@@ -906,20 +906,21 @@ class Quantity:
                 max_read_lines = self.domain.points_file_block_line_size
             else:
                 max_read_lines = default_block_line_size
-	    filename_ext = os.path.splitext(filename)[1]
-	    # pts file in the format of .txt or .pts
-	    if filename_ext in ['.txt', '.pts', '.csv']:
+
+            filename_ext = os.path.splitext(filename)[1]
+            # pts file in the format of .txt or .pts
+            if filename_ext in ['.txt', '.pts', '.csv']:
                 self.set_values_from_file(filename, attribute_name, alpha, location,
                                       indices, verbose=verbose,
                                       max_read_lines=max_read_lines,
                                       use_cache=use_cache)
-	    # dem file in the format of .asc, .grd or .dem 
-	    elif filename_ext in ['.asc', '.grd', '.dem']:
-		self.set_values_from_utm_grid_file(filename, location,
+            # structured  file in the format of .asc, .grd or .dem 
+            elif filename_ext in ['.asc', '.grd', '.dem']:
+                self.set_values_from_utm_grid_file(filename, location,
 				      indices, verbose=verbose)
-	    else:
-	    	raise Exception('Extension should be .pts .dem, .csv, .txt, .asc or .grd')
-	else:
+            else:
+                raise Exception('Extension should be .pts .dem, .csv, .txt, .asc or .grd')
+        else:
             raise Exception("This can't happen :-)")
 
         # Update all locations in triangles
@@ -1341,7 +1342,7 @@ class Quantity:
         from  anuga.fit_interpolate.interpolate2d import interpolate2d 
         
         #print points 
-        values = interpolate2d(x, y, Z, points, mode='linear', bounds_error=False)
+        values = interpolate2d(x, y, Z, points, mode='linear', bounds_error=True)
         
         #print values
 

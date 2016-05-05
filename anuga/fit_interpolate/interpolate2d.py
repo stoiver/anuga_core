@@ -22,10 +22,11 @@ __copyright__ = 'Copyright 2012, Australia Indonesia Facility for '
 __copyright__ += 'Disaster Reduction'
 
 import numpy
-from anuga.anuga_exceptions import ANUGAError
+from anuga.anuga_exceptions import ANUGAError, BoundsError
 
 
-def interpolate2d(x, y, Z, points, mode='linear', bounds_error=False):
+
+def interpolate2d(x, y, Z, points, mode='linear', bounds_error=True):
     """Fundamental 2D interpolation routine
 
     Input
@@ -39,8 +40,8 @@ def interpolate2d(x, y, Z, points, mode='linear', bounds_error=False):
                          nearest neighbours (default)
         bounds_error: Boolean flag. If True (default) a BoundsError exception
             will be raised when interpolated values are requested
-            outside the domain of the input data. If False, nan
-            is returned for those values
+            outside the domain of the input data or a nan is found in the Z
+            data file. If False, nan is returned for those values
 
     Output
         1D array of length N (same length as points) with interpolated values
@@ -279,27 +280,34 @@ def check_inputs(x, y, Z, points, mode, bounds_error):
         eta1 = numpy.nanmax(eta)
 
         msg = ('Interpolation point xi=%f was less than the smallest '
-               'value in domain (x=%f) and bounds_error was requested.'
+               'value in domain (x=%f) and bounds_error was requested. '
+               'Consider using unstructured fitting using pts file'
                % (xi0, x[0]))
         if xi0 < x[0]:
             raise BoundsError(msg)
 
         msg = ('Interpolation point xi=%f was greater than the largest '
-               'value in domain (x=%f) and bounds_error was requested.'
+               'value in domain (x=%f) and bounds_error was requested. '
+               'Consider using unstructured fitting using pts file'
                % (xi1, x[-1]))
         if xi1 > x[-1]:
             raise BoundsError(msg)
 
         msg = ('Interpolation point eta=%f was less than the smallest '
-               'value in domain (y=%f) and bounds_error was requested.'
+               'value in domain (y=%f) and bounds_error was requested. '
+               'Consider using unstructured fitting using pts file'
                % (eta0, y[0]))
         if eta0 < y[0]:
             raise BoundsError(msg)
 
         msg = ('Interpolation point eta=%f was greater than the largest '
-               'value in domain (y=%f) and bounds_error was requested.'
+               'value in domain (y=%f) and bounds_error was requested. '
+               'Consider using unstructured fitting using pts file'
                % (eta1, y[-1]))
         if eta1 > y[-1]:
             raise BoundsError(msg)
+        
+
+            
 
     return x, y, Z, xi, eta

@@ -17,8 +17,10 @@ class ShapeError(exceptions.IOError):
 
 class ANUGAError(exceptions.Exception):
     """ Generic ANUGA error. """
-    #def __init__(self, args=None):
-    #self.args = args
+    pass
+
+class BoundsError(exceptions.Exception):
+    """ Data outside expected range """
     pass
 
 class DataMissingValuesError(exceptions.Exception):

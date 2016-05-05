@@ -139,11 +139,6 @@ if myid == 0:
         domain.set_quantity('elevation', filename='topography1.pts',
                               use_cache=use_cache,
                                   verbose=verbose)
-        #domain.set_quantity('elevation', filename='topography1.asc',
-        #                      use_cache=use_cache,
-        #                      location='centroids',
-        #                      verbose=verbose)
-
     else:
         domain.set_quantity('elevation', filename='topography1.pts',
                               use_cache=use_cache,
