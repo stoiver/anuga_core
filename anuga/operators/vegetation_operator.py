@@ -208,7 +208,7 @@ class Vegetation_operator(Operator, object):
             
             
 
-    def set_veg_quantity(self, name_in, quantity_name=None, convert_file=False, load_interp=False):
+    def set_veg_quantity(self, name_in, quantity_name=None, convert_file=True, save_file=False, load_interp=False):
         """
         Read raster file and sets a vegetation quantity.
     
@@ -218,7 +218,7 @@ class Vegetation_operator(Operator, object):
         The values in the rasters should be in meters.                  
         Assumes all NODATA values in raster are zero vegetation
         
-        Saves a (Nx3) .npy file of x,y,val of non-zero points
+        Saves a (Nx3) .npy file of x,y,val of non-zero points on save_file
         """
                                 
         Quantity(self.domain, name=quantity_name, register=True)
@@ -231,7 +231,7 @@ class Vegetation_operator(Operator, object):
         else:
         
             if convert_file:
-                print 'Veg Load: converting asc file'
+                print 'Veg Load: converting asc file', name_in + '.asc'
                 self.generic_asc2dem(name_in + '.asc', quantity_name=quantity_name)
                 points = self.generic_dem2npy(name_in + '.dem', quantity_name=quantity_name)
         
@@ -245,8 +245,9 @@ class Vegetation_operator(Operator, object):
             coord = self.domain.get_centroid_coordinates(absolute=True)
             z_ = interp( coord )
             
-            print 'Veg Load: saving interpolated file: ', name_in + '_interp.npy'
-            num.save(name_in + '_interp.npy', z_)
+            if save_file:
+                print 'Veg Load: saving interpolated file: ', name_in + '_interp.npy'
+                num.save(name_in + '_interp.npy', z_)
         
         print 'Veg Load: setting quantity', quantity_name
         self.domain.quantities[quantity_name].set_values(z_, location = 'centroids') 
@@ -390,8 +391,6 @@ class Vegetation_operator(Operator, object):
                              grid_y.flatten() + northing_min,
                              grid_z.flatten())).T
         
-        print 'Veg Load: saving', name_in[:-4] + '.npy' 
-        num.save(name_in[:-4], points)
         infile.close()
         
         return points

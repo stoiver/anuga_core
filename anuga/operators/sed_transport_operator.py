@@ -64,7 +64,8 @@ class Sed_transport_operator(Operator, object):
         self.rho_w = 1000.
         self.R = (self.rho_s - self.rho_w) / self.rho_w
         
-        self.grain_size = 0.00013 # from Griffin et al 2010
+        self.grain_size = 0.000065 # from Griffin et al 2014
+        self.tau_crit = 0.088
         
         self.num_cells = len(self.depth)
         
@@ -291,13 +292,12 @@ class Sed_transport_operator(Operator, object):
         """
         Calculates the erosion rate as an excess shear stress
         """
-
-        tau_crit = 0.103
-        self.Ke = 0.2e-6 / tau_crit**(0.5) * 10.
+        
+        self.Ke = 0.2e-6 / self.tau_crit**(0.5) * 10.
         
         shear_stress = self.rho_w * self.u_star[self.ind]**2
         
-        edot = self.Ke * (shear_stress - tau_crit)
+        edot = self.Ke * (shear_stress - self.tau_crit)
         edot[edot<0.0] = 0.0
         
         return edot     
