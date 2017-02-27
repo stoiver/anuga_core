@@ -43,12 +43,11 @@ class Vegetation_operator(Operator, object):
         self.depth = self.domain.quantities['height'].centroid_values
         
         self.num_cells = len(self.depth)
-        self.mix_length = num.zeros((self.num_cells,))
-        
         
         if self.use_diffusivity:
         
             self.diffusivity = num.zeros((self.num_cells,))
+            self.mix_length = num.zeros((self.num_cells,))
             
             try:
                 diff = self.domain.get_quantity('diffusivity')
@@ -86,9 +85,6 @@ class Vegetation_operator(Operator, object):
     
         if sum(self.ind)>0:
         
-            self.mix_length[:] = 0
-            self.diffusivity[:] = 0
-        
             self.depth_w = self.depth[self.ind]
             self.veg_d_w = self.veg_diameter[self.ind]
             self.veg_s_w = self.veg_spacing[self.ind]
@@ -97,6 +93,8 @@ class Vegetation_operator(Operator, object):
             self.velocity, xvel, yvel = self.calculate_velocity()
             
             if self.use_diffusivity:
+                self.mix_length[:] = 0
+                self.diffusivity[:] = 0
                 self.calculate_diffusivity()
             
                         
