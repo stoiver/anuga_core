@@ -26,7 +26,7 @@ class Vegetation_operator(Operator, object):
     Vegetation operator that applies a drag on the flow due to the presence of veg
     """
 
-    def __init__(self, domain,
+    def __init__(self, domain, use_diffusivity=True,
                  indices=None,
                  description = None,
                  label = None,
@@ -35,14 +35,8 @@ class Vegetation_operator(Operator, object):
                 
         Operator.__init__(self, domain, description, label, logging, verbose)
         
-                     
-        try:
-            diff = self.domain.get_quantity('diffusivity')
-        except:
-            Quantity(domain, name='diffusivity', register=True)
-            
-            
-        self.domain.set_use_kinematic_viscosity(True)
+        
+        self.use_diffusivity = use_diffusivity
             
         self.xmom = self.domain.quantities['xmomentum'].centroid_values
         self.ymom = self.domain.quantities['ymomentum'].centroid_values
@@ -50,9 +44,21 @@ class Vegetation_operator(Operator, object):
         
         self.num_cells = len(self.depth)
         self.mix_length = num.zeros((self.num_cells,))
-        self.diffusivity = num.zeros((self.num_cells,))
+        
+        
+        if self.use_diffusivity:
+        
+            self.diffusivity = num.zeros((self.num_cells,))
+            
+            try:
+                diff = self.domain.get_quantity('diffusivity')
+            except:
+                Quantity(domain, name='diffusivity', register=True)
+            
+        self.domain.set_use_kinematic_viscosity(self.use_diffusivity)
 
         self.quantity_flag = False
+        
 
 
     def __call__(self):
@@ -89,8 +95,16 @@ class Vegetation_operator(Operator, object):
             self.ad_w = self.ad[self.ind]
         
             self.velocity, xvel, yvel = self.calculate_velocity()
-            self.calculate_diffusivity()
             
+            if self.use_diffusivity:
+                self.calculate_diffusivity()
+            
+                        
+            # calculate discharge in the cell
+            qcell = self.depth_w * self.velocity
+            
+            
+            #update_velocity
             Fd_x = self.Cd_veg[self.ind] * xvel**2
             Fd_y = self.Cd_veg[self.ind] * yvel**2
             
@@ -105,6 +119,14 @@ class Vegetation_operator(Operator, object):
             
             self.domain.set_quantity('xmomentum', self.xmom, location='centroids')
             self.domain.set_quantity('ymomentum', self.ymom, location='centroids')
+            
+            # calculate new depth from previous cell discharge
+            self.velocity, xvel, yvel = self.calculate_velocity()
+            
+            self.depth[self.ind] = qcell / self.velocity
+            self.domain.set_quantity('height', self.depth, location='centroids')
+            
+            
             
                 
 
