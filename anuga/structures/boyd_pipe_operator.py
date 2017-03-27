@@ -25,7 +25,7 @@ class Boyd_pipe_operator(anuga.Structure_operator):
                  domain,
                  losses,
                  diameter=None,
-                 blockage=0.0,  # added by DPM 24/7/2016 
+                 blockage=0.0,
                  z1=0.0,
                  z2=0.0,
                  end_points=None,
@@ -35,6 +35,7 @@ class Boyd_pipe_operator(anuga.Structure_operator):
                  apron=0.1,
                  manning=0.013,
                  enquiry_gap=0.2,
+                 smoothing_timescale=0.0,
                  use_momentum_jet=True,
                  use_velocity_head=True,
                  description=None,
@@ -52,7 +53,7 @@ class Boyd_pipe_operator(anuga.Structure_operator):
                                           width=None,
                                           height=None,
                                           diameter=diameter,
-                                          blockage=blockage,  # added by DPM 24/7/2016
+                                          blockage=blockage,
                                           apron=apron,
                                           manning=manning,
                                           enquiry_gap=enquiry_gap,                                                       
@@ -78,7 +79,8 @@ class Boyd_pipe_operator(anuga.Structure_operator):
         
         self.culvert_length = self.get_culvert_length()
         self.culvert_diameter = self.get_culvert_diameter()
-        self.culvert_blockage = self.get_culvert_blockage()#added DPM 24/7/2016
+        self.culvert_blockage = self.get_culvert_blockage()
+
         #print self.culvert_diameter
 
         self.max_velocity = 10.0
@@ -91,6 +93,18 @@ class Boyd_pipe_operator(anuga.Structure_operator):
         self.velocity = 0.0
         
         self.case = 'N/A'
+        
+       # May/June 2014 -- allow 'smoothing ' of driving_energy, delta total energy, and outflow_enq_depth
+        self.smoothing_timescale=0.
+        self.smooth_delta_total_energy=0.
+        self.smooth_Q=0.
+        # Set them based on a call to the discharge routine with smoothing_timescale=0.
+        # [values of self.smooth_* are required in discharge_routine, hence dummy values above]
+        Qvd=self.discharge_routine()
+        self.smooth_delta_total_energy=1.0*self.delta_total_energy
+        self.smooth_Q=Qvd[0]
+        # Finally, set the smoothing timescale we actually want
+        self.smoothing_timescale=smoothing_timescale        
         
 
 
@@ -137,7 +151,7 @@ class Boyd_pipe_operator(anuga.Structure_operator):
             Q, barrel_velocity, outlet_culvert_depth, flow_area, case = \
                               boyd_pipe_function(depth               =self.inflow.get_enquiry_depth(),
                                                  diameter            =self.culvert_diameter,
-                                                 blockage            =self.culvert_blockage, #added DPM 24/7/2016
+                                                 blockage            =self.culvert_blockage,
                                                  length              =self.culvert_length,
                                                  driving_energy      =self.driving_energy,
                                                  delta_total_energy  =self.delta_total_energy,
@@ -145,8 +159,8 @@ class Boyd_pipe_operator(anuga.Structure_operator):
                                                  sum_loss            =self.sum_loss,
                                                  manning             =self.manning)
         else:
-             Q = barrel_velocity = outlet_culvert_depth = 0.0
-             case = 'Inlet dry'
+            Q = barrel_velocity = outlet_culvert_depth = 0.0
+            case = 'Inlet dry'
 
 
         self.case = case
@@ -176,11 +190,20 @@ def boyd_pipe_function(depth, diameter, blockage, length, driving_energy, delta_
 
     For these conditions we also would like to assess the pipe flow characteristics as it leaves the pipe
     """
-    # by DPM 28/7/2016 this reduces the pipe diamater down to an equivalent blocked diameter
-    if blockage == 1:		
-        bf = 0.000001
+
+
+    # Note this errors if blockage is set to 1.0 (ie 100% blockaage) and i have no idea how to fix it   
+    if blockage >= 1.0:
+        Q = barrel_velocity = outlet_culvert_depth = 0.0
+        flow_area = 0.00001
+        case = '100 blocked culvert'
+        return Q, barrel_velocity, outlet_culvert_depth, flow_area, case
+    if blockage > 0.9:
+        bf = 3.333-3.333*blockage     
     else:
-        bf = 1-0.4012316798*blockage-0.3768350138*(blockage**2) 
+        bf = 1.0-0.4012316798*blockage-0.3768350138*(blockage**2) 
+    #print 'blockage ', blockage
+    #print '      bf ', bf
 
     # Calculate flows for inlet control for circular pipe
     Q_inlet_unsubmerged = 0.421*anuga.g**0.5*((bf*diameter)**0.87)*driving_energy**1.63 # Inlet Ctrl Inlet Unsubmerged
@@ -307,7 +330,4 @@ def boyd_pipe_function(depth, diameter, blockage, length, driving_energy, delta_
 
 
     return Q, barrel_velocity, outlet_culvert_depth, flow_area, case
-
-
-
 
