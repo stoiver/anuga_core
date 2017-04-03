@@ -410,7 +410,7 @@ def Boyd_pipe_operator(domain,
         print "========================================================"
 
     if alloc0 or alloc1:
-       return Parallel_Boyd_pipe_operator(domain=domain,
+        return Parallel_Boyd_pipe_operator(domain=domain,
                                          losses=losses,
                                          diameter=diameter,
                                          blockage=blockage,
