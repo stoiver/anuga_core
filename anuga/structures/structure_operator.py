@@ -81,11 +81,11 @@ class Structure_operator(anuga.Operator):
         assert width is not None
 
 
-        self.width  = width
-        self.height = height
-        self.diameter = diameter
-        self.z1 = z1 #added by PM 4/10/2013 
-        self.z2 = z2 #added by PM 4/10/2013
+        self.culvert_width  = width
+        self.culvert_height = height
+        self.culvert_diameter = diameter
+        self.culvert_z1 = z1 #added by PM 4/10/2013 
+        self.culvert_z2 = z2 #added by PM 4/10/2013 
         self.blockage = blockage #added by PM 24/7/2016  
         self.apron  = apron
         self.manning = manning
@@ -146,6 +146,7 @@ class Structure_operator(anuga.Operator):
             #print offset
             poly0 = num.array([ line0[0], line0[1], line0[1]+offset, line0[0]+offset])
             #print poly0
+        
         if self.invert_elevations is None:
             invert_elevation0 = None
         else:
@@ -166,8 +167,11 @@ class Structure_operator(anuga.Operator):
             # Try to enforce a constant inlet elevation 
             inlet_global_elevation = self.inlets[-1].get_average_elevation() 
             self.inlets[-1].set_elevations(inlet_global_elevation)
+            
+        if invert_elevation0  is not None:
+            self.inlets[-1].set_elevations(invert_elevation0)
 
-        tris_0 = self.inlets[0].triangle_indices
+        #tris_0 = self.inlets[0].triangle_indices
         #print tris_0
         #print self.domain.centroid_coordinates[tris_0]
 
@@ -199,8 +203,11 @@ class Structure_operator(anuga.Operator):
             # Try to enforce a constant inlet elevation 
             inlet_global_elevation = self.inlets[-1].get_average_elevation() 
             self.inlets[-1].set_elevations(inlet_global_elevation)
+            
+        if invert_elevation1 is not None:
+            self.inlets[-1].set_elevations(invert_elevation1)
 
-        tris_1 = self.inlets[1].triangle_indices
+        #tris_1 = self.inlets[1].triangle_indices
         
         self.set_logging(logging)
 
@@ -361,17 +368,27 @@ class Structure_operator(anuga.Operator):
 
         self.culvert_width = width
         
-    def set_culvert_z1(self, z1): #added by PM 4/10/2013 
+    def set_culvert_diameter(self, diameter):
 
-        self.culvert_z1 = z1 #added by PM 4/10/2013 
+        self.culvert_diameter = diameter
+        
+    def set_culvert_z1(self, z1): 
 
-    def set_culvert_z2(self, z2): #added by PM 4/10/2013 
+        self.culvert_z1 = z1 
 
-        self.culvert_z2 = z2 #added by PM 4/10/2013 
+    def set_culvert_z2(self, z2): 
+
+        self.culvert_z2 = z2 
+        
+    def set_culvert_apron(self, apron):
+
+        self.apron = apron  
+             
         
     def set_culvert_blockage(self, blockage): #added by PM 24/7/2016  
 
         self.culvert_blockage = blockage  #added by PM 24/7/2016  
+
 
     def __process_non_skew_culvert(self):
 
@@ -390,7 +407,8 @@ class Structure_operator(anuga.Operator):
 
         
         culvert_normal = num.array([-self.culvert_vector[1], self.culvert_vector[0]])  # Normal vector
-        w = 0.5*self.width*culvert_normal # Perpendicular vector of 1/2 width
+        
+        w = 0.5*self.culvert_width*culvert_normal # Perpendicular vector of 1/2 width
 
         self.exchange_lines = []
 
@@ -642,28 +660,26 @@ class Structure_operator(anuga.Operator):
         
     def get_culvert_width(self):
         
-        return self.width
-        
+        return self.culvert_width
         
     def get_culvert_diameter(self):
     
-            return self.diameter
-        
+        return self.culvert_diameter
         
     def get_culvert_height(self):
     
-        return self.height
+        return self.culvert_height
 
-    def get_culvert_z1(self): #added by PM 4/10/2013 
+    def get_culvert_z1(self): 
     
-        return self.z1 #added by PM 4/10/2013 
+        return self.culvert_z1
 
-    def get_culvert_z2(self): #added by PM 4/10/2013 
+    def get_culvert_z2(self): 
     
-        return self.z2 #added by PM 4/10/2013 
+        return self.culvert_z2 
 
     def get_culvert_blockage(self): #added by PM 24/7/2016
-		
+        
         return self.blockage #added by PM 24/7/2016 
         
     def get_culvert_apron(self):
