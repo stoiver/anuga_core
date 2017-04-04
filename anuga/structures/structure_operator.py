@@ -30,9 +30,10 @@ class Structure_operator(anuga.Operator):
                  width=None,
                  height=None,
                  diameter=None,
-                 z1=None,#added by PM 4/10/2013 
-                 z2=None,#added by PM 4/10/2013 
-                 blockage=None,#added by PM 24/7/2016  
+                 z1=None,
+                 z2=None,
+                 blockage=None,
+                 barrels=None,
                  apron=None,
                  manning=None,
                  enquiry_gap=None,
@@ -65,7 +66,7 @@ class Structure_operator(anuga.Operator):
         self.enquiry_points = ensure_numeric(enquiry_points)
         self.invert_elevations = ensure_numeric(invert_elevations)
 
-        assert self.end_points == None or self.exchange_lines == None
+        assert self.end_points is None or self.exchange_lines is None
 
         
         if height is None:
@@ -84,9 +85,10 @@ class Structure_operator(anuga.Operator):
         self.culvert_width  = width
         self.culvert_height = height
         self.culvert_diameter = diameter
-        self.culvert_z1 = z1 #added by PM 4/10/2013 
-        self.culvert_z2 = z2 #added by PM 4/10/2013 
-        self.blockage = blockage #added by PM 24/7/2016  
+        self.culvert_z1 = z1 
+        self.culvert_z2 = z2 
+        self.blockage = blockage  
+        self.barrels = barrels
         self.apron  = apron
         self.manning = manning
         self.enquiry_gap = enquiry_gap
@@ -368,28 +370,37 @@ class Structure_operator(anuga.Operator):
 
         self.culvert_width = width
         
+        
     def set_culvert_diameter(self, diameter):
 
         self.culvert_diameter = diameter
         
-    def set_culvert_z1(self, z1): 
-
-        self.culvert_z1 = z1 
-
-    def set_culvert_z2(self, z2): 
-
-        self.culvert_z2 = z2 
         
     def set_culvert_apron(self, apron):
 
         self.apron = apron  
              
+
+    def set_culvert_z1(self, z1): 
+
+        self.culvert_z1 = z1
+         
+
+    def set_culvert_z2(self, z2):
+
+        self.culvert_z2 = z2
+
         
-    def set_culvert_blockage(self, blockage): #added by PM 24/7/2016  
+    def set_culvert_blockage(self, blockage): 
 
-        self.culvert_blockage = blockage  #added by PM 24/7/2016  
+        self.blockage = blockage 
 
 
+    def set_culvert_barrels(self, barrels): 
+
+        self.barrels = barrels 
+        
+        
     def __process_non_skew_culvert(self):
 
         """Create lines at the end of a culvert inlet and outlet.
@@ -514,15 +525,17 @@ class Structure_operator(anuga.Operator):
         if self.structure_type == 'boyd_pipe':
             message += 'Culvert Diameter: %s\n'% self.diameter
             message += 'Culvert Blockage: %s\n'% self.blockage
+            message += 'No.  of  barrels: %s\n'% self.barrels
         elif self.structure_type == 'boyd_box':
-            message += 'Culvert   Height: %s\n'% self.height
+            message += 'Culvert  Height: %s\n'% self.height
             message += 'Culvert    Width: %s\n'% self.width
             message += 'Culvert Blockage: %s\n'% self.blockage
+            message += 'No.  of  barrels: %s\n'% self.barrels
         else:
-            message += 'Culvert   Height: %s\n'% self.height
-            message += 'Culvert    Width: %s\n'% self.width
-            message += 'Batter Slope 1 %s\n'% self.z1
-            message += 'Batter Slope 2 %s\n'% self.z2
+            message += 'Culvert Height: %s\n'% self.height
+            message += 'Culvert  Width: %s\n'% self.width
+            message += 'Batter Slope 1: %s\n'% self.z1
+            message += 'Batter Slope 2: %s\n'% self.z2
             
         message += '\n'
         
@@ -682,6 +695,13 @@ class Structure_operator(anuga.Operator):
         
         return self.blockage #added by PM 24/7/2016 
         
+ 
+
+    def get_culvert_barrels(self):
+        
+        return self.barrels
+                
+
     def get_culvert_apron(self):
 
         return self.apron
