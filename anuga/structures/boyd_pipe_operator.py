@@ -9,15 +9,10 @@ import numpy
 
 class Boyd_pipe_operator(anuga.Structure_operator):
     """Culvert flow - transfer water from one location to another via a circular pipe culvert.
-    Sets up the geometry of problem
-    
-    This is the base class for culverts. Inherit from this class (and overwrite
-    compute_discharge method for specific subclasses)
     
     Input: Two points, pipe_size (diameter), 
     mannings_rougness,
     """ 
-
 
     def __init__(self,
                  domain,
@@ -107,8 +102,6 @@ class Boyd_pipe_operator(anuga.Structure_operator):
         # Finally, set the smoothing timescale we actually want
         self.smoothing_timescale=smoothing_timescale
 
-        
-
 
     def discharge_routine(self):
         """Procedure to determine the inflow and outflow inlets.
@@ -188,18 +181,18 @@ class Boyd_pipe_operator(anuga.Structure_operator):
 
 
             Q, barrel_velocity, outlet_culvert_depth, flow_area, case = \
-                              boyd_pipe_function(depth               =self.inflow.get_enquiry_depth(),
-                                                diameter            =self.culvert_diameter,
-                                                blockage            =self.culvert_blockage,
-                                                barrels             =self.culvert_barrels,
-                                                length              =self.culvert_length,
-                                                driving_energy      =self.driving_energy,
-                                                delta_total_energy  =self.delta_total_energy,
-                                                outlet_enquiry_depth=self.outflow.get_enquiry_depth(),
-                                                sum_loss            =self.sum_loss,
-                                                manning             =self.manning)
+                              boyd_pipe_function(depth=self.inflow.get_enquiry_depth(),
+                                                 diameter=self.culvert_diameter,
+                                                 blockage=self.culvert_blockage,
+                                                 barrels=self.culvert_barrels,
+                                                 length=self.culvert_length,
+                                                 driving_energy=self.driving_energy,
+                                                 delta_total_energy=self.delta_total_energy,
+                                                 outlet_enquiry_depth=self.outflow.get_enquiry_depth(),
+                                                 sum_loss=self.sum_loss,
+                                                 manning=self.manning)
 
-            #
+            
             # Update 02/07/2014 -- using time-smoothed discharge
             Qsign=numpy.sign(self.smooth_delta_total_energy) #(self.outflow_index-self.inflow_index) # To adjust sign of Q
             if(forward_Euler_smooth):
@@ -233,22 +226,21 @@ class Boyd_pipe_operator(anuga.Structure_operator):
 
         return Q, barrel_velocity, outlet_culvert_depth
 
-
         
 
 #=============================================================================
 # define separately so that can be imported in parallel code.
 #=============================================================================
 def boyd_pipe_function(depth, 
-                        diameter, 
-                        blockage,
-                        barrels,
-                        length,
-                        driving_energy, 
-                        delta_total_energy, 
-                        outlet_enquiry_depth, 
-                        sum_loss, 
-                        manning):
+                       diameter, 
+                       blockage,
+                       barrels,
+                       length,
+                       driving_energy, 
+                       delta_total_energy, 
+                       outlet_enquiry_depth, 
+                       sum_loss, 
+                       manning):
 
 
     local_debug = False
