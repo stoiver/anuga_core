@@ -22,7 +22,7 @@ import numpy as num
 
 
 
-"""test_that_culvert_runs_rating
+"""test_culvert_link
 
 This test exercises the culvert and checks values outside rating curve
 are dealt with       
@@ -30,7 +30,7 @@ are dealt with
 
 path = get_pathname_from_package('anuga.culvert_flows')    
 
-length = 40.
+length = 60.
 width = 15.
 
 dx = dy = 0.5          # Resolution: Length of subdivisions on both axes
@@ -43,7 +43,7 @@ domain = anuga.Domain(points, vertices, boundary)
 domain.set_starttime(10)
 domain.set_name()                 # Output name
 domain.set_default_order(2)
-#domain.set_beta(1.5)
+
 
 
 #----------------------------------------------------------------------
@@ -56,28 +56,20 @@ def topography(x, y):
     A culvert will connect either side
     """
     # General Slope of Topography
-    z=-x/1000
+    z = -x/1000
+    #z = 0
     
     N = len(x)
     for i in range(N):
 
        # Sloping Embankment Across Channel
         if 5.0 < x[i] < 10.1:
-            # Cut Out Segment for Culvert face                
-            if  1.0+(x[i]-5.0)/5.0 <  y[i]  < 4.0 - (x[i]-5.0)/5.0: 
-               z[i]=z[i]
-            else:
-               z[i] +=  0.5*(x[i] -5.0)    # Sloping Segment  U/S Face
+            z[i] +=  0.5*(x[i] - 5.0)     # Sloping Segment  U/S Face
         if 10.0 < x[i] < 12.1:
-           z[i] +=  2.5                    # Flat Crest of Embankment
+           z[i] += 5                    # Flat Crest of Embankment
         if 12.0 < x[i] < 14.5:
-            # Cut Out Segment for Culvert face                
-            if  2.0-(x[i]-12.0)/2.5 <  y[i]  < 3.0 + (x[i]-12.0)/2.5:
-               z[i]=z[i]
-            else:
-               z[i] +=  2.5-1.0*(x[i] -12.0) # Sloping D/S Face
+            z[i] += 2.5 - 1.0 * (x[i] - 12.0) # Sloping D/S Face
                    
-        
     return z
 
 
@@ -86,50 +78,29 @@ domain.set_quantity('friction', 0.01)         # Constant friction
 domain.set_quantity('stage',
                     expression='elevation')   # Dry initial condition
 
-filename=os.path.join(path, 'example_rating_curve.csv')
+filename = os.path.join(path, 'example_rating_curve.csv')
 
-end_point0 = num.array([9.0, 2.5])
-end_point1 = num.array([13.0, 2.5])
+end_point0 = num.array([5.0, 7.5])
+end_point1 = num.array([43.0, 7.5])
 
 Boyd_pipe_operator(domain,
-                    #end_point0=[9.0, 2.5],
-                    #end_point1=[13.0, 2.5],
-                    #exchange_line0=[[9.0, 1.75],[9.0, 3.25]],
-                    #exchange_line1=[[13.0, 1.75],[13.0, 3.25]],
-                    losses=1.5,
-                    end_points=[end_point0, end_point1],
-                    diameter=1.5,
-                    apron=0.5,
-                    use_momentum_jet=True, 
-                    use_velocity_head=False,
-                    manning=0.013,
-                    verbose=False)
+                   losses=1.5,
+                   end_points=[end_point0, end_point1],
+                   diameter=2.5,
+                   apron=0.5,
+                   use_momentum_jet=True, 
+                   use_velocity_head=False,
+                   manning=0.013,
+                   verbose=False)
 
+#-----------------------------------------------------------------------
+# Setup boundary conditions
+#-----------------------------------------------------------------------
 
-line = [[0.0, 5.0], [0.0, 10.0]]
-Q = 5.0
-#Inlet_operator(domain, line, Q)
-
-
-
-
-##-----------------------------------------------------------------------
-## Setup boundary conditions
-##-----------------------------------------------------------------------
-
-## Inflow based on Flow Depth and Approaching Momentum
+# Inflow based on Flow Depth and Approaching Momentum
 Bi = anuga.Dirichlet_boundary([2.0, 0.0, 0.0])
 Br = anuga.Reflective_boundary(domain)              # Solid reflective wall
-#Bo = anuga.Dirichlet_boundary([-5, 0, 0])           # Outflow
 
-## Upstream and downstream conditions that will exceed the rating curve
-## I.e produce delta_h outside the range [0, 10] specified in the the 
-## file example_rating_curve.csv
-#Btus = anuga.Time_boundary(domain, \
-            #lambda t: [100*num.sin(2*pi*(t-4)/10), 0.0, 0.0])
-#Btds = anuga.Time_boundary(domain, \
-            #lambda t: [-5*(num.cos(2*pi*(t-4)/20)), 0.0, 0.0])
-#domain.set_boundary({'left': Btus, 'right': Btds, 'top': Br, 'bottom': Br})
 domain.set_boundary({'left': Bi, 'right': Br, 'top': Br, 'bottom': Br})
 
 
@@ -137,26 +108,6 @@ domain.set_boundary({'left': Bi, 'right': Br, 'top': Br, 'bottom': Br})
 ## Evolve system through time
 ##-----------------------------------------------------------------------
 
-#min_delta_w = sys.maxint 
-#max_delta_w = -min_delta_w
-for t in domain.evolve(yieldstep=1.0, finaltime=50.0):
+for t in domain.evolve(yieldstep=1.0, finaltime=100.0):
     domain.write_time()
 
-    #if domain.get_time() > 150.5 and domain.ge t_time() < 151.5 :
-        #Bi = anuga.Dirichlet_boundary([0.0, 0.0, 0.0])
-        #domain.set_boundary({'left': Bi, 'right': Br, 'top': Br, 'bottom': Br})
-
-    #delta_w = culvert.inlet.stage - culvert.outlet.stage
-    
-    #if delta_w > max_delta_w: max_delta_w = delta_w
-    #if delta_w < min_delta_w: min_delta_w = delta_w            
-    
-    pass
-
-## Check that extreme values in rating curve have been exceeded
-## so that we know that condition has been exercised
-#assert min_delta_w < 0
-#assert max_delta_w > 10        
-
-
-#os.remove('Test_culvert.sww')

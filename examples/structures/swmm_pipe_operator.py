@@ -1,6 +1,8 @@
 import anuga
 import math
 import numpy
+from pyswmm import Simulation, Nodes
+
 
 
 #=====================================================================
@@ -37,7 +39,7 @@ class SWMM_pipe_operator(anuga.Structure_operator):
                  use_velocity_head=True,
                  description=None,
                  label=None,
-                 structure_type='boyd_pipe',
+                 structure_type='swmm_pipe',
                  logging=False,
                  verbose=False):
                      
@@ -61,7 +63,8 @@ class SWMM_pipe_operator(anuga.Structure_operator):
                                           logging=logging,
                                           verbose=verbose)
 
-        print 'here'
+        
+        
         if isinstance(losses, dict):
             self.sum_loss = sum(losses.values())
         elif isinstance(losses, list):
@@ -84,6 +87,12 @@ class SWMM_pipe_operator(anuga.Structure_operator):
         self.max_velocity = 10.0
 
         self.inlets = self.get_inlets()
+
+        # Could be used to generate SWMM file
+        print 'E1', self.inlets[0].get_enquiry_elevation()
+        print 'E2', self.inlets[1].get_enquiry_elevation()        
+        print 'Length', self.culvert_length
+        print 'End points', self.end_points
 
 
         # Stats
@@ -111,6 +120,8 @@ class SWMM_pipe_operator(anuga.Structure_operator):
         Then use boyd_pipe_function to do the actual calculation
         """
 
+        #print 'Discharge routine', self.get_time()
+        
         local_debug = False
 
         # If the cuvert has been closed, then no water gets through
