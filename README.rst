@@ -29,6 +29,8 @@ We recommend using python 2.7
 Developed at Geoscience Australia and Mathematical Sciences Institute at the
 Australian National University.
 
+This fork is working on attaching a 1D pipe network
+
 Copyright 2004 - 2017 
 Ole Nielsen, Stephen Roberts, Duncan Gray, Jane Sexton, Gareth Davies
 
