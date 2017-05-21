@@ -1,7 +1,32 @@
 import anuga
 import math
 import numpy
-from pyswmm import Simulation, Nodes
+from pyswmm import Simulation, Nodes, Links
+
+def run_swmm():
+	
+    sim = Simulation('./swmm_pipe_test.inp')
+    print 'With OK', sim, dir(sim)
+    raw_input('check')
+    j1 = Nodes(sim)['N-1']
+    j2 = Nodes(sim)['DES-1']
+    l1 = Links(sim)['C-1']
+    
+    print 'For a Node....'
+    print 'j1 OK', dir(j1)
+    print 'For a Link....'
+    print 'l1 OK', dir(l1)
+    for step in sim:
+        print 'step'
+        print 'inflow', j1.total_inflow
+        print 'outflow', j1.total_outflow        
+        j1.generated_inflow(9)
+        print 'depth' ,j1.depth
+        print 'link flow', l1.flow
+        print 'Area',l1.ds_xsection_area   
+        print sim.current_time
+        #'ds_xsection_area', 'flow', 'flow_limit', 'froude'
+        raw_input('check func')
 
 
 
@@ -64,7 +89,8 @@ class SWMM_pipe_operator(anuga.Structure_operator):
                                           verbose=verbose)
 
         
-        
+        #run_swmm()
+        #raw_input('hold sim')
         if isinstance(losses, dict):
             self.sum_loss = sum(losses.values())
         elif isinstance(losses, list):
@@ -93,6 +119,17 @@ class SWMM_pipe_operator(anuga.Structure_operator):
         print 'E2', self.inlets[1].get_enquiry_elevation()        
         print 'Length', self.culvert_length
         print 'End points', self.end_points
+        
+
+
+        self.swmmsim = Simulation('./swmm_pipe_test.inp')
+        
+              
+        self.j1 = Nodes(self.swmmsim)['N-1']
+        self.j2 = Nodes(self.swmmsim)['DES-1']
+        self.l1 = Links(self.swmmsim)['C-1']
+        
+        
 
 
         # Stats
@@ -122,6 +159,70 @@ class SWMM_pipe_operator(anuga.Structure_operator):
 
         #print 'Discharge routine', self.get_time()
         
+        
+        
+        print 'ANUGA step', self.domain.timestep
+        
+        #self.swmmsim.step_advance(self.domain.timestep)
+        
+        #self.swmmsim.step_advance(1.0)
+        self.swmmsim._model.swmm_stride(60.0)# model stride in seconds ???
+        self.j1.generated_inflow(90)   # Flow should come from a Rating Curve driven by Domain Depth at the Enquiry Point
+        print 'inflow', self.j1.total_inflow
+        print 'outflow', self.j1.total_outflow 
+        #print 'Current Time' , self.swmmsim.current_time
+        #for step in self.swmmsim:
+        #    print 'Current Time' , self.swmmsim.current_time
+        # or here! sim.step_advance(newvalue)
+        #raw_input('check step')
+        
+        """
+        #print 'Report start' , self.swmmsim.report_start
+        for step in self.swmmsim:
+            self.j1.generated_inflow(90)   # Flow should come from a Rating Curve driven by Domain Depth at the Enquiry Point
+            print 'inflow', self.j1.total_inflow
+            print 'outflow', self.j1.total_outflow 
+            print 'Current Time' , self.swmmsim.current_time
+			#break 
+        raw_input('hold')
+        """	
+        
+        """
+        sim = Simulation('./swmm_pipe_test.inp')
+        print 'With OK', sim
+        raw_input('check')
+        j1 = Nodes(sim)['N-1']
+        j2 = Nodes(sim)['DES-1']
+        l1 = Links(sim)['C-1']
+        
+        for step in sim:
+            print 'step'
+            print 'inflow', j1.total_inflow
+            print 'outflow', j1.total_outflow        
+            j1.generated_inflow(9)
+            print 'depth' ,j1.depth
+            print 'link flow', l1.flow
+            print 'Area',l1.ds_xsection_area   
+            print sim.current_time
+            #'ds_xsection_area', 'flow', 'flow_limit', 'froude'
+        raw_input('check')
+		"""	
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
         local_debug = False
 
         # If the cuvert has been closed, then no water gets through

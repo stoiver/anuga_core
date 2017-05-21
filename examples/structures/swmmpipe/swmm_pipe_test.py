@@ -105,7 +105,7 @@ domain.set_boundary({'left': Bi, 'right': Br, 'top': Br, 'bottom': Br})
 ## Evolve system through time
 ##-----------------------------------------------------------------------
 
-for t in domain.evolve(yieldstep=1.0, finaltime=100.0):
+for t in domain.evolve(yieldstep=1.0, finaltime=300.0):
     domain.write_time()
 
 
@@ -129,18 +129,10 @@ for t in domain.evolve(yieldstep=1.0, finaltime=100.0):
     # ***********************************************************************
     #  Initializing SWMM
     # ***********************************************************************
+
+
+
     
-    sim = pyswmm.Simulation(inp)  # Step 1
-    nodes = pyswmm.Nodes(sim)
-
-    nodes['N-1'].generated_inflow(100)    
-    for node in nodes:
-        print 'ID', node.nodeid
-        print 'Total inflow', node.total_inflow
-        print 'Total outflow', node.total_outflow
-
-
-    print 'N-1', dir(nodes['N-1'])
     
     # ***********************************************************************
     #  Step Running
