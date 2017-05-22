@@ -29,7 +29,8 @@ We recommend using python 2.7
 Developed at Geoscience Australia and Mathematical Sciences Institute at the
 Australian National University.
 
-This branch is called swmmlink and is work in progress to incorporate a 1D pipe network into ANUGA.
+This branch is called swmmlink and is work in progress to incorporate a 
+1D pipe network into ANUGA.
 
 
 Copyright 2004 - 2017 

@@ -1,15 +1,20 @@
 import anuga
 import math
 import numpy
+from pyswmm import Simulation, Nodes
+
 
 
 #=====================================================================
 # The class
 #=====================================================================
 
-class Boyd_pipe_operator(anuga.Structure_operator):
-    """Culvert flow - transfer water from one location to another via a circular pipe culvert.
+class SWMM_pipe_operator(anuga.Structure_operator):
+    """SWMM pipe flow - transfer water from one location to another 
+       via a SWMM 1d pipe.
     
+    Using pyswmm commands.
+
     Input: Two points, pipe_size (diameter), 
     mannings_rougness,
     """ 
@@ -34,7 +39,7 @@ class Boyd_pipe_operator(anuga.Structure_operator):
                  use_velocity_head=True,
                  description=None,
                  label=None,
-                 structure_type='boyd_pipe',
+                 structure_type='swmm_pipe',
                  logging=False,
                  verbose=False):
                      
@@ -59,6 +64,7 @@ class Boyd_pipe_operator(anuga.Structure_operator):
                                           verbose=verbose)
 
         
+        
         if isinstance(losses, dict):
             self.sum_loss = sum(losses.values())
         elif isinstance(losses, list):
@@ -81,6 +87,12 @@ class Boyd_pipe_operator(anuga.Structure_operator):
         self.max_velocity = 10.0
 
         self.inlets = self.get_inlets()
+
+        # Could be used to generate SWMM file
+        print 'E1', self.inlets[0].get_enquiry_elevation()
+        print 'E2', self.inlets[1].get_enquiry_elevation()        
+        print 'Length', self.culvert_length
+        print 'End points', self.end_points
 
 
         # Stats
@@ -108,6 +120,8 @@ class Boyd_pipe_operator(anuga.Structure_operator):
         Then use boyd_pipe_function to do the actual calculation
         """
 
+        #print 'Discharge routine', self.get_time()
+        
         local_debug = False
 
         # If the cuvert has been closed, then no water gets through

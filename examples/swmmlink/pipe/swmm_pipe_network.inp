@@ -1,0 +1,132 @@
+[TITLE]
+;;Project Title/Notes
+
+[OPTIONS]
+;;Option             Value
+FLOW_UNITS           CMS
+INFILTRATION         HORTON
+FLOW_ROUTING         KINWAVE
+LINK_OFFSETS         DEPTH
+MIN_SLOPE            0
+ALLOW_PONDING        NO
+SKIP_STEADY_STATE    NO
+
+IGNORE_RAINFALL      YES
+IGNORE_QUALITY       YES
+START_DATE           03/09/2017
+START_TIME           00:00:00
+REPORT_START_DATE    03/09/2017
+REPORT_START_TIME    00:00:00
+END_DATE             03/09/2017
+END_TIME             00:00:00
+SWEEP_START          1/1
+SWEEP_END            12/31
+DRY_DAYS             0
+REPORT_STEP          00:01:00
+WET_STEP             00:05:00
+DRY_STEP             01:00:00
+ROUTING_STEP         0:01:00 
+
+INERTIAL_DAMPING     NONE
+NORMAL_FLOW_LIMITED  BOTH
+FORCE_MAIN_EQUATION  D-W
+VARIABLE_STEP        0.75
+LENGTHENING_STEP     0
+MIN_SURFAREA         0
+MAX_TRIALS           0
+HEAD_TOLERANCE       0
+SYS_FLOW_TOL         5
+LAT_FLOW_TOL         5
+MINIMUM_STEP         0.5
+THREADS              1
+
+[EVAPORATION]
+;;Data Source    Parameters
+;;-------------- ----------------
+CONSTANT         0.0
+DRY_ONLY         NO
+
+[JUNCTIONS]
+;;Name           Elevation  MaxDepth   InitDepth  SurDepth   Aponded   
+;;-------------- ---------- ---------- ---------- ---------- ----------
+N-1              85.2       0          0          0          0         
+N-2              86.3       0          0          0          0         
+N-3              86.0       0          0          0          0         
+N-4              85.1       0          0          0          0         
+N-5              84.9       0          0          0          0         
+N-6              83.9       0          0          0          0         
+N-7              82.8       0          0          0          0         
+N-8              81.0       0          0          0          0         
+
+[OUTFALLS]
+;;Name           Elevation  Type       Stage Data       Gated    Route To        
+;;-------------- ---------- ---------- ---------------- -------- ----------------
+DES-1            77.8       FREE                        NO                       
+
+[CONDUITS]
+;;Name           From Node        To Node          Length     Roughness  InOffset   OutOffset  InitFlow   MaxFlow   
+;;-------------- ---------------- ---------------- ---------- ---------- ---------- ---------- ---------- ----------
+C-1              N-1              N-4              16.974     0.013      0          0          0          0         
+C-2              N-2              N-3              7.733      0.013      0          0          0          0         
+C-3              N-3              N-4              9.058      0.013      0          0          0          0         
+C-4              N-4              N-5              12.511     0.013      0          0          0          0         
+C-5              N-5              N-6              9.202      0.013      0          3          0          0         
+C-6              N-6              N-7              7.193      0.013      0          0          0          0         
+C-7              N-7              N-8              9.155      0.013      0          0          0          0         
+C-8              N-8              DES-1            21.947     0.013      0          0          0          0         
+
+[XSECTIONS]
+;;Link           Shape        Geom1            Geom2      Geom3      Geom4      Barrels    Culvert   
+;;-------------- ------------ ---------------- ---------- ---------- ---------- ---------- ----------
+C-1              CIRCULAR     0.45             0          0          0          1                    
+C-2              CIRCULAR     0.45             0          0          0          1                    
+C-3              CIRCULAR     0.45             0          0          0          1                    
+C-4              CIRCULAR     0.45             0          0          0          1                    
+C-5              CIRCULAR     0.45             0          0          0          1                    
+C-6              CIRCULAR     0.45             0          0          0          1                    
+C-7              CIRCULAR     0.45             0          0          0          1                    
+C-8              CIRCULAR     0.45             0          0          0          1                    
+
+[LOSSES]
+;;Link           Kentry     Kexit      Kavg       Flap Gate  Seepage   
+;;-------------- ---------- ---------- ---------- ---------- ----------
+C-1              0.5        1          0          NO         0         
+C-2              0.5        1          0          NO         0         
+C-3              0.5        1          0          NO         0         
+C-4              0.5        1          0          NO         0         
+C-5              0.5        1          0          NO         0         
+C-6              0.5        1          0          NO         0         
+C-7              0.5        1          0          NO         0         
+C-8              0.5        1          0          NO         0         
+
+[REPORT]
+;;Reporting Options
+INPUT      YES
+CONTROLS   YES
+SUBCATCHMENTS ALL
+NODES ALL
+LINKS ALL
+
+[TAGS]
+
+[MAP]
+DIMENSIONS 304899.326 6187754.293 304960.365 6187796.478
+Units      None
+
+[COORDINATES]
+;;Node           X-Coord            Y-Coord           
+;;-------------- ------------------ ------------------
+N-1              304947.980         6187756.210       
+N-2              304957.590         6187760.550       
+N-3              304955.790         6187768.070       
+N-4              304950.760         6187771.510       
+N-5              304948.610         6187785.370       
+N-6              304939.780         6187787.960       
+N-7              304932.770         6187789.570       
+N-8              304923.850         6187791.630       
+DES-1            304902.100         6187794.560       
+
+[VERTICES]
+;;Link           X-Coord            Y-Coord           
+;;-------------- ------------------ ------------------
+
