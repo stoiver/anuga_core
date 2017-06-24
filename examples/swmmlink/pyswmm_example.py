@@ -25,7 +25,14 @@ def run_swmm():
     pprint(dir(l1))
     
     sim.start()
-    sim.step_advance(30.0) # seconds?
+
+    # this step_advance should be an integer multiple of the routing step
+    # which is set in the ,inp file. Currently set to 10s.
+    # Should be able to interrogate sim to find out what the
+    # routing stepsize is. Maybe should issue a warning if
+    # step_advance is set lower than the routing step size.
+    # Indeed maybe step_advance should just allow advance n routing steps?
+    #sim.step_advance(10.0) # seconds?
     
     while (True):
         print 50 * "="
@@ -38,10 +45,11 @@ def run_swmm():
         print 'l1 Area', l1.ds_xsection_area   
         print 'l1 Froude ', l1.froude
         print 'l1 Flow limit' , l1.flow_limit
-        model_time_days = sim._model.swmm_stride(sim._advance_seconds)
+        #model_time_days = sim._model.swmm_stride(sim._advance_seconds)
+        model_time_days = sim._model.swmm_step()
         print 'Advance seconds', sim._advance_seconds
         print 'model time (s)', model_time_days*3600*24
-        print sim.percent_complete
+        print 'Percentage complete',sim.percent_complete
         #print sim
         # 'ds_xsection_area', 'flow', 'flow_limit', 'froude'
         pdb.set_trace()
