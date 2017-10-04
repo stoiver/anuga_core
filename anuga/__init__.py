@@ -21,7 +21,7 @@
 #-----------------------------------------------------
 
 
-__version__ = '2.0'
+__version__ = '2.0.2'
 
 __svn_revision__ = filter(str.isdigit, "$Revision: 9737 $")
 
@@ -302,6 +302,8 @@ else:
     from anuga.utilities.model_tools import read_hole_dir_single_file_with_multi_poly
     from anuga.utilities.model_tools import read_multi_poly_file_value
     from anuga.utilities.model_tools import Create_culvert_bridge_Operator
+    from anuga.utilities.model_tools import get_WCC_2002_Blockage_factor
+    from anuga.utilities.model_tools import get_WCC_2016_Blockage_factor
 
 
     #---------------------------
