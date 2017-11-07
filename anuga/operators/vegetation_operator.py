@@ -41,6 +41,7 @@ class Vegetation_operator(Operator, object):
         self.xmom = self.domain.quantities['xmomentum'].centroid_values
         self.ymom = self.domain.quantities['ymomentum'].centroid_values
         self.depth = self.domain.quantities['height'].centroid_values
+        self.elev = self.domain.quantities['elevation'].centroid_values
         
         self.num_cells = len(self.depth)
         
@@ -65,15 +66,17 @@ class Vegetation_operator(Operator, object):
         Apply vegetation drag according to veg_diameter and veg_spacing quantities
         """
         
-        if not self.quantity_flag:
-            self.check_quantities()    
-        
-        if self.quantity_flag:
-        
-            self.dt = self.get_timestep()
-        
-            self.ind = (self.depth > 0.2) & (self.ad > 0)
-            self.update_quantities()
+#         if not self.quantity_flag:
+#             self.check_quantities()    
+#         
+#         if self.quantity_flag:
+#         
+#             self.dt = self.get_timestep()
+#         
+#             self.ind = (self.depth > 0.2) & (self.ad > 0)
+#             self.update_quantities()
+
+        pass
         
         
         
@@ -210,13 +213,31 @@ class Vegetation_operator(Operator, object):
         """
     
         try:
-            self.veg_diameter = self.domain.quantities['veg_diameter'].centroid_values
-            self.veg_spacing = self.domain.quantities['veg_spacing'].centroid_values
+#             self.veg_diameter = self.domain.quantities['veg_diameter'].centroid_values
+#             self.veg_spacing = self.domain.quantities['veg_spacing'].centroid_values
             
-            self.veg = num.zeros(self.depth.shape)
-            self.veg[self.veg_spacing > 0] = (self.veg_diameter[self.veg_spacing > 0] /
-                                              self.veg_spacing[self.veg_spacing > 0]**2)
-                                              
+#             self.veg = num.zeros(self.depth.shape)
+#             self.veg[self.veg_spacing > 0] = (self.veg_diameter[self.veg_spacing > 0] /
+#                                               self.veg_spacing[self.veg_spacing > 0]**2)
+
+
+            self.veg = self.domain.quantities['veg_ratio'].centroid_values 
+            
+            self.veg_diameter = self.veg.copy()
+            self.veg_diameter[self.veg > 1] = 0.2
+            self.veg_diameter[(self.veg > 0.7) & (self.veg < 1)] = 0.015
+            
+#             self.domain.quantities['veg_diameter'].\
+#                 set_values(self.veg_diameter, location = 'centroids')
+#                 
+                
+            self.veg_spacing = self.veg.copy()
+            self.veg_spacing[self.veg > 1] = 0.41
+            self.veg_spacing[(self.veg > 0.7) & (self.veg < 1)] = 0.13
+            
+#             self.domain.quantities['veg_spacing'].\
+#                 set_values(self.veg_spacing, location = 'centroids')
+                                   
             self.ad = self.veg * self.veg_diameter
             self.calculate_drag_coefficient()
             
@@ -397,14 +418,16 @@ class Vegetation_operator(Operator, object):
         points[:,2] = dem[data_id]
         
         
-        x_ = num.arange(0, num.ceil(points[:,0].max()))
-        y_ = num.arange(0, num.ceil(points[:,1].max()))
+        x_ = num.arange(0, num.ceil(points[:,0].max())+1)
+        y_ = num.arange(0, num.ceil(points[:,1].max())+1)
 
         grid_x, grid_y = num.meshgrid(x_,y_)
         grid_z = num.zeros_like(grid_x)
 
         rloc = num.round(points[:,1]).astype(int)
         cloc = num.round(points[:,0]).astype(int)
+        
+        print rloc.max(), cloc.max(), grid_z.shape
         grid_z[rloc, cloc] = points[:,2]
 
         points = num.vstack((grid_x.flatten() + easting_min,
