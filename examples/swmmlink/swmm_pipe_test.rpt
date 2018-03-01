@@ -60,12 +60,16 @@
     Flow Routing ........... YES
     Ponding Allowed ........ NO
     Water Quality .......... NO
-  Flow Routing Method ...... KINWAVE
+  Flow Routing Method ...... DYNWAVE
   Starting Date ............ 03/09/2017 00:00:00
-  Ending Date .............. 03/09/2017 00:05:00
+  Ending Date .............. 03/09/2017 00:01:01
   Antecedent Dry Days ...... 0.0
   Report Time Step ......... 00:01:00
-  Routing Time Step ........ 10.00 sec
+  Routing Time Step ........ 1.00 sec
+  Variable Time Step ....... YES
+  Maximum Trials ........... 8
+  Number of Threads ........ 1
+  Head Tolerance ........... 0.001524 m
   
   
   *********************
