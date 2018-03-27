@@ -2,7 +2,6 @@ from pyswmm import Simulation, Nodes, Links
 
 from pprint import pprint
 print 'Import OK'
-# with Simulation('./swmm_pipe_test.inp') as sim:
 
 def run_swmm():
     
@@ -11,27 +10,48 @@ def run_swmm():
     print 'sim'
     pprint(dir(sim))
 
+    node_names = ['N-1', 'DES-1']
+    link_names = ['C-1']
     
-    #pdb.set_trace()
-    j1 = Nodes(sim)['N-1']
-    j2 = Nodes(sim)['DES-1']
-    l1 = Links(sim)['C-1']
+    nodes = [Nodes(sim)[names] for names in node_names]
+    links = [Links(sim)[names] for names in link_names]
     
-    print 'For a Node....'
-    print 'j1 OK'
-    pprint(dir(j1))
-    #pprint(j1)
-    print 'j2 OK'
-    pprint(dir(j2))
-    print 'For a Link....'
-    print 'l1 OK'
-    pprint(dir(l1))
-    
+    print 'node'
+    pprint(dir(nodes[0]))
+       
+    print 'link'
+    pprint(dir(links[0]))
     #sim.step_advance()
+
+
+    pdb.set_trace()
     
+
+    #=======================================
+    # setup all the nodes before starting
+    #=======================================
+    
+
+    nodes[0].nodeid
+
+    #nodes[0].create_opening(opening_type, opening_area, opening_length,
+    #                   coeff_orifice, coeff_weir, coeff_subweir)
+
+
+    openning0 = nodes[0].create_opening(0, 1.0, 1.0, 0.6, 1.6, 1.0)
+
+
+
+    print "Is coupled? ", nodes[0].is_coupled
+
+    pdb.set_trace()
+
+    #=======================================
+    # Start the simulation
+    #=======================================   
     sim.start()
-    
-    j1.generated_inflow(9)
+
+    nodes[0].overland_depth = 1.0
 
     # this step_advance should be an integer multiple of the routing step
     # which is set in the ,inp file. Currently set to 10s.
@@ -40,41 +60,47 @@ def run_swmm():
     # step_advance is set lower than the routing step size.
     # Indeed maybe step_advance should just allow advance n routing steps?
     #sim.step_advance(10.0) # seconds?
-    
-    while (sim.evolve_step() > 0.0):
+   
+    for ind, step in enumerate(sim):
+        #print(step.getCurrentSimulationTime())
+        sim.step_advance(1.0)
+
         print 50 * "="
         
         elapsed_time = (sim.current_time - sim.start_time).total_seconds()
+        
         print 'current Time', sim.current_time
         print 'elapsed time', elapsed_time
         print 'Advance seconds', sim._advance_seconds
     
-        print 'j1 inflow', j1.total_inflow
-        print 'j1 outflow', j1.total_outflow   
-        print 'j1 depth' , j1.depth
-        print 'j1 volume' , j1.volume
-        
-        print 'j2 inflow', j2.total_inflow
-        print 'j2 outflow', j2.total_outflow   
-        print 'j2 depth' , j2.depth 
-        print 'j2 volume' , j2.volume       
-        
-        print 'l1 link flow', l1.flow
-        print 'l1 Area', l1.ds_xsection_area   
-        print 'l1 Froude ', l1.froude
-        print 'l1 Flow limit' , l1.flow_limit
-        
-        
-        if elapsed_time > 25:
-            j2.generated_inflow(-5)
+        for i,j in enumerate(nodes):
+            print 50*"="
+            jstr = node_names[i]
+            print jstr+' total_inflow', j.total_inflow
+            print jstr+' total_outflow', j.total_outflow
+            print jstr+' coupling_inflow', j.coupling_inflow
+            print jstr+' coupling_area', j.coupling_area
+            print jstr+' overland_depth', j.overland_depth
+            print jstr+' number of openings', j.number_of_openings
+            print jstr+' depth' , j.depth
+            print jstr+' volume' , j.volume
+            print jstr+' flooding' , j.flooding
+            print jstr+' lateral_inflow' , j.lateral_inflow
             
-        #model_time_days = sim.__next__()
-        #Evolve using either swmm_step or swmm_stride
-        #model_time_days = sim._model.swmm_stride(sim._advance_seconds)
-        #time = sim.evolve_step()
+        
 
-        #print sim
-        # 'ds_xsection_area', 'flow', 'flow_limit', 'froude'
+        for i,l in enumerate(links):
+            print 50*"="
+            lstr = link_names[i]
+            print lstr+' link flow', l.flow
+            print lstr+' Area', l.ds_xsection_area   
+            print lstr+' Froude ', l.froude
+            print lstr+' Depth ', l.depth
+            print lstr+' Flow limit' , l.flow_limit
+            print lstr+' volume' , l.volume
+        
+
+
         pdb.set_trace()
         
 
