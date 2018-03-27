@@ -24,8 +24,6 @@ def run_swmm():
     #sim.step_advance()
 
 
-    pdb.set_trace()
-    
 
     #=======================================
     # setup all the nodes before starting
@@ -34,17 +32,10 @@ def run_swmm():
 
     nodes[0].nodeid
 
-    #nodes[0].create_opening(opening_type, opening_area, opening_length,
-    #                   coeff_orifice, coeff_weir, coeff_subweir)
-
-
     openning0 = nodes[0].create_opening(0, 1.0, 1.0, 0.6, 1.6, 1.0)
-
-
 
     print "Is coupled? ", nodes[0].is_coupled
 
-    pdb.set_trace()
 
     #=======================================
     # Start the simulation
@@ -62,10 +53,9 @@ def run_swmm():
     #sim.step_advance(10.0) # seconds?
    
     for ind, step in enumerate(sim):
-        #print(step.getCurrentSimulationTime())
         sim.step_advance(1.0)
 
-        print 50 * "="
+        print 70 * "="
         
         elapsed_time = (sim.current_time - sim.start_time).total_seconds()
         
