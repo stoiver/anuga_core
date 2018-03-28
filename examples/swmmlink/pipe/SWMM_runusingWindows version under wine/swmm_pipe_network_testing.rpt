@@ -1,0 +1,296 @@
+
+  EPA STORM WATER MANAGEMENT MODEL - VERSION 5.1 (Build 5.1.011)
+  --------------------------------------------------------------
+
+  
+  *************
+  Element Count
+  *************
+  Number of rain gages ...... 1
+  Number of subcatchments ... 9
+  Number of nodes ........... 9
+  Number of links ........... 8
+  Number of pollutants ...... 0
+  Number of land uses ....... 0
+  
+  
+  ****************
+  Raingage Summary
+  ****************
+                                                      Data       Recording
+  Name                 Data Source                    Type       Interval 
+  ------------------------------------------------------------------------
+  1                    C:\users\wcc\My Documents\models\pipe\SWMM\rainfall.dat
+  
+  
+  ********************
+  Subcatchment Summary
+  ********************
+  Name                       Area     Width   %Imperv    %Slope Rain Gage            Outlet              
+  -----------------------------------------------------------------------------------------------------------
+  1                          0.01     10.00     40.00    0.5000 1                    N-8                 
+  2                          0.00      5.00     40.00    0.5000 1                    N-7                 
+  3                          0.41     50.00     40.00    0.5000 1                    N-6                 
+  4                          0.17     20.00     40.00    0.5000 1                    N-5                 
+  5                          0.01     15.00     40.00    0.5000 1                    N-4                 
+  6                          0.05     15.00     40.00    0.5000 1                    N-3                 
+  7                          0.04     15.00     40.00    0.5000 1                    N-2                 
+  8                          0.02     10.00     40.00    0.5000 1                    N-4                 
+  9                          0.06     16.00     40.00    0.5000 1                    N-1                 
+  
+  
+  ************
+  Node Summary
+  ************
+                                           Invert      Max.    Ponded    External
+  Name                 Type                 Elev.     Depth      Area    Inflow  
+  -------------------------------------------------------------------------------
+  N-1                  JUNCTION             85.20      0.45       0.0
+  N-2                  JUNCTION             86.30      0.45       0.0
+  N-3                  JUNCTION             86.00      0.45       0.0
+  N-4                  JUNCTION             85.10      0.45       0.0
+  N-5                  JUNCTION             84.90      0.45       0.0
+  N-7                  JUNCTION             82.80      0.45       0.0
+  N-8                  JUNCTION             81.00      0.45       0.0
+  N-6                  JUNCTION             83.50      0.45       0.0
+  DES-1                OUTFALL              77.80      0.45       0.0
+  
+  
+  ************
+  Link Summary
+  ************
+  Name             From Node        To Node          Type            Length    %Slope Roughness
+  ---------------------------------------------------------------------------------------------
+  C-1              N-1              N-4              CONDUIT           17.0    0.5891    0.0130
+  C-2              N-2              N-3              CONDUIT            7.7    3.8824    0.0130
+  C-3              N-3              N-4              CONDUIT            9.1    9.9854    0.0130
+  C-4              N-4              N-5              CONDUIT           12.5    1.5988    0.0130
+  C-5              N-6              N-7              CONDUIT            9.2    7.6291    0.0130
+  C-6              N-5              N-6              CONDUIT            7.2   19.8428    0.0130
+  C-7              N-7              N-8              CONDUIT            9.2   20.0528    0.0130
+  C-8              N-8              DES-1            CONDUIT           21.9   14.7381    0.0130
+  
+  
+  *********************
+  Cross Section Summary
+  *********************
+                                        Full     Full     Hyd.     Max.   No. of     Full
+  Conduit          Shape               Depth     Area     Rad.    Width  Barrels     Flow
+  ---------------------------------------------------------------------------------------
+  C-1              CIRCULAR             0.45     0.16     0.11     0.45        1   218.85
+  C-2              CIRCULAR             0.45     0.16     0.11     0.45        1   561.80
+  C-3              CIRCULAR             0.45     0.16     0.11     0.45        1   900.98
+  C-4              CIRCULAR             0.45     0.16     0.11     0.45        1   360.52
+  C-5              CIRCULAR             0.45     0.16     0.11     0.45        1   787.54
+  C-6              CIRCULAR             0.45     0.16     0.11     0.45        1  1270.09
+  C-7              CIRCULAR             0.45     0.16     0.11     0.45        1  1276.79
+  C-8              CIRCULAR             0.45     0.16     0.11     0.45        1  1094.59
+  
+  
+  
+  *********************
+  Rainfall File Summary
+  *********************
+  Station    First        Last         Recording   Periods    Periods    Periods
+  ID         Date         Date         Frequency  w/Precip    Missing    Malfunc.
+  -------------------------------------------------------------------------------
+  10y25m     03/10/2017   03/10/2017       5 min         7          0          0
+
+  
+  *********************************************************
+  NOTE: The summary statistics displayed in this report are
+  based on results found at every computational time step,  
+  not just on results from each reporting time step.
+  *********************************************************
+  
+  ****************
+  Analysis Options
+  ****************
+  Flow Units ............... LPS
+  Process Models:
+    Rainfall/Runoff ........ YES
+    RDII ................... NO
+    Snowmelt ............... NO
+    Groundwater ............ NO
+    Flow Routing ........... YES
+    Ponding Allowed ........ NO
+    Water Quality .......... NO
+  Infiltration Method ...... HORTON
+  Flow Routing Method ...... STEADY
+  Starting Date ............ 03/10/2017 00:00:00
+  Ending Date .............. 03/11/2017 00:00:00
+  Antecedent Dry Days ...... 0.0
+  Report Time Step ......... 00:05:00
+  Wet Time Step ............ 00:05:00
+  Dry Time Step ............ 00:05:00
+  Routing Time Step ........ 60.00 sec
+  
+  
+  *********************
+  Control Actions Taken
+  *********************
+
+  
+  **************************        Volume         Depth
+  Runoff Quantity Continuity     hectare-m            mm
+  **************************     ---------       -------
+  Total Precipitation ......         0.036        47.070
+  Evaporation Loss .........         0.000         0.000
+  Infiltration Loss ........         0.000         0.000
+  Surface Runoff ...........         0.037        47.824
+  Final Storage ............         0.000         0.065
+  Continuity Error (%) .....        -1.741
+  
+  
+  **************************        Volume        Volume
+  Flow Routing Continuity        hectare-m      10^6 ltr
+  **************************     ---------     ---------
+  Dry Weather Inflow .......         0.000         0.000
+  Wet Weather Inflow .......         0.037         0.369
+  Groundwater Inflow .......         0.000         0.000
+  RDII Inflow ..............         0.000         0.000
+  External Inflow ..........         0.000         0.000
+  External Outflow .........         0.037         0.369
+  Flooding Loss ............         0.000         0.000
+  Evaporation Loss .........         0.000         0.000
+  Exfiltration Loss ........         0.000         0.000
+  Initial Stored Volume ....         0.000         0.000
+  Final Stored Volume ......         0.000         0.000
+  Continuity Error (%) .....         0.000
+  
+  
+  ********************************
+  Highest Flow Instability Indexes
+  ********************************
+  All links are stable.
+  
+  
+  *************************
+  Routing Time Step Summary
+  *************************
+  Minimum Time Step           :    60.00 sec
+  Average Time Step           :    60.00 sec
+  Maximum Time Step           :    60.00 sec
+  Percent in Steady State     :     0.00
+  Average Iterations per Step :     1.00
+  Percent Not Converging      :     0.00
+  
+  
+  ***************************
+  Subcatchment Runoff Summary
+  ***************************
+  
+  --------------------------------------------------------------------------------------------------------
+                            Total      Total      Total      Total      Total       Total     Peak  Runoff
+                           Precip      Runon       Evap      Infil     Runoff      Runoff   Runoff   Coeff
+  Subcatchment                 mm         mm         mm         mm         mm    10^6 ltr      LPS
+  --------------------------------------------------------------------------------------------------------
+  1                         47.07       0.00       0.00       0.00      47.83        0.00     5.35   1.016
+  2                         47.07       0.00       0.00       0.00      47.83        0.00     2.58   1.016
+  3                         47.07       0.00       0.00       0.00      47.81        0.19   188.30   1.016
+  4                         47.07       0.00       0.00       0.00      47.81        0.08    76.63   1.016
+  5                         47.07       0.00       0.00       0.00      47.79        0.00     5.83   1.015
+  6                         47.07       0.00       0.00       0.00      47.86        0.03    28.93   1.017
+  7                         47.07       0.00       0.00       0.00      47.86        0.02    23.46   1.017
+  8                         47.07       0.00       0.00       0.00      47.86        0.01    11.25   1.017
+  9                         47.07       0.00       0.00       0.00      47.86        0.03    34.89   1.017
+  
+  
+  ******************
+  Node Depth Summary
+  ******************
+  
+  ---------------------------------------------------------------------------------
+                                 Average  Maximum  Maximum  Time of Max    Reported
+                                   Depth    Depth      HGL   Occurrence   Max Depth
+  Node                 Type       Meters   Meters   Meters  days hr:min      Meters
+  ---------------------------------------------------------------------------------
+  N-1                  JUNCTION     0.00     0.12    85.32     0  00:21        0.12
+  N-2                  JUNCTION     0.00     0.06    86.36     0  00:21        0.06
+  N-3                  JUNCTION     0.00     0.07    86.07     0  00:21        0.07
+  N-4                  JUNCTION     0.00     0.17    85.27     0  00:21        0.16
+  N-5                  JUNCTION     0.00     0.17    85.07     0  00:21        0.16
+  N-7                  JUNCTION     0.01     0.22    83.02     0  00:21        0.21
+  N-8                  JUNCTION     0.01     0.18    81.18     0  00:21        0.17
+  N-6                  JUNCTION     0.01     0.22    83.72     0  00:21        0.21
+  DES-1                OUTFALL      0.01     0.18    77.98     0  00:21        0.17
+  
+  
+  *******************
+  Node Inflow Summary
+  *******************
+  
+  -------------------------------------------------------------------------------------------------
+                                  Maximum  Maximum                  Lateral       Total        Flow
+                                  Lateral    Total  Time of Max      Inflow      Inflow     Balance
+                                   Inflow   Inflow   Occurrence      Volume      Volume       Error
+  Node                 Type           LPS      LPS  days hr:min    10^6 ltr    10^6 ltr     Percent
+  -------------------------------------------------------------------------------------------------
+  N-1                  JUNCTION     34.89    34.89     0  00:21      0.0311      0.0311       0.000
+  N-2                  JUNCTION     23.46    23.46     0  00:21      0.0198      0.0198       0.000
+  N-3                  JUNCTION     28.93    52.39     0  00:21      0.0252       0.045       0.000
+  N-4                  JUNCTION     17.08   104.36     0  00:21      0.0138      0.0898       0.000
+  N-5                  JUNCTION     76.63   180.99     0  00:21      0.0794       0.169       0.000
+  N-7                  JUNCTION      2.58   371.87     0  00:21     0.00203       0.365       0.000
+  N-8                  JUNCTION      5.35   377.22     0  00:21     0.00422       0.369       0.000
+  N-6                  JUNCTION    188.30   369.29     0  00:21       0.194       0.363       0.000
+  DES-1                OUTFALL       0.00   377.22     0  00:21           0       0.369       0.000
+  
+  
+  **********************
+  Node Surcharge Summary
+  **********************
+  
+  No nodes were surcharged.
+  
+  
+  *********************
+  Node Flooding Summary
+  *********************
+  
+  No nodes were flooded.
+  
+  
+  ***********************
+  Outfall Loading Summary
+  ***********************
+  
+  -----------------------------------------------------------
+                         Flow       Avg       Max       Total
+                         Freq      Flow      Flow      Volume
+  Outfall Node           Pcnt       LPS       LPS    10^6 ltr
+  -----------------------------------------------------------
+  DES-1                 39.24     10.89    377.22       0.369
+  -----------------------------------------------------------
+  System                39.24     10.89    377.22       0.369
+  
+  
+  ********************
+  Link Flow Summary
+  ********************
+  
+  -----------------------------------------------------------------------------
+                                 Maximum  Time of Max   Maximum    Max/    Max/
+                                  |Flow|   Occurrence   |Veloc|    Full    Full
+  Link                 Type          LPS  days hr:min     m/sec    Flow   Depth
+  -----------------------------------------------------------------------------
+  C-1                  CONDUIT     34.89     0  00:21      1.01    0.16    0.27
+  C-2                  CONDUIT     23.46     0  00:21      1.75    0.04    0.14
+  C-3                  CONDUIT     52.39     0  00:21      3.09    0.06    0.16
+  C-4                  CONDUIT    104.36     0  00:21      1.96    0.29    0.37
+  C-5                  CONDUIT    369.29     0  00:21      4.87    0.47    0.48
+  C-6                  CONDUIT    180.99     0  00:21      5.66    0.14    0.26
+  C-7                  CONDUIT    371.87     0  00:21      6.96    0.29    0.37
+  C-8                  CONDUIT    377.22     0  00:21      6.24    0.34    0.41
+  
+  
+  *************************
+  Conduit Surcharge Summary
+  *************************
+  
+  No conduits were surcharged.
+  
+
+  Analysis begun on:  Fri Mar 10 11:38:43 2017
+  Analysis ended on:  Fri Mar 10 11:38:43 2017
+  Total elapsed time: < 1 sec

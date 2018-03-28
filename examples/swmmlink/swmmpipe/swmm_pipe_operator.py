@@ -1,15 +1,45 @@
 import anuga
 import math
 import numpy
+from pyswmm import Simulation, Nodes, Links
+
+def run_swmm():
+	
+    sim = Simulation('./swmm_pipe_test.inp')
+    print 'With OK', sim, dir(sim)
+    raw_input('check')
+    j1 = Nodes(sim)['N-1']
+    j2 = Nodes(sim)['DES-1']
+    l1 = Links(sim)['C-1']
+    
+    print 'For a Node....'
+    print 'j1 OK', dir(j1)
+    print 'For a Link....'
+    print 'l1 OK', dir(l1)
+    for step in sim:
+        print 'step'
+        print 'inflow', j1.total_inflow
+        print 'outflow', j1.total_outflow        
+        j1.generated_inflow(9)
+        print 'depth' ,j1.depth
+        print 'link flow', l1.flow
+        print 'Area',l1.ds_xsection_area   
+        print sim.current_time
+        #'ds_xsection_area', 'flow', 'flow_limit', 'froude'
+        raw_input('check func')
+
 
 
 #=====================================================================
 # The class
 #=====================================================================
 
-class Boyd_pipe_operator(anuga.Structure_operator):
-    """Culvert flow - transfer water from one location to another via a circular pipe culvert.
+class SWMM_pipe_operator(anuga.Structure_operator):
+    """SWMM pipe flow - transfer water from one location to another 
+       via a SWMM 1d pipe.
     
+    Using pyswmm commands.
+
     Input: Two points, pipe_size (diameter), 
     mannings_rougness,
     """ 
@@ -34,7 +64,7 @@ class Boyd_pipe_operator(anuga.Structure_operator):
                  use_velocity_head=True,
                  description=None,
                  label=None,
-                 structure_type='boyd_pipe',
+                 structure_type='swmm_pipe',
                  logging=False,
                  verbose=False):
                      
@@ -59,6 +89,8 @@ class Boyd_pipe_operator(anuga.Structure_operator):
                                           verbose=verbose)
 
         
+        #run_swmm()
+        #raw_input('hold sim')
         if isinstance(losses, dict):
             self.sum_loss = sum(losses.values())
         elif isinstance(losses, list):
@@ -81,6 +113,23 @@ class Boyd_pipe_operator(anuga.Structure_operator):
         self.max_velocity = 10.0
 
         self.inlets = self.get_inlets()
+
+        # Could be used to generate SWMM file
+        print 'E1', self.inlets[0].get_enquiry_elevation()
+        print 'E2', self.inlets[1].get_enquiry_elevation()        
+        print 'Length', self.culvert_length
+        print 'End points', self.end_points
+        
+
+
+        self.swmmsim = Simulation('./swmm_pipe_test.inp')
+        
+              
+        self.j1 = Nodes(self.swmmsim)['N-1']
+        self.j2 = Nodes(self.swmmsim)['DES-1']
+        self.l1 = Links(self.swmmsim)['C-1']
+        
+        
 
 
         # Stats
@@ -108,6 +157,72 @@ class Boyd_pipe_operator(anuga.Structure_operator):
         Then use boyd_pipe_function to do the actual calculation
         """
 
+        #print 'Discharge routine', self.get_time()
+        
+        
+        
+        print 'ANUGA step', self.domain.timestep
+        
+        #self.swmmsim.step_advance(self.domain.timestep)
+        
+        #self.swmmsim.step_advance(1.0)
+        self.swmmsim._model.swmm_stride(60.0)# model stride in seconds ???
+        self.j1.generated_inflow(90)   # Flow should come from a Rating Curve driven by Domain Depth at the Enquiry Point
+        print 'inflow', self.j1.total_inflow
+        print 'outflow', self.j1.total_outflow 
+        #print 'Current Time' , self.swmmsim.current_time
+        #for step in self.swmmsim:
+        #    print 'Current Time' , self.swmmsim.current_time
+        # or here! sim.step_advance(newvalue)
+        #raw_input('check step')
+        
+        """
+        #print 'Report start' , self.swmmsim.report_start
+        for step in self.swmmsim:
+            self.j1.generated_inflow(90)   # Flow should come from a Rating Curve driven by Domain Depth at the Enquiry Point
+            print 'inflow', self.j1.total_inflow
+            print 'outflow', self.j1.total_outflow 
+            print 'Current Time' , self.swmmsim.current_time
+			#break 
+        raw_input('hold')
+        """	
+        
+        """
+        sim = Simulation('./swmm_pipe_test.inp')
+        print 'With OK', sim
+        raw_input('check')
+        j1 = Nodes(sim)['N-1']
+        j2 = Nodes(sim)['DES-1']
+        l1 = Links(sim)['C-1']
+        
+        for step in sim:
+            print 'step'
+            print 'inflow', j1.total_inflow
+            print 'outflow', j1.total_outflow        
+            j1.generated_inflow(9)
+            print 'depth' ,j1.depth
+            print 'link flow', l1.flow
+            print 'Area',l1.ds_xsection_area   
+            print sim.current_time
+            #'ds_xsection_area', 'flow', 'flow_limit', 'froude'
+        raw_input('check')
+		"""	
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
+			
         local_debug = False
 
         # If the cuvert has been closed, then no water gets through
@@ -266,10 +381,12 @@ def boyd_pipe_function(depth,
         bf = 3.333-3.333*blockage     
     else:
         bf = 1.0-0.4012316798*blockage-0.3768350138*(blockage**2) 
+    #print 'blockage ', blockage
+    #print '      bf ', bf
 
     # Calculate flows for inlet control for circular pipe
-    Q_inlet_unsubmerged = barrels * (0.421*anuga.g**0.5*((bf*diameter)**0.87)*driving_energy**1.63) # Inlet Ctrl Inlet Unsubmerged
-    Q_inlet_submerged = barrels * (0.530*anuga.g**0.5*((bf*diameter)**1.87)*driving_energy**0.63)   # Inlet Ctrl Inlet Submerged
+    Q_inlet_unsubmerged = 0.421*anuga.g**0.5*((bf*diameter)**0.87)*driving_energy**1.63 # Inlet Ctrl Inlet Unsubmerged
+    Q_inlet_submerged = 0.530*anuga.g**0.5*((bf*diameter)**1.87)*driving_energy**0.63   # Inlet Ctrl Inlet Submerged
     # Note for to SUBMERGED TO OCCUR operator.inflow.get_average_specific_energy() should be > 1.2 x diameter.... Should Check !!!
 
 
@@ -288,9 +405,9 @@ def boyd_pipe_function(depth,
     # Now determine Hydraulic Radius Parameters Area & Wetted Perimeter
     if outlet_culvert_depth >= (bf*diameter):
         outlet_culvert_depth = (bf*diameter)  # Once again the pipe is flowing full not partfull
-        flow_area = barrels * (bf*diameter/2)**2 * math.pi  # Cross sectional area of flow in the culvert
-        perimeter = barrels * bf * diameter * math.pi
-        flow_width= barrels * bf * diameter
+        flow_area = (bf*diameter/2)**2 * math.pi  # Cross sectional area of flow in the culvert
+        perimeter = bf * diameter * math.pi
+        flow_width= bf * diameter
         case = 'Inlet CTRL Outlet submerged Circular PIPE FULL'
         if local_debug:
             anuga.log.critical('Inlet CTRL Outlet submerged Circular '
@@ -299,9 +416,9 @@ def boyd_pipe_function(depth,
         #alpha = anuga.acos(1 - outlet_culvert_depth/diameter)    # Where did this Come From ????/
         alpha = anuga.acos(1-2*outlet_culvert_depth/(bf*diameter))*2
         #flow_area = diameter**2 * (alpha - sin(alpha)*cos(alpha))        # Pipe is Running Partly Full at the INLET   WHRE did this Come From ?????
-        flow_area = barrels * (bf*diameter)**2/8*(alpha - math.sin(alpha))   # Equation from  GIECK 5th Ed. Pg. B3
-        flow_width= barrels * bf*diameter*math.sin(alpha/2.0)
-        perimeter = barrels * (alpha*bf*diameter/2.0)
+        flow_area = (bf*diameter)**2/8*(alpha - math.sin(alpha))   # Equation from  GIECK 5th Ed. Pg. B3
+        flow_width= bf*diameter*math.sin(alpha/2.0)
+        perimeter = alpha*bf*diameter/2.0
         case = 'INLET CTRL Culvert is open channel flow we will for now assume critical depth'
         if local_debug:
             anuga.log.critical('INLET CTRL Culvert is open channel flow '
@@ -315,9 +432,9 @@ def boyd_pipe_function(depth,
         # Determine the depth at the outlet relative to the depth of flow in the Culvert
         if outlet_enquiry_depth > bf*diameter:       # Outlet is submerged Assume the end of the Pipe is flowing FULL
             outlet_culvert_depth=bf*diameter
-            flow_area = barrels * (bf*diameter/2)**2 * math.pi  # Cross sectional area of flow in the culvert
-            perimeter = barrels * bf*diameter * math.pi
-            flow_width= barrels * bf*diameter
+            flow_area = (bf*diameter/2)**2 * math.pi  # Cross sectional area of flow in the culvert
+            perimeter = bf*diameter * math.pi
+            flow_width= bf*diameter
             case = 'Outlet submerged'
             if local_debug:
                 anuga.log.critical('Outlet submerged')
@@ -325,23 +442,23 @@ def boyd_pipe_function(depth,
             # IF  operator.outflow.get_average_depth() < diameter
             dcrit1 = (bf*diameter)/1.26*(Q/anuga.g**0.5*((bf*diameter)**2.5))**(1/3.75)
             dcrit2 = (bf*diameter)/0.95*(Q/anuga.g**0.5*((bf*diameter)**2.5))**(1/1.95)
-            if dcrit1/(bf*diameter) > 0.85:
+            if dcrit1/(bf*diameter) >0.85:
                 outlet_culvert_depth= dcrit2
             else:
                 outlet_culvert_depth = dcrit1
             if outlet_culvert_depth > bf*diameter:
                 outlet_culvert_depth = bf*diameter  # Once again the pipe is flowing full not partfull
-                flow_area = barrels * (bf*diameter/2)**2 * math.pi  # Cross sectional area of flow in the culvert
-                perimeter = barrels * bf*diameter * math.pi
-                flow_width= barrels * bf*diameter
+                flow_area = (bf*diameter/2)**2 * math.pi  # Cross sectional area of flow in the culvert
+                perimeter = bf*diameter * math.pi
+                flow_width= bf*diameter
                 case = 'Outlet unsubmerged PIPE FULL'
                 if local_debug:
                     anuga.log.critical('Outlet unsubmerged PIPE FULL')
             else:
                 alpha = anuga.acos(1-2*outlet_culvert_depth/(bf*diameter))*2
-                flow_area = barrels * (bf*diameter)**2/8*(alpha - math.sin(alpha))   # Equation from  GIECK 5th Ed. Pg. B3
-                flow_width= barrels * bf*diameter*math.sin(alpha/2.0)
-                perimeter = barrels * alpha*bf*diameter/2.0
+                flow_area = (bf*diameter)**2/8*(alpha - math.sin(alpha))   # Equation from  GIECK 5th Ed. Pg. B3
+                flow_width= bf*diameter*math.sin(alpha/2.0)
+                perimeter = alpha*bf*diameter/2.0
                 case = 'Outlet is open channel flow we will for now assume critical depth'
                 if local_debug:
                     anuga.log.critical('Q Outlet Depth and ALPHA = %s, %s, %s'
@@ -354,6 +471,7 @@ def boyd_pipe_function(depth,
         anuga.log.critical('PERIMETER = %s' % str(perimeter))
         anuga.log.critical('Q Interim = %s' % str(Q))
     hyd_rad = flow_area/perimeter
+
 
 
     # Outlet control velocity using tail water
@@ -379,18 +497,17 @@ def boyd_pipe_function(depth,
                      % ('Q and Velocity and Depth=', Q,
                         culvert_velocity, outlet_culvert_depth))
 
-    culv_froude=math.sqrt(Q**2*flow_width*barrels/(anuga.g*flow_area**3))
+    culv_froude=math.sqrt(Q**2*flow_width/(anuga.g*flow_area**3))
     if local_debug:
         anuga.log.critical('FLOW AREA = %s' % str(flow_area))
         anuga.log.critical('PERIMETER = %s' % str(perimeter))
         anuga.log.critical('Q final = %s' % str(Q))
         anuga.log.critical('FROUDE = %s' % str(culv_froude))
-        anuga.log.critical('Case = %s' % case)
 
     # Determine momentum at the outlet
     barrel_velocity = Q/(flow_area + anuga.velocity_protection/flow_area)
 
     # END CODE BLOCK for DEPTH  > Required depth for CULVERT Flow
 
-    return Q, barrel_velocity, outlet_culvert_depth, flow_area, case
+    return barrels*Q, barrel_velocity, outlet_culvert_depth, flow_area, case
 
