@@ -50,6 +50,12 @@ else:
         your python interpreter from there."""
         raise ImportError(msg)
     
+    #---------------------------------
+    # NetCDF changes stdout to terminal\
+    # Causes trouble when using jupyter
+    #---------------------------------
+    import sys
+    _stdout = sys.stdout    
     
     #---------------------------------
     # Setup the nose tester from numpy
@@ -253,6 +259,7 @@ else:
     from anuga.operators.set_elevation_operator import Set_elevation_operator
     from anuga.operators.set_quantity_operator import Set_quantity_operator
     from anuga.operators.set_stage_operator import Set_stage_operator
+    
 
     from anuga.operators.set_elevation import Set_elevation
     from anuga.operators.set_quantity import Set_quantity
@@ -261,7 +268,7 @@ else:
     from anuga.operators.erosion_operators import Bed_shear_erosion_operator
     from anuga.operators.erosion_operators import Flat_slice_erosion_operator
     from anuga.operators.erosion_operators import Flat_fill_slice_erosion_operator
-
+    
     #---------------------------
     # Structure Operators
     #---------------------------
@@ -280,6 +287,7 @@ else:
         from anuga.structures.weir_orifice_trapezoid_operator import Weir_orifice_trapezoid_operator
         from anuga.structures.internal_boundary_operator import Internal_boundary_operator
 
+    from anuga.structures.internal_boundary_functions import pumping_station_function
 
     #----------------------------
     # Parallel distribute
@@ -331,9 +339,15 @@ else:
 
     from anuga.config import g
     from anuga.config import velocity_protection
+        
+    #--------------------------------------
+    # NetCDF changes stdout to the terminal
+    # This resets it
+    #--------------------------------------
+    reload(sys)
+    sys.stdout = _stdout
     
-
-
+    
 
 
 
