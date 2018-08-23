@@ -233,9 +233,8 @@ class Raster_time_slice_data(object):
         
         if self.debug: print '--- Date/Time ', date_time
         
-        plt.figure(1)
-        plt.clf()
 
+        plt.figure(1)
         
         if not polygons is None:
             for polygon in polygons:
@@ -252,7 +251,7 @@ class Raster_time_slice_data(object):
                    extent=self.extent,vmin=0, vmax=plot_vmax)
         
         
-        plt.colorbar()            
+                   
         
         if show: plt.draw()
         if save: plt.savefig(plot_title+'.jpg',format='jpg')
@@ -518,6 +517,11 @@ class Calibrated_radar_rain(Raster_time_slice_data):
                     
                     assert np.allclose(self.time_step,new_time_step), "Timesteps not equal"
 
+                
+                
+                # FIXME: SR 
+                # This will take up a lot of storage for a long time series
+                # probably should go back to the file when we need the data. 
                     
                 data_slices.append(data_slice)
         
@@ -668,21 +672,28 @@ if __name__ == "__main__":
     print 'time_step ',rain.time_step     
         
     import time
-    pl.ion()
+
     #pdb.set_trace() 
 
     plot_vmax = np.max(rain.data_slices)
     print 'plot_vmax', plot_vmax
+    plt.figure(1)
+    plt.clf()
+    
+    #plt.ion()
+    #plt.show()
+
     for tid in xrange(len(rain.times)):
         rain.plot_data(tid, plot_vmax=plot_vmax, save=False, show=True, polygons=[p2,p3])
-        time.sleep(0.05)
+        if tid == 0: plt.colorbar()
+        plt.pause(0.05)
         #ipdb.set_trace() 
         
         
     
     rain.plot_accumulated_data(polygons=[p2])
     
-    pl.ioff()
+    #pl.ioff()
     pl.show()
      
 
