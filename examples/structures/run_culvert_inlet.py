@@ -7,7 +7,6 @@ import anuga
 
 from anuga import Boyd_pipe_operator
 from anuga import Inlet_operator
-                            
      
 from math import pi, pow, sqrt
 
@@ -74,18 +73,19 @@ domain.set_quantity('friction', 0.01)         # Constant friction
 domain.set_quantity('stage',
                     expression='elevation')   # Dry initial condition
 
-
 Boyd_pipe_operator(domain,
                             end_points=[[9.0, 2.5],[13.0, 2.5]],
                             losses=1.5,
-                            diameter=1.5,
+                            width=1.5,
+                            height=1.5,
+                            z1=10.0,
+                            z2=10.0,
                             apron=5.0,
                             use_momentum_jet=True,
                             use_velocity_head=False,
+                            logging=True,
                             manning=0.013,
                             verbose=False)
-
-
 line = [[0.0, 5.0], [0.0, 10.0]]
 Q = 5.0
 Inlet_operator(domain, line, Q)
