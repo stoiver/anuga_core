@@ -34,6 +34,7 @@ class Structure_operator(anuga.Operator):
                  z2=None,
                  blockage=None,
                  barrels=None,
+                 #culvert_slope=None,
                  apron=None,
                  manning=None,
                  enquiry_gap=None,
@@ -66,7 +67,7 @@ class Structure_operator(anuga.Operator):
         self.enquiry_points = ensure_numeric(enquiry_points)
         self.invert_elevations = ensure_numeric(invert_elevations)
 
-        assert self.end_points == None or self.exchange_lines == None
+        assert self.end_points is None or self.exchange_lines is None
 
         
         if height is None:
@@ -101,17 +102,17 @@ class Structure_operator(anuga.Operator):
         self.always_use_Q_wetdry_adjustment = always_use_Q_wetdry_adjustment
 
 
-        if description == None:
+        if description is None:
             self.description = ' '
         else:
             self.description = description
         
-        if label == None:
+        if label is None:
             self.label = "structure_%g" % Structure_operator.counter
         else:
             self.label = label + '_%g' % Structure_operator.counter
 
-        if structure_type == None:
+        if structure_type is None:
             self.structure_type = 'generic structure'
         else:
             self.structure_type = structure_type
@@ -514,6 +515,8 @@ class Structure_operator(anuga.Operator):
             message += 'Culvert  Width: %s\n'% self.width
             message += 'Batter Slope 1: %s\n'% self.z1
             message += 'Batter Slope 2: %s\n'% self.z2
+            message += 'Culvert Blockage: %s\n'% self.blockage
+            message += 'No.  of  barrels: %s\n'% self.barrels
             
         message += '\n'
         
@@ -678,7 +681,7 @@ class Structure_operator(anuga.Operator):
     def get_culvert_barrels(self):
 		
         return self.barrels
-                
+                       
     def get_culvert_apron(self):
 
         return self.apron
