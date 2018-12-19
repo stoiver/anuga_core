@@ -1,5 +1,7 @@
 from pyswmm import Simulation, Nodes, Links
 
+import numpy as np
+
 from pprint import pprint
 print 'Import OK'
 
@@ -8,19 +10,19 @@ def run_swmm():
     import pdb
     sim = Simulation('./swmm_pipe_test.inp')
     print 'sim'
-    pprint(dir(sim))
+    #pprint(dir(sim))
 
-    node_names = ['N-1', 'DES-1']
-    link_names = ['C-1']
+    node_names = ['Inlet', 'Outlet']
+    link_names = ['Culvert']
     
     nodes = [Nodes(sim)[names] for names in node_names]
     links = [Links(sim)[names] for names in link_names]
     
     print 'node'
-    pprint(dir(nodes[0]))
+    #pprint(dir(nodes[0]))
        
     print 'link'
-    pprint(dir(links[0]))
+    #pprint(dir(links[0]))
     #sim.step_advance()
 
 
@@ -31,8 +33,8 @@ def run_swmm():
     
 
     nodes[0].nodeid
-
-    openning0 = nodes[0].create_opening(0, 1.0, 1.0, 0.6, 1.6, 1.0)
+    # type, area, length, orifice_coeff, free_weir_coeff, submerged_weir_coeff
+    openning0 = nodes[0].create_opening(4, 1.0, 1.0, 0.6, 1.6, 1.0)
 
     print "Is coupled? ", nodes[0].is_coupled
 
@@ -51,6 +53,8 @@ def run_swmm():
     # step_advance is set lower than the routing step size.
     # Indeed maybe step_advance should just allow advance n routing steps?
     #sim.step_advance(10.0) # seconds?
+    
+    bucket = np.array([1.0, 0.0])
    
     for ind, step in enumerate(sim):
         sim.step_advance(1.0)
@@ -63,6 +67,8 @@ def run_swmm():
         print 'elapsed time', elapsed_time
         print 'Advance seconds', sim._advance_seconds
     
+        pprint(openning0.flow)
+        
         for i,j in enumerate(nodes):
             print 50*"="
             jstr = node_names[i]

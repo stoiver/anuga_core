@@ -29,6 +29,7 @@
 *.blg
 *.out
 *.toc
+*.rpt
 tags
 
 # validation temp files #

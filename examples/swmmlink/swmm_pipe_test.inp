@@ -49,27 +49,27 @@ DRY_ONLY         NO
 [JUNCTIONS]
 ;;Name           Elevation  MaxDepth   InitDepth  SurDepth   Aponded   
 ;;-------------- ---------- ---------- ---------- ---------- ----------
-N-1              -0.00425      0          0          1          0         
+Inlet              0.38      2.0          0          1          0         
 
 [OUTFALLS]
 ;;Name           Elevation  Type       Stage Data       Gated    Route To        
 ;;-------------- ---------- ---------- ---------------- -------- ----------------
-DES-1            -0.04375   FREE                        NO                       
+Outlet            0.0       FREE                        NO                       
 
 [CONDUITS]
 ;;Name           From Node        To Node          Length     Roughness  InOffset   OutOffset  InitFlow   MaxFlow   
 ;;-------------- ---------------- ---------------- ---------- ---------- ---------- ---------- ---------- ----------
-C-1              N-1              DES-1              38         0.013      0          0          0          0         
+Culvert              Inlet         Outlet              38         0.013      0          0          0          10         
 
 [XSECTIONS]
 ;;Link           Shape        Geom1            Geom2      Geom3      Geom4      Barrels    Culvert   
 ;;-------------- ------------ ---------------- ---------- ---------- ---------- ---------- ----------
-C-1              CIRCULAR     2.5             0          0          0          1                    
+Culvert           CIRCULAR     1.0             0          0          0          1                    
 
 [LOSSES]
 ;;Link           Kentry     Kexit      Kavg       Flap Gate  Seepage   
 ;;-------------- ---------- ---------- ---------- ---------- ----------
-C-1              0.5        1          0          NO         0         
+Culvert              0.5        1          0          NO         0         
 
 [REPORT]
 ;;Reporting Options
@@ -88,8 +88,8 @@ Units      None
 [COORDINATES]
 ;;Node           X-Coord            Y-Coord           
 ;;-------------- ------------------ ------------------
-N-1              5.00               7.5       
-DES-1            43.0               7.5       
+Inlet            5.00               7.5       
+Outlet           43.0               7.5       
 
 [VERTICES]
 ;;Link           X-Coord            Y-Coord           
