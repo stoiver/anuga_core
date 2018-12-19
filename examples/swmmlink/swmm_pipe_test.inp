@@ -49,7 +49,7 @@ DRY_ONLY         NO
 [JUNCTIONS]
 ;;Name           Elevation  MaxDepth   InitDepth  SurDepth   Aponded   
 ;;-------------- ---------- ---------- ---------- ---------- ----------
-Inlet              0.38      2.0          0          1          0         
+Inlet              0.38      2.0          0          0.15       1         
 
 [OUTFALLS]
 ;;Name           Elevation  Type       Stage Data       Gated    Route To        
@@ -59,12 +59,12 @@ Outlet            0.0       FREE                        NO
 [CONDUITS]
 ;;Name           From Node        To Node          Length     Roughness  InOffset   OutOffset  InitFlow   MaxFlow   
 ;;-------------- ---------------- ---------------- ---------- ---------- ---------- ---------- ---------- ----------
-Culvert              Inlet         Outlet              38         0.013      0          0          0          10         
+Culvert              Inlet         Outlet              38         0.013      0          0          0          10        
 
 [XSECTIONS]
 ;;Link           Shape        Geom1            Geom2      Geom3      Geom4      Barrels    Culvert   
 ;;-------------- ------------ ---------------- ---------- ---------- ---------- ---------- ----------
-Culvert           CIRCULAR     1.0             0          0          0          1                    
+Culvert           CIRCULAR     0.38             0          0          0          1                    
 
 [LOSSES]
 ;;Link           Kentry     Kexit      Kavg       Flap Gate  Seepage   

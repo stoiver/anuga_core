@@ -36,7 +36,9 @@ def run_swmm():
     # type, area, length, orifice_coeff, free_weir_coeff, submerged_weir_coeff
     openning0 = nodes[0].create_opening(4, 1.0, 1.0, 0.6, 1.6, 1.0)
 
-    print "Is coupled? ", nodes[0].is_coupled
+    print "n0 Is coupled? ", nodes[0].is_coupled
+    print "n1 Is coupled? ", nodes[1].is_coupled
+
 
 
     #=======================================
@@ -45,14 +47,15 @@ def run_swmm():
     sim.start()
 
     nodes[0].overland_depth = 1.0
+    nodes[0].coupling_area = 1.0
 
     # this step_advance should be an integer multiple of the routing step
-    # which is set in the ,inp file. Currently set to 10s.
+    # which is set in the ,inp file. Currently set to 1s.
     # Should be able to interrogate sim to find out what the
     # routing stepsize is. Maybe should issue a warning if
     # step_advance is set lower than the routing step size.
     # Indeed maybe step_advance should just allow advance n routing steps?
-    #sim.step_advance(10.0) # seconds?
+    #sim.step_advance(1.0) # seconds?
     
     bucket = np.array([1.0, 0.0])
    
@@ -75,13 +78,16 @@ def run_swmm():
             print jstr+' total_inflow', j.total_inflow
             print jstr+' total_outflow', j.total_outflow
             print jstr+' coupling_inflow', j.coupling_inflow
+            
             print jstr+' coupling_area', j.coupling_area
             print jstr+' overland_depth', j.overland_depth
             print jstr+' number of openings', j.number_of_openings
             print jstr+' depth' , j.depth
             print jstr+' volume' , j.volume
+            print jstr+' surcharge depth', j.surcharge_depth
             print jstr+' flooding' , j.flooding
             print jstr+' lateral_inflow' , j.lateral_inflow
+            
             
         
 
@@ -89,6 +95,7 @@ def run_swmm():
             print 50*"="
             lstr = link_names[i]
             print lstr+' link flow', l.flow
+            
             print lstr+' Area', l.ds_xsection_area   
             print lstr+' Froude ', l.froude
             print lstr+' Depth ', l.depth
@@ -97,8 +104,9 @@ def run_swmm():
         
 
 
-        pdb.set_trace()
-        
+        #pdb.set_trace()
+      
+    print 70 * "="  
 
     print 'current Time', sim.current_time
     print 'end time', sim.end_time
@@ -107,6 +115,10 @@ def run_swmm():
     
     sim.report()
     sim.close()
+    
+    print ''
         
 
 run_swmm()
+#pdb.set_trace()
+
