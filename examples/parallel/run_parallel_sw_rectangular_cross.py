@@ -50,7 +50,7 @@ if myid == 0:
     width = 2.0
     #dx = dy = 0.005
     #dx = dy = 0.00125
-    dx = dy  = 0.5
+    dx = dy  = 0.05
     domain = rectangular_cross_domain(int(length/dx), int(width/dy),
                                               len1=length, len2=width, origin=(-length/2, -width/2), verbose=verbose)
 
@@ -107,7 +107,7 @@ setter()
 if myid == 0 : print 'after set quantity'
 
 yieldstep = 0.005
-finaltime = 0.05
+finaltime = 0.5
 
 barrier()
 
