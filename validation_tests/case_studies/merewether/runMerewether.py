@@ -75,7 +75,7 @@ holes_res = 1.0
 interior_regions = [[project.poly_merewether, merewether_res]]
 
 # Either use houses as holes, or as part of the mesh (with breaklines)
-houses_as_holes = False
+houses_as_holes = True
 if houses_as_holes:
     holes = project.holes
     breaklines = []
@@ -139,7 +139,6 @@ if myid == 0:
         domain.set_quantity('elevation', filename='topography1.pts',
                               use_cache=use_cache,
                                   verbose=verbose)
-
     else:
         domain.set_quantity('elevation', filename='topography1.pts',
                               use_cache=use_cache,
@@ -165,7 +164,7 @@ domain = distribute(domain)
 #------------------------------------------------------------------------------
 domain.set_name('merewether_1m') # Name of sww file
 domain.set_datadir('.') # Store sww output here
-#domain.set_minimum_storable_height(0.001) # Store only depth > 1cm
+domain.set_minimum_storable_height(0.01) # Store only depth > 1cm
 
 
 

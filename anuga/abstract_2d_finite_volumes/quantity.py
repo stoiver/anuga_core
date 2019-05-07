@@ -1330,13 +1330,10 @@ class Quantity:
         Parameters
         """
 
-
-
         from anuga.file_conversion.grd2array import grd2array
         from anuga.file_conversion.dem2array import dem2array
 
         filename_ext = os.path.splitext(filename)[1]
-
         if filename_ext in ['.asc', '.grd']:
             x,y,Z = grd2array(filename)
         elif filename_ext == '.dem':
