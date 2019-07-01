@@ -453,7 +453,7 @@ class Calibrated_radar_rain(object):
         plt.colorbar()
 
         if show:
-            plt.draw()
+            plt.pause(0.001)
         if save:
             plt.savefig(plot_title+'.jpg', format='jpg')
 
@@ -510,7 +510,8 @@ class Calibrated_radar_rain(object):
         #           extent=(x.min(), x.max(), y.min(), y.max()))
 
         plt.colorbar()
-        plt.draw()
+        #plt.show()
+        plt.pause(0.01)
 
         return
 
@@ -528,6 +529,8 @@ class Calibrated_radar_rain(object):
 
         all_values = self.extract_data_at_locations(locations)
 
+
+
         for lid, _ in enumerate(locations):
 
             bar_values = [values[lid] for values in all_values]
@@ -541,6 +544,8 @@ class Calibrated_radar_rain(object):
             #print len(t)
             #print len(bar_values)
             # Think about using...  zip(*lst)
+            #plt.figure(1)
+            plt.clf()
             plt.bar(t, bar_values, width=time_step/60,)
             plt.suptitle(' Data for Location %s:' %
                          lid, fontsize=14, fontweight='bold')
@@ -548,7 +553,8 @@ class Calibrated_radar_rain(object):
 
             plt.xlabel('time (mins)')
             plt.ylabel('rainfall (mm)')
-            plt.show()
+            plt.pause(0.01)
+            pdb.set_trace()
 
         return
 
@@ -663,19 +669,27 @@ if __name__ == "__main__":
     print 'time_step ', rain.time_step
 
     import time
-    pl.ion()
+    #pl.ion()
     pdb.set_trace()
     for tid in xrange(len(rain.times)):
         rain.plot_grid(tid, save=False, show=True, polygons=[p2])
-        time.sleep(0.05)
-        #ipdb.set_trace()
+
+        #time.sleep(0.05)
+        #pdb.set_trace()
+
+
+    pdb.set_trace()
 
     rain.plot_grid_accumulated(polygons=[p2])
 
-    pl.ioff()
-    pl.show()
+    pdb.set_trace()
+
+    #pl.ioff()
+    #plt.pause(0.01)
 
     rain.plot_time_hist_locations(locations)
+
+    pdb.set_trace()
 
     p_indices = rain.grid_indices_inside_polygon(polygon=p2)
 
