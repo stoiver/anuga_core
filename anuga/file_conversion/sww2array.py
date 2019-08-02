@@ -103,16 +103,16 @@ def sww2array(name_in,
     fid = NetCDFFile(name_in)
 
     #Get extent and reference
-    x = num.array(fid.variables['x'], num.float)
-    y = num.array(fid.variables['y'], num.float)
-    volumes = num.array(fid.variables['volumes'], num.int)
+    x = num.array(fid.variables['x'][:], num.float)
+    y = num.array(fid.variables['y'][:], num.float)
+    volumes = num.array(fid.variables['volumes'][:], num.int)
     if type(reduction) is not types.BuiltinFunctionType:
         times = fid.variables['time'][reduction]
     else:
         times = fid.variables['time'][:]
 
-    number_of_timesteps = fid.dimensions['number_of_timesteps']
-    number_of_points = fid.dimensions['number_of_points']
+    number_of_timesteps = len(fid.dimensions['number_of_timesteps'])
+    number_of_points = len(fid.dimensions['number_of_points'])
 
     if origin is None:
         # Get geo_reference
