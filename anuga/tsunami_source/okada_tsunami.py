@@ -222,6 +222,11 @@ def earthquake_source(
 
     depth=source[:,2]
     width=source[:,6]
+    print source
+    print numpy
+    print numpy.sin
+
+
     topdepth=depth-width/2.0*numpy.sin(dip/180.*numpy.pi)
     if(topdepth.min() < 0.0):
         print '  easting   northing   depth strike    dip length  width  disl1   disl2  disl3 topdepth'
