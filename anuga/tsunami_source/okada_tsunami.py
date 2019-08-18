@@ -223,9 +223,6 @@ def earthquake_source(
 
     depth=source[:,2]
     width=source[:,6]
-    print source
-    print numpy
-    print numpy.sin
 
 
     topdepth=depth-width/2.0*numpy.sin(dip/180.*numpy.pi)
