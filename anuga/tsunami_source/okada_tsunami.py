@@ -167,9 +167,10 @@ def earthquake_source(
         for line in lns[1:]:
            source.append([float(x) for x in line.split()])
 
-        # Coerce to array
-        source = numpy.array(source)
+    # Coerce to array
+    source = numpy.array(source)
 
+    
     # Hack to treat arrays with a single row
     if(len(source.shape)==1):
         source=source.reshape((1, source.shape[0]))
