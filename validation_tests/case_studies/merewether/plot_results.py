@@ -47,7 +47,7 @@ for i in range(len(nearest_points)):
     nearest_points[i] = n
 
 f = open('Stage_point_comparison.csv','w')
-f.writelines( 'Field, ANUGA, TUFLOW, ANUGA minus Field, ANUGA minus TUFLOW \n' )
+f.writelines( 'Field, Anuga, TUFLOW, Anuga - Field, Anuga - TUFLOW \n' )
 for i in range(len(nearest_points)):
     po = point_observations[i,-2]
     tu = point_observations[i,-1]
@@ -145,8 +145,3 @@ import matplotlib.patches as mpatches
 #pyplot.legend(handles=[red_patch, green_patch, blue_patch], labels=['>1', '(0-1]', '0.'], loc='best')
 pyplot.legend(loc='upper left')
 pyplot.savefig('froudeNumber.png',dpi=100,bbox_inches='tight')
-
-
-
-
-

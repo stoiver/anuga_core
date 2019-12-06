@@ -16,7 +16,7 @@ from parallel_inlet_operator import Parallel_Inlet_operator
 from parallel_structure_operator import Parallel_Structure_operator
 from parallel_boyd_box_operator import Parallel_Boyd_box_operator
 from parallel_boyd_pipe_operator import Parallel_Boyd_pipe_operator
-from parallel_weir_orifice_trapezoid_operator import Parallel_Weir_orifice_trapezoid_operator#added by PM 22/10/2013
+from parallel_weir_orifice_trapezoid_operator import Parallel_Weir_orifice_trapezoid_operator
 from parallel_internal_boundary_operator import Parallel_Internal_boundary_operator
 
 from . import distribute, myid, numprocs, finalize
@@ -27,7 +27,7 @@ import anuga.structures.boyd_pipe_operator
 import anuga.structures.inlet_operator
 import anuga.structures.internal_boundary_operator
 
-import anuga.structures.weir_orifice_trapezoid_operator #added by PM 22/10/2013
+import anuga.structures.weir_orifice_trapezoid_operator
 
 from anuga.utilities.numerical_tools import ensure_numeric
 from anuga.parallel.parallel_shallow_water import Parallel_domain
@@ -35,19 +35,19 @@ from anuga.parallel.parallel_shallow_water import Parallel_domain
 import math
 
 """
-Factory method for Parallel Inlet_operator. All parameters are the same 
-as normal Inlet_Operators master_proc coordinates the allocation process, 
+Factory method for Parallel Inlet_operator. All parameters are the same
+as normal Inlet_Operators master_proc coordinates the allocation process,
 procs contains the potential list of processors to allocate the inlet to.
 
 Returns None for calling processors not associated with inlet. Otherwise
 return an instance of Parallel_Inlet_Operator
 """
 
-def Inlet_operator(domain, 
+def Inlet_operator(domain,
                    poly,
                    Q,
                    velocity = None,
-                   default = None,
+                   default = 0.0,
                    description = None,
                    label = None,
                    logging = False,
@@ -67,7 +67,7 @@ def Inlet_operator(domain,
                                                               label = label,
                                                               logging = logging,
                                                               verbose = verbose)
-    
+
     import pypar
     if procs is None:
         procs = range(0,pypar.size())
@@ -107,7 +107,7 @@ def Inlet_operator(domain,
         return None
 
 """
-Factory method for Parallel Boyd_box_operator. All parameters are the same 
+Factory method for Parallel Boyd_box_operator. All parameters are the same
 as normal Boyd_box_operator master_proc coordinates the allocation process,
 procs contains the potential list of processors to allocate the inlet to.
 
@@ -117,9 +117,10 @@ return an instance of Parallel Boyd_box_operator
 
 def Boyd_box_operator(domain,
                        losses,
-                       width,                       
-                       height=None,                                           
-                       blockage=0.0, #added by DPM 24/7/2016 
+                       width,
+                       height=None,
+                       blockage=0.0,
+                       barrels=1.0,
                        z1=0.0,
                        z2=0.0,
                        end_points=None,
@@ -147,7 +148,8 @@ def Boyd_box_operator(domain,
                                                                     losses=losses,
                                                                     width=width,
                                                                     height=height,
-                                                                    blockage=blockage,#added by DPM 24/7/2016
+                                                                    blockage=blockage,
+                                                                    barrels=barrels,
                                                                     z1=0.0,
                                                                     z2=0.0,
                                                                     end_points=end_points,
@@ -200,7 +202,7 @@ def Boyd_box_operator(domain,
                 pypar.send(enquiry_points_tmp, i)
 
         elif end_points is not None:
-            exchange_lines_tmp, enquiry_points_tmp = __process_non_skew_culvert(end_points, width, 
+            exchange_lines_tmp, enquiry_points_tmp = __process_non_skew_culvert(end_points, width,
                                                                                 enquiry_points, apron, enquiry_gap)
             for i in procs:
                 if i == master_proc: continue
@@ -208,7 +210,7 @@ def Boyd_box_operator(domain,
                 pypar.send(enquiry_points_tmp, i)
         else:
             raise Exception, 'Define either exchange_lines or end_points'
-        
+
     else:
         if exchange_lines is not None:
             exchange_lines_tmp = exchange_lines
@@ -218,7 +220,7 @@ def Boyd_box_operator(domain,
             enquiry_points_tmp = pypar.receive(master_proc)
 
     # Determine processors associated with first inlet
-    line0 = exchange_lines_tmp[0] 
+    line0 = exchange_lines_tmp[0]
     enquiry_point0 = enquiry_points_tmp[0]
 
     alloc0, inlet0_master_proc, inlet0_procs, enquiry0_proc = allocate_inlet_procs(domain, line0, enquiry_point =  enquiry_point0,
@@ -254,7 +256,8 @@ def Boyd_box_operator(domain,
                                          losses=losses,
                                          width=width,
                                          height=height,
-                                         blockage=blockage, #added by DPM 24/7/2016
+                                         blockage=blockage,
+                                         barrels=barrels,
                                          end_points=end_points,
                                          exchange_lines=exchange_lines,
                                          enquiry_points=enquiry_points,
@@ -293,6 +296,7 @@ def Boyd_pipe_operator(domain,
                        losses,
                        diameter,
                        blockage=0.0,
+                       barrels=1.0,
                        end_points=None,
                        exchange_lines=None,
                        enquiry_points=None,
@@ -300,6 +304,7 @@ def Boyd_pipe_operator(domain,
                        apron=0.1,
                        manning=0.013,
                        enquiry_gap=0.0,
+                       smoothing_timescale=0.0,
                        use_momentum_jet=True,
                        use_velocity_head=True,
                        description=None,
@@ -317,6 +322,7 @@ def Boyd_pipe_operator(domain,
                                                                     losses=losses,
                                                                     diameter=diameter,
                                                                     blockage=blockage,
+                                                                    barrels=barrels,
                                                                     end_points=end_points,
                                                                     exchange_lines=exchange_lines,
                                                                     enquiry_points=enquiry_points,
@@ -324,6 +330,7 @@ def Boyd_pipe_operator(domain,
                                                                     apron=apron,
                                                                     manning=manning,
                                                                     enquiry_gap=enquiry_gap,
+                                                                    smoothing_timescale=smoothing_timescale,
                                                                     use_momentum_jet=use_momentum_jet,
                                                                     use_velocity_head=use_velocity_head,
                                                                     description=description,
@@ -335,7 +342,7 @@ def Boyd_pipe_operator(domain,
     import pypar
     if procs is None:
         procs = range(0,pypar.size())
-        
+
     myid = pypar.rank()
 
     end_points = ensure_numeric(end_points)
@@ -414,6 +421,7 @@ def Boyd_pipe_operator(domain,
                                          losses=losses,
                                          diameter=diameter,
                                          blockage=blockage,
+                                         barrels=barrels,
                                          end_points=end_points,
                                          exchange_lines=exchange_lines,
                                          enquiry_points=enquiry_points,
@@ -421,6 +429,7 @@ def Boyd_pipe_operator(domain,
                                          apron=apron,
                                          manning=manning,
                                          enquiry_gap=enquiry_gap,
+                                         smoothing_timescale=smoothing_timescale,
                                          use_momentum_jet=use_momentum_jet,
                                          use_velocity_head=use_velocity_head,
                                          description=description,
@@ -440,7 +449,7 @@ def Boyd_pipe_operator(domain,
 
 
 """
-Factory method for Parallel Weir_orifice_trapezoid_operator. All parameters are the same 
+Factory method for Parallel Weir_orifice_trapezoid_operator. All parameters are the same
 as normal Weir_orifice_trapezoid_operator master_proc coordinates the allocation process,
 procs contains the potential list of processors to allocate the inlet to.
 
@@ -453,6 +462,8 @@ This was addede by PM 22/10/2013
 def Weir_orifice_trapezoid_operator(domain,
                        losses,
                        width,
+                       blockage=0.0,
+                       barrels=1.0,
                        z1=None,
                        z2=None,
                        height=None,
@@ -460,9 +471,11 @@ def Weir_orifice_trapezoid_operator(domain,
                        exchange_lines=None,
                        enquiry_points=None,
                        invert_elevations=None,
+                       #culvert_slope=None,
                        apron=0.1,
                        manning=0.013,
                        enquiry_gap=0.0,
+                       smoothing_timescale=0.0,
                        use_momentum_jet=True,
                        use_velocity_head=True,
                        description=None,
@@ -480,8 +493,11 @@ def Weir_orifice_trapezoid_operator(domain,
                                                                     losses=losses,
                                                                     width=width,
                                                                     height=height,
+                                                                    blockage=blockage,
+                                                                    barrels=barrels,
                                                                     z1=z1,
                                                                     z2=z2,
+                                                                    #culvert_slope=culvert_slope,
                                                                     end_points=end_points,
                                                                     exchange_lines=exchange_lines,
                                                                     enquiry_points=enquiry_points,
@@ -489,6 +505,7 @@ def Weir_orifice_trapezoid_operator(domain,
                                                                     apron=apron,
                                                                     manning=manning,
                                                                     enquiry_gap=enquiry_gap,
+                                                                    smoothing_timescale=smoothing_timescale,
                                                                     use_momentum_jet=use_momentum_jet,
                                                                     use_velocity_head=use_velocity_head,
                                                                     description=description,
@@ -531,7 +548,7 @@ def Weir_orifice_trapezoid_operator(domain,
                 pypar.send(enquiry_points_tmp, i)
 
         elif end_points is not None:
-            exchange_lines_tmp, enquiry_points_tmp = __process_non_skew_culvert(end_points, width, 
+            exchange_lines_tmp, enquiry_points_tmp = __process_non_skew_culvert(end_points, width,
                                                                                 enquiry_points, apron, enquiry_gap)
             for i in procs:
                 if i == master_proc: continue
@@ -539,7 +556,7 @@ def Weir_orifice_trapezoid_operator(domain,
                 pypar.send(enquiry_points_tmp, i)
         else:
             raise Exception, 'Define either exchange_lines or end_points'
-        
+
     else:
         if exchange_lines is not None:
             exchange_lines_tmp = exchange_lines
@@ -549,7 +566,7 @@ def Weir_orifice_trapezoid_operator(domain,
             enquiry_points_tmp = pypar.receive(master_proc)
 
     # Determine processors associated with first inlet
-    line0 = exchange_lines_tmp[0] 
+    line0 = exchange_lines_tmp[0]
     enquiry_point0 = enquiry_points_tmp[0]
 
     alloc0, inlet0_master_proc, inlet0_procs, enquiry0_proc = allocate_inlet_procs(domain, line0, enquiry_point =  enquiry_point0,
@@ -585,8 +602,11 @@ def Weir_orifice_trapezoid_operator(domain,
                                          losses=losses,
                                          width=width,
                                          height=height,
+                                         blockage=blockage,
+                                         barrels=barrels,
                                          z1=z1,
                                          z2=z2,
+                                         #culvert_slope=culvert_slope,
                                          end_points=end_points,
                                          exchange_lines=exchange_lines,
                                          enquiry_points=enquiry_points,
@@ -594,6 +614,7 @@ def Weir_orifice_trapezoid_operator(domain,
                                          apron=apron,
                                          manning=manning,
                                          enquiry_gap=enquiry_gap,
+                                         smoothing_timescale=smoothing_timescale,
                                          use_momentum_jet=use_momentum_jet,
                                          use_velocity_head=use_velocity_head,
                                          description=description,
@@ -611,7 +632,7 @@ def Weir_orifice_trapezoid_operator(domain,
 
 
 """
-Factory method for Parallel Internal_boundary_operator. All parameters are the same 
+Factory method for Parallel Internal_boundary_operator. All parameters are the same
 as normal Internal_boundary_operator. master_proc coordinates the allocation process,
 procs contains the potential list of processors to allocate the inlet to.
 
@@ -699,7 +720,7 @@ def Internal_boundary_operator(domain,
                 pypar.send(enquiry_points_tmp, i)
 
         elif end_points is not None:
-            exchange_lines_tmp, enquiry_points_tmp = __process_non_skew_culvert(end_points, width, 
+            exchange_lines_tmp, enquiry_points_tmp = __process_non_skew_culvert(end_points, width,
                                                                                 enquiry_points, apron, enquiry_gap)
             for i in procs:
                 if i == master_proc: continue
@@ -707,7 +728,7 @@ def Internal_boundary_operator(domain,
                 pypar.send(enquiry_points_tmp, i)
         else:
             raise Exception, 'Define either exchange_lines or end_points'
-        
+
     else:
         if exchange_lines is not None:
             exchange_lines_tmp = exchange_lines
@@ -717,7 +738,7 @@ def Internal_boundary_operator(domain,
             enquiry_points_tmp = pypar.receive(master_proc)
 
     # Determine processors associated with first inlet
-    line0 = exchange_lines_tmp[0] 
+    line0 = exchange_lines_tmp[0]
     enquiry_point0 = enquiry_points_tmp[0]
 
     alloc0, inlet0_master_proc, inlet0_procs, enquiry0_proc = allocate_inlet_procs(domain, line0, enquiry_point =  enquiry_point0,
@@ -847,7 +868,7 @@ def __process_skew_culvert(exchange_lines, end_points, enquiry_points, apron, en
         enquiry_points.append(centre_point1 + gap)
 
     return enquiry_points
-        
+
 
 def allocate_inlet_procs(domain, poly, enquiry_point = None, master_proc = 0, procs = None, verbose = False):
 
@@ -855,7 +876,7 @@ def allocate_inlet_procs(domain, poly, enquiry_point = None, master_proc = 0, pr
     import pypar
     if procs is None:
         procs = range(0, pypar.size())
-        
+
     myid = pypar.rank()
     vertex_coordinates = domain.get_full_vertex_coordinates(absolute=True)
     domain_centroids = domain.centroid_coordinates
@@ -880,7 +901,7 @@ def allocate_inlet_procs(domain, poly, enquiry_point = None, master_proc = 0, pr
         tris_0 = line_intersect(vertex_coordinates, [poly[0],poly[1]])
         tris_1 = inside_polygon(domain_centroids, poly)
         tri_id = num.union1d(tris_0, tris_1)
-        
+
 
     if verbose:
         print "P%d has %d triangles in poly %s" %(myid, len(tri_id), poly)

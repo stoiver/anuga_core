@@ -187,7 +187,7 @@ def get_polygons_from_Mid_Mif(Rfile):
     return polylist          
 
 # ---------------------------------------------------------------------------------------------------------
-def get_polygon_list_from_files(dir):
+def get_polygon_list_from_files(dir, verbose = False):
     """Read all polygons found in specified dir and return them in a list
        Called by:
        get_polygon_dictionary
@@ -202,18 +202,21 @@ def get_polygon_list_from_files(dir):
     polylist = []
     for filename in os.listdir(dir):
         Rfile = dir +'/'+filename
-        #print Rfile
+        
         
         if Rfile[-4:] == '.svn':  # wHAT DOES THIS DO ??
             continue
         if Rfile[-4:] == '.csv':
             #print 'CSV File'
-            polylist = get_polygon_from_single_file(Rfile)
-            #polylist.append(polys)
+            if verbose: print Rfile
+            polylistcsv = get_polygon_from_single_file(Rfile)
+            polylist = polylist+polylistcsv
         if Rfile[-4:] == '.mif':
+            if verbose: print Rfile
             #print 'MIF File ...'
             #polys = get_polygons_from_Mid_Mif(Rfile)
-            polylist=get_polygons_from_Mid_Mif(Rfile)
+            polylistmif=get_polygons_from_Mid_Mif(Rfile)
+            polylist = polylist+polylistmif
         #print filename
         #print Rfile
         #raw_input('Hold check file...- line 211')
@@ -592,3 +595,46 @@ def get_WCC_2016_Blockage_factor(Structure,Event,Scenario, long_result=False, ve
     else:
         return(BF)
 
+
+
+def get_WCC_2002_Blockage_factor(Structure, verbose=True):
+    """
+    If the Structure has a single dimension it is assumed a Diameter (hence Pipe)
+    Else it is a Box with w & h
+
+    --------------------------------------------------------------------
+    2017 - 06 - 22
+    
+    Wollongong Blockage Factor Calculator for 2002 Blockage Policy
+    
+    Author: Petar Milevski
+    
+    --------------------------------------------------------------------
+    For all design storm events    
+     
+    if diag >= 6.0m, blockage factor = 0.25, otherwise blockage factor is 100%
+
+    """
+    
+    if len(Structure) > 1:# ====== FOR BOX =================
+        h = float(Structure[0])
+        w = float(Structure[1])
+        diag = (w**2+h**2)**0.5
+                
+    else:   # ====== FOR PIPE ================
+        d = float(Structure[0])
+        diag = d
+     
+    if diag >= 6.0:
+        BF = 0.25
+    else:
+        BF = 1.0
+
+    if verbose:
+        print '       Importing Culverts'
+        print '   Culvert Size ([H,W] or [d]): ', Structure
+        print '                      Diagonal: ', diag
+        print '               Blockage Factor: ', BF
+        print ''
+
+    return(BF)

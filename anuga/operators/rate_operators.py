@@ -46,7 +46,8 @@ class Rate_operator(Operator,Region):
                  description = None,
                  label = None,
                  logging = False,
-                 verbose = False):
+                 verbose = False,
+                 monitor = False):
 
 
         Operator.__init__(self, domain, description, label, logging, verbose)
@@ -63,12 +64,13 @@ class Rate_operator(Operator,Region):
         #------------------------------------------
         # Local variables
         #------------------------------------------
+        self.monitor = monitor
         self.factor = factor
         self.relative_time = relative_time
 
         self.rate_callable = False
         self.rate_spatial = False
-        
+
         self.set_rate(rate)
         self.set_default_rate(default_rate)
 
@@ -77,7 +79,7 @@ class Rate_operator(Operator,Region):
 
         self.set_areas()
         self.set_full_indices()
-        
+
         # Mass tracking
         self.local_influx=0.
 
@@ -86,7 +88,7 @@ class Rate_operator(Operator,Region):
         Apply rate to those triangles defined in indices
 
         indices == [], then don't apply anywhere
-        indices == None, then apply everywhere
+        indices is None, then apply everywhere
         otherwise apply for the specific indices
         """
 
@@ -116,9 +118,6 @@ class Rate_operator(Operator,Region):
         else:
             rate = self.get_non_spatial_rate(t)
 
-        if self.verbose is True:
-            log.critical('Rate of %s at time = %.2f = %f'
-                         % (self.quantity_name, self.domain.get_time(), rate))
 
 
         fid = self.full_indices
@@ -140,17 +139,23 @@ class Rate_operator(Operator,Region):
                 #       + factor*rate*timestep, self.elev_c )
                 local_rates = num.maximum(factor*timestep*rate, self.elev_c[:]-self.stage_c[:])
                 self.local_influx = (local_rates*self.areas)[fid].sum()
-                self.stage_c[:] = self.stage_c + local_rates 
+                self.stage_c[:] = self.stage_c + local_rates
             else:
                 #self.local_influx=(num.minimum(factor*timestep*rate, self.stage_c[indices]-self.elev_c[indices])*self.areas)[fid].sum()
                 #self.stage_c[indices] = num.maximum(self.stage_c[indices] \
                 #       + factor*rate*timestep, self.elev_c[indices])
-                
+
                 local_rates = num.maximum(factor*timestep*rate, self.elev_c[indices]-self.stage_c[indices])
                 self.local_influx = (local_rates*self.areas)[fid].sum()
-                self.stage_c[indices] = self.stage_c[indices] + local_rates 
+                self.stage_c[indices] = self.stage_c[indices] + local_rates
         # Update mass inflows from fractional steps
         self.domain.fractional_step_volume_integral+=self.local_influx
+        
+        if self.monitor:
+            log.critical('Local Flux at time %.2f = %f'
+                         % (self.domain.get_time(), self.local_influx))
+
+            
 
         return
 
@@ -161,11 +166,9 @@ class Rate_operator(Operator,Region):
         if t is None:
             t = self.get_time()
 
-
         assert not self.rate_spatial
 
-
-        rate = evaluate_temporal_function(self.rate, t, 
+        rate = evaluate_temporal_function(self.rate, t,
                                           default_right_value=self.default_rate,
                                           default_left_value=self.default_rate)
 
@@ -214,7 +217,7 @@ class Rate_operator(Operator,Region):
 
 
     def set_rate(self, rate):
-        """Set rate 
+        """Set rate
         Can change rate while running
         Can be a scalar, or a function of t or x,y or x,y,t or a quantity
         """
@@ -229,7 +232,7 @@ class Rate_operator(Operator,Region):
 
 
         self.rate = rate
-        
+
 
         if self.rate_type == 'scalar':
             self.rate_callable = False
@@ -296,7 +299,7 @@ class Rate_operator(Operator,Region):
                 return num.sum(self.areas*rate)*self.factor
             elif self.rate_type == 'quantity':
                 rate = self.rate.centroid_values # rate is a quantity
-                return num.sum(self.areas*rate)*self.factor                
+                return num.sum(self.areas*rate)*self.factor
             else:
                 rate = self.get_non_spatial_rate() # rate is a scalar
                 return num.sum(self.areas*rate)*self.factor
@@ -346,26 +349,35 @@ class Rate_operator(Operator,Region):
 
         if self.rate_spatial:
             rate = self.get_spatial_rate()
-            min_rate = num.min(rate)
-            max_rate = num.max(rate)
+            try:
+                min_rate = num.min(rate)
+            except ValueError:
+                min_rate = 0.0
+            try:
+                max_rate = num.max(rate)
+            except ValueError:
+                max_rate = 0.0
+
             Q = self.get_Q()
             message  = indent + self.label + ': Min rate = %g m/s, Max rate = %g m/s, Total Q = %g m^3/s'% (min_rate,max_rate, Q)
+
+        elif self.rate_type == 'quantity':
+            rate = self.get_non_spatial_rate() # return quantity
+            min_rate = rate.get_minimum_value()
+            max_rate = rate.get_maximum_value()
+            Q = self.get_Q()
+            message  = indent + self.label + ': Min rate = %g m/s, Max rate = %g m/s, Total Q = %g m^3/s'% (min_rate,max_rate, Q)
+
         else:
             rate = self.get_non_spatial_rate()
             Q = self.get_Q()
             message  = indent + self.label + ': Rate = %g m/s, Total Q = %g m^3/s' % (rate, Q)
 
-
         return message
 
-
-
-
-
-
-#===============================================================================
+# ===============================================================================
 # Specific Rate Operators for circular region.
-#===============================================================================
+# ===============================================================================
 class Circular_rate_operator(Rate_operator):
     """
     Add water at certain rate (ms^{-1} = vol/Area/sec) over a
@@ -426,11 +438,3 @@ class Polygonal_rate_operator(Rate_operator):
                                polygon=polygon,
                                default_rate=default_rate,
                                verbose=verbose)
-                               
-
-
-                
-
-
-
-
