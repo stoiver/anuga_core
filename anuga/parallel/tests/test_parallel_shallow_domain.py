@@ -2,7 +2,7 @@
 """Test a run of the sequential shallow water domain against
 a run of the parallel shallow water domain.
 
-WARNING: This assumes that the command to run jobs is mpirun.
+WARNING: This assumes that the command to run jobs is mpiexec.
 Tested with MPICH and LAM (Ole)
 """
 
@@ -18,7 +18,8 @@ import sys
 
 import numpy as num
 
-
+if os.name == 'nt' and os.environ['MSMPI_BIN'] not in os.environ['PATH']:
+    os.environ['PATH'] += os.pathsep + os.environ['MSMPI_BIN']
 
 #------------------------------------------
 # Import pypar without the initial output
@@ -129,7 +130,7 @@ class Test_parallel_shallow_domain(unittest.TestCase):
         #print "Expect this test to fail if not run from the parallel directory."
         
         abs_script_name = os.path.abspath(__file__)
-        cmd = "mpirun -np %d python %s" % (nprocs, abs_script_name)
+        cmd = "mpiexec -np %d python %s" % (nprocs, abs_script_name)
         result = os.system(cmd)
         
         assert_(result == 0)

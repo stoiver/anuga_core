@@ -3,7 +3,7 @@
 
    run using command like:
 
-   mpirun -np m python run_parallel_sw_merimbula.py
+   mpiexec -np m python run_parallel_sw_merimbula.py
 
    where m is the number of processors to be used.
    
@@ -25,6 +25,9 @@ import tempfile
 from struct import pack, unpack
 from anuga.file.netcdf import NetCDFFile
 import copy
+
+if os.name == 'nt' and os.environ['MSMPI_BIN'] not in os.environ['PATH']:
+    os.environ['PATH'] += os.pathsep + os.environ['MSMPI_BIN']
 
 #------------------------
 # ANUGA Modules

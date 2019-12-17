@@ -13,6 +13,8 @@ import anuga
 import warnings
 warnings.simplefilter("ignore")
 
+if os.name == 'nt' and os.environ['MSMPI_BIN'] not in os.environ['PATH']:
+    os.environ['PATH'] += os.pathsep + os.environ['MSMPI_BIN']
 
 #------------------------------------------
 # Import pypar without the initial output
@@ -283,7 +285,7 @@ class Test_parallel_frac_op(unittest.TestCase):
         #print "Expect this test to fail if not run from the parallel directory."
 
         abs_script_name = os.path.abspath(__file__)
-        cmd = "mpirun -np %d python %s" % (nprocs, abs_script_name)
+        cmd = "mpiexec -np %d python %s" % (nprocs, abs_script_name)
         result = os.system(cmd)
 
         assert_(result == 0)

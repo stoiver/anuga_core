@@ -13,6 +13,9 @@ import anuga
 import warnings
 warnings.simplefilter("ignore")
 
+if os.name == 'nt' and os.environ['MSMPI_BIN'] not in os.environ['PATH']:
+    os.environ['PATH'] += os.pathsep + os.environ['MSMPI_BIN']
+
 #------------------------------------------
 # Import pypar without the initial output
 #------------------------------------------
@@ -313,7 +316,7 @@ class Test_parallel_boyd_box_apron(unittest.TestCase):
     def test_parallel_operator(self):
         
         abs_script_name = os.path.abspath(__file__)
-        cmd = "mpirun -np %d python %s" % (nprocs, abs_script_name)
+        cmd = "mpiexec -np %d python %s" % (nprocs, abs_script_name)
         exitstatus = os.system(cmd)
 
 

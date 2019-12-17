@@ -10,6 +10,9 @@ from anuga.abstract_2d_finite_volumes.util import file_function
 
 import anuga
 
+if os.name == 'nt' and os.environ['MSMPI_BIN'] not in os.environ['PATH']:
+    os.environ['PATH'] += os.pathsep + os.environ['MSMPI_BIN']
+
 #------------------------------------------
 # Import pypar without the initial output
 #------------------------------------------
@@ -307,7 +310,7 @@ def run_simulation(parallel = False, control_data = None, test_points = None, ve
 class Test_parallel_boyd_pipe_op(unittest.TestCase):
     def test_parallel_operator(self):
         #print "Expect this test to fail if not run from the parallel directory."
-        result = os.system("mpirun -np %d python test_parallel_boyd_pipe_operator.py" % nprocs)
+        result = os.system("mpiexec -np %d python test_parallel_boyd_pipe_operator.py" % nprocs)
         assert_(result == 0)
 
 
