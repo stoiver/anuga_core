@@ -25,8 +25,10 @@ build_script:
   - conda config --set always_yes yes
   - conda update conda
   - conda install python=2.7.13 gdal=2.2.2 nose numpy cython scipy netcdf4 matplotlib dill libpython msys2::m2w64-toolchain
+  - set PATH=%PATH%;%MSMPI_BIN%
   - pip install mpi4py
   - mpiexec -n 2 python script.py
 
 test_script:
+  - set PATH=%PATH%;%MSMPI_BIN%
   - mpiexec -n 2 python script.py
