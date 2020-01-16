@@ -96,7 +96,7 @@ class Inlet_operator(anuga.Operator):
         else: #extracting too much water!
             self.inlet.set_depths(0.0)
             self.domain.fractional_step_volume_integral-=current_volume
-            self.applied_Q = -old_div(current_volume, timestep)
+            self.applied_Q = -old_div(current_volume,timestep)
 
             #msg =  'Requesting too much water to be removed from an inlet! \n'
             #msg += 'current_water_volume = %5.2e Increment volume = %5.2e' % (current_volume, volume)
