@@ -71,7 +71,12 @@ def distibute_three_processors():
 
 	barrier()
 
-	metis_version = 4
+	try:
+		import pymetis
+		metis_version = 5
+	except:
+		metis_version = 4
+
 
 	if myid == 0:
 
@@ -91,11 +96,11 @@ def distibute_three_processors():
 		vertices, triangles, boundary, triangles_per_proc, quantities = pmesh_divide_metis(
 			domain, numprocs)
 
-		if False: 
+		if False:
 			print_seq_values(vertices, triangles, triangles_per_proc)
 
 		true_seq_values = get_true_seq_values()
-		
+
 		if False:
 			print("True Seq Values = \\")
 			pprint(true_seq_values)
@@ -111,7 +116,7 @@ def distibute_three_processors():
 		submesh = build_submesh(vertices, triangles, boundary,
 		                        quantities, triangles_per_proc)
 
-		if False: 
+		if False:
 			print('submesh_values = \\')
 			print_submesh_values(submesh)
 
@@ -132,7 +137,7 @@ def distibute_three_processors():
 		assert_(num.allclose(submesh['ghost_triangles'][0], true_values['ghost_triangles_0']))
 		assert_(num.allclose(submesh['ghost_triangles'][1], true_values['ghost_triangles_1']))
 		assert_(num.allclose(submesh['ghost_triangles'][2], true_values['ghost_triangles_2']))
-		
+
 		assert_(num.allclose(submesh['ghost_commun'][0], true_values['ghost_commun_0']))
 		assert_(num.allclose(submesh['ghost_commun'][1], true_values['ghost_commun_1']))
 		assert_(num.allclose(submesh['ghost_commun'][2], true_values['ghost_commun_2']))
@@ -173,7 +178,7 @@ def distibute_three_processors():
 	#--------------------------------
 	if myid == 0:
 
-		if False: 
+		if False:
 			print('extract_values = \\')
 			print_extract_submesh(points, triangles, ghost_recv_dict, \
 				                  full_send_dict, tri_map, node_map, ghost_layer_width)
@@ -184,7 +189,7 @@ def distibute_three_processors():
 			print('true_extract_values = \\')
 			pprint(true_values)
 
-		
+
 		assert_(num.allclose(points,   true_values['points']))
 		assert_(num.allclose(triangles, true_values['triangles']))
 		assert_(num.allclose(ghost_recv_dict[1], true_values['ghost_recv_dict_1']))
@@ -198,12 +203,12 @@ def distibute_three_processors():
 
 	if myid == 1:
 
-		if False: 
+		if False:
 			print("rec_submesh_1 = \\")
 			print_rec_submesh_1(points, triangles, ghost_recv_dict, full_send_dict, \
 	                     tri_map, node_map, ghost_layer_width)
 
-		
+
 		true_values = get_true_rec_submesh_1()
 
 		if False:
@@ -223,7 +228,7 @@ def distibute_three_processors():
 
 	if myid == 2:
 
-		if False: 
+		if False:
 			print("rec_submesh_2 = \\")
 			print_rec_submesh_2(points, triangles, ghost_recv_dict, full_send_dict, \
 	                     tri_map, node_map, ghost_layer_width)
@@ -331,7 +336,7 @@ def print_seq_values(vertices, triangles, triangles_per_proc):
 def print_submesh_values(submesh):
 	from pprint import pformat
 	for i in [0,1,2]:
-		parms = [ 'full_nodes',			 
+		parms = [ 'full_nodes',
 			'ghost_nodes',
 			'full_triangles',
 			'ghost_triangles',
@@ -661,7 +666,7 @@ def print_extract_submesh(points, triangles, ghost_recv_dict, full_send_dict, \
 		tri_map=tri_map,
 		node_map=node_map)
 
-	pprint(values)	
+	pprint(values)
 
 def print_extract_submesh_1(points, triangles, ghost_recv_dict, full_send_dict, \
 	                     tri_map, node_map, ghost_layer_width):
@@ -677,7 +682,7 @@ def print_extract_submesh_1(points, triangles, ghost_recv_dict, full_send_dict, 
 		tri_map=tri_map,
 		node_map=node_map)
 
-	pprint(values)		
+	pprint(values)
 
 def get_true_extract_submesh():
 
@@ -710,7 +715,7 @@ def get_true_extract_submesh():
 				[3, 5, 7],
 				[1, 5, 3],
 				[4, 6, 3],
-				[3, 8, 4]])}			
+				[3, 8, 4]])}
 
 		return true_values
 
@@ -771,7 +776,7 @@ def print_rec_submesh_1(points, triangles, ghost_recv_dict, full_send_dict, \
 		tri_map=tri_map,
 		node_map=node_map)
 
-	pprint(values)		
+	pprint(values)
 
 
 def get_true_rec_submesh_1():
@@ -812,7 +817,7 @@ def get_true_rec_submesh_1():
 			[10, 11,  2],
 			[ 1,  7,  2],
 			[ 2,  8, 10],
-			[10,  8,  5]])}			
+			[10,  8,  5]])}
 
 		return true_values
 
@@ -851,7 +856,7 @@ def get_true_rec_submesh_1():
 			[ 7,  5,  0],
 			[ 7, 10,  3]])}
 
-	return true_values		
+	return true_values
 
 def print_rec_submesh_2(points, triangles, ghost_recv_dict, full_send_dict, \
 	                     tri_map, node_map, ghost_layer_width):
@@ -913,7 +918,7 @@ def get_true_rec_submesh_2():
 			[12,  7, 11],
 			[ 2,  7, 12],
 			[12,  8,  2],
-			[ 4,  8, 12]])}		
+			[ 4,  8, 12]])}
 
 		return true_values
 
@@ -988,7 +993,5 @@ if __name__ == "__main__":
 		from anuga.utilities.parallel_abstraction import global_except_hook
 		import sys
 		sys.excepthook = global_except_hook
-		
+
 		distibute_three_processors()
-
-

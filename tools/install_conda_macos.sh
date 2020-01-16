@@ -22,6 +22,12 @@ brew update
 # fi
 
 
+# Install pymetis
+git clone https://github.com/inducer/pymetis.git;
+pushd pymetis;
+python setup.py install;
+popd;
+
 # Install miniconda
 wget https://repo.continuum.io/miniconda/Miniconda2-latest-MacOSX-x86_64.sh -O miniconda.sh ;
 
@@ -35,10 +41,8 @@ conda update --yes conda
 # Configure the conda environment and put it in the path using the
 # provided versions
 
-#conda create -n anuga_env -c conda-forge --yes python=$PYTHON_VERSION pip numpy scipy cython netcdf4 \
-#    nose matplotlib gdal dill
-    
-conda create -n anuga_env --yes python=2.7.13 gdal=2.2.2 pip nose numpy scipy netcdf4 matplotlib dill cython mpi4py future
+conda create -n anuga_env -c conda-forge --yes python=$PYTHON_VERSION pip numpy scipy netcdf4 \
+    nose matplotlib gdal dill pymetis cython mpi4py future
 
 source activate anuga_env
 

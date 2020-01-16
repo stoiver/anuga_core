@@ -47,7 +47,7 @@ chmod +x miniconda.sh && ./miniconda.sh -b
 
 export PATH=/home/travis/miniconda2/bin:$PATH
 
-ls 
+ls
 
 ls ..
 
@@ -57,7 +57,7 @@ conda update --yes conda
 
 # Configure the conda environment and put it in the path using the
 # provided versions
-conda create -n anuga_env -c conda-forge --yes python=$PYTHON_VERSION pip numpy scipy cython netcdf4 nose matplotlib gdal dill mpi4py future
+conda create -n anuga_env -c conda-forge --yes python=$PYTHON_VERSION pip numpy scipy cython netcdf4 nose matplotlib gdal dill mpi4py future pymetis
 
 
 source activate anuga_env
