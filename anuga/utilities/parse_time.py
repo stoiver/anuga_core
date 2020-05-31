@@ -1,4 +1,6 @@
+from __future__ import print_function
 
+from past.builtins import basestring
 def parse_time(time = None, verbose=False, debug=False):
     """
     Time: seconds since epoch  or 
@@ -68,14 +70,14 @@ def parse_time(time = None, verbose=False, debug=False):
         second = 0         
        
     if debug:
-        print year, month, day, hour, minute, second
-        print 'Convert to epoch'
+        print(year, month, day, hour, minute, second)
+        print('Convert to epoch')
 
             
                 
     import datetime
     time = int((datetime.datetime(year,month,day,hour,minute,second) - datetime.datetime(1970,1,1)).total_seconds())
 
-    if debug: print time
+    if debug: print(time)
     
     return float(time)

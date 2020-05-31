@@ -6,11 +6,15 @@ similar to a beach environment
 
 This is a very simple test of the parallel algorithm using the simplified parallel API
 """
+from __future__ import print_function
+from __future__ import division
 
 
 #------------------------------------------------------------------------------
 # Import necessary modules
 #------------------------------------------------------------------------------
+from past.utils import old_div
+from future.utils import raise_
 import unittest
 import os
 import sys
@@ -38,6 +42,9 @@ from anuga.parallel.sequential_distribute import sequential_distribute_load
 import anuga.utilities.plot_utils as util
 
 
+from anuga.utilities.parallel_abstraction import global_except_hook
+
+
 #--------------------------------------------------------------------------
 # Setup parameters
 #--------------------------------------------------------------------------
@@ -56,7 +63,7 @@ new_parameters['ghost_layer_width'] = 2
 # Setup Functions
 #---------------------------------
 def topography(x,y): 
-    return -x/2    
+    return old_div(-x,2)    
 
 ###########################################################################
 # Setup Test
@@ -83,7 +90,7 @@ def run_simulation(parallel=False, verbose=False):
     # Create pickled partition
     #--------------------------------------------------------------------------
     if myid == 0:
-        if verbose: print 'DUMPING PARTITION DATA'
+        if verbose: print('DUMPING PARTITION DATA')
         sequential_distribute_dump(domain, numprocs, verbose=verbose, parameters=new_parameters)    
 
     #--------------------------------------------------------------------------
@@ -91,11 +98,11 @@ def run_simulation(parallel=False, verbose=False):
     #--------------------------------------------------------------------------
     if parallel:
         
-        if myid == 0 and verbose : print 'DISTRIBUTING TO PARALLEL DOMAIN'
+        if myid == 0 and verbose : print('DISTRIBUTING TO PARALLEL DOMAIN')
         pdomain = distribute(domain, verbose=verbose, parameters=new_parameters)
         pdomain.set_name('pdomain')
         
-        if myid == 0 and verbose : print 'LOADING IN PARALLEL DOMAIN'
+        if myid == 0 and verbose : print('LOADING IN PARALLEL DOMAIN')
         sdomain = sequential_distribute_load(filename='odomain', verbose = verbose)
         sdomain.set_name('sdomain')
         
@@ -129,10 +136,10 @@ def run_simulation(parallel=False, verbose=False):
 
 class Test_parallel_sw_flow(unittest.TestCase):
     def test_parallel_sw_flow(self):
-        if verbose : print "Expect this test to fail if not run from the parallel directory."
+        if verbose : print("Expect this test to fail if not run from the parallel directory.")
 
         abs_script_name = os.path.abspath(__file__)
-        cmd = "mpirun -np %d python %s" % (nprocs, abs_script_name)
+        cmd = "mpiexec -np %d python %s" % (nprocs, abs_script_name)
         result = os.system(cmd)
         
         assert_(result == 0)
@@ -142,7 +149,7 @@ class Test_parallel_sw_flow(unittest.TestCase):
 def assert_(condition, msg="Assertion Failed"):
     if condition == False:
         #pypar.finalize()
-        raise AssertionError, msg
+        raise_(AssertionError, msg)
 
 if __name__=="__main__":
     if numprocs == 1: 
@@ -157,7 +164,11 @@ if __name__=="__main__":
         # Run the codel and compare sequential
         # results at 4 gauge stations
         #------------------------------------------
-        if myid ==0 and verbose: print 'PARALLEL START'
+        if myid ==0 and verbose: print('PARALLEL START')
+
+        from anuga.utilities.parallel_abstraction import global_except_hook
+        import sys
+        sys.excepthook = global_except_hook
 
         run_simulation(parallel=True, verbose=verbose)
         

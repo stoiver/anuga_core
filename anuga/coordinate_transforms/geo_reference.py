@@ -6,6 +6,8 @@
 #FIXME: Ensure that all attributes of a georef are treated everywhere
 #and unit test
 
+from builtins import str
+from builtins import object
 import sys
 import copy
 
@@ -28,7 +30,7 @@ DEFAULT_FALSE_EASTING = 500000
 DEFAULT_FALSE_NORTHING = 10000000    # Default for southern hemisphere
 
 
-class Geo_reference:
+class Geo_reference(object):
     """
     Attributes of the Geo_reference class:
         .zone           The UTM zone (default is -1)
@@ -97,8 +99,20 @@ class Geo_reference:
             
         # Set flag for absolute points (used by get_absolute)    
         self.absolute = num.allclose([self.xllcorner, self.yllcorner], 0)
-            
+        
+    def __eq__(self, other):
 
+        # FIXME (Ole): Can this be automatically done for all attributes?
+        return(self.false_easting == other.false_easting and
+               self.false_northing == other.false_northing and
+               self.datum == other.datum and
+               self.projection == other.projection and
+               self.zone == other.zone and
+               self.units == other.units and
+               self.xllcorner == other.xllcorner and
+               self.yllcorner == other.yllcorner and
+               self.absolute == other.absolute)
+        
     def get_xllcorner(self):
         return self.xllcorner
 
@@ -216,13 +230,13 @@ class Geo_reference:
             if read_title[0:2].upper() != TITLE[0:2].upper():
                 msg = ('File error.  Expecting line: %s.  Got this line: %s'
                        % (TITLE, read_title))
-                raise TitleError, msg
+                raise TitleError(msg)
             self.zone = int(fd.readline())
             self.xllcorner = float(fd.readline())
             self.yllcorner = float(fd.readline())
         except SyntaxError:
             msg = 'File error.  Got syntax error while parsing geo reference'
-            raise ParsingError, msg
+            raise ParsingError(msg)
 
         # Fix some assertion failures
         if isinstance(self.zone, num.ndarray) and self.zone.shape == ():
@@ -326,13 +340,13 @@ class Geo_reference:
             # One point has been passed
             msg = 'Single point must have two elements'
             if not len(points) == 2:
-                raise ShapeError, msg    
+                raise ShapeError(msg)    
 
 
         msg = 'Input must be an N x 2 array or list of (x,y) values. '
         msg += 'I got an %d x %d array' %points.shape    
         if not points.shape[1] == 2:
-            raise ShapeError, msg    
+            raise ShapeError(msg)    
             
         
         # Add geo ref to points
@@ -365,12 +379,12 @@ class Geo_reference:
             #One point has been passed
             msg = 'Single point must have two elements'
             if not len(points) == 2:
-                raise ShapeError, msg    
+                raise ShapeError(msg)    
 
         if not points.shape[1] == 2:
             msg = ('Input must be an N x 2 array or list of (x,y) values. '
                    'I got an %d x %d array' % points.shape)
-            raise ShapeError, msg    
+            raise ShapeError(msg)    
 
         # Subtract geo ref from points
         if not self.is_absolute():
@@ -398,7 +412,7 @@ class Geo_reference:
             msg = ('Geospatial data must be in the same '
                    'ZONE to allow reconciliation. I got zone %d and %d'
                    % (self.zone, other.zone))
-            raise ANUGAError, msg
+            raise ANUGAError(msg)
 
     #def easting_northing2geo_reffed_point(self, x, y):
     #    return [x-self.xllcorner, y - self.xllcorner]
@@ -467,7 +481,7 @@ def ensure_geo_reference(origin):
     elif origin is None:
         geo_ref = None
     else:
-        geo_ref = apply(Geo_reference, origin)
+        geo_ref = Geo_reference(*origin)
 
     return geo_ref
 

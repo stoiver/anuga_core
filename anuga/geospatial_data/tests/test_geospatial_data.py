@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+from builtins import str
+from builtins import range
 import unittest
 import os
 import tempfile
@@ -53,8 +55,8 @@ class Test_Geospatial_data(unittest.TestCase):
         points = [[1.0, 2.1], [3.0, 5.3]]
         attributes = [2, 4]
         G = Geospatial_data(points, attributes)
-        assert G.attributes.keys()[0] == DEFAULT_ATTRIBUTE
-        assert num.allclose(G.attributes.values()[0], [2, 4])
+        assert list(G.attributes.keys())[0] == DEFAULT_ATTRIBUTE
+        assert num.allclose(list(G.attributes.values())[0], [2, 4])
 
     def test_2(self):
         from anuga.coordinate_transforms.geo_reference import Geo_reference
@@ -224,16 +226,16 @@ class Test_Geospatial_data(unittest.TestCase):
 
         points_dict = geospatial_data2points_dictionary(G)
 
-        assert points_dict.has_key('pointlist')
-        assert points_dict.has_key('attributelist')
-        assert points_dict.has_key('geo_reference')
+        assert 'pointlist' in points_dict
+        assert 'attributelist' in points_dict
+        assert 'geo_reference' in points_dict
 
         assert num.allclose( points_dict['pointlist'], points )
 
         A = points_dict['attributelist']
-        assert A.has_key('a0')
-        assert A.has_key('a1')
-        assert A.has_key('a2')
+        assert 'a0' in A
+        assert 'a1' in A
+        assert 'a2' in A
 
         assert num.allclose( A['a0'], [0, 0] )
         assert num.allclose( A['a1'], [2, 4] )
@@ -281,8 +283,8 @@ class Test_Geospatial_data(unittest.TestCase):
 
         G = G1 + G2
 
-        assert G.attributes.has_key('depth')
-        assert G.attributes.has_key('elevation')
+        assert 'depth' in G.attributes
+        assert 'elevation' in G.attributes
         assert num.allclose(G.attributes['depth'], [2, 4, 2, 4])
         assert num.allclose(G.attributes['elevation'], [6.1, 5, 2.5, 1])
         assert num.allclose(G.get_data_points(), [[1.0, 2.1], [3.0, 5.3],
@@ -303,8 +305,8 @@ class Test_Geospatial_data(unittest.TestCase):
 
         G = G1 + G2
 
-        assert G.attributes.has_key('depth')
-        assert G.attributes.keys(), ['depth']
+        assert 'depth' in G.attributes
+        assert list(G.attributes.keys()), ['depth']
         assert num.allclose(G.attributes['depth'], [2, 4, 200, 400])
         assert num.allclose(G.get_data_points(), [[1.0, 2.1], [3.0, 5.3],
                                                   [5.0, 2.1], [3.0, 50.3]])
@@ -412,16 +414,16 @@ class Test_Geospatial_data(unittest.TestCase):
         G1 = Geospatial_data(points1, attributes1, geo_ref1)
         assert num.allclose(G1.get_geo_reference().get_xllcorner(), 1.0)
         assert num.allclose(G1.get_geo_reference().get_yllcorner(), 2.0)
-        assert G1.attributes.has_key('depth')
-        assert G1.attributes.has_key('elevation')
+        assert 'depth' in G1.attributes
+        assert 'elevation' in G1.attributes
         assert num.allclose(G1.attributes['depth'], [2, 4.7])
         assert num.allclose(G1.attributes['elevation'], [6.1, 5])
 
         G2 = Geospatial_data(points2, attributes2, geo_ref2)
         assert num.allclose(G2.get_geo_reference().get_xllcorner(), 0.1)
         assert num.allclose(G2.get_geo_reference().get_yllcorner(), 3.0)
-        assert G2.attributes.has_key('depth')
-        assert G2.attributes.has_key('elevation')
+        assert 'depth' in G2.attributes
+        assert 'elevation' in G2.attributes
         assert num.allclose(G2.attributes['depth'], [-2.3, 4])
         assert num.allclose(G2.attributes['elevation'], [2.5, 1])
 
@@ -434,8 +436,8 @@ class Test_Geospatial_data(unittest.TestCase):
 
         # Normal add
         G = G1 + None
-        assert G.attributes.has_key('depth')
-        assert G.attributes.has_key('elevation')
+        assert 'depth' in G.attributes
+        assert 'elevation' in G.attributes
         assert num.allclose(G.attributes['depth'], [2, 4.7])
         assert num.allclose(G.attributes['elevation'], [6.1, 5])
 
@@ -447,8 +449,8 @@ class Test_Geospatial_data(unittest.TestCase):
         assert num.allclose(P, [[3.0, 6.1], [5.0, 9.3]]), msg
 
         G = G2 + None
-        assert G.attributes.has_key('depth')
-        assert G.attributes.has_key('elevation')
+        assert 'depth' in G.attributes
+        assert 'elevation' in G.attributes
         assert num.allclose(G.attributes['depth'], [-2.3, 4])
         assert num.allclose(G.attributes['elevation'], [2.5, 1])
         assert num.allclose(G.get_geo_reference().get_xllcorner(), 0.0)
@@ -459,8 +461,8 @@ class Test_Geospatial_data(unittest.TestCase):
 
         # Reverse add
         G = None + G1
-        assert G.attributes.has_key('depth')
-        assert G.attributes.has_key('elevation')
+        assert 'depth' in G.attributes
+        assert 'elevation' in G.attributes
         assert num.allclose(G.attributes['depth'], [2, 4.7])
         assert num.allclose(G.attributes['elevation'], [6.1, 5])
 
@@ -472,8 +474,8 @@ class Test_Geospatial_data(unittest.TestCase):
         assert num.allclose(P, [[3.0, 6.1], [5.0, 9.3]])
 
         G = None + G2
-        assert G.attributes.has_key('depth')
-        assert G.attributes.has_key('elevation')
+        assert 'depth' in G.attributes
+        assert 'elevation' in G.attributes
         assert num.allclose(G.attributes['depth'], [-2.3, 4])
         assert num.allclose(G.attributes['elevation'], [2.5, 1])
 

@@ -35,15 +35,24 @@ test() --       Conducts a basic test of the caching functionality.
 
 See doc strings of individual functions for detailed documentation.
 """
+from __future__ import division
 
 # -----------------------------------------------------------------------------
 # Initialisation code
 
 # Determine platform
 #
+from builtins import zip
+from builtins import input
+from builtins import str
+from builtins import range
+from past.builtins import basestring
+from past.utils import old_div
 from os import getenv
+import collections
 import types
 import time
+import sys
 
 import os
 if os.name in ['nt', 'dos', 'win32', 'what else?']:
@@ -52,6 +61,7 @@ else:
   unix = True
 
 import anuga.utilities.log as log
+from anuga.utilities import system_tools
 
 import numpy as num
 
@@ -286,13 +296,13 @@ def cache(my_F,
 
   # Handle the case cache('clear')
   if isinstance(my_F, basestring):
-    if string.lower(my_F) == 'clear':
+    if my_F.lower() == 'clear':
       clear_cache(CD,verbose=verbose)
       return
 
   # Handle the case cache(my_F, 'clear')
   if isinstance(args, basestring):
-    if string.lower(args) == 'clear':
+    if args.lower() == 'clear':
       clear_cache(CD,my_F,verbose=verbose)
       return
 
@@ -317,7 +327,7 @@ def cache(my_F,
   funcname = get_funcname(my_F)
 
   # Create cache filename
-  FN = funcname+'['+`arghash`+']'  # The symbol '(' does not work under unix
+  FN = funcname+'['+repr(arghash)+']'  # The symbol '(' does not work under unix
 
   if return_filename:
     return(FN)
@@ -706,7 +716,7 @@ def test(cachedir=None, verbose=False, compression=None):
   if T1 == T2:
     if t1 > t2:
       logtestOK('Performance test: relative time saved = %s pct' \
-              %str(round((t1-t2)*100/t1,2)))
+              %str(round(old_div((t1-t2)*100,t1),2)))
   else:       
     logtesterror('Basic caching failed for new problem')
             
@@ -755,8 +765,9 @@ def test(cachedir=None, verbose=False, compression=None):
 # Import pickler
 # cPickle is used by functions mysave, myload, and compare
 #
-import cPickle  # 10 to 100 times faster than pickle
-pickler = cPickle 
+#import cPickle  # 10 to 100 times faster than pickle
+import pickle as pickler
+#pickler = cPickle 
 
 # Local immutable constants
 #
@@ -843,7 +854,7 @@ def CacheLookup(CD, FN, my_F, args, kwargs, deps, verbose, compression,
   (admfile,compressed2) =  myopen(CD+FN+'_'+file_types[2],"rb",compression)
 
   if verbose is True and deps is not None:
-    log.critical('Caching: Dependencies are %s' % deps.keys())
+    log.critical('Caching: Dependencies are %s' % list(deps.keys()))
 
   if not (argsfile and datafile and admfile) or \
      not (compressed0 == compressed1 and compressed0 == compressed2):
@@ -1021,7 +1032,7 @@ def clear_cache(CD, my_F=None, verbose=None):
         for file_name in file_names:
             log.critical('     ' + file_name)
 
-        A = raw_input('Delete (Y/N)[N] ?')
+        A = input('Delete (Y/N)[N] ?')
       else:
         A = 'Y' 
         
@@ -1060,8 +1071,8 @@ def DeleteOldFiles(CD,verbose=None):
     delfiles = numfiles-maxfiles+block
     if verbose:
       log.critical('Deleting %d expired files:' % delfiles)
-      os.system('ls -lur '+CD+'* | head -' + `delfiles`)            # List them
-    os.system('ls -ur '+CD+'* | head -' + `delfiles` + ' | xargs /bin/rm')
+      os.system('ls -lur '+CD+'* | head -' + repr(delfiles))            # List them
+    os.system('ls -ur '+CD+'* | head -' + repr(delfiles) + ' | xargs /bin/rm')
                                                                   # Delete them
     # FIXME: Replace this with os.listdir and os.remove
 
@@ -1301,7 +1312,6 @@ def myload(file, compressed):
         return None, reason
       
   except MemoryError:
-    import sys
     if options['verbose']:
       log.critical('ERROR: Out of memory while loading %s, aborting'
                    % file.name)
@@ -1398,21 +1408,19 @@ def myhash(T, ids=None):
     T -- Anything
   """
 
-  from types import TupleType, ListType, DictType, InstanceType  
-    
-  if type(T) in [TupleType, ListType, DictType, InstanceType]:  
+  # Replacing Python2: if type(T) in [TupleType, ListType, DictType, InstanceType]:
+  if isinstance(T, (tuple, list, dict)) or type(T) is type:
       # Keep track of unique id's to protect against infinite recursion
       if ids is None: ids = []
 
       # Check if T has already been encountered
       i = id(T) 
-  
+
       if i in ids:
           return 0 # T has been hashed already      
       else:
           ids.append(i)
     
-
     
   # Start hashing  
   
@@ -1425,25 +1433,30 @@ def myhash(T, ids=None):
       return(1)
 
   # Get hash values for hashable entries
-  if type(T) in [TupleType, ListType]:
+  if isinstance(T, (tuple, list)):
       hvals = []
       for t in T:
           h = myhash(t, ids)
           hvals.append(h)
       val = hash(tuple(hvals))
-  elif type(T) == DictType:
-      # Make dictionary ordering unique  
-      
-      # FIXME(Ole): Need new way of doing this in Python 3.0
-      I = T.items()
-      I.sort()    
+  elif isinstance(T, dict):
+      # Make dictionary ordering unique
+
+      # FIXME(Ole): Need new way of doing this in Python 3.0 (B4 2010 ;-)
+      if system_tools.major_version == 2:
+          I = list(T.items())
+          I.sort()
+      else:
+          pass # As of Python 3.7 they now are ordered: https://mail.python.org/pipermail/python-dev/2017-December/151283.html         
+         
+      I = T
       val = myhash(I, ids)
   elif isinstance(T, num.ndarray):
       T = num.array(T) # Ensure array is contiguous
 
       # Use mean value for efficiency
       val = hash(num.average(T.flat))
-  elif type(T) == InstanceType:
+  elif type(T) is type:  # This is instead of the old InstanceType:
       # Use the attribute values 
       val = myhash(T.__dict__, ids)
   else:
@@ -1499,20 +1512,22 @@ def compare(A, B, ids=None):
     elif isinstance(A, dict):
         if len(A) != len(B):
             identical = False
-        else:                        
+        else:
+            # Dictionaries are now ordered as of Python 3.7
             # Make dictionary ordering unique 
-            a = A.items(); a.sort()    
-            b = B.items(); b.sort()
+            #a = list(A.items()); a.sort()    
+            #b = list(B.items()); b.sort()
             
-            identical = compare(a, b, ids)
+            identical = compare(A, B, ids)
             
     elif isinstance(A, num.ndarray):
         # Use element by element comparison
         identical = num.alltrue(A==B)
 
-    elif type(A) == types.InstanceType:
+    #elif type(A) == types.InstanceType:
+    elif type(A) is type:
         # Take care of special case where elements are instances            
-        # Base comparison on attributes     
+        # Base comparison on attributes
         identical = compare(A.__dict__, 
                             B.__dict__, 
                             ids)
@@ -1572,15 +1587,23 @@ def get_funcname(my_F):
   import string
 
   if type(my_F) == types.FunctionType:
-    funcname = my_F.func_name
+    funcname = my_F.__name__
   elif type(my_F) == types.BuiltinFunctionType:
     funcname = my_F.__name__
   else:
-    tab = string.maketrans("<>'","   ")
-    tmp = string.translate(repr(my_F), tab)
-    tmp = string.split(tmp)
-    funcname = string.join(tmp)
-
+    if system_tools.major_version == 3:
+      tab = str.maketrans("<>'","   ")
+      tmp = str.translate(repr(my_F), tab)
+      tmp = str.split(tmp)
+    elif system_tools.major_version == 2:
+      tab = string.maketrans("<>'","   ")
+      tmp = string.translate(repr(my_F), tab)
+      tmp = string.split(tmp)
+    else:
+      raise Exception('Unsupported version: %' % system_tools.version)
+      
+    funcname = ' '.join(tmp)
+    
     # Truncate memory address as in
     # class __main__.Dummy at 0x00A915D0
     index = funcname.find('at 0x')
@@ -1592,9 +1615,70 @@ def get_funcname(my_F):
 
 # -----------------------------------------------------------------------------
 
+#def get_bytecode(my_F):
+#  """ Get bytecode from function object.#
+#
+#  USAGE:
+#    get_bytecode(my_F)
+#  """
+#  print('HERE', type(my_F)) #
+#
+#  
+#    #
+#
+#  if type(my_F) == types.FunctionType:
+#    return get_func_code_details(my_F)
+#  elif type(my_F) == types.MethodType:
+#    return get_func_code_details(my_F.__func__)
+#  elif system_tools.major_version == 3 and type(my_F) is type:
+#    # It is an instance of a class (in Python 3)
+#
+#    if callable(my_F):
+#      # Get bytecode from __call__ method
+#      
+#      # FIXME (Ole): Haven't found the equivalent in Python3 yet.
+#      # It may be in here: https://docs.python.org/3/library/inspect.html
+#      # For now we just ignore this - it may actually not be that important.
+#       
+#      return (myhash(my_F),)
+#    else:
+#      msg = 'Instance %s was passed into caching in the role of a function ' % str(my_F)
+#      msg = ' but it was not callable.'
+#      raise Exception(msg)
+#  elif system_tools.major_version == 2 and type(my_F) == types.InstanceType:
+#    if hasattr(my_F, '__call__'):  # Should be     if callable(my_F):
+#      # Get bytecode from __call__ method
+#      bytecode = get_func_code_details(my_F.__call__.im_func)
+#      
+#      # Add hash value of object to detect attribute changes
+#      return bytecode + (myhash(my_F),) 
+#    else:
+#      msg = 'Instance %s was passed into caching in the role of a function ' % str(my_F)
+#      msg = ' but it was not callable.'
+#      raise Exception(msg)
+#
+#      
+#        func = my_F.__call__.__func__  
+#        bytecode = get_func_code_details(func)
+#        # Add hash value of object to detect attribute changes
+#        return bytecode + (myhash(my_F),)
+#    else:
+#      msg = 'Instance %s was passed into caching in the role of a function ' % str(my_F)
+#      msg = ' but it was not callable.'
+#      raise Exception(msg)      
+#  elif type(my_F) in [types.BuiltinFunctionType, types.BuiltinMethodType]:      
+#    # Built-in functions are assumed not to change  
+#    return None, 0, 0, 0
+#  elif isinstance(my_F, object):
+#      # Get bytecode from __init__ method
+#      bytecode = get_func_code_details(my_F.__init__.__func__)    
+#      return bytecode      
+#  else:
+#    msg = 'Unknown function type: %s' % type(my_F)
+#    raise Exception(msg)
+
 def get_bytecode(my_F):
   """ Get bytecode from function object.
-
   USAGE:
     get_bytecode(my_F)
   """
@@ -1603,8 +1687,8 @@ def get_bytecode(my_F):
     return get_func_code_details(my_F)
   elif type(my_F) == types.MethodType:
     return get_func_code_details(my_F.im_func)
-  elif type(my_F) == types.InstanceType:    
-    if hasattr(my_F, '__call__'):
+  elif system_tools.major_version == 2 and type(my_F) == types.InstanceType:
+    if hasattr(my_F, '__call__'):   # FIXME: callable(my_F) is OK both in Python2 and Python3 
       # Get bytecode from __call__ method
       bytecode = get_func_code_details(my_F.__call__.im_func)
       
@@ -1614,6 +1698,11 @@ def get_bytecode(my_F):
       msg = 'Instance %s was passed into caching in the role of a function ' % str(my_F)
       msg = ' but it was not callable.'
       raise Exception(msg)
+  elif system_tools.major_version == 3 and type(my_F) is type:
+    # FIXME (Ole): Haven't found the equivalent in Python3 yet.
+    # It may be in here: https://docs.python.org/3/library/inspect.html
+    # For now we just ignore this - it may actually not be that important.
+    return (myhash(my_F),)    
   elif type(my_F) in [types.BuiltinFunctionType, types.BuiltinMethodType]:      
     # Built-in functions are assumed not to change  
     return None, 0, 0, 0
@@ -1625,17 +1714,16 @@ def get_bytecode(my_F):
     msg = 'Unknown function type: %s' % type(my_F)
     raise Exception(msg)
 
-
   
   
 def get_func_code_details(my_F):
   """Extract co_code, co_consts, co_argcount, func_defaults
   """
   
-  bytecode = my_F.func_code.co_code
-  consts = my_F.func_code.co_consts
-  argcount = my_F.func_code.co_argcount    
-  defaults = my_F.func_defaults       
+  bytecode = my_F.__code__.co_code
+  consts = my_F.__code__.co_consts
+  argcount = my_F.__code__.co_argcount    
+  defaults = my_F.__defaults__       
   
   return bytecode, consts, argcount, defaults  
 
@@ -1711,7 +1799,7 @@ def filestat(FN):
     log.critical('Hack to get os.stat when files are too large')
 
     if unix:
-      tmp = '/tmp/cach.tmp.'+`time.time()`+`os.getpid()`
+      tmp = '/tmp/cach.tmp.'+repr(time.time())+repr(os.getpid())
       # Unique filename, FIXME: Use random number
 
       # Get size and access time (atime)
@@ -1738,7 +1826,7 @@ def filestat(FN):
       pass
       raise Exception  # FIXME: Windows case
 
-  return(long(size),atime,mtime,ctime)
+  return(int(size),atime,mtime,ctime)
 
 # -----------------------------------------------------------------------------
 
@@ -1855,7 +1943,7 @@ def addstatsline(CD, funcname, FN, Retrieved, reason, comptime, loadtime,
     log.critical('Warning: Stat file could not be opened')
 
   try:
-    if os.environ.has_key('USER'):
+    if 'USER' in os.environ:
       user = os.environ['USER']
     else:
       user = 'Nobody'
@@ -2017,7 +2105,7 @@ def __cachestat(sortidx=4, period=-1, showuser=None, cachedir=None):
             saving = cputime-loadtime
 
             if cputime != 0:
-              rel_saving = round(100.0*saving/cputime,2)
+              rel_saving = round(old_div(100.0*saving,cputime),2)
             else:
               #rel_saving = round(1.0*saving,2)
               rel_saving = 100.0 - round(1.0*saving,2)  # A bit of a hack
@@ -2063,11 +2151,11 @@ def __cachestat(sortidx=4, period=-1, showuser=None, cachedir=None):
 
   i = 0
   for Dict in Dictionaries:
-    for key in Dict.keys():
+    for key in list(Dict.keys()):
       rec = Dict[key]
       for n in range(len(rec)):
         if n > 0:
-          rec[n] = round(1.0*rec[n]/rec[0],2)
+          rec[n] = round(old_div(1.0*rec[n],rec[0]),2)
       Dict[key] = rec
 
     # Sort and output
@@ -2119,7 +2207,7 @@ def UpdateDict(Dict, key, info):
     UpdateDict(Dict,key,info)
   """
 
-  if Dict.has_key(key):
+  if key in Dict:
     dinfo = Dict[key]
     for n in range(len(dinfo)):
       dinfo[n] = info[n] + dinfo[n]
@@ -2142,7 +2230,7 @@ def SortDict(Dict, sortidx=0):
   """
 
   sortlist  = []
-  keylist = Dict.keys()
+  keylist = list(Dict.keys())
   for key in keylist:
     rec = Dict[key]
     if not isinstance(rec, (list, tuple)):
@@ -2155,9 +2243,9 @@ def SortDict(Dict, sortidx=0):
     val = rec[sortidx]
     sortlist.append(val)
 
-  A = map(None,sortlist,keylist)
+  A = list(zip(sortlist,keylist))
   A.sort()
-  keylist = map(lambda x: x[1], A)  # keylist sorted by sortidx
+  keylist = [x[1] for x in A]  # keylist sorted by sortidx
 
   return(keylist)
 
@@ -2292,7 +2380,7 @@ def msg5(CD, FN, deps, compression):
   log.critical('|')
   if len(deps) > 0:
     log.critical('| Dependencies:  ')
-    dependencies  = deps.keys()
+    dependencies  = list(deps.keys())
     dlist = []; maxd = 0
     tlist = []; maxt = 0
     slist = []; maxs = 0
@@ -2456,7 +2544,7 @@ def mkargstr(args, textwidth, argstr = '', level=0):
   else:
     if isinstance(args, dict):
       argstr = argstr + "{"
-      for key in args.keys():
+      for key in list(args.keys()):
         argstr = argstr + mkargstr(key, textwidth, level=level+1) + ": " + \
                  mkargstr(args[key], textwidth, level=level+1) + ", "
         if len(argstr) > textwidth:
@@ -2524,7 +2612,7 @@ def logtesterror(msg):
   log.critical()
   log.critical()
   
-  raise StandardError
+  raise Exception
 
 #-------------------------------------------------------------
 if __name__ == "__main__":

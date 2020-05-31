@@ -2,29 +2,45 @@
 
 
 """
+from __future__ import print_function
+from __future__ import division
 
+from future import standard_library
+standard_library.install_aliases()
+from builtins import str
+from builtins import input
+from builtins import map
+from past.builtins import basestring
+from past.utils import old_div
+from future.utils import raise_
 import sys
 import os
 import string
-import urllib
-import urllib2
+import urllib.request, urllib.parse, urllib.error
+import urllib.request, urllib.error, urllib.parse
 import getpass
 import tarfile
 import warnings
+import platform
 import pdb
+from functools import reduce
+
+# Record Python version
+major_version = int(platform.python_version_tuple()[0])
+version = platform.python_version()
 
 try:
     import hashlib
 except ImportError:
     import md5 as hashlib
 
-
+   
 def log_to_file(filename, s, verbose=False, mode='a'):
     """Log string to file name
     """
 
     fid = open(filename, mode)
-    if verbose: print s
+    if verbose: print(s)
     fid.write(s + '\n')
     fid.close()
 
@@ -102,7 +118,7 @@ Good luck!
         revision_number = int(line)
     except:
         msg = ".svn/entries, line 4 was '%s'?" % line.strip()
-        raise Exception, msg
+        raise_(Exception, msg)
 
     return revision_number
 
@@ -149,7 +165,7 @@ def __get_revision_from_svn_client__():
         except:
             msg = ('Revision number must be an integer. I got "%s" from '
                    '"SubWCRev.exe".' % line)
-            raise Exception, msg
+            raise_(Exception, msg)
     else:                   # assume Linux
         try:
             fid = os.popen('svn info . 2>/dev/null')
@@ -182,7 +198,7 @@ def __get_revision_from_svn_client__():
         except:
             msg = ("Revision number must be an integer. I got '%s' from "
                    "'svn'." % fields[1])
-            raise Exception, msg
+            raise_(Exception, msg)
 
     return revision_number
 
@@ -242,7 +258,7 @@ def process_revision_info(revision_info):
         msg = ("Revision number must be an integer. I got '%s'.\n"
                'Check that the command svn is on the system path.'
                % fields[1])
-        raise Exception, msg
+        raise_(Exception, msg)
 
     return revision_number
 
@@ -301,7 +317,7 @@ def store_revision_info(destination_path='.', verbose=False):
         #txt = fid.read()
         #fid.close()
 
-        if verbose: print 'response ',txt
+        if verbose: print('response ',txt)
 
 
         # Determine absolute filename
@@ -324,7 +340,7 @@ def store_revision_info(destination_path='.', verbose=False):
 
 
         if verbose is True:
-            print 'Revision info stored to %s' % filename
+            print('Revision info stored to %s' % filename)
 
 
 def safe_crc(string):
@@ -355,6 +371,21 @@ def compute_checksum(filename, max_length=2**20):
 
     return crcval
 
+
+def get_anuga_pathname():
+    """Get pathname of anuga install location 
+
+    Typically, this is required in unit tests depending
+    on external files.
+
+    """
+    
+    import anuga
+
+    path = anuga.__path__[0]
+    
+    return path
+    
 def get_pathname_from_package(package):
     """Get pathname of given package (provided as string)
 
@@ -370,11 +401,12 @@ def get_pathname_from_package(package):
 
     """
 
-    exec('import %s as x' %package)
+    # Execute import command
+    # See https://stackoverflow.com/questions/1463306/how-does-exec-work-with-locals
+    exec('import %s as x' % package, globals())
 
-    path = x.__path__[0]
-    
-    return path
+    # Get and return path
+    return x.__path__[0]
 
     # Alternative approach that has been used at times
     #try:
@@ -437,7 +469,8 @@ def string_to_char(l):
     if l == ['']:
         l = [' ']
 
-    maxlen = reduce(max, map(len, l))
+
+    maxlen = reduce(max, list(map(len, l)))
     ll = [x.ljust(maxlen) for x in l]
     result = []
     for s in ll:
@@ -445,34 +478,53 @@ def string_to_char(l):
     return result
 
 
+
 def char_to_string(ll):
     '''Convert 2-D list of chars to 1-D list of strings.'''
 
-    return map(string.rstrip, [''.join(x) for x in ll])
+    #https://stackoverflow.com/questions/23618218/numpy-bytes-to-plain-string
+    #bytes_string.decode('UTF-8')
+
+    # We might be able to do this a bit more shorthand as we did in Python2.x
+    # i.e return [''.join(x).strip() for x in ll]
+
+    # But this works for now.
+
+    result = []
+    for i in range(len(ll)):
+        x = ll[i]
+        string = ''
+        for j in range(len(x)):
+            c = x[j]
+            if type(c) == str:
+                string += c
+            else:
+                string += c.decode()            
+
+        result.append(string.strip())
+        
+    return result
+
 
 ################################################################################
 
 def get_vars_in_expression(source):
     '''Get list of variable names in a python expression.'''
 
-    import compiler
-    from compiler.ast import Node
-
-    def get_vars_body(node, var_list=[]):
-        if isinstance(node, Node):
-            if node.__class__.__name__ == 'Name':
-                for child in node.getChildren():
-                    if child not in var_list:
-                        var_list.append(child)
-            for child in node.getChildren():
-                if isinstance(child, Node):
-                    for child in node.getChildren():
-                        var_list = get_vars_body(child, var_list)
-                    break
-
-        return var_list
-
-    return get_vars_body(compiler.parse(source))
+    # https://stackoverflow.com/questions/37993137/how-do-i-detect-variables-in-a-python-eval-expression
+    
+    import ast
+        
+    variables = {}
+    syntax_tree = ast.parse(source)
+    for node in ast.walk(syntax_tree):
+        if type(node) is ast.Name:
+            variables[node.id] = 0  # Keep first one, but not duplicates
+                
+    # Only return keys
+    result = list(variables.keys()) # Only return keys i.e. the variable names
+    result.sort() # Sort for uniqueness
+    return result
 
 
 def get_web_file(file_url, file_name, auth=None, blocksize=1024*1024):
@@ -493,16 +545,16 @@ def get_web_file(file_url, file_name, auth=None, blocksize=1024*1024):
 
     # Simple fetch, if fails, check for proxy error
     try:
-        urllib.urlretrieve(file_url, file_name)
+        urllib.request.urlretrieve(file_url, file_name)
         return (True, auth)     # no proxy, no auth required
-    except IOError, e:
+    except IOError as e:
         if e[1] == 407:     # proxy error
             pass
         elif e[1][0] == 113:  # no route to host
-            print 'No route to host for %s' % file_url
+            print('No route to host for %s' % file_url)
             return (False, auth)    # return False
         else:
-            print 'Unknown connection error to %s' % file_url
+            print('Unknown connection error to %s' % file_url)
             return (False, auth)
 
     # We get here if there was a proxy error, get file through the proxy
@@ -522,21 +574,21 @@ def get_web_file(file_url, file_name, auth=None, blocksize=1024*1024):
 
     # Get auth info from user if still not supplied
     if httpproxy is None or proxyuser is None or proxypass is None:
-        print '-'*72
+        print('-'*72)
         print ('You need to supply proxy authentication information.')
         if httpproxy is None:
-            httpproxy = raw_input('                    proxy server: ')
+            httpproxy = input('                    proxy server: ')
         else:
-            print '         HTTP proxy was supplied: %s' % httpproxy
+            print('         HTTP proxy was supplied: %s' % httpproxy)
         if proxyuser is None:
-            proxyuser = raw_input('                  proxy username: ') 
+            proxyuser = input('                  proxy username: ') 
         else:
-            print 'HTTP proxy username was supplied: %s' % proxyuser
+            print('HTTP proxy username was supplied: %s' % proxyuser)
         if proxypass is None:
             proxypass = getpass.getpass('                  proxy password: ')
         else:
-            print 'HTTP proxy password was supplied: %s' % '*'*len(proxyuser)
-        print '-'*72
+            print('HTTP proxy password was supplied: %s' % '*'*len(proxyuser))
+        print('-'*72)
 
     # the proxy URL cannot start with 'http://', we add that later
     httpproxy = httpproxy.lower()
@@ -544,17 +596,17 @@ def get_web_file(file_url, file_name, auth=None, blocksize=1024*1024):
         httpproxy = httpproxy.replace('http://', '', 1)
 
     # open remote file
-    proxy = urllib2.ProxyHandler({'http': 'http://' + proxyuser
+    proxy = urllib.request.ProxyHandler({'http': 'http://' + proxyuser
                                               + ':' + proxypass
                                               + '@' + httpproxy})
-    authinfo = urllib2.HTTPBasicAuthHandler()
-    opener = urllib2.build_opener(proxy, authinfo, urllib2.HTTPHandler)
-    urllib2.install_opener(opener)
+    authinfo = urllib.request.HTTPBasicAuthHandler()
+    opener = urllib.request.build_opener(proxy, authinfo, urllib.request.HTTPHandler)
+    urllib.request.install_opener(opener)
     try:
-        webget = urllib2.urlopen(file_url)
-    except urllib2.HTTPError, e:
-        print 'Error received from proxy:\n%s' % str(e)
-        print 'Possibly the user/password is wrong.'
+        webget = urllib.request.urlopen(file_url)
+    except urllib.error.HTTPError as e:
+        print('Error received from proxy:\n%s' % str(e))
+        print('Possibly the user/password is wrong.')
         return (False, (httpproxy, proxyuser, proxypass))
 
     # transfer file to local filesystem
@@ -606,7 +658,7 @@ def get_file_hexdigest(filename, blocksize=1024*1024*10):
         data = fd.read(blocksize)
         if len(data) == 0:
             break
-        m.update(data)
+        m.update(data.encode())
                                                                 
     fd.close()
     return m.hexdigest()
@@ -653,7 +705,7 @@ def _VmB(VmKey):
     if len(v) < 3:
         return 0.0  # invalid format?
      # convert Vm value to MB
-    return (float(v[1]) * _scale[v[2]]) / (1024.0*1024.0)
+    return old_div((float(v[1]) * _scale[v[2]]), (1024.0*1024.0))
 
 
 def MemoryUpdate(print_msg=None,str_return=False):
