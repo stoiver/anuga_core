@@ -1,7 +1,7 @@
 
 
 ******************
-ANUGA Installation
+Anuga Installation
 ******************
 
 .. contents::
@@ -10,10 +10,9 @@ ANUGA Installation
 Introduction
 ============
 
-ANUGA_ is a python package with some C extensions (and an optional fortran 
-extension). At present ANUGA has only been run and tested using python 2.x.
-We recommend python 2.7.
-We are currently porting ANUGA to Python 3.x
+AnuGA_ is a python package with some C extensions (and an optional fortran 
+extension). At present AnuGA has only been run and tested using python 2.x.
+We recommend python 2.7.  
 
 
 Dependencies
@@ -28,9 +27,7 @@ AnuGA requires the following packages:
 * `netcdf <http://www.unidata.ucar.edu/software/netcdf/>`_
 * `nose <http://nose.readthedocs.org/en/latest/>`_
 * `dill <https://dill.readthedocs.io/>`_
-* A C compiler (preferably GCC or TDM-GCC_ MinGW_ on Windows)  # Possibly deprecated by the use of Cython?
-* `Cython <https://cython.org/>`
-* `future <https://pypi.org/project/future` # Possible superfluous if we ditch backward compatibility with Python 2.7
+* A C compiler (preferably GCC or TDM-GCC_ MinGW_ on Windows)
 
 
 Installing the latest DEVELOPMENT version on Ubuntu
@@ -103,10 +100,10 @@ GCC dependency for Windows users
 
 Unfortunately, the ``gcc`` compiler MinGW_ included in Anaconda or 
 installable via Miniconda_ doesn't have OpenMP_ support. This is required to compile
-some extension modules in ANUGA (those that have multi-threaded parallel code).
+some extension modules in AnuGA (those that have multi-threaded parallel code).
 
 We suggest that you download and install the version of MinGW_ provided by TDM-GCC_
-**after** you've installed Anaconda and **before** you install ANUGA.
+**after** you've installed Anaconda and **before** you install AnuGA.
 Don't forget to mark the ``openmp`` and ``gfortran`` options in the "Choose Components" part of
 the installation. See this `excellent documentation for Windows users`_
 (they even have screenshots!). The same applies if you are using Miniconda_.

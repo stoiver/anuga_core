@@ -2,11 +2,7 @@
 """
 boundary.py - Classes for implementing boundary conditions
 """
-from __future__ import division
 
-from builtins import str
-from past.utils import old_div
-from builtins import object
 from warnings import warn
 
 from anuga.utilities.numerical_tools import NAN    
@@ -17,7 +13,7 @@ import anuga.utilities.log as log
 import numpy as num
 
 
-class Boundary(object):
+class Boundary:
     """Base class for boundary conditions.
        Specific boundary conditions must provide values for
        the conserved_quantities
@@ -103,9 +99,9 @@ class Boundary(object):
 
         try:
             res = self.function(t)
-        except Modeltime_too_early as e:
+        except Modeltime_too_early, e:
             raise Modeltime_too_early(e)
-        except Modeltime_too_late as e:
+        except Modeltime_too_late, e:
             if self.default_boundary is None:
                 raise Modeltime_too_late(e) # Reraise exception
             else:
@@ -332,7 +328,7 @@ class Time_boundary(Boundary):
         
         try:
             q = function(0.0)
-        except Exception as e:
+        except Exception, e:
             msg = 'Function for time boundary could not be executed:\n%s' %e
             raise Exception(msg)
 
@@ -451,7 +447,7 @@ class Time_space_boundary(Boundary):
             
         try:
             q = function(0.0, 0.0, 0.0)
-        except Exception as e:
+        except Exception, e:
             msg = 'Function for time_space_boundary could not be executed:\n%s' %e
             raise Exception(msg)
 
@@ -485,9 +481,9 @@ class Time_space_boundary(Boundary):
 
         try:
             res = self.function(self.domain.get_time(), x, y)
-        except Modeltime_too_early as e:
+        except Modeltime_too_early, e:
             raise Modeltime_too_early(e)
-        except Modeltime_too_late as e:
+        except Modeltime_too_late, e:
             if self.default_boundary is None:
                 raise Exception(e) # Reraise exception
             else:
@@ -571,7 +567,7 @@ class File_boundary(Boundary):
 
         if verbose: log.critical('Find midpoint coordinates of entire boundary')
         self.midpoint_coordinates = num.zeros((len(domain.boundary), 2), num.float)
-        boundary_keys = list(domain.boundary.keys())
+        boundary_keys = domain.boundary.keys()
 
         xllcorner = domain.geo_reference.get_xllcorner()
         yllcorner = domain.geo_reference.get_yllcorner()        
@@ -660,9 +656,9 @@ class File_boundary(Boundary):
             
             try:
                 res = self.F(t, point_id=i)
-            except Modeltime_too_early as e:
+            except Modeltime_too_early, e:
                 raise Modeltime_too_early(e)
-            except Modeltime_too_late as e:
+            except Modeltime_too_late, e:
                 if self.default_boundary is None:
                     raise Exception(e) # Reraise exception
                 else:
@@ -760,7 +756,7 @@ class AWI_boundary(Boundary):
 
         if verbose: log.critical('Find midpoint coordinates of entire boundary')
         self.midpoint_coordinates = num.zeros((len(domain.boundary), 2), num.float)
-        boundary_keys = list(domain.boundary.keys())
+        boundary_keys = domain.boundary.keys()
 
         xllcorner = domain.geo_reference.get_xllcorner()
         yllcorner = domain.geo_reference.get_yllcorner()        
@@ -777,9 +773,9 @@ class AWI_boundary(Boundary):
             x2, y2 = V[base_index+2, :]
             
             # Compute midpoints
-            if edge_id == 0: m = num.array([old_div((x1 + x2),2), old_div((y1 + y2),2)])
-            if edge_id == 1: m = num.array([old_div((x0 + x2),2), old_div((y0 + y2),2)])
-            if edge_id == 2: m = num.array([old_div((x1 + x0),2), old_div((y1 + y0),2)])
+            if edge_id == 0: m = num.array([(x1 + x2)/2, (y1 + y2)/2])
+            if edge_id == 1: m = num.array([(x0 + x2)/2, (y0 + y2)/2])
+            if edge_id == 2: m = num.array([(x1 + x0)/2, (y1 + y0)/2])
 
             # Convert to absolute UTM coordinates
             m[0] += xllcorner

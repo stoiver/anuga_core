@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-from builtins import str
 import numpy as num
 
 celltype_map = {'IEEE4ByteReal': num.float32, 'IEEE8ByteReal': num.float64}
@@ -208,39 +207,39 @@ def create_default_header(header = {}):
     #           to be filled with default values
 
 
-    if 'datum' not in header:
+    if not header.has_key('datum'):
         header['datum'] = '"GDA94"'
-    if 'projection' not in header:
+    if not header.has_key('projection'):
         header['projection'] = '"GEOGRAPHIC"'
-    if 'coordinatetype' not in header:
+    if not header.has_key('coordinatetype'):
         header['coordinatetype'] = 'LL'
-    if 'rotation' not in header:
+    if not header.has_key('rotation'):
         header['rotation'] = '0:0:0.0'
-    if 'units' not in header:
+    if not header.has_key('units'):
         header['units'] = '"METERS"'
-    if 'celltype' not in header:
+    if not header.has_key('celltype'):
         header['celltype'] = 'IEEE4ByteReal'
-    if 'nullcellvalue' not in header:
+    if not header.has_key('nullcellvalue'):
         header['nullcellvalue'] = '-99999'
-    if 'xdimension' not in header:
+    if not header.has_key('xdimension'):
         header['xdimension'] = '100'
-    if 'latitude' not in header:
+    if not header.has_key('latitude'):
         header['latitude'] = '0:0:0'
-    if 'longitude' not in header:
+    if not header.has_key('longitude'):
         header['longitude'] = '0:0:0'
-    if 'ydimension' not in header:
+    if not header.has_key('ydimension'):
         header['ydimension'] = '100'
-    if 'nroflines' not in header:
+    if not header.has_key('nroflines'):
         header['nroflines'] = '3'
-    if 'nrofcellsperline' not in header:
+    if not header.has_key('nrofcellsperline'):
         header['nrofcellsperline'] = '4'
-    if 'registrationcellx' not in header:
+    if not header.has_key('registrationcellx'):
         header['registrationcellx'] = '0'
-    if 'registrationcelly' not in header:
+    if not header.has_key('registrationcelly'):
         header['registrationcelly'] = str(int(header['nroflines'])-1)
-    if 'nrofbands' not in header:
+    if not header.has_key('nrofbands'):
         header['nrofbands'] = '1'
-    if 'value' not in header:
+    if not header.has_key('value'):
         header['value'] = '"Default_Band"'
 
 

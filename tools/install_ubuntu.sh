@@ -12,13 +12,6 @@ set -e
 PYTHON_VERSION=${PYTHON_VERSION:-"2.7"}
 ANUGA_PARALLEL=${ANUGA_PARALLEL:-"false"}
 
-if [[ "$ANUGA_PARALLEL" == "false" ]];
-then 
-    PYPAR_AVAILABLE="false"
-else
-    PYPAR_AVAILABLE=${PYPAR_AVAILABLE:-"pypar"}
-fi
-
 ###########################################################
 # Check if mpich2 has been installed
 if [ $(dpkg-query -W -f='${Status}\n' mpich2 2>/dev/null | grep -c "ok installed") -gt 0 ];
@@ -43,6 +36,7 @@ fi
 
 
 sudo apt-get update -q
+
 
 ##########################################################
 # Use standard ubuntu packages in their default version
@@ -72,16 +66,6 @@ echo "+===============================================+"
 echo "|  Using pip to install netCDF4                 |"
 echo "+===============================================+"
 sudo pip install -q netCDF4
-
-echo "+===============================================+"
-echo "|  Using pip to install Cython                  |"
-echo "+===============================================+"
-sudo pip install -q Cython
-
-echo "+===============================================+"
-echo "|  Using pip to install future                  |"
-echo "+===============================================+"
-sudo pip install -q future
 
 echo "+===============================================+"
 echo "|  Using pip to install pyproj                  |"
@@ -114,7 +98,7 @@ fi
 
 
 # Install pypar if parallel set
-if [[ "$PYPAR_AVAILABLE" == "pypar" ]]; then
+if [[ "$ANUGA_PARALLEL" == "mpich" || "$ANUGA_PARALLEL" == "mpich2" || "$ANUGA_PARALLEL" == "openmpi" ]]; then
     echo "+===============================================+"
     echo "|  Installing pypar from source                 |"
     echo "+===============================================+"
@@ -127,13 +111,6 @@ if [[ "$PYPAR_AVAILABLE" == "pypar" ]]; then
     sudo python setup.py  install;
     popd;
 fi
-
-if [[ "$PYPAR_AVAILABLE" == "mpi4py" ]]; then 
-    echo "+===============================================+"
-    echo "|  Using pip to install mpi4py                  |"
-    echo "+===============================================+"
-    sudo pip install -q mpi4py
-fi  
 
 #########################################################
 # Build and install anuga

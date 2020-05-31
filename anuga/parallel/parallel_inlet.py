@@ -1,10 +1,6 @@
-from __future__ import print_function
-from __future__ import division
 # To change this template, choose Tools | Templates
 # and open the template in the editor.
 
-from builtins import str
-from past.utils import old_div
 import anuga.geometry.polygon
 from anuga.geometry.polygon import inside_polygon, is_inside_polygon, line_intersect
 from anuga.config import velocity_protection, g
@@ -46,7 +42,7 @@ class Parallel_Inlet(Inlet):
         else:
             self.procs = procs
 
-        from anuga.utilities import parallel_abstraction as pypar
+        import pypar
         self.myid = pypar.rank()
 
         self.compute_triangle_indices()
@@ -83,7 +79,7 @@ class Parallel_Inlet(Inlet):
         if len(self.triangle_indices) == 0:
             region = 'Inlet line=%s' % (self.line)
             msg = 'No triangles have been identified in region '
-            print("WARNING: " + msg)
+            print "WARNING: " + msg
 
         self.area = 0.0
         for j in self.triangle_indices:
@@ -122,7 +118,7 @@ class Parallel_Inlet(Inlet):
         # WARNING: requires synchronization, must be called by all procs associated
         # with this inlet
 
-        from anuga.utilities import parallel_abstraction as pypar
+        import pypar
         local_area = self.area
         area = local_area
 
@@ -155,7 +151,7 @@ class Parallel_Inlet(Inlet):
     def get_average_stage(self):
         # LOCAL
 
-        return old_div(num.sum(self.get_stages()*self.get_areas()),self.area)
+        return num.sum(self.get_stages()*self.get_areas())/self.area
 
     def get_global_average_stage(self):
         # GLOBAL: Master processor gathers stages from all child processors, and returns average
@@ -163,7 +159,7 @@ class Parallel_Inlet(Inlet):
         # WARNING: requires synchronization, must be called by all procs associated
         # with this inlet
 
-        from anuga.utilities import parallel_abstraction as pypar
+        import pypar
         local_stage = num.sum(self.get_stages()*self.get_areas())
         global_area = self.get_global_area()
 
@@ -182,7 +178,7 @@ class Parallel_Inlet(Inlet):
 
 
         if global_area > 0.0:
-            return old_div(global_stage,global_area)
+            return global_stage/global_area
         else:
             return 0.0
 
@@ -194,7 +190,7 @@ class Parallel_Inlet(Inlet):
         # LOCAL
 
         if self.area > 0:
-            return old_div(num.sum(self.get_elevations()*self.get_areas()),self.area)
+            return num.sum(self.get_elevations()*self.get_areas())/self.area
         else:
             return 0.0
 
@@ -204,7 +200,7 @@ class Parallel_Inlet(Inlet):
         # WARNING: requires synchronization, must be called by all procs associated
         # with this inlet
 
-        from anuga.utilities import parallel_abstraction as pypar
+        import pypar
         local_elevation = num.sum(self.get_elevations()*self.get_areas())
         global_area = self.get_global_area()
 
@@ -223,7 +219,7 @@ class Parallel_Inlet(Inlet):
 
 
         if global_area > 0.0:
-            return old_div(global_elevation,global_area)
+            return global_elevation/global_area
         else:
             return 0.0
 
@@ -236,7 +232,7 @@ class Parallel_Inlet(Inlet):
         # LOCAL
 
         if self.area > 0:
-            return old_div(num.sum(self.get_xmoms()*self.get_areas()),self.area)
+            return num.sum(self.get_xmoms()*self.get_areas())/self.area
         else:
             return 0.0
 
@@ -245,7 +241,7 @@ class Parallel_Inlet(Inlet):
         # WARNING: requires synchronization, must be called by all procs associated
         # with this inlet
 
-        from anuga.utilities import parallel_abstraction as pypar
+        import pypar
         global_area = self.get_global_area()
         local_xmoms = num.sum(self.get_xmoms()*self.get_areas())
         global_xmoms = local_xmoms
@@ -261,7 +257,7 @@ class Parallel_Inlet(Inlet):
 
 
         if global_area > 0.0:
-            return old_div(global_xmoms,global_area)
+            return global_xmoms/global_area
         else:
             return 0.0
 
@@ -273,14 +269,14 @@ class Parallel_Inlet(Inlet):
 
     def get_average_ymom(self):
         # LOCAL
-        return old_div(num.sum(self.get_ymoms()*self.get_areas()),self.area)
+        return num.sum(self.get_ymoms()*self.get_areas())/self.area
 
     def get_global_average_ymom(self):
         # GLOBAL: master proc gathers all ymom values and returns average
         # WARNING: requires synchronization, must be called by all procs associated
         # with this inlet
 
-        from anuga.utilities import parallel_abstraction as pypar
+        import pypar
         global_area = self.get_global_area()
         local_ymoms = num.sum(self.get_ymoms()*self.get_areas())
         global_ymoms = local_ymoms
@@ -296,7 +292,7 @@ class Parallel_Inlet(Inlet):
 
 
         if global_area > 0.0:
-            return old_div(global_ymoms,global_area)
+            return global_ymoms/global_area
         else:
             return 0.0
 
@@ -314,7 +310,7 @@ class Parallel_Inlet(Inlet):
         # WARNING: requires synchronization, must be called by all procs associated
         # with this inlet
 
-        from anuga.utilities import parallel_abstraction as pypar
+        import pypar
         local_volume = num.sum(self.get_depths()*self.get_areas())
         volume = local_volume
 
@@ -334,7 +330,7 @@ class Parallel_Inlet(Inlet):
         # LOCAL
 
         if self.area > 0.0:
-            return old_div(self.get_total_water_volume(),self.area)
+            return self.get_total_water_volume()/self.area
         else:
             return 0.0
 
@@ -348,7 +344,7 @@ class Parallel_Inlet(Inlet):
 
 
         if area > 0.0:
-            return old_div(total_water_volume, area)
+            return total_water_volume / area
         else:
             return 0.0
 
@@ -356,8 +352,8 @@ class Parallel_Inlet(Inlet):
     def get_velocities(self):
         #LOCAL
         depths = self.get_depths()
-        u = old_div(depths*self.get_xmoms(),(depths**2 + velocity_protection))
-        v = old_div(depths*self.get_ymoms(),(depths**2 + velocity_protection))
+        u = depths*self.get_xmoms()/(depths**2 + velocity_protection)
+        v = depths*self.get_ymoms()/(depths**2 + velocity_protection)
 
         return u, v
 
@@ -365,27 +361,27 @@ class Parallel_Inlet(Inlet):
     def get_xvelocities(self):
         #LOCAL
         depths = self.get_depths()
-        return old_div(depth*self.get_xmoms(),(depths**2 + velocity_protection))
+        return depth*self.get_xmoms()/(depths**2 + velocity_protection)
 
     def get_yvelocities(self):
         #LOCAL
         depths = self.get_depths()
-        return old_div(depths*self.get_ymoms(),(depths**2 + velocity_protection))
+        return depths*self.get_ymoms()/(depths**2 + velocity_protection)
 
 
     def get_average_speed(self):
         #LOCAL
         u, v = self.get_velocities()
 
-        average_u = old_div(num.sum(u*self.get_areas()),self.area)
-        average_v = old_div(num.sum(v*self.get_areas()),self.area)
+        average_u = num.sum(u*self.get_areas())/self.area
+        average_v = num.sum(v*self.get_areas())/self.area
 
         return math.sqrt(average_u**2 + average_v**2)
 
 
     def get_average_velocity_head(self):
         #LOCAL
-        return old_div(0.5*self.get_average_speed()**2,g)
+        return 0.5*self.get_average_speed()**2/g
 
 
     def get_average_total_energy(self):
@@ -432,7 +428,7 @@ class Parallel_Inlet(Inlet):
         # WARNING: requires synchronization, must be called by all procs associated
         # with this inlet
 
-        from anuga.utilities import parallel_abstraction as pypar
+        import pypar
         centroid_coordinates = self.domain.get_full_centroid_coordinates(absolute=True)
         areas = self.get_areas()
         stages = self.get_stages()
@@ -517,7 +513,7 @@ class Parallel_Inlet(Inlet):
                 prev_stage = current_stage
 
             # Calculate new stage
-            new_stage = prev_stage + old_div((volume - summed_volume), summed_areas)
+            new_stage = prev_stage + (volume - summed_volume) / summed_areas
 
             # Send postion and new stage to all processors
             for i in self.procs:
@@ -541,7 +537,7 @@ class Parallel_Inlet(Inlet):
         """ Distribute volume over all exchange
         cells with equal depth of water
         """
-        new_depth = self.get_average_depth() + (old_div(volume,self.get_area()))
+        new_depth = self.get_average_depth() + (volume/self.get_area())
         self.set_depths(new_depth)
 
     def get_master_proc(self):
@@ -555,7 +551,7 @@ class Parallel_Inlet(Inlet):
         # WARNING: requires synchronization, must be called by all procs associated
         # with this inlet
 
-        from anuga.utilities import parallel_abstraction as pypar
+        import pypar
 
         message = ''
 
@@ -623,4 +619,4 @@ __author__="pete"
 __date__ ="$16/08/2011 6:49:42 PM$"
 
 if __name__ == "__main__":
-    print("Hello World")
+    print "Hello World"

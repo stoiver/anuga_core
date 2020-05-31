@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 #
 
-from builtins import zip
-from builtins import str
 import unittest
 import tempfile
 import os
@@ -125,7 +123,7 @@ class geo_referenceTestCase(unittest.TestCase):
 
         self.assertTrue(isinstance(new_lofl, list), ' failed')
         self.assertTrue(type(new_lofl) == type(lofl), ' failed')
-        for point,new_point in zip(lofl,new_lofl):
+        for point,new_point in map(None,lofl,new_lofl):
             self.assertTrue(point[0]-x==new_point[0], ' failed')
             self.assertTrue(point[1]-y==new_point[1], ' failed')
          
@@ -139,7 +137,7 @@ class geo_referenceTestCase(unittest.TestCase):
 
         self.assertTrue(isinstance(new_lofl, list), ' failed')
         self.assertTrue(type(new_lofl) == type(lofl), ' failed')
-        for point,new_point in zip(lofl,new_lofl):
+        for point,new_point in map(None,lofl,new_lofl):
             self.assertTrue(point[0]-x==new_point[0], ' failed')
             self.assertTrue(point[1]-y==new_point[1], ' failed')
         
@@ -152,7 +150,7 @@ class geo_referenceTestCase(unittest.TestCase):
 
         self.assertTrue(isinstance(new_lofl, list), ' failed')
         self.assertTrue(type(new_lofl) == type(lofl), ' failed')
-        for point,new_point in zip([lofl],new_lofl):
+        for point,new_point in map(None,[lofl],new_lofl):
             self.assertTrue(point[0]-x==new_point[0], ' failed')
             self.assertTrue(point[1]-y==new_point[1], ' failed')
         
@@ -182,7 +180,7 @@ class geo_referenceTestCase(unittest.TestCase):
         self.assertTrue(type(new_lofl) == type(lofl), ' failed')
 
 
-        for point,new_point in zip(lofl,new_lofl):
+        for point,new_point in map(None,lofl,new_lofl):
             self.assertTrue(point[0]-x==new_point[0], ' failed')
             self.assertTrue(point[1]-y==new_point[1], ' failed')
         
@@ -195,7 +193,7 @@ class geo_referenceTestCase(unittest.TestCase):
 
         self.assertTrue(isinstance(new_lofl, num.ndarray), ' failed')
         self.assertTrue(type(new_lofl) == type(lofl), ' failed')
-        for point,new_point in zip([lofl],new_lofl):
+        for point,new_point in map(None,[lofl],new_lofl):
             self.assertTrue(point[0]-x==new_point[0], ' failed')
             self.assertTrue(point[1]-y==new_point[1], ' failed')
      
@@ -211,7 +209,7 @@ class geo_referenceTestCase(unittest.TestCase):
 
         self.assertTrue(isinstance(new_lofl, list), ' failed')
         self.assertTrue(type(new_lofl) == type(lofl), ' failed')
-        for point,new_point in zip(lofl,new_lofl):
+        for point,new_point in map(None,lofl,new_lofl):
             self.assertTrue(point[0]+point_x-x==new_point[0], ' failed')
             self.assertTrue(point[1]+point_y-y==new_point[1], ' failed')
 
@@ -226,7 +224,7 @@ class geo_referenceTestCase(unittest.TestCase):
 
         self.assertTrue(isinstance(new_points, list), 'failed')
         self.assertTrue(type(new_points) == type(points), 'failed')
-        for point, new_point in zip(points, new_points):
+        for point, new_point in map(None, points, new_points):
             self.assertTrue(point[0]+x == new_point[0], 'failed')
             self.assertTrue(point[1]+y == new_point[1], 'failed')
 
@@ -237,7 +235,7 @@ class geo_referenceTestCase(unittest.TestCase):
 
         self.assertTrue(isinstance(new_points, list), 'failed')
         self.assertTrue(type(new_points) == type(points), 'failed')
-        for point, new_point in zip(points, new_points):
+        for point, new_point in map(None, points, new_points):
             self.assertTrue(point[0] == new_point[0], 'failed')
             self.assertTrue(point[1] == new_point[1], 'failed')
             
@@ -276,7 +274,7 @@ class geo_referenceTestCase(unittest.TestCase):
         self.assertTrue(isinstance(new_points, num.ndarray), 'failed')
         self.assertTrue(type(new_points) == type(points), 'failed')
         msg = 'points=\n%s\nnew_points=\n%s' % (str(points), str(new_points))
-        for point, new_point in zip(points, new_points):
+        for point, new_point in map(None, points, new_points):
             self.assertTrue(point[0]+x == new_point[0], msg)
             self.assertTrue(point[1]+y == new_point[1], msg)
 
@@ -335,7 +333,7 @@ class geo_referenceTestCase(unittest.TestCase):
 
         self.assertTrue(isinstance(new_points, list), 'failed')
         self.assertTrue(type(new_points) == type(points), 'failed')
-        for point, new_point in zip(points, new_points):
+        for point, new_point in map(None, points, new_points):
             self.assertTrue(point[0]-x == new_point[0], 'failed')
             self.assertTrue(point[1]-y == new_point[1], 'failed')
 
@@ -346,7 +344,7 @@ class geo_referenceTestCase(unittest.TestCase):
 
         self.assertTrue(isinstance(new_points, list), 'failed')
         self.assertTrue(type(new_points) == type(points), 'failed')
-        for point, new_point in zip(points, new_points):
+        for point, new_point in map(None, points, new_points):
             self.assertTrue(point[0] == new_point[0], 'failed')
             self.assertTrue(point[1] == new_point[1], 'failed')
             
@@ -385,7 +383,7 @@ class geo_referenceTestCase(unittest.TestCase):
         self.assertTrue(isinstance(new_points, num.ndarray), 'failed')
         self.assertTrue(type(new_points) == type(points), 'failed')
         msg = 'points=\n%s\nnew_points=\n%s' % (str(points), str(new_points))
-        for point, new_point in zip(points, new_points):
+        for point, new_point in map(None, points, new_points):
             self.assertTrue(point[0]-x == new_point[0], msg)
             self.assertTrue(point[1]-y == new_point[1], msg)
 

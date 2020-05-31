@@ -1,8 +1,3 @@
-from __future__ import division
-from builtins import zip
-from builtins import map
-from builtins import range
-from past.utils import old_div
 import os
 import unittest
 import tempfile
@@ -62,7 +57,7 @@ class Test_sww(unittest.TestCase):
         domain.set_name('bedslope')
         domain.default_order=2
         #Bed-slope and friction
-        domain.set_quantity('elevation', lambda x,y: old_div(-x,3))
+        domain.set_quantity('elevation', lambda x,y: -x/3)
         domain.set_quantity('friction', 0.1)
         # Boundary conditions
         from math import sin, pi
@@ -211,7 +206,7 @@ class Test_sww(unittest.TestCase):
         
         domain.set_starttime(200.0)
         #Bed-slope and friction
-        domain.set_quantity('elevation', lambda x,y: old_div(-x,3))
+        domain.set_quantity('elevation', lambda x,y: -x/3)
         domain.set_quantity('friction', 0.1)
         # Boundary conditions
         from math import sin, pi
@@ -394,7 +389,7 @@ class Test_sww(unittest.TestCase):
         assert num.allclose(mesh.nodes, domain.get_nodes())
 
         # Check that time has been recovered
-        assert num.allclose(time, list(range(t_end+1)))
+        assert num.allclose(time, range(t_end+1))
 
         # Check that quantities have been recovered
         # (sww files use single precision)
@@ -468,7 +463,7 @@ class Test_sww(unittest.TestCase):
         assert num.allclose(mesh.nodes, domain.get_nodes())
 
         # Check that time has been recovered
-        assert num.allclose(time, list(range(t_end+1)))
+        assert num.allclose(time, range(t_end+1))
 
         # Check that quantities have been recovered
         # (sww files use single precision)
@@ -560,7 +555,7 @@ class Test_sww(unittest.TestCase):
 
 
         # Check that time has been recovered
-        assert num.allclose(time, list(range(t_end+1)))
+        assert num.allclose(time, range(t_end+1))
 
         z=domain.get_quantity('elevation').get_values(location='vertices').flatten()
         
@@ -653,7 +648,7 @@ class Test_sww(unittest.TestCase):
 
 
         # Check that time has been recovered
-        assert num.allclose(time, list(range(t_end+1)))
+        assert num.allclose(time, range(t_end+1))
 
         z=domain.get_quantity('elevation').get_values(location='vertices').flatten()
         
@@ -685,7 +680,7 @@ class Test_sww(unittest.TestCase):
         assert len(points2)==len(coordinates2)
         for i in range(len(coordinates2)):
             coordinate = tuple(coordinates2[i])
-            assert coordinate in points2
+            assert points2.has_key(coordinate)
             points2[coordinate]=i
 
         for triangle in volumes1:
@@ -722,7 +717,7 @@ class Test_sww(unittest.TestCase):
         y = fid.variables['y'][:]
         fid.close()
 
-        assert num.allclose(num.array(list(zip(x,y))), points_utm)
+        assert num.allclose(num.array(map(None, x,y)), points_utm)
         os.remove(filename)
 
         
@@ -761,7 +756,7 @@ class Test_sww(unittest.TestCase):
         assert results_georef == Geo_reference(DEFAULT_ZONE, 0, 0)
         fid.close()
 
-        assert num.allclose(num.array(list(zip(x,y))), points_utm)
+        assert num.allclose(num.array(map(None, x,y)), points_utm)
         os.remove(filename)
 
         
@@ -799,7 +794,7 @@ class Test_sww(unittest.TestCase):
 
         absolute = Geo_reference(56, 0,0)
         assert num.allclose(num.array(
-            absolute.change_points_geo_ref(list(zip(x,y)),
+            absolute.change_points_geo_ref(map(None, x,y),
                                            new_origin)),points_utm)
         
         os.remove(filename)
@@ -837,7 +832,7 @@ class Test_sww(unittest.TestCase):
         assert results_georef == points_georeference
         fid.close()
 
-        assert num.allclose(num.array(list(zip(x,y))), points_utm)
+        assert num.allclose(num.array(map(None, x,y)), points_utm)
         os.remove(filename)
         
     def test_triangulation_2_geo_refs(self):
@@ -876,7 +871,7 @@ class Test_sww(unittest.TestCase):
 
         absolute = Geo_reference(56, 0,0)
         assert num.allclose(num.array(
-            absolute.change_points_geo_ref(list(zip(x,y)),
+            absolute.change_points_geo_ref(map(None, x,y),
                                            new_origin)),points_utm)
         os.remove(filename)
 

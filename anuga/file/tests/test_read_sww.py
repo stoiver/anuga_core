@@ -4,9 +4,6 @@
 # This file was reverted from changeset:5484 to changeset:5470 on 10th July 
 # by Ole.
 
-from __future__ import division
-from builtins import str
-from past.utils import old_div
 import unittest
 import copy
 import os
@@ -58,8 +55,8 @@ class Test_read_sww(unittest.TestCase):
         
         inc = 0.05 # Elevation increment
 
-        points, vertices, boundary = rectangular_cross(int(old_div(length,dx)), 
-                                                       int(old_div(width,dy)),
+        points, vertices, boundary = rectangular_cross(int(length/dx), 
+                                                       int(width/dy),
                                                        len1=length, 
                                                        len2=width)
         domain = Domain(points, vertices, boundary)
@@ -130,14 +127,14 @@ class Test_read_sww(unittest.TestCase):
 
         assert num.allclose(sww_file.get_bounds(), [0.0, length, 0.0, width])
 
-        assert 'stage'     in list(sww_file.quantities.keys())
-        assert 'friction'  in list(sww_file.quantities.keys())
-        assert 'elevation' in list(sww_file.quantities.keys())
-        assert 'xmomentum' in list(sww_file.quantities.keys())
-        assert 'ymomentum' in list(sww_file.quantities.keys())
+        assert 'stage'     in sww_file.quantities.keys()
+        assert 'friction'  in sww_file.quantities.keys()
+        assert 'elevation' in sww_file.quantities.keys()
+        assert 'xmomentum' in sww_file.quantities.keys()
+        assert 'ymomentum' in sww_file.quantities.keys()
 
 
-        for qname, q in list(sww_file.read_quantities(last_frame_number).items()):
+        for qname, q in sww_file.read_quantities(last_frame_number).items():
             
             #print qname
             #print num.linalg.norm(num.abs((domain.get_quantity(qname).get_values()-q).flatten()), ord=1)
@@ -149,8 +146,8 @@ class Test_read_sww(unittest.TestCase):
         #-----------------------------------------
         sww_file.read_quantities(last_frame_number-1)
 
-        points, vertices, boundary = rectangular_cross(int(old_div(length,dx)), 
-                                                       int(old_div(width,dy)),
+        points, vertices, boundary = rectangular_cross(int(length/dx), 
+                                                       int(width/dy),
                                                        len1=length, 
                                                        len2=width)
         new_domain = Domain(points, vertices, boundary)
@@ -158,7 +155,7 @@ class Test_read_sww(unittest.TestCase):
 
         new_domain.set_store_vertices_uniquely(True)
 
-        for qname, q in list(sww_file.read_quantities(last_frame_number-1).items()):
+        for qname, q in sww_file.read_quantities(last_frame_number-1).items():
             new_domain.set_quantity(qname, q)    
 
         #------------------------------------------------------------------
@@ -214,8 +211,8 @@ class Test_read_sww(unittest.TestCase):
         
         inc = 0.05 # Elevation increment
 
-        points, vertices, boundary = rectangular_cross(int(old_div(length,dx)), 
-                                                       int(old_div(width,dy)),
+        points, vertices, boundary = rectangular_cross(int(length/dx), 
+                                                       int(width/dy),
                                                        len1=length, 
                                                        len2=width)
         domain = Domain(points, vertices, boundary)
@@ -290,14 +287,14 @@ class Test_read_sww(unittest.TestCase):
         #print 50*"="
         #print sww_file.quantities.keys()
 
-        assert 'stage'     in list(sww_file.quantities.keys())
-        assert 'friction'  in list(sww_file.quantities.keys())
-        assert 'elevation' in list(sww_file.quantities.keys())
-        assert 'xmomentum' in list(sww_file.quantities.keys())
-        assert 'ymomentum' in list(sww_file.quantities.keys())
+        assert 'stage'     in sww_file.quantities.keys()
+        assert 'friction'  in sww_file.quantities.keys()
+        assert 'elevation' in sww_file.quantities.keys()
+        assert 'xmomentum' in sww_file.quantities.keys()
+        assert 'ymomentum' in sww_file.quantities.keys()
 
 
-        for qname, q in list(sww_file.read_quantities(last_frame_number).items()):
+        for qname, q in sww_file.read_quantities(last_frame_number).items():
             assert num.allclose(domain.get_quantity(qname).get_values(), q)
 
         #-----------------------------------------
@@ -305,8 +302,8 @@ class Test_read_sww(unittest.TestCase):
         #-----------------------------------------
         sww_file.read_quantities(last_frame_number-1)
 
-        points, vertices, boundary = rectangular_cross(int(old_div(length,dx)), 
-                                                       int(old_div(width,dy)),
+        points, vertices, boundary = rectangular_cross(int(length/dx), 
+                                                       int(width/dy),
                                                        len1=length, 
                                                        len2=width)
         new_domain = Domain(points, vertices, boundary)
@@ -314,7 +311,7 @@ class Test_read_sww(unittest.TestCase):
 
         new_domain.set_store_vertices_uniquely(True)
 
-        for qname, q in list(sww_file.read_quantities(last_frame_number-1).items()):
+        for qname, q in sww_file.read_quantities(last_frame_number-1).items():
             new_domain.set_quantity(qname, q)    
 
         #------------------------------------------------------------------

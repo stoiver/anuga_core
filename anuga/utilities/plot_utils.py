@@ -46,20 +46,12 @@
           filenames, and ensure that in each case, the output will be as desired.
 
 """
-from __future__ import print_function
-from __future__ import division
-from builtins import zip
-from past.builtins import str
-from builtins import range
-from past.utils import old_div
-from builtins import object
-from future.utils import raise_
 from anuga.file.netcdf import NetCDFFile
 import numpy
 import copy
 import matplotlib.cm
 
-class combine_outputs(object):
+class combine_outputs:
     """
     Read in a list of filenames, and combine all their outputs into a single object.
     e.g.:
@@ -85,7 +77,7 @@ class combine_outputs(object):
         #
 
         for i, filename in enumerate(filename_list):
-            if verbose: print(i, filename)
+            if verbose: print i, filename
             # Store output from filename
             p_tmp = get_output(filename, minimum_allowed_height,verbose=verbose)
             if(i==0):
@@ -131,7 +123,7 @@ def sort_sww_filenames(sww_wildcard):
     filenames=glob.glob(sww_wildcard)
     
     # Extract time from filenames
-    file_time=list(range(len(filenames))) # Predefine
+    file_time=range(len(filenames)) # Predefine
      
     for i,filename in enumerate(filenames):
         filesplit=filename.rsplit('_time_')
@@ -140,15 +132,15 @@ def sort_sww_filenames(sww_wildcard):
         else:
             file_time[i]=0         
     
-    name_and_time=list(zip(file_time,filenames))
+    name_and_time=zip(file_time,filenames)
     name_and_time.sort() # Sort by file_time
     
-    output_times, output_names = list(zip(*name_and_time))
+    output_times, output_names = zip(*name_and_time)
     
     return list(output_names)
 
 #####################################################################
-class get_output(object):
+class get_output:
     """Read in data from an .sww file in a convenient form
        e.g. 
         p = plot_utils.get_output('channel3.sww', minimum_allowed_height=0.01)
@@ -239,7 +231,7 @@ def _read_output(filename, minimum_allowed_height, timeSlices):
 
     # Treat specification of timeSlices
     if(timeSlices=='all'):
-        inds=list(range(len(time)))
+        inds=range(len(time))
     elif(timeSlices=='last'):
         inds=[len(time)-1]
     elif(timeSlices=='max'):
@@ -274,7 +266,7 @@ def _read_output(filename, minimum_allowed_height, timeSlices):
     vols=fid.variables['volumes'][:]
 
     # Friction if it exists
-    if('friction' in fid.variables):
+    if(fid.variables.has_key('friction')):
         friction=getInds(fid.variables['friction'],timeSlices=inds) 
     else:
         # Set friction to nan if it is not stored
@@ -283,10 +275,10 @@ def _read_output(filename, minimum_allowed_height, timeSlices):
     # Trick to treat the case where inds == 'max'
     inds2 = copy.copy(inds)
     if inds == 'max':
-        inds2 = list(range(len(fid.variables['time'])))
+        inds2 = range(len(fid.variables['time']))
     
     # Get height
-    if('height' in fid.variables):
+    if(fid.variables.has_key('height')):
         height = fid.variables['height'][inds2]
     else:
         # Back calculate height if it is not stored
@@ -333,7 +325,7 @@ def _read_output(filename, minimum_allowed_height, timeSlices):
 
 ######################################################################################
 
-class get_centroids(object):
+class get_centroids:
     """
     Extract centroid values from the output of get_output, OR from a
         filename  
@@ -377,7 +369,7 @@ def _getCentVar(fid, varkey_c, time_indices, absMax=False,  vols = None, space_i
         vols1 = vols[:,1]
         vols2 = vols[:,2]
 
-    if((varkey_c in fid.variables)==False):
+    if(fid.variables.has_key(varkey_c)==False):
         # It looks like centroid values are not stored
         # In this case, compute centroid values from vertex values
         assert (vols is not None), "Must specify vols since centroid quantity is not stored"
@@ -483,13 +475,13 @@ def _get_centroid_values(p, velocity_extrapolation, verbose, timeSlices,
     if(timeSlices is None):
         if(pIsFile):
             # Assume all timeSlices
-            timeSlices=list(range(nts))
+            timeSlices=range(nts)
         else:
             timeSlices=copy.copy(p.timeSlices)
     else:
         # Treat word-based special cases
         if(timeSlices is 'all'):
-            timeSlices=list(range(nts))
+            timeSlices=range(nts)
         if(timeSlices is 'last'):
             timeSlices=[nts-1]
 
@@ -502,7 +494,7 @@ def _get_centroid_values(p, velocity_extrapolation, verbose, timeSlices,
 
     # Treat specification of timeSlices
     if(timeSlices=='all'):
-        inds=list(range(len(time)))
+        inds=range(len(time))
     elif(timeSlices=='last'):
         inds=[len(time)-1]
     elif(timeSlices=='max'):
@@ -546,14 +538,14 @@ def _get_centroid_values(p, velocity_extrapolation, verbose, timeSlices,
     # Trick to treat the case where inds == 'max'
     inds2 = copy.copy(inds)
     if inds == 'max':
-        inds2 = list(range(len(fid.variables['time'])))
+        inds2 = range(len(fid.variables['time']))
    
     # height
     height_cent= stage_cent + 0.
     for i in range(stage_cent.shape[0]):
         height_cent[i,:] = stage_cent[i,:] - elev_cent
 
-    if 'xmomentum_c' in fid.variables:
+    if fid.variables.has_key('xmomentum_c'):
         # The following commented out lines seem to only work on
         # some numpy/netcdf versions. So we loop
         #xmom_cent = fid.variables['xmomentum_c'][inds2]
@@ -564,7 +556,7 @@ def _get_centroid_values(p, velocity_extrapolation, verbose, timeSlices,
         for i in range(len(inds2)):
             xmom_cent[i,:] = fid.variables['xmomentum_c'][inds2[i]]
             ymom_cent[i,:] = fid.variables['ymomentum_c'][inds2[i]]
-            if 'height_c' in fid.variables:
+            if fid.variables.has_key('height_c'):
                 height_c_tmp[i,:] = fid.variables['height_c'][inds2[i]]
             else:
                 height_c_tmp[i,:] = fid.variables['stage_c'][inds2[i]] - elev_cent
@@ -708,7 +700,7 @@ def near_transect(p, point1, point2, tol=1.):
     # Find line equation a*x + b*y + c = 0
     # based on y=gradient*x +intercept
     if x1!=x2:
-        gradient= old_div((y2-y1),(x2-x1))
+        gradient= (y2-y1)/(x2-x1)
         intercept = y1 - gradient*x1
         #
         a = -gradient
@@ -731,8 +723,8 @@ def near_transect(p, point1, point2, tol=1.):
     g1x = x2-x1 
     g1y = y2-y1
     g1_norm = (g1x**2 + g1y**2)**0.5
-    g1x=old_div(g1x,g1_norm)
-    g1y=old_div(g1y,g1_norm)
+    g1x=g1x/g1_norm
+    g1y=g1y/g1_norm
     
     g2x = p.x[near_points] - x1
     g2y = p.y[near_points] - y1
@@ -753,7 +745,7 @@ def triangle_areas(p, subset=None):
     # subset = vector of centroid indices to include in the computation. 
 
     if(subset is None):
-        subset=list(range(len(p.vols[:,0])))
+        subset=range(len(p.vols[:,0]))
     
     x0=p.x[p.vols[subset,0]]
     x1=p.x[p.vols[subset,1]]
@@ -779,7 +771,7 @@ def water_volume(p, p2, per_unit_area=False, subset=None):
     # Compute the water volume from p(vertex values) and p2(centroid values)
 
     if(subset is None):
-        subset=list(range(len(p2.x)))
+        subset=range(len(p2.x))
 
     l=len(p2.time)
     area=triangle_areas(p, subset=subset)
@@ -796,7 +788,7 @@ def water_volume(p, p2, per_unit_area=False, subset=None):
         volume[i]=volume[i]+((-p2.elev[subset])*(p2.stage[i,subset]>p2.elev[subset])*area).sum()
     
     if(per_unit_area):
-        volume=old_div(volume,total_area) 
+        volume=volume/total_area 
     
     return volume
 
@@ -905,10 +897,10 @@ def make_grid(data, lats, lons, fileName, EPSG_CODE=None, proj4string=None,
     try:
         import osgeo.gdal as gdal
         import osgeo.osr as osr
-    except ImportError as e:
+    except ImportError, e:
         msg='Failed to import gdal/ogr modules --'\
         + 'perhaps gdal python interface is not installed.'
-        raise_(ImportError, msg)
+        raise ImportError, msg
     
 
 
@@ -933,7 +925,7 @@ def make_grid(data, lats, lons, fileName, EPSG_CODE=None, proj4string=None,
     elif(EPSG_CODE is not None):
         srs.ImportFromEPSG(EPSG_CODE)
     else:
-        raise Exception('No spatial reference information given')
+        raise Exception, 'No spatial reference information given'
 
 
     ds.SetProjection(srs.ExportToWkt())
@@ -1006,10 +998,10 @@ def Make_Geotif(swwFile=None,
     try:
         import osgeo.gdal as gdal
         import osgeo.osr as osr
-    except ImportError as e:
+    except ImportError, e:
         msg = 'Failed to import gdal/ogr modules --'\
         + 'perhaps gdal python interface is not installed.'
-        raise_(ImportError, msg)
+        raise ImportError, msg
 
     # Check whether swwFile is an array, and if so, redefine various inputs to
     # make the code work
@@ -1020,7 +1012,7 @@ def Make_Geotif(swwFile=None,
 
     if(((EPSG_CODE is None) & (proj4string is None) )|
        ((EPSG_CODE is not None) & (proj4string is not None))):
-        raise Exception('Must specify EITHER an integer EPSG_CODE describing the file projection, OR a proj4string')
+        raise Exception, 'Must specify EITHER an integer EPSG_CODE describing the file projection, OR a proj4string'
 
 
     # Make output_dir
@@ -1033,7 +1025,7 @@ def Make_Geotif(swwFile=None,
         # Read in ANUGA outputs
             
         if(verbose):
-            print('Reading sww File ...')
+            print 'Reading sww File ...'
         p2 = get_centroids(swwFile, velocity_extrapolation, timeSlices=myTimeStep,
             minimum_allowed_height=min_allowed_height)
         xllcorner = p2.xllcorner
@@ -1042,30 +1034,30 @@ def Make_Geotif(swwFile=None,
         myTimeStep_Orig = myTimeStep
         # Now, myTimeStep just holds indices we want to plot in p2
         if(myTimeStep != 'max'):
-            myTimeStep = list(range(len(p2.time)))
+            myTimeStep = range(len(p2.time))
 
         # Ensure myTimeStep is a list
         if type(myTimeStep) != list:
             myTimeStep = [myTimeStep]
 
         if(verbose):
-            print('Extracting required data ...')
+            print 'Extracting required data ...'
         # Get ANUGA points
         swwX = p2.x + xllcorner
         swwY = p2.y + yllcorner
     else:
         # Get the point data from the 3-column array
         if(xyzPoints.shape[1] != 3):
-            raise Exception('If an array is passed, it must have exactly 3 columns')
+            raise Exception, 'If an array is passed, it must have exactly 3 columns'
         if(len(output_quantities) != 1):
-            raise Exception('Can only have 1 output quantity when passing an array')
+            raise Exception, 'Can only have 1 output quantity when passing an array'
         swwX = xyzPoints[:,0]
         swwY = xyzPoints[:,1]
         myTimeStep = ['pointData']
 
     # Grid for meshing
     if(verbose):
-        print('Computing grid of output locations...')
+        print 'Computing grid of output locations...'
     # Get points where we want raster cells
     if(lower_left is None):
         lower_left = [swwX.min(), swwY.min()]
@@ -1081,7 +1073,7 @@ def Make_Geotif(swwFile=None,
     gridX, gridY = scipy.meshgrid(desiredX, desiredY)
 
     if(verbose):
-        print('Making interpolation functions...')
+        print 'Making interpolation functions...'
     swwXY = scipy.array([swwX[:],swwY[:]]).transpose()
 
     # Get function to interpolate quantity onto gridXY_array
@@ -1112,7 +1104,7 @@ def Make_Geotif(swwFile=None,
             for i in range(k_nearest_neighbours):
                 denom += nn_wts[:,i]
                 num += quantity[nn_inds[:,i]]*nn_wts[:,i]
-            return (old_div(num,denom))
+            return (num/denom)
 
     if bounding_polygon is not None:
         # Find points to exclude (i.e. outside the bounding polygon)
@@ -1130,9 +1122,9 @@ def Make_Geotif(swwFile=None,
     # Loop over all output quantities and produce the output
     for myTSindex, myTSi in enumerate(myTimeStep):
         if(verbose):
-            print('Reduction = ', myTSi)
+            print 'Reduction = ', myTSi
         for output_quantity in output_quantities:
-            if (verbose): print(output_quantity)
+            if (verbose): print output_quantity
 
             if(myTSi is not 'max'):
                 myTS = myTSi
@@ -1183,7 +1175,7 @@ def Make_Geotif(swwFile=None,
                 output_name = output_dir+'/'+'PointData_'+output_quantity+'.tif'
 
             if(verbose):
-                print('Making raster ...')
+                print 'Making raster ...'
             gridq.shape = (len(desiredY),len(desiredX))
             make_grid(scipy.flipud(gridq), desiredY, desiredX, output_name, EPSG_CODE=EPSG_CODE, 
                       proj4string=proj4string, creation_options=creation_options)

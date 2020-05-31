@@ -24,7 +24,6 @@ Generate C code coverage listing under build/lcov/:
     $ python runtests.py --lcov-html
 
 """
-from __future__ import print_function
 
 #
 # This is a generic test runner script for projects using Numpy's test

@@ -1,13 +1,10 @@
-from __future__ import absolute_import
-from __future__ import division
-from past.utils import old_div
 from anuga.geometry.polygon import inside_polygon, is_inside_polygon, line_intersect
 from anuga.config import velocity_protection, g
 import math
 
 import numpy as num
 
-from . import parallel_inlet
+import parallel_inlet
 
 class Parallel_Inlet_enquiry(parallel_inlet.Parallel_Inlet):
     """Contains information associated with each inlet plus an enquiry point
@@ -32,7 +29,7 @@ class Parallel_Inlet_enquiry(parallel_inlet.Parallel_Inlet):
         parallel_inlet.Parallel_Inlet.__init__(self, domain, polyline,
                                                 master_proc = master_proc, procs = procs, verbose=verbose)
 
-        from anuga.utilities import parallel_abstraction as pypar
+        import pypar
 
         self.enquiry_pt = enquiry_pt
         self.invert_elevation = invert_elevation
@@ -159,8 +156,8 @@ class Parallel_Inlet_enquiry(parallel_inlet.Parallel_Inlet):
 
         if self.enquiry_index >= 0:
             depth = self.get_enquiry_water_depth()
-            u = old_div(depth*self.get_enquiry_xmom(),(depth**2 + velocity_protection))
-            v = old_div(depth*self.get_enquiry_ymom(),(depth**2 + velocity_protection))
+            u = depth*self.get_enquiry_xmom()/(depth**2 + velocity_protection)
+            v = depth*self.get_enquiry_ymom()/(depth**2 + velocity_protection)
 
             return u, v
         else:
@@ -172,7 +169,7 @@ class Parallel_Inlet_enquiry(parallel_inlet.Parallel_Inlet):
 
         if self.enquiry_index >= 0:
             depth = self.get_enquiry_water_depth()
-            return old_div(depth*self.get_enquiry_xmom(),(depth**2 + velocity_protection))
+            return depth*self.get_enquiry_xmom()/(depth**2 + velocity_protection)
         else:
             return None
 
@@ -181,7 +178,7 @@ class Parallel_Inlet_enquiry(parallel_inlet.Parallel_Inlet):
 
         if self.enquiry_index >= 0:
             depth = self.get_enquiry_water_depth()
-            return old_div(depth*self.get_enquiry_ymom(),(depth**2 + velocity_protection))
+            return depth*self.get_enquiry_ymom()/(depth**2 + velocity_protection)
         else:
             return None
 
@@ -200,7 +197,7 @@ class Parallel_Inlet_enquiry(parallel_inlet.Parallel_Inlet):
         # WARNING: Must be called by processor containing inlet enquiry point to have effect
 
         if self.enquiry_index >= 0:
-            return old_div(0.5*self.get_enquiry_speed()**2,g)
+            return 0.5*self.get_enquiry_speed()**2/g
         else:
             return None
 

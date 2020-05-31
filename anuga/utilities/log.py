@@ -30,12 +30,7 @@ introduced in python2.5.  If running on earlier versions, the following
 features are disabled:
     . Calling module name + line number
 '''
-from __future__ import division
 
-from future import standard_library
-standard_library.install_aliases()
-from builtins import str
-from past.utils import old_div
 import os
 import sys
 import traceback
@@ -267,14 +262,14 @@ def resource_usage(level=logging.INFO):
             return _VmB('VmStk:') - since
 
         msg = ('Resource usage: memory=%.1fMB resident=%.1fMB stacksize=%.1fMB'
-               % (old_div(memory(),_scale['MB']), old_div(resident(),_scale['MB']),
-                  old_div(stacksize(),_scale['MB'])))
+               % (memory()/_scale['MB'], resident()/_scale['MB'],
+                  stacksize()/_scale['MB']))
         log(msg, level)
     else:
         # Windows code from: http://code.activestate.com/recipes/511491/
         try:
             import ctypes
-            import winreg
+            import _winreg
         except:
             log(level, 'Windows resource usage not available')
             return
@@ -299,8 +294,8 @@ def resource_usage(level=logging.INFO):
         kernel32.GlobalMemoryStatusEx(ctypes.byref(memoryStatusEx))
 
         msg = ('Resource usage: total memory=%.1fMB free memory=%.1fMB'
-               % (old_div(memoryStatusEx.ullTotalPhys,_scale['MB']),
-                  old_div(memoryStatusEx.ullAvailPhys,_scale['MB'])))
+               % (memoryStatusEx.ullTotalPhys/_scale['MB'],
+                  memoryStatusEx.ullAvailPhys/_scale['MB']))
         log(msg, level)
 
 def CurrentDateTime():
@@ -355,18 +350,18 @@ def resource_usage_timing(level=logging.INFO, prefix =""):
             return _VmB('VmStk:') - since
 
         msg = ('Resource usage: memory=%.1fMB resident=%.1fMB stacksize=%.1fMB'
-               % (old_div(memory(),_scale['MB']), old_div(resident(),_scale['MB']),
-                  old_div(stacksize(),_scale['MB'])))
+               % (memory()/_scale['MB'], resident()/_scale['MB'],
+                  stacksize()/_scale['MB']))
         log(msg, level)
         timingInfo('sys_platform, ' + sys.platform)
-        timingInfo(prefix + 'memory, ' + str(old_div(memory(),_scale['MB'])))
-        timingInfo(prefix + 'resident, ' + str(old_div(resident(),_scale['MB'])))
-        timingInfo(prefix + 'stacksize, ' + str(old_div(stacksize(),_scale['MB'])))
+        timingInfo(prefix + 'memory, ' + str(memory()/_scale['MB']))
+        timingInfo(prefix + 'resident, ' + str(resident()/_scale['MB']))
+        timingInfo(prefix + 'stacksize, ' + str(stacksize()/_scale['MB']))
     else:
         # Windows code from: http://code.activestate.com/recipes/511491/
         try:
             import ctypes
-            import winreg
+            import _winreg
         except:
             log(level, 'Windows resource usage not available')
             return
@@ -391,12 +386,12 @@ def resource_usage_timing(level=logging.INFO, prefix =""):
         kernel32.GlobalMemoryStatusEx(ctypes.byref(memoryStatusEx))
 
         msg = ('Resource usage: total memory=%.1fMB free memory=%.1fMB'
-               % (old_div(memoryStatusEx.ullTotalPhys,_scale['MB']),
-                  old_div(memoryStatusEx.ullAvailPhys,_scale['MB'])))
+               % (memoryStatusEx.ullTotalPhys/_scale['MB'],
+                  memoryStatusEx.ullAvailPhys/_scale['MB']))
         log(msg, level)
         timingInfo('sys_platform, ' + sys.platform)
-        timingInfo(prefix + 'total_memory, ' + str(old_div(memoryStatusEx.ullTotalPhys,_scale['MB'])))
-        timingInfo(prefix + 'free_memory, ' + str(old_div(memoryStatusEx.ullAvailPhys,_scale['MB'])))
+        timingInfo(prefix + 'total_memory, ' + str(memoryStatusEx.ullTotalPhys/_scale['MB']))
+        timingInfo(prefix + 'free_memory, ' + str(memoryStatusEx.ullAvailPhys/_scale['MB']))
 
 
 ################################################################################

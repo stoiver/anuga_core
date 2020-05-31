@@ -1,6 +1,3 @@
-from __future__ import print_function
-from __future__ import division
-from past.utils import old_div
 import anuga
 import math
 import numpy
@@ -55,11 +52,11 @@ class Internal_boundary_operator(anuga.Structure_operator):
                  verbose=True):
 
         if verbose:
-            print('########################################')
-            print('INTERNAL BOUNDARY OPERATOR')
-            print('THIS IS EXPERIMENTAL')
-            print('SUBJECT TO CHANGE WITHOUT NOTICE')
-            print('########################################')
+            print '########################################'
+            print 'INTERNAL BOUNDARY OPERATOR'
+            print 'THIS IS EXPERIMENTAL'
+            print 'SUBJECT TO CHANGE WITHOUT NOTICE'
+            print '########################################'
 
         # Since no barrel_velocity is computed we cannot use_momentum_jet
         use_momentum_jet = False
@@ -173,7 +170,7 @@ class Internal_boundary_operator(anuga.Structure_operator):
 
         # ts is used for smoothing discharge and delta_total_energy
         if self.domain.timestep > 0.0:
-            ts = old_div(self.domain.timestep,max(self.domain.timestep, self.smoothing_timescale, 1.0e-30))
+            ts = self.domain.timestep/max(self.domain.timestep, self.smoothing_timescale, 1.0e-30)
         else:
             ts = 1.0
 
@@ -278,7 +275,7 @@ class Internal_boundary_operator(anuga.Structure_operator):
 
         # Use time-smoothed discharge if smoothing_timescale > 0.
         if dt > 0.0:
-            ts = old_div(dt,max(dt, self.smoothing_timescale, 1.0e-30))
+            ts = dt/max(dt, self.smoothing_timescale, 1.0e-30)
         else:
             # No smoothing
             ts = 1.0

@@ -1,7 +1,6 @@
-from builtins import object
 from types import FloatType
 from vtk import vtkActor
-class Feature(object):
+class Feature:
     def __init__(self, colour=(0.5, 0.5, 0.5), opacity=1.0, dynamic=False):
         '''
         Parameters:

@@ -12,10 +12,6 @@ have an undefined value.
 
 """
 
-from builtins import str
-from six import string_types
-from builtins import range
-from past.builtins import basestring
 import numpy as num
 
 from anuga.geospatial_data.geospatial_data import ensure_absolute
@@ -138,7 +134,8 @@ def file_function(filename,
                              compression=False,                  
                              verbose=verbose)
     else:
-        f, starttime = _file_function(*args, **kwargs)
+        f, starttime = apply(_file_function,
+                             args, kwargs)
 
     #FIXME (Ole): Pass cache arguments, such as compression, in some sort of
     #structure
@@ -178,7 +175,7 @@ def _file_function(filename,
     See file_function for documentatiton
     """
 
-    assert isinstance(filename,string_types) or isinstance(filename, str),\
+    assert isinstance(filename,str) or isinstance(filename, unicode),\
                'First argument to File_function must be a string'
 
     #try:
@@ -253,7 +250,7 @@ def get_netcdf_file_function(filename,
 
     fid = NetCDFFile(filename, netcdf_mode_r)
 
-    if isinstance(quantity_names, string_types):
+    if isinstance(quantity_names, basestring):
         quantity_names = [quantity_names]        
 
     if quantity_names is None or len(quantity_names) < 1:
@@ -271,7 +268,7 @@ def get_netcdf_file_function(filename,
     # are present in file 
     missing = []
     for quantity in ['time'] + quantity_names:
-        if quantity not in fid.variables:
+        if not fid.variables.has_key(quantity):
             missing.append(quantity)
 
     if len(missing) > 0:
@@ -283,7 +280,7 @@ def get_netcdf_file_function(filename,
     # Decide whether this data has a spatial dimension
     spatial = True
     for quantity in ['x', 'y']:
-        if quantity not in fid.variables:
+        if not fid.variables.has_key(quantity):
             spatial = False
 
     if filename[-3:] == 'tms' and spatial is True:

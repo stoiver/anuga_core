@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 '''Function to get terminal width, Windows or Linux.'''
-from __future__ import print_function
 
 ######
 # This code was found at http://code.activestate.com/recipes/440694/
@@ -58,4 +57,4 @@ def terminal_width():
     return width
 
 if __name__ == '__main__':
-    print('terminal width=%d' % terminal_width())
+    print 'terminal width=%d' % terminal_width()

@@ -1,6 +1,3 @@
-from past.builtins import cmp
-from builtins import zip
-from builtins import str
 import csv
 import unittest, os
 import tempfile
@@ -123,7 +120,7 @@ class Test_Exposure(unittest.TestCase):
         os.remove(file_name)
         #print "e4",e4._attribute_dic 
         #print "e2",e2._attribute_dic 
-        self.assertTrue(cmp(e4,e2)!=0,
+        self.assertTrue(cmp(e4,e2)<>0,
                         'FAILED!')
         
         file_name = tempfile.mktemp(".csv")
@@ -137,7 +134,7 @@ class Test_Exposure(unittest.TestCase):
         e5 = Exposure(file_name)
         os.remove(file_name)
 
-        self.assertTrue(cmp(e3,e5)!=0,
+        self.assertTrue(cmp(e3,e5)<>0,
                         'FAILED!')
         
     def test_exposure_csv_saving(self):
@@ -253,7 +250,7 @@ class Test_Exposure(unittest.TestCase):
         e1.save(file_name = file_name2)
         e2 = Exposure(file_name2)
         returned_values = e2.get_column(new_title)
-        for returned, new in zip(returned_values, new_values):
+        for returned, new in map(None, returned_values, new_values):
             self.assertTrue(returned == str(new), ' Error!')
         #self.assertTrue(returned_values == new_values, ' Error!')       
         os.remove(file_name2)

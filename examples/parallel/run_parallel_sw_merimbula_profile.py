@@ -3,7 +3,7 @@
 
    run using command like:
 
-   mpiexec -np m python run_parallel_sw_merimbula.py
+   mpirun -np m python run_parallel_sw_merimbula.py
 
    where m is the number of processors to be used.
    

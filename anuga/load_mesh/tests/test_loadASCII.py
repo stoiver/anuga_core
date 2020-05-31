@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-from builtins import zip
-from builtins import str
 import tempfile
 import unittest
 import os
@@ -384,11 +382,6 @@ showme1.0 0.0 10.0 \n\
         loaded_dict = loadASCII._read_msh_file(fileName)
         os.remove(fileName)
         dict = self.dict
-
-        #print()
-        #print(dict)
-        #print()
-        #print(loaded_dict)
         self.check_mesh_dicts(loaded_dict, dict, 'test_read_write_msh_file1')
 
     def test_read_write_msh_fileII(self):
@@ -468,7 +461,7 @@ showme1.0 0.0 10.0 \n\
 
         assert num.allclose(num.array(dict['segments']),
                             num.array(loaded_dict['segments']))
-        for ob, ldob in zip(dict['triangle_tags'],
+        for ob, ldob in map(None, dict['triangle_tags'],
                             loaded_dict['triangle_tags']):
             msg = ('ob=\n%s\nshould be same as ldob=\n%s' % (str(ob), str(ldob)))
             self.assertTrue(ob == ldob,
@@ -485,7 +478,7 @@ showme1.0 0.0 10.0 \n\
         assert num.allclose(num.array(dict['triangle_neighbors']),
                             num.array(loaded_dict['triangle_neighbors']))
 
-        for seg, ldseg in zip(dict['segment_tags'],
+        for seg, ldseg in map(None, dict['segment_tags'],
                               loaded_dict['segment_tags']):
             msg = ('seg=\n"%s"\nshould be same as ldseg=\n"%s"'
                    % (str(seg), str(ldseg)))
@@ -510,7 +503,7 @@ showme1.0 0.0 10.0 \n\
         except KeyError:        #??# 2 lines below??
             msg = ("'dict' has no key 'geo_reference' "
                    "but loaded_dict['geo_reference'] isn't None")
-            self.assertTrue('geo_reference' not in dict and
+            self.assertTrue(not dict.has_key('geo_reference') and
                                 loaded_dict['geo_reference'] is None,
                             fail_string + ' failed\n' + msg)
 

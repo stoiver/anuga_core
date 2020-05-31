@@ -1,10 +1,6 @@
-from __future__ import print_function
-from future import standard_library
-standard_library.install_aliases()
-from builtins import object
 from os.path import splitext
-from tkinter import Tk, Button, Frame, Label, Scale
-from tkinter import N, E, S, W, HORIZONTAL, VERTICAL
+from Tkinter import Tk, Button, Frame, Label, Scale
+from Tkinter import N, E, S, W, HORIZONTAL, VERTICAL
 from vtk import vtkCellArray, vtkRenderer, vtkWindowToImageFilter
 from vtk import vtkJPEGWriter, vtkPNGWriter, vtkPNMWriter
 from vtk.tk.vtkTkRenderWidget import vtkTkRenderWidget
@@ -223,7 +219,7 @@ class Visualiser(object):
         _, ext = splitext(self.vis_recordPattern)
         try: writer = extmap[ext.lower()]()
         except KeyError:
-            print('ERROR: Can\'t handle %s extension. Recording disabled.' % ext)
+            print 'ERROR: Can\'t handle %s extension. Recording disabled.' % ext
             self.vis_recordPattern = None
             return
 

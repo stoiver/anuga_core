@@ -1,5 +1,11 @@
+#include "Python.h"
+#include "numpy/arrayobject.h"
 #include <stdio.h>
 #include <math.h>
+//#include <malloc.h>
+
+#define DDATA(p) ((double*)(((PyArrayObject *)p)->data))
+#define IDATA(p) ((long*)(((PyArrayObject *)p)->data))
 
 #define MIN(a, b) (((a)<=(b))?(a):(b))
 #define MAX(a, b) (((a)>(b))?(a):(b))
@@ -292,8 +298,7 @@ void _calc_grid_values( double *x, double *y, double *norms,
 	int x_min, x_max, y_min, y_max, point_index;
 	double x_dist, y_dist, x_base, y_base;
 	double sigma0, sigma1, sigma2;
-	double fraction;
-	double intpart;
+	double fraction, intpart;
 	double triangle[6], point[2];
 	double v1[2], v2[2], v3[2];
 	double n1[2], n2[2], n3[2];
@@ -301,7 +306,7 @@ void _calc_grid_values( double *x, double *y, double *norms,
 	EXTENT extent[1];
 
 	
-    x_dist = cell_size;
+        x_dist = cell_size;
 	y_dist = cell_size;
 
 	x_base = 0.0;
@@ -364,7 +369,7 @@ void _calc_grid_values( double *x, double *y, double *norms,
 				// iterate through points within a small region
 				point_index = j*ncol+k;
 
-                //printf("point_index %d %d %d\n",point_index, j, k);
+                                //printf("point_index %d %d %d\n",point_index, j, k);
 
 				point[0] = k*cell_size;
 				point[1] = j*cell_size;
@@ -373,19 +378,19 @@ void _calc_grid_values( double *x, double *y, double *norms,
 							  1, 1.0e-12, 1.0e-12 ) ) {
 					point_sub( point, v2, res);
 					val1 = point_dot( res, n1 );
-                    point_sub( v1, v2 , res);
+                                        point_sub( v1, v2 , res);
 					val2 = point_dot( res, n1 );
 					sigma0 = val2 ? val1/val2 : 0;	
 
-                    point_sub( point, v3, res);
+                                        point_sub( point, v3, res);
 					val1 = point_dot( res, n2 );
-                    point_sub( v2, v3, res);
+                                        point_sub( v2, v3, res);
 					val2 = point_dot( res, n2 );
 					sigma1 = val2 ? val1/val2 : 0;
 
-                    point_sub( point, v1, res);
+                                        point_sub( point, v1, res);
 					val1 = point_dot( res, n3 );
-                    point_sub( v3, v1, res);
+                                        point_sub( v3, v1, res);
 					val2 = point_dot( res, n3 );
 					sigma2 = val2 ? val1/val2 : 0;
 
@@ -400,3 +405,89 @@ void _calc_grid_values( double *x, double *y, double *norms,
 	}
 
 }
+
+static PyObject *calc_grid_values( PyObject *self, PyObject *args )
+{
+	int i, ok, num_tri, num_vert, ncol, nrow, num_norms, num_grid_val;
+	long *volumes; 
+	double nodata_val;
+    double cell_size;
+	double *x, *y;
+    double *norms;
+	double *result;
+	double *grid_val;
+	PyObject *pyobj_x;
+    PyObject *pyobj_y;
+    PyObject *pyobj_norms;
+	PyObject *pyobj_volumes;
+	PyObject *pyobj_result;
+	PyObject *pyobj_grid_val;
+
+	ok = PyArg_ParseTuple( args, "iiddOOOOOO",
+				&nrow,
+				&ncol,
+                &cell_size,
+				&nodata_val, 
+				&pyobj_x,
+                &pyobj_y,
+                &pyobj_norms,
+				&pyobj_volumes, 
+				&pyobj_result,
+				&pyobj_grid_val );
+
+
+
+
+	if( !ok ){
+		fprintf( stderr, "calc_grid_values: argument parsing error\n" );
+		exit(1);
+	}
+
+	// get data from python objects
+	x = DDATA( pyobj_x );
+    y = DDATA( pyobj_y );
+    norms    = DDATA( pyobj_norms );
+	result	 = DDATA( pyobj_result );
+	grid_val = DDATA( pyobj_grid_val );
+	volumes  = IDATA( pyobj_volumes );
+
+
+	num_tri  = ((PyArrayObject*)pyobj_volumes)->dimensions[0];
+	num_vert = ((PyArrayObject*)pyobj_x)->dimensions[0];
+    num_norms = ((PyArrayObject*)pyobj_norms)->dimensions[0];
+    num_grid_val = ((PyArrayObject*)pyobj_grid_val)->dimensions[0];
+
+    //printf("==== %d %d %d %d %d \n",num_norms,num_tri,num_vert,nrow,ncol);
+
+	// init triangle array
+	init_norms( x,y, norms, volumes, num_tri );
+
+
+
+        //printf("+++ %d\n",nrow*ncol);
+	// evaluate grid
+	for ( i = 0 ; i < nrow*ncol; i++ ) 
+		grid_val[i] = nodata_val;
+
+
+
+	_calc_grid_values( x,y, norms, num_vert, volumes, num_tri, \
+				    cell_size, nrow, ncol,   	\
+				    result, grid_val );
+
+
+	return Py_BuildValue("");
+}
+
+static PyMethodDef calc_grid_values_ext_methods[] = {
+	{"calc_grid_values", calc_grid_values, METH_VARARGS},
+	{NULL, NULL}
+};
+
+void initcalc_grid_values_ext( )
+{
+	(void) Py_InitModule( "calc_grid_values_ext", calc_grid_values_ext_methods );
+	
+	import_array( );
+}
+

@@ -11,23 +11,15 @@
    Ole Nielsen, Stephen Roberts, Duncan Gray
    Geoscience Australia
 """
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import division
 
-from builtins import str
-from builtins import range
-from past.builtins import basestring
-from builtins import object
-from past.utils import old_div
 from time import time as walltime
 
 from anuga.abstract_2d_finite_volumes.neighbour_mesh import Mesh
-from .pmesh2domain import pmesh_to_domain
-from .tag_region import Set_tag_region as region_set_tag_region
+from pmesh2domain import pmesh_to_domain
+from tag_region import Set_tag_region as region_set_tag_region
 from anuga.geometry.polygon import inside_polygon
 from anuga.abstract_2d_finite_volumes.util import get_textual_float
-from .quantity import Quantity
+from quantity import Quantity
 import anuga.utilities.log as log
 
 import numpy as num
@@ -36,7 +28,7 @@ import numpy as num
 
 
 
-class Generic_Domain(object):
+class Generic_Domain:
     '''
     Generic computational Domain constructor.
     '''
@@ -245,7 +237,7 @@ class Generic_Domain(object):
         # =0 for ghost
         self.tri_full_flag = num.ones(N, num.int)
         
-        for i in list(self.ghost_recv_dict.keys()):
+        for i in self.ghost_recv_dict.keys():
             id = self.ghost_recv_dict[i][0]
             self.tri_full_flag[id] = 0
 
@@ -254,7 +246,7 @@ class Generic_Domain(object):
 
         # Identify full nodes as those that intersect a full triangle.
 
-        Vol_ids  = old_div(self.vertex_value_indices,3)
+        Vol_ids  = self.vertex_value_indices/3
 
         # want this
         # W = num.repeat(self.tri_full_flag, 3)
@@ -465,7 +457,7 @@ class Generic_Domain(object):
         return self.mesh.statistics(*args, **kwargs)
 
     def print_statistics(self, *args, **kwargs):
-        print(self.statistics(*args, **kwargs))
+        print self.statistics(*args, **kwargs)
         
     def get_extent(self, *args, **kwargs):
         return self.mesh.get_extent(*args, **kwargs)    
@@ -698,7 +690,7 @@ class Generic_Domain(object):
 
         # FIXME: Could we name this a bit more intuitively
         # E.g. set_quantities_from_dictionary
-        for key in list(quantity_dict.keys()):
+        for key in quantity_dict.keys():
             self.set_quantity(key, quantity_dict[key], location='vertices')
 
     def set_quantity(self, name,
@@ -715,7 +707,7 @@ class Generic_Domain(object):
         """
 
         # Do the expression stuff
-        if 'expression' in kwargs:
+        if kwargs.has_key('expression'):
             expression = kwargs['expression']
             del kwargs['expression']
 
@@ -735,7 +727,7 @@ class Generic_Domain(object):
         """
 
         # Do the expression stuff
-        if 'expression' in kwargs:
+        if kwargs.has_key('expression'):
             expression = kwargs['expression']
             Q2 = self.create_quantity_from_expression(expression)
         else:
@@ -759,7 +751,7 @@ class Generic_Domain(object):
         """
 
         # Do the expression stuff
-        if 'expression' in kwargs:
+        if kwargs.has_key('expression'):
             expression = kwargs['expression']
             Q2 = self.create_quantity_from_expression(expression)
         else:
@@ -783,7 +775,7 @@ class Generic_Domain(object):
         """
 
         # Do the expression stuff
-        if 'expression' in kwargs:
+        if kwargs.has_key('expression'):
             expression = kwargs['expression']
             Q2 = self.create_quantity_from_expression(expression)
         else:
@@ -802,7 +794,7 @@ class Generic_Domain(object):
         Any value in the result should be a valid input to get_quantity.
         """
 
-        return list(self.quantities.keys())
+        return self.quantities.keys()
 
     def get_quantity(self, name,
                            location='vertices',
@@ -893,11 +885,11 @@ class Generic_Domain(object):
         else:
             # This is a modification of an already existing map
             # Update map an proceed normally
-            for key in list(boundary_map.keys()):
+            for key in boundary_map.keys():
                 self.boundary_map[key] = boundary_map[key]
 
         # FIXME (Ole): Try to remove the sorting and fix test_mesh.py
-        x = list(self.boundary.keys())
+        x = self.boundary.keys()
         x.sort()
 
         # Loop through edges that lie on the boundary and associate them with
@@ -906,7 +898,7 @@ class Generic_Domain(object):
         for k, (vol_id, edge_id) in enumerate(x):
             tag = self.boundary[(vol_id, edge_id)]
 
-            if tag in self.boundary_map:
+            if self.boundary_map.has_key(tag):
                 B = self.boundary_map[tag]  # Get callable boundary object
 
                 if B is not None:
@@ -975,7 +967,7 @@ class Generic_Domain(object):
         # The order of functions in the list is used.
         tagged_elements = self.get_tagged_elements()
         for function in functions:
-            for tag in list(tagged_elements.keys()):
+            for tag in tagged_elements.keys():
                 function(tag, tagged_elements[tag], self)
 
     def set_quantities_to_be_monitored(self, q,
@@ -1157,7 +1149,7 @@ class Generic_Domain(object):
                 k = 0
                 lower = num.min(speed)
                 for i, a in enumerate(speed):
-                    if i % (old_div(N,10)) == 0 and i != 0:
+                    if i % (N/10) == 0 and i != 0:
                         # For every 10% of the sorted speeds
                         msg += '    %d speeds in [%f, %f]\n' % (i-k, lower, a)
                         lower = a
@@ -1188,7 +1180,7 @@ class Generic_Domain(object):
                 msg += 'had computed speed: %.6f m/s ' % (max_speed)
 
             if max_speed > 0.0:
-                msg += '(timestep=%.6f)\n' % (old_div(radius,max_speed))
+                msg += '(timestep=%.6f)\n' % (radius/max_speed)
             else:
                 msg += '(timestep=%.6f)\n' % (0)
 
@@ -1216,12 +1208,12 @@ class Generic_Domain(object):
         return msg
 
     def print_timestepping_statistics(self, *args, **kwargs):
-        print(self.timestepping_statistics(self, *args, **kwargs))
+        print self.timestepping_statistics(self, *args, **kwargs)
 
 
         
     def print_boundary_statistics(self, quantities=None, tags=None):
-        print(self.boundary_statistics(quantities, tags))
+        print self.boundary_statistics(quantities, tags)
 
     def write_boundary_statistics(self, quantities=None, tags=None):
         log.critical(self.boundary_statistics(quantities, tags))
@@ -1379,7 +1371,7 @@ class Generic_Domain(object):
         else:
             time_interval_start = 0.0
 
-        for quantity_name, info in list(self.quantities_to_be_monitored.items()):
+        for quantity_name, info in self.quantities_to_be_monitored.items():
             msg += '    %s:\n' % quantity_name
 
             msg += '      values since time = %.2f in [%s, %s]\n' \
@@ -1458,7 +1450,7 @@ class Generic_Domain(object):
     def set_starttime(self, time):
         
         if self.evolved_called: 
-            raise Exception("Can't change simulation start time once evolve has been called")
+            raise "Can't change simulation start time once evolve has been called"
         
         self.starttime = float(time)
         self.set_time(0.0)
@@ -1484,7 +1476,7 @@ class Generic_Domain(object):
             import matplotlib.pyplot as plt
             import matplotlib.tri as tri
         except:
-            print("Couldn't import module from matplotlib, probably you need to update matplotlib")
+            print "Couldn't import module from matplotlib, probably you need to update matplotlib"
             raise
 
         vertices = self.get_vertex_coordinates()
@@ -1500,16 +1492,16 @@ class Generic_Domain(object):
 
 
         # Plot full triangles
-        n = int(old_div(len(fx),3))
+        n = int(len(fx)/3)
 
-        triang = num.array(list(range(0,3*n)))
+        triang = num.array(range(0,3*n))
         triang.shape = (n, 3)
         plt.triplot(fx, fy, triang, 'g-')
 
         # Plot ghost triangles
-        n = int(old_div(len(gx),3))
+        n = int(len(gx)/3)
         if n > 0:
-            triang = num.array(list(range(0,3*n)))
+            triang = num.array(range(0,3*n))
             triang.shape = (n, 3)
             plt.triplot(gx, gy, triang, 'b--')
 
@@ -2292,7 +2284,7 @@ class Generic_Domain(object):
             
         #Update of ghost cells
         iproc = self.processor
-        if iproc in self.full_send_dict:
+        if self.full_send_dict.has_key(iproc):
 
             # now store full as local id, global id, value
             Idf  = self.full_send_dict[iproc][0]

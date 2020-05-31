@@ -1,9 +1,6 @@
 #!/usr/bin/env python
 #
 
-from __future__ import print_function
-from builtins import str
-from builtins import range
 import unittest
 import tempfile
 import os, sys
@@ -428,7 +425,7 @@ class Test_inundation_damage(unittest.TestCase):
         #print "sww_file",sww_file
         
         out_csv = tempfile.mktemp(".csv")
-        print("out_csv",out_csv) 
+        print "out_csv",out_csv 
         add_depth_and_momentum2csv(sww_file, self.csv_file,
                                    out_csv, verbose=False)
         
@@ -511,7 +508,7 @@ class Test_inundation_damage(unittest.TestCase):
         for i in [5,6,7,8]:
             sum_struct += edm.struct_damage[i]
             sum_contents += edm.contents_damage[i]
-        print("", end=' ') 
+        print "", 
         self.assertTrue( sum_struct == 0.0 and sum_contents  == 0.0,
                         'Error!')
         sum_struct = 0.0

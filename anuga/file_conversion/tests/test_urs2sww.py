@@ -1,7 +1,5 @@
 
 # External modules
-from builtins import zip
-from builtins import range
 from anuga.file.netcdf import NetCDFFile
 import sys
 import unittest
@@ -66,7 +64,7 @@ class Test_Dem2Pts(Test_Mux):
         x = fid.variables['x'][:]
         y = fid.variables['y'][:]
         geo_reference = Geo_reference(NetCDFObject=fid)
-        points = geo_reference.get_absolute(list(zip(x, y)))
+        points = geo_reference.get_absolute(map(None, x, y))
         points = ensure_numeric(points)
         x = points[:,0]
         y = points[:,1]
@@ -257,7 +255,7 @@ class Test_Dem2Pts(Test_Mux):
         x = fid.variables['x'][:]
         y = fid.variables['y'][:]
         geo_reference = Geo_reference(NetCDFObject=fid)
-        points = geo_reference.get_absolute(list(zip(x, y)))
+        points = geo_reference.get_absolute(map(None, x, y))
         points = ensure_numeric(points)
         x = points[:,0]
         y = points[:,1]
@@ -343,8 +341,8 @@ class Test_Dem2Pts(Test_Mux):
         
         # Make x and y absolute
         geo_reference = Geo_reference(NetCDFObject=fid)
-        points = geo_reference.get_absolute(list(zip(fid.variables['x'][:],
-                                                fid.variables['y'][:])))
+        points = geo_reference.get_absolute(map(None, fid.variables['x'][:],
+                                                fid.variables['y'][:]))
         points = ensure_numeric(points)
         x = points[:,0]
         
@@ -464,7 +462,7 @@ class Test_Dem2Pts(Test_Mux):
         x = fid.variables['x'][:]
         y = fid.variables['y'][:]
         geo_reference = Geo_reference(NetCDFObject=fid)
-        points = geo_reference.get_absolute(list(zip(x, y)))
+        points = geo_reference.get_absolute(map(None, x, y))
         points = ensure_numeric(points)
         x = points[:,0]
         y = points[:,1]
@@ -555,7 +553,7 @@ class Test_Dem2Pts(Test_Mux):
         x = fid.variables['x'][:]
         y = fid.variables['y'][:]
         geo_reference = Geo_reference(NetCDFObject=fid)
-        points = geo_reference.get_absolute(list(zip(x, y)))
+        points = geo_reference.get_absolute(map(None, x, y))
         points = ensure_numeric(points)
         x = points[:,0]
         y = points[:,1]

@@ -18,15 +18,7 @@ To create:
    Quantities can be found in the dictionary domain.quantities (note, other Quantities can
    exist).
 """
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import division
 
-from builtins import str
-from builtins import range
-from past.builtins import basestring
-from builtins import object
-from past.utils import old_div
 import types
 import os.path
 
@@ -45,7 +37,7 @@ import anuga.utilities.log as log
 import numpy as num
 
 
-class Quantity(object):
+class Quantity:
 
 
     counter = 0
@@ -207,9 +199,9 @@ class Quantity(object):
         # are calculated and assigned directly without using
         # set_values (which calls interpolate). Otherwise
         # edge and centroid values wouldn't be quotient of q1 and q2
-        result.vertex_values = old_div(self.vertex_values,(Q.vertex_values + epsilon))
-        result.edge_values = old_div(self.edge_values,(Q.edge_values + epsilon))
-        result.centroid_values = old_div(self.centroid_values,(Q.centroid_values + epsilon))
+        result.vertex_values = self.vertex_values/(Q.vertex_values + epsilon)
+        result.edge_values = self.edge_values/(Q.edge_values + epsilon)
+        result.centroid_values = self.centroid_values/(Q.centroid_values + epsilon)
 
         return result
 
@@ -217,7 +209,7 @@ class Quantity(object):
         """Handle cases like 3/Q, where Q is an instance of class Quantity
         """
 
-        return old_div(self, other)
+        return self / other
 
     def __pow__(self, other):
         """Raise quantity to (numerical) power
@@ -458,13 +450,13 @@ class Quantity(object):
         yllcorner = geo_ref.get_yllcorner()
 
         if verbose:
-            print()
-            print(xllcorner)
-            print(yllcorner)
-            print(x)
-            print(y)
-            print(node_coordinates[:,0])
-            print(node_coordinates[:,1])
+            print
+            print xllcorner
+            print yllcorner
+            print x
+            print y
+            print node_coordinates[:,0]
+            print node_coordinates[:,1]
 
 
 
@@ -512,8 +504,8 @@ class Quantity(object):
             cellsize = max(xrange,yrange)/10.0
 
 
-        ncols = int(old_div(xrange,cellsize)) + 1
-        nrows = int(old_div(yrange,cellsize)) + 1
+        ncols = int(xrange/cellsize) + 1
+        nrows = int(yrange/cellsize) + 1
 
         # New absolute reference and coordinates
         newxllcorner = xmin + xllcorner
@@ -676,7 +668,7 @@ class Quantity(object):
         v1 = self.vertex_values[:, 1]
         v2 = self.vertex_values[:, 2]
 
-        self.centroid_values[:] = old_div((v0 + v1 + v2),3)
+        self.centroid_values[:] = (v0 + v1 + v2)/3
 
         self.interpolate_from_vertices_to_edges()
 
@@ -688,20 +680,20 @@ class Quantity(object):
         """Compute interpolated values at edges and centroid
         Pre-condition: vertex_values have been set
         """
-        from .quantity_ext import interpolate
+        from quantity_ext import interpolate
         interpolate(self)
 
 
     def interpolate_from_vertices_to_edges(self):
         # Call correct module function (either from this module or C-extension)
 
-        from .quantity_ext import interpolate_from_vertices_to_edges
+        from quantity_ext import interpolate_from_vertices_to_edges
         interpolate_from_vertices_to_edges(self)
 
     def interpolate_from_edges_to_vertices(self):
         # Call correct module function (either from this module or C-extension)
 
-        from .quantity_ext import interpolate_from_edges_to_vertices
+        from quantity_ext import interpolate_from_edges_to_vertices
         interpolate_from_edges_to_vertices(self)
 
     #---------------------------------------------
@@ -838,7 +830,7 @@ class Quantity(object):
                 raise Exception(msg)
             else:
                 # Check that numeric is as constant
-                assert isinstance(numeric, (float, int, int)), msg
+                assert isinstance(numeric, (float, int, long)), msg
 
             location = 'centroids'
 
@@ -876,7 +868,7 @@ class Quantity(object):
             raise Exception(msg)
 
         msg = 'Indices must be a list, array or None'
-        assert isinstance(indices, (type(None), list, num.ndarray)), msg
+        assert isinstance(indices, (types.NoneType, list, num.ndarray)), msg
 
         # Determine which 'set_values_from_...' to use
         if numeric is not None:
@@ -1126,7 +1118,7 @@ class Quantity(object):
         # Compute the function values and call set_values again
         if location == 'centroids':
             if indices is None:
-                indices = list(range(len(self)))
+                indices = range(len(self))
 
             V = num.take(self.domain.get_centroid_coordinates(), indices, axis=0)
             x = V[:,0]; y = V[:,1]
@@ -1217,7 +1209,7 @@ class Quantity(object):
                   'alpha': alpha,
                   'verbose': verbose}
 
-        vertex_attributes = fit_to_mesh(*args, **kwargs)
+        vertex_attributes = apply(fit_to_mesh, args, kwargs)
 
         # Call underlying method using array values
         self.set_values_from_array(vertex_attributes, location, indices,
@@ -1503,7 +1495,7 @@ class Quantity(object):
 
 
         msg = "Function not implemented yet"
-        raise Exception(msg)
+        raise Exception, msg
 
         msg = 'Filename must be a text string'
         assert isinstance(filename, basestring), msg
@@ -1548,7 +1540,7 @@ class Quantity(object):
             xllcorner = float(xref[1].strip())
         else:
             msg = 'Unknown keyword: %s' % xref[0].strip()
-            raise Exception(msg)
+            raise Exception, msg
 
         yref = lines[3].split()
         if yref[0].strip() == 'yllcorner':
@@ -1557,7 +1549,7 @@ class Quantity(object):
             yllcorner = float(yref[1].strip())
         else:
             msg = 'Unknown keyword: %s' % yref[0].strip()
-            raise Exception(msg)
+            raise Exception, msg
 
         NODATA_value = int(float(lines[5].split()[1].strip()))
 
@@ -1889,7 +1881,7 @@ class Quantity(object):
 
 
         msg = '\'indices\' must be a list, array or None'
-        assert isinstance(indices, (type(None), list, num.ndarray)), msg
+        assert isinstance(indices, (types.NoneType, list, num.ndarray)), msg
 
         if location == 'centroids':
             if indices is None:
@@ -1903,7 +1895,7 @@ class Quantity(object):
                 return num.take(self.edge_values, indices, axis=0)
         elif location == 'unique vertices':
             if indices is None:
-                indices=list(range(self.domain.get_number_of_nodes()))
+                indices=range(self.domain.get_number_of_nodes())
             vert_values = []
 
             # Go through list of unique vertices
@@ -1925,7 +1917,7 @@ class Quantity(object):
                 else:
                     for triangle_id, vertex_id in triangles:
                         sum += self.vertex_values[triangle_id, vertex_id]
-                vert_values.append(old_div(sum, len(triangles)))
+                vert_values.append(sum / len(triangles))
 
             return num.array(vert_values, num.float)
         else:
@@ -1954,7 +1946,7 @@ class Quantity(object):
 
         if indices is None:
             assert A.shape[0] == self.domain.get_nodes().shape[0]
-            vertex_list = list(range(A.shape[0]))
+            vertex_list = range(A.shape[0])
         else:
             assert A.shape[0] == len(indices)
             vertex_list = indices
@@ -2085,14 +2077,14 @@ class Quantity(object):
 
                         k += 1
 
-                        volume_id = old_div(index, 3)
+                        volume_id = index / 3
                         vertex_id = index % 3
 
                         v = self.vertex_values[volume_id, vertex_id]
                         total += v
 
                         if self.domain.number_of_triangles_per_node[current_node] == k:
-                            A[current_node] = old_div(total,k)
+                            A[current_node] = total/k
 
                             # Move on to next node
                             total = 0.0
@@ -2259,7 +2251,7 @@ class Conserved_quantity(Quantity):
 ######
 # Prepare the C extensions.
 ######
-from .quantity_ext import \
+from quantity_ext import \
          average_vertex_values,\
          average_centroid_values,\
          backup_centroid_values,\

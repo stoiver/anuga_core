@@ -1,6 +1,3 @@
-from builtins import str
-from builtins import object
-from future.utils import raise_
 import numpy as num
 import anuga.utilities.log as log
 from anuga.file.netcdf import NetCDFFile
@@ -14,7 +11,7 @@ from anuga.coordinate_transforms.geo_reference import Geo_reference, \
      ensure_geo_reference
 from anuga.config import netcdf_mode_r, netcdf_mode_w, netcdf_mode_a
 
-class Write_sts(object):
+class Write_sts:
     """ A class to write STS files.
     """
     sts_quantities = ['stage', 'xmomentum', 'ymomentum']
@@ -207,9 +204,9 @@ class Write_sts(object):
         # other quantities will be ignored, silently.
         # Also write the ranges: stage_range
         for q in Write_sts.sts_quantities:
-            if q not in quant:
+            if not quant.has_key(q):
                 msg = 'STS file can not write quantity %s' % q
-                raise_(Exception, msg)
+                raise Exception, msg
             else:
                 q_values = quant[q]
                 outfile.variables[q][slice_index] = \

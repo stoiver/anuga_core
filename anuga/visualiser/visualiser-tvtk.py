@@ -1,9 +1,6 @@
-from future import standard_library
-standard_library.install_aliases()
-from builtins import map
 from threading import Thread
-from queue import Queue
-from tkinter import Tk, Button, Frame, N, E, S, W
+from Queue import Queue
+from Tkinter import Tk, Button, Frame, N, E, S, W
 from types import FunctionType, TupleType
 from enthought.tvtk.api import tvtk
 from enthought.tvtk.tools import ivtk
@@ -146,21 +143,21 @@ class Visualiser(Thread):
         """Use the vtkPolyData and prepare/update the rest of the VTK
         rendering pipeline.
         """
-        if quantityName in self.vtk_mappers:
+        if self.vtk_mappers.has_key(quantityName):
             mapper = self.vtk_mappers[quantityName]
         else:
             mapper = self.vtk_mappers[quantityName] = vtkPolyDataMapper()
         mapper.SetInput(self.vtk_polyData[quantityName])
         mapper.Update()
 
-        if quantityName not in self.vtk_actors:
+        if not self.vtk_actors.has_key(quantityName):
             actor = self.vtk_actors[quantityName] = vtkActor()
             actor.SetMapper(mapper)
             self.vtk_renderer.AddActor(actor)
         else:
             actor = self.vtk_actors[quantityName]
 
-        if quantityName in self.colours_height:
+        if self.colours_height.has_key(quantityName):
             colour = self.colours_height[quantityName]
             if type(colour) == TupleType:
                 if type(colour[0]) == FunctionType:
@@ -169,7 +166,7 @@ class Visualiser(Thread):
                     # colour[2] as the upper bound on the scalar
                     # range.
                     scalars = tvtk.FloatArray()
-                    list(map(scalars.InsertNextValue, colour[0](self.build_quantity_dict())))
+                    map(scalars.InsertNextValue, colour[0](self.build_quantity_dict()))
                     self.vtk_polyData[quantityName].GetPointData().SetScalars(scalars)
                     mapper.SetScalarRange(colour[1:])
                     mapper.Update()

@@ -4,15 +4,13 @@
      python compile.py <filename>
  
 """     
-from __future__ import print_function
-from past.builtins import execfile
 import os
 
 buildroot = os.getcwd()
 os.chdir('..')
 
 
-print('Changing to', os.getcwd())        
+print 'Changing to', os.getcwd()        
 
 #entries = listdir('.')
 

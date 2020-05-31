@@ -1,9 +1,6 @@
 #!/usr/bin/env python
 
 
-from __future__ import print_function
-from __future__ import division
-from past.utils import old_div
 import unittest
 
 
@@ -42,7 +39,7 @@ class Test_boyd_pipe_operator(unittest.TestCase):
                             yvelocity_0 = 0.0,
                             yvelocity_1 = 0.0):
         
-        points, vertices, boundary = rectangular_cross(int(old_div(d_length,dx)), int(old_div(d_width,dy)),
+        points, vertices, boundary = rectangular_cross(int(d_length/dx), int(d_width/dy),
                                                         len1=d_length, len2=d_width)
         domain = Domain(points, vertices, boundary)   
         domain.set_name('Test_Outlet_Inlet')                 # Output name
@@ -64,7 +61,7 @@ class Test_boyd_pipe_operator(unittest.TestCase):
             z = numpy.zeros(x.shape,dtype='d')
             z[:] = elevation_0
             
-            numpy.putmask(z, x > old_div(d_length,2), elevation_1)
+            numpy.putmask(z, x > d_length/2, elevation_1)
     
             return z
             
@@ -74,7 +71,7 @@ class Test_boyd_pipe_operator(unittest.TestCase):
             z = numpy.zeros(x.shape,dtype='d')
             z[:] = stage_0
             
-            numpy.putmask(z, x > old_div(d_length,2), stage_1)
+            numpy.putmask(z, x > d_length/2, stage_1)
 
             return z
         
@@ -84,7 +81,7 @@ class Test_boyd_pipe_operator(unittest.TestCase):
             z = numpy.zeros(x.shape,dtype='d')
             z[:] = xvelocity_0*(stage_0-elevation_0)
             
-            numpy.putmask(z, x > old_div(d_length,2), xvelocity_1*(stage_1-elevation_1) )
+            numpy.putmask(z, x > d_length/2, xvelocity_1*(stage_1-elevation_1) )
 
             return z
         
@@ -94,7 +91,7 @@ class Test_boyd_pipe_operator(unittest.TestCase):
             z = numpy.zeros(x.shape,dtype='d')
             z[:] = yvelocity_0*(stage_0-elevation_0)
             
-            numpy.putmask(z, x > old_div(d_length,2), yvelocity_1*(stage_1-elevation_1) )
+            numpy.putmask(z, x > d_length/2, yvelocity_1*(stage_1-elevation_1) )
 
             return z
             
@@ -151,8 +148,8 @@ class Test_boyd_pipe_operator(unittest.TestCase):
 
         #print 'Defining Structures'
         
-        ep0 = numpy.array([old_div(domain_length,2)-old_div(culvert_length,2), 100.0])
-        ep1 = numpy.array([old_div(domain_length,2)+old_div(culvert_length,2), 100.0])
+        ep0 = numpy.array([domain_length/2-culvert_length/2, 100.0])
+        ep1 = numpy.array([domain_length/2+culvert_length/2, 100.0])
         
         
         culvert = Boyd_pipe_operator(domain,
@@ -175,10 +172,10 @@ class Test_boyd_pipe_operator(unittest.TestCase):
         ( Q, v, d ) = culvert.discharge_routine()
         
         if verbose:
-            print('test_boyd_non_skew')
-            print('Q: ', Q, 'expected_Q: ', expected_Q)
-            print('v: ', v, 'expected_v: ', expected_v)
-            print('d: ', d, 'expected_d: ', expected_d)
+            print 'test_boyd_non_skew'
+            print 'Q: ', Q, 'expected_Q: ', expected_Q
+            print 'v: ', v, 'expected_v: ', expected_v
+            print 'd: ', d, 'expected_d: ', expected_d
 
         assert numpy.allclose(Q, expected_Q, rtol=1.0e-2) #inflow
         assert numpy.allclose(v, expected_v, rtol=1.0e-2) #outflow velocity
@@ -229,8 +226,8 @@ class Test_boyd_pipe_operator(unittest.TestCase):
 
         #print 'Defining Structures'
         
-        ep0 = numpy.array([old_div(domain_length,2)-old_div(culvert_length,2), 100.0])
-        ep1 = numpy.array([old_div(domain_length,2)+old_div(culvert_length,2), 100.0])
+        ep0 = numpy.array([domain_length/2-culvert_length/2, 100.0])
+        ep1 = numpy.array([domain_length/2+culvert_length/2, 100.0])
         
         
         culvert = Boyd_pipe_operator(domain,
@@ -253,10 +250,10 @@ class Test_boyd_pipe_operator(unittest.TestCase):
         ( Q, v, d ) = culvert.discharge_routine()
         
         if verbose:
-            print('test_boyd_non_skew2')
-            print('Q: ', Q, 'expected_Q: ', expected_Q)
-            print('v: ', v, 'expected_v: ', expected_v)
-            print('d: ', d, 'expected_d: ', expected_d)
+            print 'test_boyd_non_skew2'
+            print 'Q: ', Q, 'expected_Q: ', expected_Q
+            print 'v: ', v, 'expected_v: ', expected_v
+            print 'd: ', d, 'expected_d: ', expected_d
 
         assert numpy.allclose(Q, expected_Q, rtol=1.0e-2) #inflow
         assert numpy.allclose(v, expected_v, rtol=1.0e-2) #outflow velocity
@@ -307,8 +304,8 @@ class Test_boyd_pipe_operator(unittest.TestCase):
 
         #print 'Defining Structures'
         
-        ep0 = numpy.array([old_div(domain_length,2)-old_div(culvert_length,2), 100.0])
-        ep1 = numpy.array([old_div(domain_length,2)+old_div(culvert_length,2), 100.0])
+        ep0 = numpy.array([domain_length/2-culvert_length/2, 100.0])
+        ep1 = numpy.array([domain_length/2+culvert_length/2, 100.0])
         
         
         culvert = Boyd_pipe_operator(domain,
@@ -331,10 +328,10 @@ class Test_boyd_pipe_operator(unittest.TestCase):
         ( Q, v, d ) = culvert.discharge_routine()
         
         if verbose:
-            print('test_boyd_non_skew3')
-            print('Q: ', Q, 'expected_Q: ', expected_Q)
-            print('v: ', v, 'expected_v: ', expected_v)
-            print('d: ', d, 'expected_d: ', expected_d)
+            print 'test_boyd_non_skew3'
+            print 'Q: ', Q, 'expected_Q: ', expected_Q
+            print 'v: ', v, 'expected_v: ', expected_v
+            print 'd: ', d, 'expected_d: ', expected_d
 
  
         assert numpy.allclose(Q, expected_Q, rtol=1.0e-2) #inflow
@@ -386,8 +383,8 @@ class Test_boyd_pipe_operator(unittest.TestCase):
 
         #print 'Defining Structures'
         
-        ep0 = numpy.array([old_div(domain_length,2)-old_div(culvert_length,2), 100.0])
-        ep1 = numpy.array([old_div(domain_length,2)+old_div(culvert_length,2), 100.0])
+        ep0 = numpy.array([domain_length/2-culvert_length/2, 100.0])
+        ep1 = numpy.array([domain_length/2+culvert_length/2, 100.0])
         
         
         culvert = Boyd_pipe_operator(domain,
@@ -410,10 +407,10 @@ class Test_boyd_pipe_operator(unittest.TestCase):
         ( Q, v, d ) = culvert.discharge_routine()
         
         if verbose:
-            print('test_boyd_non_skew4')
-            print('Q: ', Q, 'expected_Q: ', expected_Q)
-            print('v: ', v, 'expected_v: ', expected_v)
-            print('d: ', d, 'expected_d: ', expected_d)
+            print 'test_boyd_non_skew4'
+            print 'Q: ', Q, 'expected_Q: ', expected_Q
+            print 'v: ', v, 'expected_v: ', expected_v
+            print 'd: ', d, 'expected_d: ', expected_d
 
 
         assert numpy.allclose(Q, expected_Q, rtol=1.0e-2) #inflow
@@ -465,8 +462,8 @@ class Test_boyd_pipe_operator(unittest.TestCase):
 
         #print 'Defining Structures'
         
-        ep0 = numpy.array([old_div(domain_length,2)-old_div(culvert_length,2), 100.0])
-        ep1 = numpy.array([old_div(domain_length,2)+old_div(culvert_length,2), 100.0])
+        ep0 = numpy.array([domain_length/2-culvert_length/2, 100.0])
+        ep1 = numpy.array([domain_length/2+culvert_length/2, 100.0])
         
         
         culvert = Boyd_pipe_operator(domain,
@@ -489,10 +486,10 @@ class Test_boyd_pipe_operator(unittest.TestCase):
         ( Q, v, d ) = culvert.discharge_routine()
         
         if verbose:
-            print('test_boyd_non_skew5')
-            print('Q: ', Q, 'expected_Q: ', expected_Q)
-            print('v: ', v, 'expected_v: ', expected_v)
-            print('d: ', d, 'expected_d: ', expected_d)
+            print 'test_boyd_non_skew5'
+            print 'Q: ', Q, 'expected_Q: ', expected_Q
+            print 'v: ', v, 'expected_v: ', expected_v
+            print 'd: ', d, 'expected_d: ', expected_d
 
 
         assert numpy.allclose(Q, expected_Q, rtol=1.0e-2) #inflow
@@ -545,8 +542,8 @@ class Test_boyd_pipe_operator(unittest.TestCase):
 
         #print 'Defining Structures'
         
-        ep0 = numpy.array([old_div(domain_length,2)-old_div(culvert_length,2), 100.0])
-        ep1 = numpy.array([old_div(domain_length,2)+old_div(culvert_length,2), 100.0])
+        ep0 = numpy.array([domain_length/2-culvert_length/2, 100.0])
+        ep1 = numpy.array([domain_length/2+culvert_length/2, 100.0])
         
         
         culvert = Boyd_pipe_operator(domain,
@@ -569,10 +566,10 @@ class Test_boyd_pipe_operator(unittest.TestCase):
         ( Q, v, d ) = culvert.discharge_routine()
         
         if verbose:
-            print('test_boyd_non_skew6')
-            print('Q: ', Q, 'expected_Q: ', expected_Q)
-            print('v: ', v, 'expected_v: ', expected_v)
-            print('d: ', d, 'expected_d: ', expected_d)
+            print 'test_boyd_non_skew6'
+            print 'Q: ', Q, 'expected_Q: ', expected_Q
+            print 'v: ', v, 'expected_v: ', expected_v
+            print 'd: ', d, 'expected_d: ', expected_d
 
 
         assert numpy.allclose(Q, expected_Q, rtol=1.0e-2) #inflow
@@ -625,8 +622,8 @@ class Test_boyd_pipe_operator(unittest.TestCase):
 
         #print 'Defining Structures'
         
-        ep0 = numpy.array([old_div(domain_length,2)-old_div(culvert_length,2), 100.0])
-        ep1 = numpy.array([old_div(domain_length,2)+old_div(culvert_length,2), 100.0])
+        ep0 = numpy.array([domain_length/2-culvert_length/2, 100.0])
+        ep1 = numpy.array([domain_length/2+culvert_length/2, 100.0])
         
         
         culvert = Boyd_pipe_operator(domain,
@@ -649,10 +646,10 @@ class Test_boyd_pipe_operator(unittest.TestCase):
         ( Q, v, d ) = culvert.discharge_routine()
         
         if verbose:
-            print('test_boyd_non_skew7')
-            print('Q: ', Q, 'expected_Q: ', expected_Q)
-            print('v: ', v, 'expected_v: ', expected_v)
-            print('d: ', d, 'expected_d: ', expected_d)
+            print 'test_boyd_non_skew7'
+            print 'Q: ', Q, 'expected_Q: ', expected_Q
+            print 'v: ', v, 'expected_v: ', expected_v
+            print 'd: ', d, 'expected_d: ', expected_d
 
 
         assert numpy.allclose(Q, expected_Q, rtol=1.0e-2, atol=1.0e-5) #inflow

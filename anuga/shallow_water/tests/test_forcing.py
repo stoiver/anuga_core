@@ -1,11 +1,6 @@
 """  Test environmental forcing - rain, wind, etc.
 """
-from __future__ import division
 
-from builtins import str
-from builtins import range
-from past.utils import old_div
-from future.utils import raise_
 import unittest, os
 import anuga
 from anuga.shallow_water.shallow_water_domain import Domain
@@ -50,7 +45,7 @@ def speed(t, x, y):
     for k in range(N):
         r = num.sqrt(x[k]**2 + y[k]**2)
         factor = exp(-(r-0.15)**2)
-        s[k] = 4000 * factor * (cos(old_div(t*2*pi,150)) + 2)
+        s[k] = 4000 * factor * (cos(t*2*pi/150) + 2)
 
     return s
 
@@ -69,19 +64,19 @@ def angle(t, x, y):
     for k in range(N):
         r = num.sqrt(x[k]**2 + y[k]**2)
 
-        angle = atan(old_div(y[k],x[k]))
+        angle = atan(y[k]/x[k])
 
         if x[k] < 0:
             angle += pi
 
         # Take normal direction
-        angle -= old_div(pi,2)
+        angle -= pi/2
 
         # Ensure positive radians
         if angle < 0:
             angle += 2*pi
 
-        a[k] = old_div(angle,pi)*180
+        a[k] = angle/pi*180
 
     return a
 
@@ -264,9 +259,9 @@ class Test_Forcing(unittest.TestCase):
                 a = angle(1.0, x=x, y=y)
                 p = pressure(1.0, x=x, y=y)
                 use_function=True
-            except Exception as e:
+            except Exception, e:
                 msg = 'Function could not be executed.\n'
-                raise_(Exception, msg)
+                raise Exception, msg
         else:
             try :
                 speed=float(speed)
@@ -275,7 +270,7 @@ class Test_Forcing(unittest.TestCase):
                 use_function=False
             except:
                 msg = ('Force fields must be a scalar value coercible to float.')
-                raise_(Exception, msg)
+                raise Exception, msg
 
         for i,t in enumerate(time):
             if ( use_function ):
@@ -324,7 +319,7 @@ class Test_Forcing(unittest.TestCase):
         wa = fid.variables['wind_angle']
         pr = fid.variables['barometric_pressure']
 
-        for i in range(number_of_timesteps):
+        for i in xrange(number_of_timesteps):
             ws[i] = wind_speed[i,:]
             wa[i] = wind_angle[i,:]
             pr[i] = barometric_pressure[i,:]
@@ -373,10 +368,10 @@ class Test_Forcing(unittest.TestCase):
 
         domain.compute_forcing_terms()
 
-        const = old_div(eta_w*rho_a, rho_w)
+        const = eta_w*rho_a / rho_w
 
         #Convert to radians
-        phi = old_div(phi*pi, 180)
+        phi = phi*pi / 180
 
         #Compute velocity vector (u, v)
         u = s*cos(phi)
@@ -425,7 +420,7 @@ class Test_Forcing(unittest.TestCase):
         domain.compute_forcing_terms()
 
         #Compute reference solution
-        const = old_div(eta_w*rho_a, rho_w)
+        const = eta_w*rho_a / rho_w
 
         N = len(domain)    # number_of_triangles
 
@@ -439,7 +434,7 @@ class Test_Forcing(unittest.TestCase):
 
         for k in range(N):
             # Convert to radians
-            phi = old_div(phi_vec[k]*pi, 180)
+            phi = phi_vec[k]*pi / 180
             s = s_vec[k]
 
             # Compute velocity vector (u, v)
@@ -520,7 +515,7 @@ class Test_Forcing(unittest.TestCase):
         domain.compute_forcing_terms()
 
         # Compute reference solution
-        const = old_div(eta_w*rho_a, rho_w)
+        const = eta_w*rho_a / rho_w
 
         N = len(domain)    # number_of_triangles
 
@@ -530,7 +525,7 @@ class Test_Forcing(unittest.TestCase):
         phi = angle(t, [1], [0])[0]
 
         # Convert to radians
-        phi = old_div(phi*pi, 180)
+        phi = phi*pi / 180
 
         # Compute velocity vector (u, v)
         u = s*cos(phi)
@@ -609,7 +604,7 @@ class Test_Forcing(unittest.TestCase):
         domain.compute_forcing_terms()
 
         # Compute reference solution
-        const = old_div(eta_w*rho_a, rho_w)
+        const = eta_w*rho_a / rho_w
 
         N = len(domain)    # number_of_triangles
 
@@ -619,7 +614,7 @@ class Test_Forcing(unittest.TestCase):
         phi = angle(t, [1], [0])[0]
 
         # Convert to radians
-        phi = old_div(phi*pi, 180)
+        phi = phi*pi / 180
 
         # Compute velocity vector (u, v)
         u = s*cos(phi)
@@ -679,7 +674,7 @@ class Test_Forcing(unittest.TestCase):
             pass
         else:
             msg = 'Should have raised exception'
-            raise_(Exception, msg)
+            raise Exception, msg
 
         try:
             domain.forcing_terms.append(Wind_stress(s=speed, phi=scalar_func))
@@ -687,7 +682,7 @@ class Test_Forcing(unittest.TestCase):
             pass
         else:
             msg = 'Should have raised exception'
-            raise_(Exception, msg)
+            raise Exception, msg
 
         try:
             domain.forcing_terms.append(Wind_stress(s=speed, phi='xx'))
@@ -695,7 +690,7 @@ class Test_Forcing(unittest.TestCase):
             pass
         else:
             msg = 'Should have raised exception'
-            raise_(Exception, msg)
+            raise Exception, msg
 
     def test_rainfall(self):
         from math import pi, cos, sin
@@ -807,7 +802,7 @@ class Test_Forcing(unittest.TestCase):
         domain.compute_forcing_terms()
 
         assert num.allclose(domain.quantities['stage'].explicit_update[1],
-                            old_div((3*domain.time + 7),1000))
+                            (3*domain.time + 7)/1000)
         assert num.allclose(domain.quantities['stage'].explicit_update[0], 0)
         assert num.allclose(domain.quantities['stage'].explicit_update[2:], 0)
 
@@ -852,7 +847,7 @@ class Test_Forcing(unittest.TestCase):
         domain.compute_forcing_terms()
 
         assert num.allclose(domain.quantities['stage'].explicit_update[1],
-                            old_div((3*domain.get_time() + 7),1000))
+                            (3*domain.get_time() + 7)/1000)
 
 
         assert num.allclose(domain.quantities['stage'].explicit_update[0], 0)
@@ -900,7 +895,7 @@ class Test_Forcing(unittest.TestCase):
         domain.compute_forcing_terms()
 
         assert num.allclose(domain.quantities['stage'].explicit_update[1],
-                            old_div((3*domain.get_starttime() + 7),1000))
+                            (3*domain.get_starttime() + 7)/1000)
 
         assert num.allclose(domain.quantities['stage'].explicit_update[0], 0)
         assert num.allclose(domain.quantities['stage'].explicit_update[2:], 0)
@@ -958,7 +953,7 @@ class Test_Forcing(unittest.TestCase):
         domain.compute_forcing_terms()
 
         assert num.allclose(domain.quantities['stage'].explicit_update[1],
-                            old_div((3*domain.get_time() + 7),1000))
+                            (3*domain.get_time() + 7)/1000)
 
 
         assert num.allclose(domain.quantities['stage'].explicit_update[0], 0)
@@ -1016,7 +1011,7 @@ class Test_Forcing(unittest.TestCase):
         domain.compute_forcing_terms()
 
         assert num.allclose(domain.quantities['stage'].explicit_update[1],
-                            old_div((3*domain.get_time() + 7),1000))
+                            (3*domain.get_time() + 7)/1000)
 
 
         assert num.allclose(domain.quantities['stage'].explicit_update[0], 0)
@@ -1061,7 +1056,7 @@ class Test_Forcing(unittest.TestCase):
         def main_rate(t):
             if t > 20:
                 msg = 'Model time exceeded.'
-                raise_(Modeltime_too_late, msg)
+                raise Modeltime_too_late, msg
             else:
                 return 3*t + 7
 
@@ -1081,7 +1076,7 @@ class Test_Forcing(unittest.TestCase):
         domain.compute_forcing_terms()
 
         assert num.allclose(domain.quantities['stage'].explicit_update[1],
-                            old_div((3*domain.time+7),1000))
+                            (3*domain.time+7)/1000)
         assert num.allclose(domain.quantities['stage'].explicit_update[0], 0)
         assert num.allclose(domain.quantities['stage'].explicit_update[2:], 0)
 
@@ -1133,7 +1128,7 @@ class Test_Forcing(unittest.TestCase):
         def main_rate(t):
             if t > 20:
                 msg = 'Model time exceeded.'
-                raise_(Modeltime_too_late, msg)
+                raise Modeltime_too_late, msg
             else:
                 return 3*t + 7
 
@@ -1192,7 +1187,7 @@ class Test_Forcing(unittest.TestCase):
         def main_rate(t):
             if t > 20:
                 msg = 'Model time exceeded.'
-                raise_(Modeltime_too_late, msg)
+                raise Modeltime_too_late, msg
             else:
                 return 3*t + 7
 
@@ -1211,11 +1206,11 @@ class Test_Forcing(unittest.TestCase):
         try:
             for t in domain.evolve(yieldstep=1, finaltime=25):
                 pass
-        except Modeltime_too_late as e:
+        except Modeltime_too_late, e:
             # Test that error message is as expected
             assert 'can specify keyword argument default_rate in the forcing function' in str(e)
         else:
-            raise Exception('Should have raised exception')
+            raise Exception, 'Should have raised exception'
 
     def test_constant_wind_stress_from_file(self):
         from anuga.config import rho_a, rho_w, eta_w
@@ -1276,10 +1271,10 @@ class Test_Forcing(unittest.TestCase):
         domain.forcing_terms.append(W)
         domain.compute_forcing_terms()
 
-        const = old_div(eta_w*rho_a, rho_w)
+        const = eta_w*rho_a / rho_w
 
         # Convert to radians
-        phi = old_div(phi*pi, 180)
+        phi = phi*pi / 180
 
         # Compute velocity vector (u, v)
         u = s*cos(phi)
@@ -1409,7 +1404,7 @@ class Test_Forcing(unittest.TestCase):
         domain.compute_forcing_terms()
 
         # Compute reference solution
-        const = old_div(eta_w*rho_a, rho_w)
+        const = eta_w*rho_a / rho_w
 
         N = len(domain)    # number_of_triangles
 
@@ -1423,7 +1418,7 @@ class Test_Forcing(unittest.TestCase):
 
         for k in range(N):
             # Convert to radians
-            phi = old_div(phi_vec[k]*pi, 180)
+            phi = phi_vec[k]*pi / 180
             s = s_vec[k]
 
             # Compute velocity vector (u, v)
@@ -1529,10 +1524,10 @@ class Test_Forcing(unittest.TestCase):
             assert num.allclose(domain.quantities['stage'].explicit_update[k],0)
 
             assert num.allclose(domain.quantities['xmomentum'].\
-                                    explicit_update[k],old_div(h*px,rho_w))
+                                    explicit_update[k],h*px/rho_w)
 
             assert num.allclose(domain.quantities['ymomentum'].\
-                                     explicit_update[k],old_div(h*py,rho_w))
+                                     explicit_update[k],h*py/rho_w)
 
         os.remove(field_sts_filename+'.sts')
         os.remove(field_sts_filename+'.sww')
@@ -2139,7 +2134,7 @@ class Test_Forcing(unittest.TestCase):
 
         #Create some momentum for friction to work with
         domain.set_quantity('xmomentum', 1)
-        S = old_div(-g*eta**2, h**(7.0/3))
+        S = -g*eta**2 / h**(7.0/3)
 
         domain.compute_forcing_terms()
         assert num.allclose(domain.quantities['stage'].semi_implicit_update, 0)
@@ -2157,7 +2152,7 @@ class Test_Forcing(unittest.TestCase):
         domain.set_quantity('ymomentum', 4)
         # sqrt(3^2 +4^2) = 5
 
-        S = old_div(-g*eta**2, h**(7.0/3))  * 5
+        S = -g*eta**2 / h**(7.0/3)  * 5
 
         domain.compute_forcing_terms()
 
@@ -2221,7 +2216,7 @@ class Test_Forcing(unittest.TestCase):
 
         #Create some momentum for friction to work with
         domain.set_quantity('xmomentum', 1)
-        S = old_div(-g*eta**2, h**(7.0/3)) * math.sqrt(10)
+        S = -g*eta**2 / h**(7.0/3) * math.sqrt(10)
 
         domain.compute_forcing_terms()
         assert num.allclose(domain.quantities['stage'].semi_implicit_update, 0)
@@ -2238,7 +2233,7 @@ class Test_Forcing(unittest.TestCase):
         domain.set_quantity('xmomentum', 3)
         domain.set_quantity('ymomentum', 4)
 
-        S = old_div(-g*eta**2 *5, h**(7.0/3)) * math.sqrt(10.0)
+        S = -g*eta**2 *5 / h**(7.0/3) * math.sqrt(10.0)
 
         domain.compute_forcing_terms()
 
@@ -2374,7 +2369,7 @@ class Test_Forcing(unittest.TestCase):
             pass
         else:
             msg = 'Should have raised exception'
-            raise_(Exception, msg)
+            raise Exception, msg
 
 
             

@@ -16,7 +16,6 @@ interpolate_block
 
 """
 
-from builtins import object
 import time
 import os
 from warnings import warn
@@ -42,7 +41,7 @@ build_quadtree_time = 0
 def get_build_quadtree_time():
     return build_quadtree_time
 
-class FitInterpolate(object):
+class FitInterpolate:
     
     def __init__(self,
                  vertex_coordinates=None,

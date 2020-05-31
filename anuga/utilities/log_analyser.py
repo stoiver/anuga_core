@@ -1,5 +1,3 @@
-from __future__ import print_function
-from builtins import zip
 import sys
 import os
 import re
@@ -37,7 +35,7 @@ def build_log_info(path, log_file):
                         key = key_value_list[0].strip()
                         value =  key_value_list[1].strip()
                         if key in dictResults:
-                            print("WARNING. Multiple values ignored.")
+                            print "WARNING. Multiple values ignored."
                         dictResults[key] = value
                         #print "key", key 
                         #print "value", value
@@ -56,7 +54,7 @@ def write_meta_log(log_pairs, output_file):
     writer = csv.DictWriter(han, delimiter=',', fieldnames=sorted_all_keys,
                         extrasaction='ignore')
     # Title 
-    writer.writerow(dict(list(zip(sorted_all_keys, sorted_all_keys))))
+    writer.writerow(dict(zip(sorted_all_keys, sorted_all_keys)))
     
     for pair in log_pairs: # Write the main body
         writer.writerow(pair)

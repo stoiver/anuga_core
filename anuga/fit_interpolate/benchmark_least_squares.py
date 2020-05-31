@@ -13,13 +13,8 @@
    Duncan Gray
    Geoscience Australia, 2004.
 """
-from __future__ import division
 
 
-from builtins import str
-from builtins import range
-from builtins import object
-from past.utils import old_div
 import os
 import sys
 import time
@@ -117,7 +112,7 @@ def mem_usage():
     return int(string.split(lines[1])[4]) 
 
 
-class BenchmarkLeastSquares(object):
+class BenchmarkLeastSquares:
     """
 
     Note(DSG-DSG): If you are interested in benchmarking fitting, before
@@ -342,7 +337,7 @@ class BenchmarkLeastSquares(object):
                 # point starts at 0.0
                 # the 2 and 0.25 is to make sure all points are in the
                 # range 0 - 1
-                points.append([float(old_div(point,grid))/float(grid*1.1)+0.0454,
+                points.append([float(point/grid)/float(grid*1.1)+0.0454,
                                float(point%grid)/float(grid*1.1)+0.0454])
             else:
                 points.append([random(), random()])

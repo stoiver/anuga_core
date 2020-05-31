@@ -48,18 +48,14 @@ Here's a DTD format, we might implement one day
 
 
 """
-from __future__ import print_function
-from __future__ import absolute_import
 
-from builtins import str
-from future.utils import raise_
 from os import remove, walk, sep
 from os.path import join, splitext
 
 # Don't add anuga.utilities to these imports
 # EQRM also uses this file, but has a different directory structure
-from .xml_tools import xml2object, XML_element
-from .system_tools import compute_checksum
+from xml_tools import xml2object, XML_element
+from system_tools import compute_checksum
 
 
 # Audit exceptions
@@ -150,7 +146,7 @@ def IP_verified(directory,
                                       filename,
                                       dirpath,
                                       verbose=False)
-            except audit_exceptions as e:
+            except audit_exceptions, e:
                 all_files_accounted_for = False                                
                 status = 'LICENSE FILE NOT VALID\n'
                 status += 'REASON: %s\n' %e
@@ -175,27 +171,27 @@ def IP_verified(directory,
         else:
             # Only print status if there is a problem (no news is good news)
             if first_time_this_dir is True:
-                print()
-                print('------------------------------------')
+                print
+                print '------------------------------------'
                 msg = 'Files without licensing info in dir:'
-                print(msg, dirpath)
-                print('------------------------------------')
+                print msg, dirpath
+                print '------------------------------------'
                 first_time_this_dir = False
             
 
-            print(filename + ' (Checksum=%s): '\
+            print filename + ' (Checksum=%s): '\
                   %str(compute_checksum(join(dirpath, filename))),\
-                  status)
+                  status
 
 
     if verbose is True:
-        print()
-        print('---------------------')        
-        print('Audit result for dir: %s:' %directory)
-        print('---------------------')                
-        print('Number of files audited:  %d' %(all_files))
-        print('Number of files verified: %d' %(ok_files))        
-        print()
+        print
+        print '---------------------'        
+        print 'Audit result for dir: %s:' %directory
+        print '---------------------'                
+        print 'Number of files audited:  %d' %(all_files)
+        print 'Number of files verified: %d' %(ok_files)        
+        print
 
     # Return result        
     return all_files_accounted_for
@@ -261,7 +257,7 @@ def license_file_is_valid(license_filename, data_filename,
     """
 
     if verbose:
-        print('Parsing', license_filename)
+        print 'Parsing', license_filename
         
     doc = xml2object(license_filename)
     
@@ -271,8 +267,8 @@ def license_file_is_valid(license_filename, data_filename,
         msg += ' at the root level. They are\n'
         msg += '  <?xml version="1.0" encoding="iso-8859-1"?>\n'
         msg += '  <ga_license_file>\n'
-        msg += 'The second element was found to be %s' %list(doc.keys())
-        raise_(WrongTags, msg)
+        msg += 'The second element was found to be %s' %doc.keys()
+        raise WrongTags, msg
     
 
     # Validate elements: metadata, datafile, datafile, ...
@@ -282,31 +278,31 @@ def license_file_is_valid(license_filename, data_filename,
     elements = doc['ga_license_file']
     if not elements.has_key('metadata'):
         msg = 'Tag %s must have the element "metadata"'\
-              %list(doc.keys())[0]
+              %doc.keys()[0]
         msg += 'The element found was %s' %elements[0].nodeName
-        raise_(WrongTags, msg)
+        raise WrongTags, msg
 
     if not elements.has_key('datafile'):
         msg = 'Tag %s must have the element "datafile"'\
-              %list(doc.keys())[0]
+              %doc.keys()[0]
         msg += 'The element found was %s' %elements[0].nodeName
-        raise_(WrongTags, msg)    
+        raise WrongTags, msg    
 
-    for key in list(elements.keys()):
+    for key in elements.keys():
         msg = 'Invalid tag: %s' %key
         if not key in ['metadata', 'datafile']:
-            raise_(WrongTags, msg)                    
+            raise WrongTags, msg                    
 
     
     # Extract information for metadata section
-    if verbose: print()
+    if verbose: print
     metadata = elements['metadata']
 
     author = metadata['author']
-    if verbose: print('Author:   ', author)
+    if verbose: print 'Author:   ', author
     if author == '':
         msg = 'Missing author'
-        raise_(Exception, msg)                
+        raise Exception, msg                
     
     #svn_keywords = metadata['svn_keywords']
     #if verbose: print 'SVN keywords:   ', svn_keywords
@@ -328,7 +324,7 @@ def license_file_is_valid(license_filename, data_filename,
     if not found:
         msg = 'Specified filename to verify %s ' %data_filename
         msg += 'did not appear in license file %s' %license_filename
-        raise_(FilenameMismatch, msg)                
+        raise FilenameMismatch, msg                
             
         
     # Check contents for selected data_filename
@@ -338,20 +334,20 @@ def license_file_is_valid(license_filename, data_filename,
     # Filename
     if data['filename'] == '':
         msg = 'Missing filename'
-        raise_(FilenameMismatch, msg)            
+        raise FilenameMismatch, msg            
     else:
         filename = join(dirpath, data['filename'])
-        if verbose: print('Filename: "%s"' %filename)
+        if verbose: print 'Filename: "%s"' %filename
         try:
             fid = open(filename, 'r')
         except:
             msg = 'Specified filename %s could not be opened'\
                   %filename
-            raise_(FilenameMismatch, msg)
+            raise FilenameMismatch, msg
 
     # CRC
     reported_crc = data['checksum']
-    if verbose: print('Checksum: "%s"' %reported_crc)
+    if verbose: print 'Checksum: "%s"' %reported_crc
     
     file_crc = str(compute_checksum(filename))
     if reported_crc != file_crc:
@@ -360,47 +356,47 @@ def license_file_is_valid(license_filename, data_filename,
                %(license_filename, reported_crc)
         msg += '  The CRC computed from file "%s" is "%s"'\
                %(filename, file_crc)
-        raise_(CRCMismatch, msg)
+        raise CRCMismatch, msg
             
     # Accountable
     accountable = data['accountable']
-    if verbose: print('Accountable: "%s"' %accountable)
+    if verbose: print 'Accountable: "%s"' %accountable
     if accountable == '':
         msg = 'No accountable person specified'
-        raise_(Empty, msg)
+        raise Empty, msg
 
     # Source
     source = data['source']
-    if verbose: print('Source: "%s"' %source)
+    if verbose: print 'Source: "%s"' %source
     if source == '':
         msg = 'No source specified'
-        raise_(Empty, msg)                
+        raise Empty, msg                
 
     # IP owner
     ip_owner = data['IP_owner']
-    if verbose: print('IP owner: "%s"' %ip_owner)
+    if verbose: print 'IP owner: "%s"' %ip_owner
     if ip_owner == '':
         msg = 'No IP owner specified'
-        raise_(Empty, msg)                                
+        raise Empty, msg                                
             
     # IP info
     ip_info = data['IP_info']
-    if verbose: print('IP info: "%s"' %ip_info)
+    if verbose: print 'IP info: "%s"' %ip_info
     #if ip_info == '':
     #    msg = 'No IP info specified'
     #    raise Empty, msg                                               
 
     # Publishable
     publishable = data['publishable']
-    if verbose: print('Publishable: "%s"' %publishable)
+    if verbose: print 'Publishable: "%s"' %publishable
     if publishable == '':
         msg = 'No publishable value specified'
-        raise_(NotPublishable, msg)
+        raise NotPublishable, msg
     
     if publishable.upper() != 'YES':
         msg = 'Data file %s is not flagged as publishable'\
               %fid.name
-        raise_(NotPublishable, msg)
+        raise NotPublishable, msg
 
 
 

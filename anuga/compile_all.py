@@ -1,6 +1,5 @@
 """ Script to compile all C extensions in ANUGA. """
 
-from past.builtins import execfile
 import os
 import subprocess
 import sys

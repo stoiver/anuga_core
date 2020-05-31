@@ -6,6 +6,7 @@
     :target: https://ci.appveyor.com/project/stoiver/anuga-core-67ygx
     :alt: appveyor status
 
+
 .. image:: https://img.shields.io/pypi/v/anuga.svg
     :target: https://pypi.python.org/pypi/anuga/
     :alt: Latest Version

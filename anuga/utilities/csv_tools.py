@@ -5,9 +5,6 @@ Some CSV file utility routines.
 '''
 
 
-from builtins import next
-from builtins import range
-from future.utils import raise_
 import csv
 
 
@@ -40,20 +37,20 @@ def merge_csv_key_values(file_title_list, output_file,
 
         # start reading the CSV file
         data = []
-        fd = open(filename, 'r')
+        fd = open(filename, 'rb')
         csv_reader = csv.reader(fd)
 
         # open file, get header row, calculate required column indices
-        h = next(csv_reader)
+        h = csv_reader.next()
         header = [x.strip() for x in h]
         if key_col not in header:
             msg = ("Column '%s' not in file %s"
                    % (key_col, filename))
-            raise_(Exception, msg)
+            raise Exception, msg
         if data_col not in header:
             msg = ("Column '%s' not in file %s"
                    % (data_col, filename))
-            raise_(Exception, msg)
+            raise Exception, msg
 
         key_index = header.index(key_col)
         data_index = header.index(data_col)
@@ -73,7 +70,7 @@ def merge_csv_key_values(file_title_list, output_file,
     num_files = len(file_title_list)
     if num_files == 0:
         msg = "List 'file_title_list' is empty!?"
-        raise_(Exception, msg)
+        raise Exception, msg
 
     # read data from all files
     file_data = []
@@ -92,7 +89,7 @@ def merge_csv_key_values(file_title_list, output_file,
                 msg = ('File %s has different number of rows from %s, '
                        'expected %d columns, got %d'
                        % (fn, file_data[0][0], num_rows, len(d)))
-                raise_(Exception, msg)
+                raise Exception, msg
 
     # sanity check, check key values same in same rows
     first_key_values = [v[0] for v in file_data[0][2]]
@@ -101,7 +98,7 @@ def merge_csv_key_values(file_title_list, output_file,
         if key_values != first_key_values:
             msg = ('Key values differ between files %s and %s!?'
                    % (fn, file_data[0][0]))
-            raise_(Exception, msg)
+            raise Exception, msg
 
     # open output file
     out_fd = open(output_file, 'w')
@@ -115,7 +112,7 @@ def merge_csv_key_values(file_title_list, output_file,
     
     # write data rows to output file
     file_kv_list = [x[2] for x in file_data]
-    for i in range(num_rows):
+    for i in xrange(num_rows):
         data_row = [file_kv_list[0][i][0]]
         for file_data in file_kv_list:
             data_row.append(file_data[i][1])

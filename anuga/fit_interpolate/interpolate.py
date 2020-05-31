@@ -3,7 +3,7 @@
    These functions and classes calculate a value at a particular point on
    the given mesh. It interpolates the values stored at the vertices of the
    mesh.
-
+   
    For example, if you want to get the height of a terrain mesh at particular
    point, you pass the point to an Interpolate class. The point will intersect
    one of the triangles on the mesh, and the interpolated height will be an
@@ -23,12 +23,7 @@ interpolate
 interpolate_block
 
 """
-from __future__ import division
 
-from builtins import str
-from builtins import range
-from builtins import object
-from past.utils import old_div
 import time
 import os
 import sys
@@ -135,9 +130,9 @@ def interpolate(vertex_coordinates,
               'verbose': verbose}
 
     if use_cache is True:
-        I = cache(Interpolate, args, kwargs, verbose=verbose)
+		I = cache(Interpolate, args, kwargs, verbose=verbose)
     else:
-        I = Interpolate(*args, **kwargs)
+        I = apply(Interpolate, args, kwargs)    
 
     # Call interpolate method with interpolation points
     result = I.interpolate_block(vertex_values, interpolation_points,
@@ -299,8 +294,8 @@ class Interpolate (FitInterpolate):
         Return the point data, z.
 
         See interpolate for doc info.
-        """
-
+        """ 
+    
         # FIXME (Ole): I reckon we should change the interface so that
         # the user can specify the interpolation matrix instead of the
         # interpolation points to save time.
@@ -332,7 +327,7 @@ class Interpolate (FitInterpolate):
 
                 reuse_A = False
 
-                if key in self.interpolation_matrices:
+                if self.interpolation_matrices.has_key(key):
                     X, stored_points = self.interpolation_matrices[key]
                     if num.alltrue(stored_points == point_coordinates):
                         reuse_A = True                # Reuse interpolation matrix
@@ -448,32 +443,32 @@ class Interpolate (FitInterpolate):
 
         centroids = []
         inside_poly_indices = []
-
+        
         # Compute matrix elements for points inside the mesh
         if verbose: log.critical('Building interpolation matrix from %d points'
                                  % n)
 
         for d, i in enumerate(inside_boundary_indices):
             # For each data_coordinate point
-            if verbose and d%(old_div((n+10),10))==0: log.critical('Doing %d of %d'
+            if verbose and d%((n+10)/10)==0: log.critical('Doing %d of %d'
                                                           %(d, n))
 
             x = point_coordinates[i]
-            element_found, sigma0, sigma1, sigma2, k = self.root.search_fast(x)
+            element_found, sigma0, sigma1, sigma2, k = self.root.search_fast(x)         
             # Update interpolation matrix A if necessary
             if element_found is True:
 
                 #if verbose:
                 #    print 'Point is within mesh:', d, i
-
+            
                 inside_poly_indices.append(i)
-
+                
                 # Assign values to matrix A
                 j0 = self.mesh.triangles[k,0] # Global vertex id for sigma0
                 j1 = self.mesh.triangles[k,1] # Global vertex id for sigma1
                 j2 = self.mesh.triangles[k,2] # Global vertex id for sigma2
                 js = [j0, j1, j2]
-
+                
                 if output_centroids is False:
                     # Weight each vertex according to its distance from x
                     sigmas = {j0:sigma0, j1:sigma1, j2:sigma2}
@@ -483,7 +478,7 @@ class Interpolate (FitInterpolate):
                     # If centroids are needed, weight all 3 vertices equally
                     for j in js:
                         A[i, j] = 1.0/3.0
-                    centroids.append(self.mesh.centroid_coordinates[k])
+                    centroids.append(self.mesh.centroid_coordinates[k])                        
             else:
                 if verbose:
                     log.critical('Mesh has a hole - moving this point to outside list')
@@ -615,7 +610,7 @@ def interpolate_sww2csv(sww_file,
                 velocity_x = NAN
             else:
                 if depth > 1.e-30: # use epsilon
-                    velocity_x = old_div(momentum_x, depth)  #Absolute velocity
+                    velocity_x = momentum_x / depth  #Absolute velocity
                 else:
                     velocity_x = 0
 
@@ -623,7 +618,7 @@ def interpolate_sww2csv(sww_file,
                 velocity_y = NAN
             else:
                 if depth > 1.e-30: # use epsilon
-                    velocity_y = old_div(momentum_y, depth)  #Absolute velocity
+                    velocity_y = momentum_y / depth  #Absolute velocity
                 else:
                     velocity_y = 0
 
@@ -631,8 +626,8 @@ def interpolate_sww2csv(sww_file,
                 froude = NAN
             else:
 
-                froude = old_div(sqrt(velocity_x*velocity_x + velocity_y*velocity_y), \
-                         sqrt(depth * g)) # gravity m/s/s
+                froude = sqrt(velocity_x*velocity_x + velocity_y*velocity_y)/ \
+                         sqrt(depth * g) # gravity m/s/s
 
             depths.append(depth)
             velocity_xs.append(velocity_x)
@@ -653,7 +648,7 @@ def interpolate_sww2csv(sww_file,
             froude_writer.writerow(froudes)
 
 
-class Interpolation_function(object):
+class Interpolation_function:
     """Interpolation_interface - creates callable object f(t, id) or f(t,x,y)
     which is interpolated from time series defined at vertices of
     triangular mesh (such as those stored in sww files)
@@ -738,7 +733,7 @@ class Interpolation_function(object):
 
         # Use keys if no names are specified
         if quantity_names is None:
-            quantity_names = list(quantities.keys())
+            quantity_names = quantities.keys()
 
         # Check spatial info
         if vertex_coordinates is None:
@@ -798,7 +793,7 @@ class Interpolation_function(object):
 
             # Ensure 'mesh_boundary_polygon' is defined
             mesh_boundary_polygon = None
-
+            
             if triangles is not None and vertex_coordinates is not None:
                 # Check that all interpolation points fall within
                 # mesh boundary as defined by triangles and vertex_coordinates.
@@ -932,7 +927,7 @@ class Interpolation_function(object):
                                                       self.interpolation_points,
                                                       verbose=False,
                                                       output_centroids=output_centroids)
-                        self.centroids = interpol.centroids
+                        self.centroids = interpol.centroids                                                          
                     elif triangles is None and vertex_coordinates is not None:
                         result = interpolate_polyline(Q,
                                                       vertex_coordinates,
@@ -941,11 +936,11 @@ class Interpolation_function(object):
                                                           self.interpolation_points)
 
                     #assert len(result), len(interpolation_points)
-                    self.precomputed_values[name][i, :] = result
-
+                    self.precomputed_values[name][i, :] = result                                    
+                    
             # Report
             if verbose:
-                log.critical(self.statistics())
+                log.critical(self.statistics())            
         else:
             # Store quantitites as is
             for name in quantity_names:
@@ -1005,8 +1000,8 @@ class Interpolation_function(object):
             ratio = 0
         else:
             # t is now between index and index+1
-            ratio = (old_div((t - self.time[self.index]),
-                         (self.time[self.index+1] - self.time[self.index])))
+            ratio = ((t - self.time[self.index]) /
+                         (self.time[self.index+1] - self.time[self.index]))
 
         # Compute interpolated values
         q = num.zeros(len(self.quantity_names), num.float)
@@ -1087,9 +1082,9 @@ class Interpolation_function(object):
             msg += '    x in [%f, %f], len(x) == %d\n'\
                    %(min(x), max(x), len(x))
             msg += '    y in [%f, %f], len(y) == %d\n'\
-                   %(min(y), max(y), len(y))
+                   %(min(y), max(y), len(y))            
 
-
+        
 
         msg += '    t in [%f, %f], len(t) == %d\n'\
                %(min(self.time), max(self.time), len(self.time))
@@ -1145,3 +1140,5 @@ def interpolate_sww(sww_file, time, interpolation_points,
                                      triangles=volumes,
                                      interpolation_points=interpolation_points,
                                      verbose=verbose)
+
+

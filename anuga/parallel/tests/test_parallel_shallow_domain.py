@@ -2,17 +2,14 @@
 """Test a run of the sequential shallow water domain against
 a run of the parallel shallow water domain.
 
-WARNING: This assumes that the command to run jobs is mpiexec.
+WARNING: This assumes that the command to run jobs is mpirun.
 Tested with MPICH and LAM (Ole)
 """
-from __future__ import print_function
 
 #------------------------------------------------------------------------------
 # Import necessary modules
 #------------------------------------------------------------------------------
 
-from builtins import object
-from future.utils import raise_
 import unittest
 import os
 import sys
@@ -21,7 +18,18 @@ import sys
 
 import numpy as num
 
-from anuga.utilities import parallel_abstraction as pypar
+
+
+#------------------------------------------
+# Import pypar without the initial output
+#------------------------------------------
+class NullStream:
+    def write(self,text):
+        pass
+sys.stdout = NullStream()
+import pypar
+sys.stdout = sys.__stdout__
+
 
 #------------------------------------------
 # anuga imports
@@ -62,7 +70,7 @@ verbose = False
 #--------------------------------------------------------------------------
 # Setup procedures
 #--------------------------------------------------------------------------
-class Set_Stage(object):
+class Set_Stage:
     """Set an initial condition with constant water height, for x<x0
     """
 
@@ -88,7 +96,7 @@ def run_simulation(parallel=False):
     #--------------------------------------------------------------------------
 
     if parallel:
-        if myid == 0 and verbose: print('DISTRIBUTING PARALLEL DOMAIN')
+        if myid == 0 and verbose: print 'DISTRIBUTING PARALLEL DOMAIN'
         domain = distribute(domain)
 
     #------------------------------------------------------------------------------
@@ -104,9 +112,9 @@ def run_simulation(parallel=False):
     # Evolution
     #------------------------------------------------------------------------------
     if parallel:
-        if myid == 0 and verbose: print('PARALLEL EVOLVE')
+        if myid == 0 and verbose: print 'PARALLEL EVOLVE'
     else:
-        if verbose: print('SEQUENTIAL EVOLVE')
+        if verbose: print 'SEQUENTIAL EVOLVE'
 
     for t in domain.evolve(yieldstep = yieldstep, finaltime = finaltime):
         pass
@@ -121,7 +129,7 @@ class Test_parallel_shallow_domain(unittest.TestCase):
         #print "Expect this test to fail if not run from the parallel directory."
         
         abs_script_name = os.path.abspath(__file__)
-        cmd = "mpiexec -np %d python %s" % (3, abs_script_name)
+        cmd = "mpirun -np %d python %s" % (nprocs, abs_script_name)
         result = os.system(cmd)
         
         assert_(result == 0)
@@ -132,7 +140,7 @@ class Test_parallel_shallow_domain(unittest.TestCase):
 def assert_(condition, msg="Assertion Failed"):
     if condition == False:
         #pypar.finalize()
-        raise_(AssertionError, msg)
+        raise AssertionError, msg
 
 if __name__=="__main__":
     if numprocs == 1: 
@@ -141,18 +149,14 @@ if __name__=="__main__":
         runner.run(suite)
     else:
 
-        from anuga.utilities.parallel_abstraction import global_except_hook
-        import sys
-        sys.excepthook = global_except_hook
-
         pypar.barrier()
         if myid ==0:
-            if verbose: print('PARALLEL START')
+            if verbose: print 'PARALLEL START'
 
         run_simulation(parallel=True)
         
         if myid == 0:     
-            if verbose: print('Parallel test OK')
+            if verbose: print 'Parallel test OK'
 
 
 

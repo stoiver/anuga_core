@@ -1,4 +1,3 @@
-from __future__ import print_function
 import os
 import time
 import sys
@@ -18,7 +17,7 @@ if sys.platform == 'win32':
     cmd = 'python setup.py build --compiler=mingw32'
 else:
     cmd = 'python setup.py build'
-print(cmd)
+print cmd
 
 log_filename_1 = 'build.log'
 log_filename_2 = 'build_err.log'
@@ -55,8 +54,8 @@ else:
 
 
 
-print()        
-print('That took %.3fs' %(time.time() - t0))
+print        
+print 'That took %.3fs' %(time.time() - t0)
 
 
 

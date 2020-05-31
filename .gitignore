@@ -1,6 +1,5 @@
 # Editor temporary/working/backup files #
 #########################################
-
 .#*
 [#]*#
 *~
@@ -15,8 +14,6 @@
 .settings/
 .*.sw[nop]
 .sw[nop]
-*.c
-*.cpp
 *.tmp
 *.vim
 *.sww
@@ -197,5 +194,4 @@ doc/source/generated
 
 # Things specific to this project #
 ###################################
-anuga/__config__.py
 anuga/version.py

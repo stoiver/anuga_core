@@ -3,13 +3,6 @@
    Duncan Gray, Ole Nielsen, Jane Sexton, Nick Bartzis
    Geoscience Australia, 2006
 """
-from __future__ import absolute_import
-from builtins import zip
-from builtins import str
-from builtins import range
-from past.builtins import basestring
-from builtins import object
-from future.utils import raise_
 import os
 from math import sqrt
 
@@ -32,7 +25,7 @@ except ImportError:
     # Hand-built mockup of the things we need from the kinds package, since it
     # was recently removed from the standard numeric distro.  Some users may  
     # not have it by default.  
-    class _bunch(object):  
+    class _bunch:  
         pass  
          
     class _kinds(_bunch):  
@@ -44,7 +37,7 @@ except ImportError:
     
 
 from anuga.utilities.numerical_tools import ensure_numeric
-from .exposure import Exposure
+from exposure import Exposure
 from anuga.abstract_2d_finite_volumes.util import file_function
 from anuga.geospatial_data.geospatial_data import ensure_absolute
 from anuga.utilities.numerical_tools import NAN
@@ -105,7 +98,7 @@ def inundation_damage(sww_base_name, exposure_files_in,
                                )
         results_dic = edm.calc_damage_and_costs(verbose_csv=True,
                                                 verbose=verbose)
-        for title, value in results_dic.items():
+        for title, value in results_dic.iteritems():
             csv.set_column(title, value, overwrite=overwrite)
     
         # Save info back to csv file
@@ -175,7 +168,7 @@ def calc_max_depth_and_momentum(sww_base_name, points,
     if len(interate_over) == 0:
         msg = 'No files of the base name %s.'\
               %(sww_base_name)
-        raise_(IOError, msg)
+        raise IOError, msg
     from os import sep
 
     for this_sww_file in interate_over:
@@ -210,7 +203,7 @@ def calc_max_depth_and_momentum(sww_base_name, points,
 
     return max_depths, max_momentums
 
-class EventDamageModel(object):
+class EventDamageModel:
     """
     Object for working out the damage and cost
 
@@ -363,8 +356,8 @@ class EventDamageModel(object):
         contents_damage = num.zeros(self.structure_count, num.float)
         self.struct_inundated = ['']* self.structure_count
 
-        for i,max_depth,shore_distance,wall in zip(
-                                                   list(range(self.structure_count)),
+        for i,max_depth,shore_distance,wall in map(None,
+                                                   range(self.structure_count),
                                                    self.max_depths,
                                                    self.shore_distances,
                                                    self.walls):
@@ -412,8 +405,8 @@ class EventDamageModel(object):
         # value of list of struct indexes 
         struct_coll_prob = {}
         
-        for i,max_depth,shore_distance,wall in zip(
-                                                   list(range(self.structure_count)),
+        for i,max_depth,shore_distance,wall in map(None,
+                                                   range(self.structure_count),
                                                    self.max_depths,
                                                    self.shore_distances,
                                                    self.walls):
@@ -450,7 +443,7 @@ class EventDamageModel(object):
         if verbose_csv:
             self.collapse_csv_info = ['']* self.structure_count
         #for a given 'bin', work out how many houses will collapse
-        for probability, house_indexes in collapse_probability.items():
+        for probability, house_indexes in collapse_probability.iteritems():
             collapse_count = round(len(house_indexes) *probability)
             
             if verbose_csv:

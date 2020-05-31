@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 
-from builtins import zip
-from builtins import range
 import os
 import unittest
 import tempfile
@@ -16,8 +14,7 @@ col_text_string = {0: 'col_%d',
                    1: ' col_%d',
                    2: 'col_%d ',
                    3: ' col_%d '
-                   }
-
+                  }
 
 class Test_CSV_utils(unittest.TestCase):
 
@@ -25,7 +22,7 @@ class Test_CSV_utils(unittest.TestCase):
     NUM_COLS = 6
     NUM_LINES = 10
     OUTPUT_FILE = 'test.csv'
-
+    
     def setUp(self):
         # create temporary scratch directory
         self.tmp_dir = tempfile.mkdtemp()
@@ -45,10 +42,11 @@ class Test_CSV_utils(unittest.TestCase):
             csv_fd.writerow(columns)
 
             # write data rows
-            for j in range(self.NUM_LINES):
+            for j in xrange(self.NUM_LINES):
                 data = [j, j, '%d.%d' % (j, i)] + ['qwert']*(self.NUM_COLS-3)
                 csv_fd.writerow(data)
             fd.close()
+
 
     def tearDown(self):
         for fn in self.filenames:
@@ -61,9 +59,10 @@ class Test_CSV_utils(unittest.TestCase):
         except:
             pass
 
+
     def test_merge_one_file(self):
         """Test merging a single CSV file.
-
+        
         This is the same as a two coluymn extract, with column rename.
         """
 
@@ -96,6 +95,7 @@ class Test_CSV_utils(unittest.TestCase):
                '--------------------\n'
                % (expected, got))
         self.assertTrue(self.str_cmp(got, expected), msg)
+
 
     def test_merge_two_files(self):
         """Test merging two CSV files."""
@@ -131,6 +131,7 @@ class Test_CSV_utils(unittest.TestCase):
                % (expected, got))
         self.assertTrue(self.str_cmp(got, expected), msg)
 
+
     def test_merge_two_files2(self):
         """Test merging two CSV files."""
 
@@ -164,6 +165,7 @@ class Test_CSV_utils(unittest.TestCase):
                '--------------------\n'
                % (expected, got))
         self.assertTrue(self.str_cmp(got, expected), msg)
+
 
     def test_merge_four_files(self):
         """Test merging four CSV files."""
@@ -200,6 +202,7 @@ class Test_CSV_utils(unittest.TestCase):
                '--------------------\n'
                % (expected, got))
         self.assertTrue(self.str_cmp(got, expected), msg)
+
 
     def test_merge_ten_files(self):
         """Test merging ten CSV files."""
@@ -243,30 +246,33 @@ class Test_CSV_utils(unittest.TestCase):
                % (expected, got))
         self.assertTrue(self.str_cmp(got, expected), msg)
 
+
     def test_no_key_column(self):
         """Test merging two CSV files with expected missing key column."""
 
         file_title_list = [(self.filenames[0], 'test0'),
                            (self.filenames[2], 'test2')]
         self.assertRaises(Exception,
-                          csv_tools.merge_csv_key_values,
-                          file_title_list,
-                          self.OUTPUT_FILE,
-                          key_col='col_A',
-                          data_col='col_2'
-                          )
+                              csv_tools.merge_csv_key_values,
+                              file_title_list,
+                              self.OUTPUT_FILE,
+                              key_col='col_A',
+                              data_col='col_2'
+                             )
+
 
     def test_no_input_files(self):
         """Test merging *zero* CSV files!"""
 
         file_title_list = []
         self.assertRaises(Exception,
-                          csv_tools.merge_csv_key_values,
-                          file_title_list,
-                          self.OUTPUT_FILE,
-                          key_col='col_1',
-                          data_col='col_A'
-                          )
+                              csv_tools.merge_csv_key_values,
+                              file_title_list,
+                              self.OUTPUT_FILE,
+                              key_col='col_1',
+                              data_col='col_A'
+                             )
+
 
     def test_no_data_column(self):
         """Test merging two CSV files with expected missing data column."""
@@ -274,12 +280,13 @@ class Test_CSV_utils(unittest.TestCase):
         file_title_list = [(self.filenames[0], 'test0'),
                            (self.filenames[2], 'test2')]
         self.assertRaises(Exception,
-                          csv_tools.merge_csv_key_values,
-                          file_title_list,
-                          self.OUTPUT_FILE,
-                          key_col='col_1',
-                          data_col='col_A'
-                          )
+                              csv_tools.merge_csv_key_values,
+                              file_title_list,
+                              self.OUTPUT_FILE,
+                              key_col='col_1',
+                              data_col='col_A'
+                             )
+
 
     def test_different_num_rows(self):
         """Test merging two CSV files with different number of rows."""
@@ -298,17 +305,18 @@ class Test_CSV_utils(unittest.TestCase):
         file_title_list = [(self.filenames[0], 'test0'),
                            (test_filename, 'test2')]
         self.assertRaises(Exception,
-                          csv_tools.merge_csv_key_values,
-                          file_title_list,
-                          self.OUTPUT_FILE,
-                          key_col='col_1',
-                          data_col='col_A'
-                          )
+                              csv_tools.merge_csv_key_values,
+                              file_title_list,
+                              self.OUTPUT_FILE,
+                              key_col='col_1',
+                              data_col='col_A'
+                             )
 
         try:
             os.remove(test_filename)
         except:
             pass
+
 
     def test_different_key_values(self):
         """Test merging two CSV files with different key values."""
@@ -328,17 +336,18 @@ class Test_CSV_utils(unittest.TestCase):
         file_title_list = [(self.filenames[0], 'test0'),
                            (test_filename, 'test2')]
         self.assertRaises(Exception,
-                          csv_tools.merge_csv_key_values,
-                          file_title_list,
-                          self.OUTPUT_FILE,
-                          key_col='col_1',
-                          data_col='col_A'
-                          )
+                              csv_tools.merge_csv_key_values,
+                              file_title_list,
+                              self.OUTPUT_FILE,
+                              key_col='col_1',
+                              data_col='col_A'
+                             )
 
         try:
             os.remove(test_filename)
         except:
             pass
+
 
     def test_latex_example(self):
         """Test merging two CSV files - example from latex doc."""
@@ -398,6 +407,7 @@ class Test_CSV_utils(unittest.TestCase):
         except:
             pass
 
+
     def str_cmp(self, str1, str2):
         '''Compare 2 strings, removing end-of-line stuff first.'''
 
@@ -408,6 +418,7 @@ class Test_CSV_utils(unittest.TestCase):
                 return False
         return True
 
+
     def get_file_contents(self, filename):
         '''Return file contents as a string.'''
 
@@ -417,7 +428,6 @@ class Test_CSV_utils(unittest.TestCase):
         return ''.join(data).replace('\r', '')
 
 ################################################################################
-
 
 if __name__ == "__main__":
     suite = unittest.makeSuite(Test_CSV_utils, 'test')

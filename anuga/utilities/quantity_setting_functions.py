@@ -3,12 +3,6 @@
 Function which can be useful when setting quantities
 
 """
-from __future__ import print_function
-from __future__ import division
-from past.builtins import str
-from builtins import range
-from past.utils import old_div
-from future.utils import raise_
 import copy
 import os
 import anuga.utilities.spatialInputUtil as su
@@ -153,7 +147,7 @@ def make_nearestNeighbour_quantity_function(
                 numerator += values*inverse_distance
                 denominator += inverse_distance
 
-            quantity_output[dist_lt_thresh] = old_div(numerator,denominator)
+            quantity_output[dist_lt_thresh] = numerator/denominator
 
         return quantity_output
 
@@ -377,8 +371,8 @@ def composite_quantity_setting_function(poly_fun_pairs,
                     pi_path = su.getRasterExtent(fi,asPolygon=True)
 
                     if verbose:
-                        print('Extracting extent from raster: ', fi)
-                        print('Extent: ', pi_path)
+                        print 'Extracting extent from raster: ', fi
+                        print 'Extent: ', pi_path
 
                 elif( (type(pi) == str) and os.path.isfile(pi) ):
                     # pi is a file
@@ -407,7 +401,7 @@ def composite_quantity_setting_function(poly_fun_pairs,
                 # fi is a function
                 quantityVal[fInds] = fi(x[fInds], y[fInds])
 
-            elif isinstance(fi, (int, int, float)):
+            elif isinstance(fi, (int, long, float)):
                 # fi is a numerical constant
                 quantityVal[fInds] = fi*1.0
 
@@ -418,8 +412,8 @@ def composite_quantity_setting_function(poly_fun_pairs,
                     fi_array = su.read_csv_optional_header(fi)
                     # Check the results
                     if fi_array.shape[1] is not 3:
-                        print('Treated input file ' + fi +\
-                              ' as xyz array with an optional header')
+                        print 'Treated input file ' + fi +\
+                              ' as xyz array with an optional header'
                         msg = 'Array should have 3 columns -- x,y,value'
                         raise Exception(msg)
 
@@ -443,9 +437,9 @@ def composite_quantity_setting_function(poly_fun_pairs,
                 quantityVal[fInds] = newfi(x[fInds], y[fInds])
 
             else:
-                print('ERROR: with function from ' + fi)
+                print 'ERROR: with function from ' + fi
                 msg='Cannot make function from type ' + str(type(fi))
-                raise_(Exception, msg)
+                raise Exception, msg
 
             ###################################################################
             # Check for nan values
@@ -471,7 +465,7 @@ def composite_quantity_setting_function(poly_fun_pairs,
                           'poly_fun_pair at index ' + str(i) + ' '\
                           'in composite_quantity_setting_function. ' + \
                           'They will be passed to later poly_fun_pairs'
-                    if verbose: print(msg)
+                    if verbose: print msg
                     not_nan_inds = (1-nan_flag).nonzero()[0]
 
                     if len(not_nan_inds)>0:
@@ -480,7 +474,7 @@ def composite_quantity_setting_function(poly_fun_pairs,
                         # All values are nan
                         msg = '( Actually all the values were nan - ' + \
                               'Are you sure they should be? Possible error?)'
-                        if verbose: print(msg)
+                        if verbose: print msg
                         continue
 
                 else:
@@ -536,10 +530,10 @@ def composite_quantity_setting_function(poly_fun_pairs,
 
 
             if verbose:
-                print('Re-interpolating ', len(points_to_reinterpolate),\
+                print 'Re-interpolating ', len(points_to_reinterpolate),\
                       ' points which were nan under their',\
                       ' first-preference and are inside the',\
-                      ' nan_interpolation_region_polygon')
+                      ' nan_interpolation_region_polygon'
 
             if len(points_to_reinterpolate) > 0:
                 msg = 'WARNING: nan interpolation is being applied. This ',\
@@ -548,7 +542,7 @@ def composite_quantity_setting_function(poly_fun_pairs,
                       'implemented yet [so parallel results might depend on ',\
                       'the number of processes]'
                 if verbose:
-                    print(msg)
+                    print msg
 
 
             # Find the interpolation points = points not needing reinterpolation
@@ -561,11 +555,11 @@ def composite_quantity_setting_function(poly_fun_pairs,
             nan_ip = (quantityVal[ip] != quantityVal[ip]).nonzero()[0]
 
             if len(nan_ip) > 0:
-                print('There are ', len(nan_ip), ' points outside the ',\
-                      'nan_interpolation_region_polygon have nan values.')
-                print('The user should ensure this does not happen.')
-                print('The points have the following coordinates:')
-                print(xy_array_trans[ip[nan_ip],:])
+                print 'There are ', len(nan_ip), ' points outside the ',\
+                      'nan_interpolation_region_polygon have nan values.'
+                print 'The user should ensure this does not happen.'
+                print 'The points have the following coordinates:'
+                print xy_array_trans[ip[nan_ip],:]
                 msg = "There are nan points outside of " +\
                       "nan_interpolation_region_polygon, even after all " +\
                       "fall-through's"
@@ -591,13 +585,13 @@ def composite_quantity_setting_function(poly_fun_pairs,
 
         # Check there are no remaining nan values
         if( min(isSet) != 1):
-            print('Some points remain as nan, which is not allowed')
+            print 'Some points remain as nan, which is not allowed'
             unset_inds = (isSet != 1).nonzero()[0]
             lui = min(5, len(unset_inds))
-            print('There are ', len(unset_inds), ' such points')
-            print('Here are a few:')
+            print 'There are ', len(unset_inds), ' such points'
+            print 'Here are a few:'
             for i in range(lui):
-                print(x[unset_inds[i]] + xll, y[unset_inds[i]] + yll)
+                print x[unset_inds[i]] + xll, y[unset_inds[i]] + yll
             raise Exception('It seems the input data needs to be fixed')
 
         return quantityVal

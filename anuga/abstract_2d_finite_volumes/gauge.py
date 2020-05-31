@@ -7,18 +7,12 @@
    Ole Nielsen, Stephen Roberts, Duncan Gray, Christopher Zoppou, James Hudson
    Geoscience Australia
 """
-from __future__ import absolute_import
-from __future__ import division
 
-from builtins import str
-from six import string_types
-from builtins import range
-from past.utils import old_div
 import numpy as num
 
 from anuga.geospatial_data.geospatial_data import ensure_absolute
-from .util import check_list, calc_bearing
-from .file_function import file_function
+from util import check_list, calc_bearing
+from file_function import file_function
 
 import os
 
@@ -63,8 +57,8 @@ def _quantities2csv(quantities, point_quantities, centroids, point_i):
                 if point_quantities[2] < 1.0e6:
                     momentum = sqrt(point_quantities[2]**2
                                     + point_quantities[3]**2)
-                    vel = old_div(momentum, (point_quantities[0] 
-                                      - point_quantities[1]))
+                    vel = momentum / (point_quantities[0] 
+                                      - point_quantities[1])
                 else:
                     momentum = 0
                     vel = 0
@@ -143,12 +137,12 @@ def sww2csv_gauges(sww_file,
     from anuga.utilities.file_utils import get_all_swwfiles
     from anuga.abstract_2d_finite_volumes.util import file_function    
 
-    assert isinstance(gauge_file,string_types) or isinstance(gauge_file, str), 'Gauge filename must be a string or unicode'
-    assert isinstance(out_name,string_types) or isinstance(out_name, str), 'Output filename prefix must be a string'
+    assert isinstance(gauge_file,str) or isinstance(gauge_file, unicode), 'Gauge filename must be a string or unicode'
+    assert isinstance(out_name,str) or isinstance(out_name, unicode), 'Output filename prefix must be a string'
     
     try:
         point_reader = reader(file(gauge_file))
-    except Exception as e:
+    except Exception, e:
         msg = 'File "%s" could not be opened: Error="%s"' % (gauge_file, e)
         raise Exception(msg)
 
@@ -417,7 +411,7 @@ def _sww2timeseries(swwfiles,
     
     try:
         fid = open(gauge_filename)
-    except Exception as e:
+    except Exception, e:
         msg = 'File "%s" could not be opened: Error="%s"' % (gauge_filename, e)
         raise Exception(msg)
 
@@ -452,10 +446,10 @@ def _sww2timeseries(swwfiles,
     themaxT = 0.0
     theminT = 0.0
 
-    for swwfile in list(swwfiles.keys()):
+    for swwfile in swwfiles.keys():
         try:
             fid = open(swwfile)
-        except Exception as e:
+        except Exception, e:
             msg = 'File "%s" could not be opened: Error="%s"' % (swwfile, e)
             raise Exception(msg)
 
@@ -521,7 +515,7 @@ def _sww2timeseries(swwfiles,
     if verbose and len(gauge_index) > 0:
          log.critical('Inputs OK - going to generate figures')
 
-    if len(gauge_index) != 0:
+    if len(gauge_index) <> 0:
         texfile, elev_output = \
             _generate_figures(plot_quantity, file_loc, report, reportname,
                              surface, leg_label, f_list, gauges, locations,
@@ -554,7 +548,7 @@ def gauge_get_from_file(filename):
     line1 = lines[0]
     line11 = line1.split(',')
 
-    if isinstance(line11[0], string_types) is True:
+    if isinstance(line11[0], str) is True:
         # We have found text in the first line
         east_index = None
         north_index = None
@@ -595,7 +589,7 @@ def gauge_get_from_file(filename):
 
         N = len(lines)
         elev = [-9999]*N
-        gaugelocation = list(range(N))
+        gaugelocation = range(N)
         
     # Read in gauge data
     for line in lines:
@@ -731,9 +725,9 @@ def _generate_figures(plot_quantity, file_loc, report, reportname, surface,
                     if depth < 0.001:
                         vel = 0.0
                     else:
-                        vel = old_div(m, (depth + old_div(1.e-6,depth))) 
+                        vel = m / (depth + 1.e-6/depth) 
                     bearing = calc_bearing(uh, vh)                    
-                    model_time[i,k,j] = old_div((t + starttime),scale) #t/60.0
+                    model_time[i,k,j] = (t + starttime)/scale #t/60.0
                     stages[i,k,j] = w
                     elevations[i,k,j] = z 
                     xmom[i,k,j] = uh 
@@ -819,17 +813,17 @@ def _generate_figures(plot_quantity, file_loc, report, reportname, surface,
 
     elev_output = []
     if generate_fig is True:
-        depth_axis = axis([old_div(starttime,scale), old_div(time_max,scale), -0.1,
+        depth_axis = axis([starttime/scale, time_max/scale, -0.1,
                            max(max_depths)*1.1])
-        stage_axis = axis([old_div(starttime,scale), old_div(time_max,scale),
+        stage_axis = axis([starttime/scale, time_max/scale,
                            min(min_stages), max(max_stages)*1.1])
-        vel_axis = axis([old_div(starttime,scale), old_div(time_max,scale),
+        vel_axis = axis([starttime/scale, time_max/scale,
                          min(min_speeds), max(max_speeds)*1.1])
-        mom_axis = axis([old_div(starttime,scale), old_div(time_max,scale),
+        mom_axis = axis([starttime/scale, time_max/scale,
                          min(min_momentums), max(max_momentums)*1.1])
-        xmom_axis = axis([old_div(starttime,scale), old_div(time_max,scale),
+        xmom_axis = axis([starttime/scale, time_max/scale,
                           min(min_xmomentums), max(max_xmomentums)*1.1])
-        ymom_axis = axis([old_div(starttime,scale), old_div(time_max,scale),
+        ymom_axis = axis([starttime/scale, time_max/scale,
                           min(min_ymomentums), max(max_ymomentums)*1.1])
         cstr = ['g', 'r', 'b', 'c', 'm', 'y', 'k']
         nn = len(plot_quantity)
@@ -1076,7 +1070,7 @@ def _generate_figures(plot_quantity, file_loc, report, reportname, surface,
                     '\label{fig:%s} \n' \
                     '\end{figure} \n \n' % (caption, label)
                 fid.write(s)
-                if float(old_div((k+1),div) - pp) == 0.:
+                if float((k+1)/div - pp) == 0.:
                     fid.write('\\clearpage \n')
                     pp += 1
                 #### finished generating figures ###

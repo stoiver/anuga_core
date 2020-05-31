@@ -2,10 +2,7 @@
 
 python vtk_viewer swwfile.sww
 """
-from __future__ import print_function
-from __future__ import division
 
-from past.utils import old_div
 import sys, os
 from anuga.visualiser import OfflineVisualiser
 
@@ -15,8 +12,8 @@ def get_filename():
 
         root, ext = os.path.splitext(filename)
             
-        if ext != '.sww':
-            print('WARNING: I only view sww files.' %filename)
+        if ext <> '.sww':
+            print 'WARNING: I only view sww files.' %filename
       
         return filename
 
@@ -51,8 +48,8 @@ if __name__ == '__main__':
         #                                         (q['ymomentum'] ** 2)),
         #                                          0, 10))
         o.colour_height_quantity('stage',
-                                  (lambda q: old_div(q['xmomentum'],
-                                             (q['stage'] - q['elevation'])),
+                                  (lambda q: q['xmomentum']/
+                                             (q['stage'] - q['elevation']),
                                               0, 5))
 
 

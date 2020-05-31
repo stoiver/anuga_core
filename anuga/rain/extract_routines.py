@@ -4,13 +4,7 @@ Basic helper routines
 
 
 """
-from __future__ import print_function
-from __future__ import division
 
-from builtins import range
-from past.builtins import basestring
-from builtins import object
-from past.utils import old_div
 import anuga
 #from anuga.fit_interpolate.interpolate2d import interpolate2d
 from anuga.fit_interpolate.interpolate2d import interpolate_raster
@@ -136,15 +130,15 @@ class Calibrated_radar_rain(object):
             minute = 0
                 
         if self.debug:
-            print(year, month, day, hour, minute)
-            print('Convert to epoch')
+            print year, month, day, hour, minute
+            print 'Convert to epoch'
  
                 
                     
         import datetime
         time = int((datetime.datetime(year,month,day,hour,minute) - datetime.datetime(1970,1,1)).total_seconds())
  
-        if self.debug: print(time)
+        if self.debug: print time
         
         return float(time)
     
@@ -169,8 +163,8 @@ class Calibrated_radar_rain(object):
         for root, dirs, files in os.walk(radar_dir): 
             
             if self.debug or self.verbose:
-                print('Directory: ',dirs)
-                print('Number of Files = ',len(fnmatch.filter(files, pattern)))
+                print 'Directory: ',dirs
+                print 'Number of Files = ',len(fnmatch.filter(files, pattern))
             
             for filename in fnmatch.filter(files, pattern): 
                     
@@ -184,7 +178,7 @@ class Calibrated_radar_rain(object):
                     if valid_time < self.start_time: continue
 
                 if self.debug :
-                    print(filename)
+                    print filename
                     
                 file_counter +=1
                 if file_counter == 1:
@@ -198,8 +192,8 @@ class Calibrated_radar_rain(object):
                 
                 # RADAR NetCDF files have Dimensions, Attributes, Variables
                 if self.debug:
-                    print('VARIABLES:')
-                    print('Reference LAT, LONG = ',data.reference_longitude, data.reference_latitude)
+                    print 'VARIABLES:'
+                    print 'Reference LAT, LONG = ',data.reference_longitude, data.reference_latitude
 
                     
                 # Check Time for key 
@@ -210,8 +204,8 @@ class Calibrated_radar_rain(object):
                 file_valid_time = data.variables['valid_time'][0]
                 
                 if self.debug:
-                    print('VARIABLES:')
-                    print('Reference times ', file_start_time, file_valid_time, valid_time)
+                    print 'VARIABLES:'
+                    print 'Reference times ', file_start_time, file_valid_time, valid_time
                 
                 times.append(valid_time)                
         
@@ -224,8 +218,8 @@ class Calibrated_radar_rain(object):
                     if name in data.variables:
                         precip_name = name
                         if self.debug:
-                            print('BOM Reference name tag in this file:')
-                            print(precip_name)
+                            print 'BOM Reference name tag in this file:'
+                            print precip_name
 
                 
                 if first:
@@ -234,7 +228,7 @@ class Calibrated_radar_rain(object):
                     self.base_filename = filename[:-20]
                     
                     
-                    if self.debug: print(' Accumulate rainfall here....')
+                    if self.debug: print ' Accumulate rainfall here....'
                     self.x = data.variables['x_loc'][:]
                     self.y = data.variables['y_loc'][:]
                     if self.y[0] < 0:
@@ -265,7 +259,7 @@ class Calibrated_radar_rain(object):
 
                     precip_total += precip
                     
-                    if self.debug: print(' Keep accumulating rainfall....')
+                    if self.debug: print ' Keep accumulating rainfall....'
 
                     rain_max_in_period  = max(np.max(precip),rain_max_in_period)
 
@@ -309,9 +303,9 @@ class Calibrated_radar_rain(object):
         for root, dirs, files in os.walk(radar_dir): 
             
             if self.debug or self.verbose:
-                print('Directory: ',dirs)
-                print('Root: ',root)
-                print('Number of Files = ',len(fnmatch.filter(files, pattern)))
+                print 'Directory: ',dirs
+                print 'Root: ',root
+                print 'Number of Files = ',len(fnmatch.filter(files, pattern))
             
             if len(fnmatch.filter(files, pattern)) > 0:
                 os.chdir(root)
@@ -330,7 +324,7 @@ class Calibrated_radar_rain(object):
         EXTRACT RAINFALL FROM GRID AT locations  
         
         """
-        if self.verbose or self.debug: print('Extract Rain Check data First')
+        if self.verbose or self.debug: print 'Extract Rain Check data First'
         
         locations = np.array(locations)
         all_values = []
@@ -338,7 +332,7 @@ class Calibrated_radar_rain(object):
         y = self.y
         precips = self.precips
 
-        if self.debug: print(locations)
+        if self.debug: print locations
         
         for precip in precips:
             # and then do the interpolation
@@ -367,8 +361,8 @@ class Calibrated_radar_rain(object):
         y = self.y
         nx = len(x)
         ny = len(y)
-        ldx = old_div(dx,nx)
-        ldy = old_div(dy,ny)
+        ldx = dx/nx
+        ldy = dy/ny
         
         if not polygon is None:
             X,Y = np.meshgrid(x,y)
@@ -397,8 +391,8 @@ class Calibrated_radar_rain(object):
         y = self.y
         nx = len(x)
         ny = len(y)
-        ldx = old_div(dx,nx)
-        ldy = old_div(dy,ny)
+        ldx = dx/nx
+        ldy = dy/ny
         
         time_step = self.time_step
         
@@ -424,17 +418,17 @@ class Calibrated_radar_rain(object):
             Total_Rain_Vol = np.sum(pmask)/1000.0*ldx*ldy # cubic metres
             Catchment_Area = len(pmask)*ldx*ldy
 
-        print(indices)
-        Peak_Intensity = old_div(Rain_Max_in_period,time_step) # mm/sec     
+        print indices
+        Peak_Intensity = Rain_Max_in_period/time_step # mm/sec     
 
         
         if self.verbose:
-            print('Time period = ',time_period)
-            print('Time step = ',time_step)
-            print('Catchment Area = ', Catchment_Area)
-            print('Total rainfall volume in cubic metres (m^3) =', Total_Rain_Vol)
-            print('Peak rainfall/time_step in time period (mm) = ', Rain_Max_in_period)
-            print('Peak Intensity in time period (mm/sec) =', Peak_Intensity)      
+            print 'Time period = ',time_period
+            print 'Time step = ',time_step
+            print 'Catchment Area = ', Catchment_Area
+            print 'Total rainfall volume in cubic metres (m^3) =', Total_Rain_Vol
+            print 'Peak rainfall/time_step in time period (mm) = ', Rain_Max_in_period
+            print 'Peak Intensity in time period (mm/sec) =', Peak_Intensity      
         
         return Total_Rain_Vol, Rain_Max_in_period, Peak_Intensity, Catchment_Area, time_period
 
@@ -454,7 +448,7 @@ class Calibrated_radar_rain(object):
         from datetime import datetime
         date_time = datetime.utcfromtimestamp(times[tid]).strftime("%Y/%m/%d %H:%M")
         
-        if self.debug: print('--- Date/Time ', date_time)
+        if self.debug: print '--- Date/Time ', date_time
         
         plt.figure(1)
         plt.clf()
@@ -498,24 +492,24 @@ class Calibrated_radar_rain(object):
         
         
         if self.debug: 
-            print(precip_total)
-            print('maximum rain =',np.max(precip_total))
-            print('mean rain =',np.mean(precip_total))
+            print precip_total
+            print 'maximum rain =',np.max(precip_total)
+            print 'mean rain =',np.mean(precip_total)
             
         dx = self.extent[1]-self.extent[0]
         dy = self.extent[3]-self.extent[2]
-        Total_Rain_Vol = old_div(np.mean(precip_total)/1000.0*dx*dy,1e6) # Volume in Million m3 over 128km x 128km area
+        Total_Rain_Vol = np.mean(precip_total)/1000.0*dx*dy/1e6 # Volume in Million m3 over 128km x 128km area
         Rain_Max_in_period = self.rain_max_in_period
-        Peak_Intensity = old_div(Rain_Max_in_period,time_step)
+        Peak_Intensity = Rain_Max_in_period/time_step
         extent = self.extent
         
         if self.verbose:
-            print('Total rainfall volume in Mill m3 =',Total_Rain_Vol)
-            print('Peak rainfall in 1 time step = ', Rain_Max_in_period)
-            print('Peak Intensity in 1 timestep =',Peak_Intensity)
-            print('extent', extent)
-            print('size', extent[1]-extent[0], extent[3]-extent[2])
-            print(time_step)
+            print 'Total rainfall volume in Mill m3 =',Total_Rain_Vol
+            print 'Peak rainfall in 1 time step = ', Rain_Max_in_period
+            print 'Peak Intensity in 1 timestep =',Peak_Intensity
+            print 'extent', extent
+            print 'size', extent[1]-extent[0], extent[3]-extent[2]
+            print time_step
 
 
         plt.figure(1)
@@ -564,8 +558,8 @@ class Calibrated_radar_rain(object):
 
             bar_values = [values[lid] for values in all_values]
             total_rain = sum(bar_values)
-            Ave_rain = old_div(total_rain,(self.times[-1]-self.times[0]))*3600
-            max_Intensity = old_div(max(bar_values),time_step)*3600
+            Ave_rain = total_rain/(self.times[-1]-self.times[0])*3600
+            max_Intensity = max(bar_values)/time_step*3600
             
             
             b_title = 'Tot rain = %.1f mm, Ave. rain = %.3f mm/hr, Max Int.= %.3f mm/hr' % (total_rain,Ave_rain,max_Intensity)
@@ -573,7 +567,7 @@ class Calibrated_radar_rain(object):
             #print len(t)
             #print len(bar_values)
             # Think about using...  zip(*lst)
-            plt.bar(t,bar_values,width=old_div(time_step,60),)
+            plt.bar(t,bar_values,width=time_step/60,)
             plt.suptitle(' Data for Location %s:' % lid, fontsize=14, fontweight='bold')    
             plt.title(b_title)
     
@@ -670,12 +664,12 @@ if __name__ == "__main__":
         pass
 
     
-    print(rain.radar_dir)
+    print rain.radar_dir
     
     try: 
         p2 = anuga.read_polygon(Catchment_file)
-        print('Catchment File')
-        print(Catchment_file)
+        print 'Catchment File'
+        print Catchment_file
         #print p2
     except:
         p2 = None
@@ -683,23 +677,23 @@ if __name__ == "__main__":
     
     try:
         p3 = anuga.read_polygon(State_boundary_file)
-        print('State_boundary_file')
-        print(State_boundary_file)
+        print 'State_boundary_file'
+        print State_boundary_file
         #print p3
     except:
         p3 = None
         pass
      
 
-    print(rain.get_extent())
+    print rain.get_extent()
     rain.accumulate_grid()
     
-    print('time_step ',rain.time_step)     
+    print 'time_step ',rain.time_step     
         
     import time
     pl.ion()
     pdb.set_trace() 
-    for tid in range(len(rain.times)):
+    for tid in xrange(len(rain.times)):
         rain.plot_grid(tid, save=False, show=True, polygons=[p2])
         time.sleep(0.05)
         #ipdb.set_trace() 

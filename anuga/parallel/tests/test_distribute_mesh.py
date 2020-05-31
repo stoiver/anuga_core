@@ -1,12 +1,8 @@
 #!/usr/bin/env python
 
-from __future__ import division
-from builtins import range
-from past.utils import old_div
 import unittest
 import sys
 from math import sqrt
-from pprint import pprint
 
 
 from anuga import Domain
@@ -21,7 +17,7 @@ import numpy as num
 
 
 def topography(x,y): 
-    return old_div(-x,2)
+    return -x/2
 
 
 def xcoord(x,y):
@@ -136,19 +132,20 @@ class Test_Distribute_Mesh(unittest.TestCase):
         true_nodes = [[0.0, 0.0], [0.0, 0.5], [0.0, 1.0], [0.5, 0.0], [0.5, 0.5], [0.5, 1.0], \
         [1.0, 0.0], [1.0, 0.5], [1.0, 1.0], [0.25, 0.25], [0.25, 0.75], [0.75, 0.25], [0.75, 0.75]]
 
-        if sys.platform == 'win32':
-            true_triangles = [[ 4,  9,  3], [ 1,  9,  4], [ 4, 10,  1], [ 5, 10,  4], \
-            [ 4, 11,  7], [ 4, 12,  5], [ 7, 12,  4], [ 8, 12,  7], [ 0,  9,  1], [ 3,  9,  0], \
-            [ 1, 10,  2], [ 2, 10,  5], [ 3, 11,  4], [ 6, 11,  3], [ 7, 11,  6],[ 5, 12,  8]]
-        else:
-            true_triangles = [[0, 9, 1], [3, 9, 0], [4, 9, 3], [1, 9, 4], [4, 10, 1], [3, 11, 4], \
-            [4, 11, 7], [4, 12, 5], [1, 10, 2], [5, 10, 4], [2, 10, 5], [6, 11, 3], [7, 11, 6], \
-            [7, 12, 4], [8, 12, 7], [5, 12, 8]]
+
+        true_triangles = [[0, 9, 1], [3, 9, 0], [4, 9, 3], [1, 9, 4], [4, 10, 1], [3, 11, 4], \
+        [4, 11, 7], [4, 12, 5], [1, 10, 2], [5, 10, 4], [2, 10, 5], [6, 11, 3], [7, 11, 6], \
+        [7, 12, 4], [8, 12, 7], [5, 12, 8]]
+
 
         assert num.allclose(nodes,true_nodes)
         assert num.allclose(triangles,true_triangles)
+
+
         assert num.allclose(triangles_per_proc,[8,8])
 
+
+            
     def test_build_submesh_3(self):
         """
         Test 3 way build_submesh
@@ -535,7 +532,7 @@ class Test_Distribute_Mesh(unittest.TestCase):
 
 
 
-        for key, value in true_submesh['ghost_quan'].items():
+        for key, value in true_submesh['ghost_quan'].iteritems():
             for i in range(3):
                 assert num.allclose(true_submesh['ghost_quan'][key][i],submesh['ghost_quan'][key][i])
                 assert num.allclose(true_submesh['full_quan'][key][i],submesh['full_quan'][key][i])
@@ -1132,7 +1129,7 @@ class Test_Distribute_Mesh(unittest.TestCase):
        [ 2.,  2.,  2.]])]}
 
 
-        for key, value in true_submesh['ghost_quan'].items():
+        for key, value in true_submesh['ghost_quan'].iteritems():
             for i in range(3):
                 assert num.allclose(true_submesh['ghost_quan'][key][i],submesh['ghost_quan'][key][i])
                 assert num.allclose(true_submesh['full_quan'][key][i],submesh['full_quan'][key][i])
@@ -1503,7 +1500,7 @@ class Test_Distribute_Mesh(unittest.TestCase):
         assert true_submesh['full_boundary'] == submesh['full_boundary']
         assert true_submesh['full_commun'] == submesh['full_commun']
 
-        for key, value in true_submesh['ghost_quan'].items():
+        for key, value in true_submesh['ghost_quan'].iteritems():
             for i in range(3):
                 assert num.allclose(true_submesh['ghost_quan'][key][i],submesh['ghost_quan'][key][i])
                 assert num.allclose(true_submesh['full_quan'][key][i],submesh['full_quan'][key][i])
