@@ -2,12 +2,6 @@
 A module to allow interactive plotting in a Jupyter notebook of quantities and mesh
 associated with an ANUGA domain and SWW file.
 """
-from __future__ import print_function
-from __future__ import division
-
-from builtins import range
-from past.utils import old_div
-from builtins import object
 import numpy as np
 import os
 
@@ -55,6 +49,8 @@ class Domain_plotter(object):
         name = self.domain.get_name()
         time = self.domain.get_time()
         
+        self.depth = self.stage - self.elev
+
         md = self.min_depth
 
         fig = plt.figure(figsize=figsize, dpi=dpi)
@@ -66,7 +62,8 @@ class Domain_plotter(object):
                       facecolors=self.elev,
                       cmap='Greys_r')
 
-        self.triang.set_mask(self.depth < md)
+
+        self.triang.set_mask(self.depth <= md)
         plt.tripcolor(self.triang,
                       facecolors=self.depth,
                       cmap='viridis',
@@ -150,6 +147,8 @@ class Domain_plotter(object):
         name = self.domain.get_name()
         time = self.domain.get_time()
         
+        self.depth = self.stage - self.elev
+
         md = self.min_depth
 
         fig = plt.figure(figsize=figsize, dpi=dpi)
@@ -161,7 +160,7 @@ class Domain_plotter(object):
                       facecolors=self.elev,
                       cmap='Greys_r')
 
-        self.triang.set_mask(self.depth < md)
+        self.triang.set_mask(self.depth <= md)
         plt.tripcolor(self.triang,
                       facecolors=self.stage,
                       cmap='viridis',
@@ -246,6 +245,8 @@ class Domain_plotter(object):
         name = self.domain.get_name()
         time = self.domain.get_time()
         
+        self.depth = self.stage - self.elev
+
         md = self.min_depth
 
         fig = plt.figure(figsize=figsize, dpi=dpi)
@@ -257,7 +258,7 @@ class Domain_plotter(object):
                       facecolors=self.elev,
                       cmap='Greys_r')
 
-        self.triang.set_mask(self.depth < md)
+        self.triang.set_mask(self.depth <= md)
         plt.tripcolor(self.triang,
                       facecolors=self.speed,
                       cmap='viridis',
@@ -412,9 +413,9 @@ class SWW_plotter(object):
                 self.depth[i, :] = self.stage[i, :]-self.elev
 
         self.xvel = np.where(self.depth > minimum_allowed_depth,
-                             old_div(self.xmom, self.depth), 0.0)
+                             (self.xmom, self.depth) / 0.0)
         self.yvel = np.where(self.depth > minimum_allowed_depth,
-                             old_div(self.ymom, self.depth), 0.0)
+                             (self.ymom, self.depth) / 0.0)
 
         self.speed = np.sqrt(self.xvel**2 + self.yvel**2)
 
