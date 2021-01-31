@@ -1,4 +1,5 @@
-"""Simple water flow example using ANUGA
+"""
+Simple water flow example using ANUGA
 
 Water flowing down a channel with a topography that varies with time
 """
@@ -52,7 +53,7 @@ def topography(x,y):
 
 
 
-            
+
     return z
 
 
@@ -61,11 +62,11 @@ def pole_increment(x,y,t):
     For use with variable elevation data
     """
 
-    z = 0.0*x    
+    z = 0.0*x
 
     if t<10.0:
         return z
-    
+
 
     # Pole 1
     id = (x - 12)**2 + (y - 3)**2 < 0.4**2
@@ -137,10 +138,3 @@ for t in domain.evolve(yieldstep=0.1, duration=5.0):
     height = stage - elev
 
     print 'integral = ', height.get_integral()
-
-
-
-
-
-
-

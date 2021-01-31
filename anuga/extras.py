@@ -130,7 +130,10 @@ def create_domain_from_regions(bounding_polygon,
     args = (bounding_polygon,
             boundary_tags)
     
+    local_meshfile = False
+    
     if mesh_filename is None:
+        local_meshfile = True
         import tempfile
         import time
         mesh_filename = 'mesh_%d.msh'%int(time.time())
@@ -165,6 +168,14 @@ def create_domain_from_regions(bounding_polygon,
     else:
         domain = _create_domain_from_regions(*args, **kwargs)
 
+    if local_meshfile:
+        try:
+            import os
+            os.remove(mesh_filename)
+        except OSError:
+            pass
+
+            
     return domain
 
         
