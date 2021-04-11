@@ -594,15 +594,15 @@ if __name__ == "__main__":
     
 
     #scenario = 'act'
-    scenario = 'grantham'
-    #scenario = 'artificial'
+    #scenario = 'grantham'
+    scenario = 'artificial'
     
-
+    HOME_DIR = "/home/anuga/RAINFALL"
     
     if scenario == 'act':
         start_time = '20120301_0000'
         final_time = '20120302_1200'
-        BASE_DIR = "/home/steve/RAINFALL/RADAR/AUS_RADAR/Calibrated_Radar_Data/ACT_netcdf"
+        BASE_DIR           = join(HOME_DIR, "RADAR/AUS_RADAR/Calibrated_Radar_Data/ACT_netcdf")
         RADAR_DIR          = join(BASE_DIR, 'RADAR_Rainfall/140/2012' )    
         Catchment_file     = join(BASE_DIR,'ACT_Bdy/ACT_Entire_Catchment_Poly_Simple_UTM_55.csv')
         State_boundary_file = join(BASE_DIR,'ACT_Bdy/ACT_State_Bdy_UTM_55.csv')
@@ -626,7 +626,7 @@ if __name__ == "__main__":
         #start_time = '20110105_2300'
         #final_time = '20110106_2300'
         
-        BASE_DIR = '/home/steve/RAINFALL/RADAR/AUS_RADAR/Gauge_Blend_Grantham/20081211-20110223.gz_y_loc_Inverted_30min/Merged/66/2011/'
+        BASE_DIR           = join(HOME_DIR, 'RADAR/AUS_RADAR/Gauge_Blend_Grantham/20081211-20110223.gz_y_loc_Inverted_30min/Merged/66/2011/')
         RADAR_DIR          = join(BASE_DIR, '01' ) 
         Daily_plot_Vmax = 50
         rain = Calibrated_radar_rain(RADAR_DIR, start_time=start_time, final_time=final_time, verbose=True, debug=True)
