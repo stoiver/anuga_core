@@ -395,12 +395,14 @@ class Calibrated_radar_rain(object):
         if indices is None:
             Rain_Max_in_period = np.max(precip)
             Total_Rain_Vol = np.sum(precip)/1000.0*ldx*ldy  # cubic metres
-            Catchment_Area = len(precip.flat)*ldx*ldy
+            import pdb
+            pdb.set_trace()
+            Catchment_Area = precip.size*ldx*ldy
         else:
             pmask = precip.flat[indices]
             Rain_Max_in_period = np.max(pmask)
             Total_Rain_Vol = np.sum(pmask)/1000.0*ldx*ldy  # cubic metres
-            Catchment_Area = len(pmask)*ldx*ldy
+            Catchment_Area = pmask.size*ldx*ldy
 
         print (indices)
         Peak_Intensity = Rain_Max_in_period/time_step  # mm/sec
@@ -570,9 +572,9 @@ if __name__ == "__main__":
     except:
         import pdb
 
-    #scenario = 'act'
+    scenario = 'act'
     #scenario = 'grantham'
-    scenario = 'artificial'
+    #scenario = 'artificial'
     
     HOME_DIR = "/home/anuga/RAINFALL"
     
