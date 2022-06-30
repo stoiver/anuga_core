@@ -141,6 +141,8 @@ def sort_sww_filenames(sww_wildcard):
     return list(output_names)
 
 #####################################################################
+
+# FIXME (Ole): We should move this to e.g. the module sww.py as it has nothing to do with plotting ;-)
 class get_output(object):
     """Read in data from an .sww file in a convenient form
        e.g. 
@@ -154,7 +156,7 @@ class get_output(object):
                 self.height, self.elev, self.friction, self.xmom, self.ymom, \
                 self.xvel, self.yvel, self.vel, self.minimum_allowed_height,\
                 self.xllcorner, self.yllcorner, self.timeSlices, self.starttime = \
-                _read_output(filename, minimum_allowed_height,copy.copy(timeSlices))
+                _read_output(filename, minimum_allowed_height, copy.copy(timeSlices))
         self.filename = filename
         self.verbose = verbose
 
@@ -185,11 +187,11 @@ def getInds(varIn, timeSlices, absMax=False):
             else:
                 # For variables xmom,ymom,xvel,yvel we want the 'maximum-absolute-value'
                 varInds = abs(varIn[:]).argmax(axis=0)
-                varNew = varInds*0.
+                varNew = varInds * 0.
                 for i in range(len(varInds)):
-                    varNew[i] = varIn[varInds[i],i]
+                    varNew[i] = varIn[varInds[i], i]
                 var = varNew
-                var=var.reshape((1,len(var)))
+                var=var.reshape((1, len(var)))
         else:
             var = numpy.zeros((len(timeSlices), varIn.shape[1]), dtype='float32')
             for i in range(len(timeSlices)):
@@ -231,47 +233,47 @@ def _read_output(filename, minimum_allowed_height, timeSlices):
     time=fid.variables['time'][:]
 
     # Treat specification of timeSlices
-    if(timeSlices=='all'):
-        inds=list(range(len(time)))
-    elif(timeSlices=='last'):
-        inds=[len(time)-1]
-    elif(timeSlices=='max'):
-        inds='max' #
+    if(timeSlices == 'all'):
+        inds = list(range(len(time)))
+    elif(timeSlices == 'last'):
+        inds = [len(time)-1]
+    elif(timeSlices == 'max'):
+        inds = 'max' #
     else:
         try:
-            inds=list(timeSlices)
+            inds = list(timeSlices)
         except:
-            inds=[timeSlices]
+            inds = [timeSlices]
     
     if(inds != 'max'):
-        time=time[inds]
+        time = time[inds]
     else:
         # We can't really assign a time to 'max', but I guess max(time) is
         # technically the right thing -- if not misleading
-        time=time.max()
+        time = time.max()
 
     
     # Get lower-left
-    xllcorner=fid.xllcorner
-    yllcorner=fid.yllcorner
-    starttime=fid.starttime
+    xllcorner = fid.xllcorner
+    yllcorner = fid.yllcorner
+    starttime = fid.starttime
 
     # Read variables
-    x=fid.variables['x'][:]
-    y=fid.variables['y'][:]
+    x = fid.variables['x'][:]
+    y = fid.variables['y'][:]
 
-    stage=getInds(fid.variables['stage'], timeSlices=inds)
-    elev=getInds(fid.variables['elevation'], timeSlices=inds)
+    stage = getInds(fid.variables['stage'], timeSlices=inds)
+    elev = getInds(fid.variables['elevation'], timeSlices=inds)
 
     # Simple approach for volumes
-    vols=fid.variables['volumes'][:]
+    vols = fid.variables['volumes'][:]
 
     # Friction if it exists
     if('friction' in fid.variables):
-        friction=getInds(fid.variables['friction'],timeSlices=inds) 
+        friction=getInds(fid.variables['friction'], timeSlices=inds) 
     else:
         # Set friction to nan if it is not stored
-        friction = elev*0.+numpy.nan
+        friction = elev * 0. + numpy.nan
 
     # Trick to treat the case where inds == 'max'
     inds2 = copy.copy(inds)
@@ -449,29 +451,29 @@ def _get_centroid_values(p, velocity_extrapolation, verbose, timeSlices,
     # Figure out if p is a string (filename) or the output of get_output
     pIsFile = isinstance(p, str)
     if(pIsFile): 
-        fid=NetCDFFile(p) 
+        fid = NetCDFFile(p) 
     else:
-        fid=NetCDFFile(p.filename)
+        fid = NetCDFFile(p.filename)
 
     # UPDATE: 15/06/2014 -- below, we now get all variables directly from the file
     #         This is more flexible, and allows to get 'max' as well
     #         However, potentially it could have performance penalities vs the old approach (?)
 
     # Make 3 arrays, each containing one index of a vertex of every triangle.
-    vols=fid.variables['volumes'][:]
-    vols0=vols[:,0]
-    vols1=vols[:,1]
-    vols2=vols[:,2]
+    vols = fid.variables['volumes'][:]
+    vols0 = vols[:,0]
+    vols1 = vols[:,1]
+    vols2 = vols[:,2]
     
     # Get lower-left offset
-    xllcorner=fid.xllcorner
-    yllcorner=fid.yllcorner
+    xllcorner = fid.xllcorner
+    yllcorner = fid.yllcorner
    
     #@ Get timeSlices 
     # It will be either a list of integers, or 'max'
-    l=len(vols)
-    time=fid.variables['time'][:]
-    nts=len(time) # number of time slices in the file 
+    l = len(vols)
+    time = fid.variables['time'][:]
+    nts = len(time) # number of time slices in the file 
     if(timeSlices is None):
         if(pIsFile):
             # Assume all timeSlices
@@ -493,30 +495,30 @@ def _get_centroid_values(p, velocity_extrapolation, verbose, timeSlices,
             minimum_allowed_height=copy.copy(p.minimum_allowed_height)
 
     # Treat specification of timeSlices
-    if(timeSlices=='all'):
-        inds=list(range(len(time)))
+    if(timeSlices == 'all'):
+        inds = list(range(len(time)))
     elif(timeSlices=='last'):
-        inds=[len(time)-1]
+        inds = [len(time)-1]
     elif(timeSlices=='max'):
-        inds='max' #
+        inds = 'max' #
     else:
         try:
-            inds=list(timeSlices)
+            inds = list(timeSlices)
         except:
-            inds=[timeSlices]
+            inds = [timeSlices]
     
     if(inds != 'max'):
-        time=time[inds]
+        time = time[inds]
     else:
         # We can't really assign a time to 'max', but I guess max(time) is
         # technically the right thing -- if not misleading
-        time=time.max()
+        time = time.max()
 
     # Get coordinates
-    x=fid.variables['x'][:]
-    y=fid.variables['y'][:]
-    x_cent=(x[vols0]+x[vols1]+x[vols2])/3.0
-    y_cent=(y[vols0]+y[vols1]+y[vols2])/3.0
+    x = fid.variables['x'][:]
+    y = fid.variables['y'][:]
+    x_cent = (x[vols0] + x[vols1] + x[vols2]) / 3.0
+    y_cent = (y[vols0] + y[vols1] + y[vols2]) / 3.0
 
     # Stage and height and elevation
     stage_cent = _getCentVar(fid, 'stage_c', time_indices=inds, vols=vols)
@@ -525,15 +527,15 @@ def _get_centroid_values(p, velocity_extrapolation, verbose, timeSlices,
     # Hack to allow refernece to time varying elevation
     elev_cent_orig = elev_cent
     
-    if(len(elev_cent.shape)==2):
+    if(len(elev_cent.shape) == 2):
         # Coerce to 1D array, since lots of our code assumes it is
-        elev_cent=elev_cent[0,:]
+        elev_cent = elev_cent[0,:]
 
     # Friction might not be stored at all
     try:
         friction_cent = _getCentVar(fid, 'friction_c', time_indices=inds, vols=vols)
     except:
-        friction_cent=elev_cent*0.+numpy.nan
+        friction_cent = elev_cent*0.+numpy.nan
     
     # Trick to treat the case where inds == 'max'
     inds2 = copy.copy(inds)
@@ -541,7 +543,7 @@ def _get_centroid_values(p, velocity_extrapolation, verbose, timeSlices,
         inds2 = list(range(len(fid.variables['time'])))
    
     # height
-    height_cent= stage_cent + 0.
+    height_cent = stage_cent + 0.
     for i in range(stage_cent.shape[0]):
         height_cent[i,:] = stage_cent[i,:] - elev_cent
 
@@ -662,8 +664,8 @@ def animate_1D(time, var, x, ylab=' '):
     pylab.ion()
 
     # Initial plot
-    vmin=var.min()
-    vmax=var.max()
+    vmin = var.min()
+    vmax = var.max()
     line, = pylab.plot( (x.min(), x.max()), (vmin, vmax), 'o')
 
     # Lots of plots
@@ -813,7 +815,7 @@ def get_triangle_containing_point(p, point, search_order=None):
     x = p.x
     y = p.y
 
-    from anuga.geometry.polygon import is_outside_polygon,is_inside_polygon
+    from anuga.geometry.polygon import is_inside_polygon
 
     if search_order is None:
         # Estimate a good search order by finding the distance to the first
@@ -835,6 +837,39 @@ def get_triangle_containing_point(p, point, search_order=None):
 
     msg = 'Point %s not found within a triangle' %str(point)
     raise Exception(msg)
+
+def get_triangle_near_point(p, point, tolerance=1.0e20):
+    """
+    Function to get the index of a triangle nearest to a point (as measured by distance to 
+    centroid of the triangle).
+
+    @param p Object containing mesh vertex information (e.g. from plot_utils.get_output)
+    @param point A single point (absolute units)
+    @param tolerance Raise an exception if "nearest" point is further that tolerance from the domain
+    
+    @return The index of the triangle "nearest" to point.
+    """
+
+    import numpy
+
+    pc = get_centroids(p)
+    
+    xll_corner = p.xllcorner
+    yll_corner = p.yllcorner
+
+    X = pc.x[:] + xll_corner
+    Y = pc.y[:] + yll_corner
+    
+    distance2 = (X - point[0])**2 + (Y - point[1])**2
+    
+    tid = numpy.argmin(distance2)
+
+    if distance2[tid] > tolerance**2:
+        msg = 'Point %s further than %g (m) from domain' % (str(point), tolerance)
+        raise Exception(msg)
+    else:
+        return tid
+
 
 
 def get_triangle_lookup_function(pv):

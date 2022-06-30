@@ -139,7 +139,7 @@ class Weir(object):
         N = len(x)
         assert N == len(y)
 
-        z = num.zeros(N, num.float)
+        z = num.zeros(N, float)
         for i in range(N):
             z[i] = -x[i] / 2  # General slope
 
@@ -230,7 +230,7 @@ class Weir_simple(object):
         N = len(x)
         assert N == len(y)
 
-        z = num.zeros(N, num.float)
+        z = num.zeros(N, float)
         for i in range(N):
             z[i] = -x[i]  # General slope
 
@@ -294,10 +294,10 @@ class Test_Shallow_Water(unittest.TestCase):
 
     # Individual flux tests
     def test_flux_zero_case(self):
-        ql = num.zeros(3, num.float)
-        qr = num.zeros(3, num.float)
-        normal = num.zeros(2, num.float)
-        edgeflux = num.zeros(3, num.float)
+        ql = num.zeros(3, float)
+        qr = num.zeros(3, float)
+        normal = num.zeros(2, float)
+        edgeflux = num.zeros(3, float)
         zl = zr = 0.
         H0 = 1.0e-3 # As suggested in the manual
 
@@ -312,7 +312,7 @@ class Test_Shallow_Water(unittest.TestCase):
         normal = num.array([1.,0])
         ql = num.array([w, 0, 0])
         qr = num.array([w, 0, 0])
-        edgeflux = num.zeros(3, num.float)
+        edgeflux = num.zeros(3, float)
         zl = zr = 0.
         h = w - (zl+zr) / 2
         H0 = 0.0
@@ -342,7 +342,7 @@ class Test_Shallow_Water(unittest.TestCase):
         ql = num.array([-0.2, 2, 3])
         qr = num.array([-0.2, 2, 3])
         zl = zr = -0.5
-        edgeflux = num.zeros(3, num.float)
+        edgeflux = num.zeros(3, float)
 
         H0 = 0.0
 
@@ -359,7 +359,7 @@ class Test_Shallow_Water(unittest.TestCase):
         qr = num.array([-0.075, 2, 3])
         zl = zr = -0.375
 
-        edgeflux = num.zeros(3, num.float)
+        edgeflux = num.zeros(3, float)
         H0 = 0.0
         max_speed = flux_function(normal, ql, qr, zl, zr, edgeflux,
                                   epsilon, g, H0)
@@ -374,7 +374,7 @@ class Test_Shallow_Water(unittest.TestCase):
         qr = num.array([-0.075, 2, 3])
         zl = zr = -0.375
 
-        edgeflux = num.zeros(3, num.float)
+        edgeflux = num.zeros(3, float)
         H0 = 0.0
         max_speed = flux_function(normal, ql, qr, zl, zr, edgeflux,
                                   epsilon, g, H0)
@@ -389,7 +389,7 @@ class Test_Shallow_Water(unittest.TestCase):
         qr = num.array([-0.30683287, 0.1071986, 0.05930515])
         zl = zr = -0.375
 
-        edgeflux = num.zeros(3, num.float)
+        edgeflux = num.zeros(3, float)
         H0 = 0.0
         max_speed = flux_function(normal, ql, qr, zl, zr, edgeflux,
                                   epsilon, g, H0)
@@ -874,10 +874,10 @@ class Test_Shallow_Water(unittest.TestCase):
 
         zl = zr = 0.     # Assume flat bed
 
-        edgeflux = num.zeros(3, num.float)
-        edgeflux0 = num.zeros(3, num.float)
-        edgeflux1 = num.zeros(3, num.float)
-        edgeflux2 = num.zeros(3, num.float)
+        edgeflux = num.zeros(3, float)
+        edgeflux0 = num.zeros(3, float)
+        edgeflux1 = num.zeros(3, float)
+        edgeflux2 = num.zeros(3, float)
         H0 = 0.0
 
         # Flux across right edge of volume 1
@@ -964,10 +964,10 @@ class Test_Shallow_Water(unittest.TestCase):
 
         zl = zr = 0.    # Assume flat bed
 
-        edgeflux = num.zeros(3, num.float)
-        edgeflux0 = num.zeros(3, num.float)
-        edgeflux1 = num.zeros(3, num.float)
-        edgeflux2 = num.zeros(3, num.float)
+        edgeflux = num.zeros(3, float)
+        edgeflux0 = num.zeros(3, float)
+        edgeflux1 = num.zeros(3, float)
+        edgeflux2 = num.zeros(3, float)
         H0 = 0.0
 
         # Flux across right edge of volume 1
@@ -1064,13 +1064,13 @@ class Test_Shallow_Water(unittest.TestCase):
         val3 = 2. + 8.0/3
 
         zl = zr = 0    # Assume flat zero bed
-        edgeflux = num.zeros(3, num.float)
-        edgeflux0 = num.zeros(3, num.float)
-        edgeflux1 = num.zeros(3, num.float)
-        edgeflux2 = num.zeros(3, num.float)
+        edgeflux = num.zeros(3, float)
+        edgeflux0 = num.zeros(3, float)
+        edgeflux1 = num.zeros(3, float)
+        edgeflux2 = num.zeros(3, float)
         H0 = 0.0
 
-        domain.set_quantity('elevation', zl*num.ones((4, 3), num.int)) #array default#
+        domain.set_quantity('elevation', zl*num.ones((4, 3), int)) #array default#
 
         domain.set_quantity('stage', [[val0, val0-1, val0-2],
                                       [val1, val1+1, val1],
@@ -1146,12 +1146,12 @@ class Test_Shallow_Water(unittest.TestCase):
         val3 = 2.+8.0/3
 
         zl = zr = -3.75    # Assume constant bed (must be less than stage)
-        domain.set_quantity('elevation', zl*num.ones((4, 3), num.float)) #array default#
+        domain.set_quantity('elevation', zl*num.ones((4, 3), float)) #array default#
 
-        edgeflux = num.zeros(3, num.float)
-        edgeflux0 = num.zeros(3, num.float)
-        edgeflux1 = num.zeros(3, num.float)
-        edgeflux2 = num.zeros(3, num.float)
+        edgeflux = num.zeros(3, float)
+        edgeflux0 = num.zeros(3, float)
+        edgeflux1 = num.zeros(3, float)
+        edgeflux2 = num.zeros(3, float)
         H0 = 0.0
 
         domain.set_quantity('stage', [[val0, val0-1, val0-2],
@@ -1241,10 +1241,10 @@ class Test_Shallow_Water(unittest.TestCase):
 
         zl = zr = 0.     # Assume flat bed
 
-        edgeflux = num.zeros(3, num.float)
-        edgeflux0 = num.zeros(3, num.float)
-        edgeflux1 = num.zeros(3, num.float)
-        edgeflux2 = num.zeros(3, num.float)
+        edgeflux = num.zeros(3, float)
+        edgeflux0 = num.zeros(3, float)
+        edgeflux1 = num.zeros(3, float)
+        edgeflux2 = num.zeros(3, float)
         H0 = 0.0
 
         # Flux across right edge of volume 1
@@ -1331,10 +1331,10 @@ class Test_Shallow_Water(unittest.TestCase):
 
         zl = zr = 0.    # Assume flat bed
 
-        edgeflux = num.zeros(3, num.float)
-        edgeflux0 = num.zeros(3, num.float)
-        edgeflux1 = num.zeros(3, num.float)
-        edgeflux2 = num.zeros(3, num.float)
+        edgeflux = num.zeros(3, float)
+        edgeflux0 = num.zeros(3, float)
+        edgeflux1 = num.zeros(3, float)
+        edgeflux2 = num.zeros(3, float)
         H0 = 0.0
 
         # Flux across right edge of volume 1
@@ -1429,13 +1429,13 @@ class Test_Shallow_Water(unittest.TestCase):
         val3 = 2. + 8.0/3
 
         zl = zr = 0    # Assume flat zero bed
-        edgeflux = num.zeros(3, num.float)
-        edgeflux0 = num.zeros(3, num.float)
-        edgeflux1 = num.zeros(3, num.float)
-        edgeflux2 = num.zeros(3, num.float)
+        edgeflux = num.zeros(3, float)
+        edgeflux0 = num.zeros(3, float)
+        edgeflux1 = num.zeros(3, float)
+        edgeflux2 = num.zeros(3, float)
         H0 = 0.0
 
-        domain.set_quantity('elevation', zl*num.ones((4, 3), num.int)) #array default#
+        domain.set_quantity('elevation', zl*num.ones((4, 3), int)) #array default#
 
         domain.set_quantity('stage', [[val0, val0-1, val0-2],
                                       [val1, val1+1, val1],
@@ -1510,12 +1510,12 @@ class Test_Shallow_Water(unittest.TestCase):
         val3 = 2.+8.0/3
 
         zl = zr = -3.75    # Assume constant bed (must be less than stage)
-        domain.set_quantity('elevation', zl*num.ones((4, 3), num.int)) #array default#
+        domain.set_quantity('elevation', zl*num.ones((4, 3), int)) #array default#
 
-        edgeflux = num.zeros(3, num.float)
-        edgeflux0 = num.zeros(3, num.float)
-        edgeflux1 = num.zeros(3, num.float)
-        edgeflux2 = num.zeros(3, num.float)
+        edgeflux = num.zeros(3, float)
+        edgeflux0 = num.zeros(3, float)
+        edgeflux1 = num.zeros(3, float)
+        edgeflux2 = num.zeros(3, float)
         H0 = 0.0
 
         domain.set_quantity('stage', [[val0, val0-1, val0-2],
@@ -1590,7 +1590,7 @@ class Test_Shallow_Water(unittest.TestCase):
         val3 = 2. + 8.0/3
 
         zl = zr = 4    # Too large
-        domain.set_quantity('elevation', zl*num.ones((4, 3), num.int)) #array default#
+        domain.set_quantity('elevation', zl*num.ones((4, 3), int)) #array default#
         domain.set_quantity('stage', [[val0, val0-1, val0-2],
                                       [val1, val1+1, val1],
                                       [val2, val2-2, val2],
@@ -1622,7 +1622,7 @@ class Test_Shallow_Water(unittest.TestCase):
         val3 = 2. + 8.0/3
 
         zl = zr = 5
-        domain.set_quantity('elevation', zl*num.ones((4, 3), num.int)) #array default#
+        domain.set_quantity('elevation', zl*num.ones((4, 3), int)) #array default#
         domain.set_quantity('stage', [[val0, val0-1, val0-2],
                                       [val1, val1+1, val1],
                                       [val2, val2-2, val2],
@@ -3489,7 +3489,7 @@ class Test_Shallow_Water(unittest.TestCase):
 
         # Now apply the inflow and check volumes for a range of stage values
         for stage in [2.0, 1.0, 0.5, 0.25, 0.1, 0.0]:
-            domain.time = 0.0
+            domain.set_time(0.0)
             domain.set_quantity('stage', stage)
             domain.forcing_terms = []
             domain.forcing_terms.append(Inflow(domain, rate=2.0,
@@ -3507,7 +3507,7 @@ class Test_Shallow_Water(unittest.TestCase):
         for stage in [2.0, 1.0, 0.5, 0.25, 0.1, 0.0]:
             #print stage
 
-            domain.time = 0.0
+            domain.set_time(0.0)
             domain.set_quantity('stage', stage)
             domain.forcing_terms = []
             domain.forcing_terms.append(Inflow(domain, rate=-2.0,
@@ -3526,7 +3526,7 @@ class Test_Shallow_Water(unittest.TestCase):
         for stage in [2.0, 1.0, 0.5, 0.25, 0.1, 0.0]:
             #print stage
 
-            domain.time = 0.0
+            domain.set_time(0.0)
             domain.set_quantity('stage', stage)
             domain.forcing_terms = []
             domain.forcing_terms.append(Inflow(domain, rate=2.0,
@@ -3563,7 +3563,7 @@ class Test_Shallow_Water(unittest.TestCase):
         val3 = 2. + 8.0/3
 
         zl = zr = -3.75    # Assume constant bed (must be less than stage)
-        domain.set_quantity('elevation', zl*num.ones((4, 3), num.int)) #array default#
+        domain.set_quantity('elevation', zl*num.ones((4, 3), int)) #array default#
         domain.set_quantity('stage', [[val0, val0-1, val0-2],
                                       [val1, val1+1, val1],
                                       [val2, val2-2, val2],
@@ -4412,7 +4412,7 @@ class Test_Shallow_Water(unittest.TestCase):
         os.remove(domain.get_name() + '.sww')
 
     def test_evolve_duration(self):
-        """Test evolve with finaltime set
+        """Test evolve with duration set
         """
 
         from anuga import rectangular_cross_domain
@@ -4444,6 +4444,182 @@ class Test_Shallow_Water(unittest.TestCase):
         assert num.allclose(tt,252.5)
 
         os.remove(domain.get_name() + '.sww')
+
+    def test_evolve_and_set_time(self):
+        """Test evolve with set_time before evolve
+        """
+
+        from anuga import rectangular_cross_domain
+
+        # Create basic mesh
+        domain = rectangular_cross_domain(6, 6)
+        domain.set_name('evolve_and_set_time')
+
+        # IC
+        def x_slope(x, y):
+            return x / 3
+
+        domain.set_quantity('elevation', 0)
+        domain.set_quantity('friction', 0)
+        domain.set_quantity('stage', x_slope)
+
+        # Boundary conditions (reflective everywhere)
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+
+        domain.check_integrity()
+
+        
+        domain.set_time(0.5)
+
+
+        # Evolution
+        # Test that t is a float
+        tt = 0.0
+        for t in domain.evolve(yieldstep=0.05, outputstep=1.0, duration=5.0):
+            tt += t
+
+        assert num.allclose(tt,252.5) 
+
+        os.remove(domain.get_name() + '.sww')       
+
+
+    def test_evolve_outputstep(self):
+        """Test evolve with outputstep set
+        """
+
+        from anuga import rectangular_cross_domain
+
+        # Create basic mesh
+        domain = rectangular_cross_domain(6, 6)
+        domain.set_name('evolve_outputstep')
+
+        # IC
+        def x_slope(x, y):
+            return x / 3
+
+        domain.set_quantity('elevation', 0)
+        domain.set_quantity('friction', 0)
+        domain.set_quantity('stage', x_slope)
+
+        # Boundary conditions (reflective everywhere)
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+
+        domain.check_integrity()
+
+        # Evolution
+        # Test that t is a float
+        tt = 0.0
+        for t in domain.evolve(yieldstep=0.05, outputstep=1.0, duration=5.0):
+            tt += t
+
+        assert num.allclose(tt,252.5)
+
+        # Open sww file to check that only store every second
+
+        # Read results for specific timesteps t=1 and t=2
+        fid = NetCDFFile(domain.get_name() + '.sww')
+        time = fid.variables['time'][:]
+        stage = fid.variables['stage'][:,:]
+        fid.close()
+
+        os.remove(domain.get_name() + '.sww')
+
+        timeslices = 6
+        msg = f' time.shape[0] = {time.shape[0]}, expected {timeslices}'
+        assert time.shape[0] == timeslices, msg
+
+        msg = f' time.shape[0] = {stage.shape[0]}, expected {timeslices}'
+        assert stage.shape[0] == timeslices
+
+    def test_evolve_outputstep_integer(self):
+        """Test evolve outputstep when it is an integer multipe of yieldstep
+        """
+
+        from anuga import rectangular_cross_domain
+
+        # Create basic mesh
+        domain = rectangular_cross_domain(6, 6)
+        domain.set_name('evolve_outputstep_integer')
+
+        # IC
+        def x_slope(x, y):
+            return x / 3
+
+        domain.set_quantity('elevation', 0)
+        domain.set_quantity('friction', 0)
+        domain.set_quantity('stage', x_slope)
+
+        # Boundary conditions (reflective everywhere)
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+
+        domain.check_integrity()
+
+        # Evolution
+        # Test that t is a float
+        tt = 0.0
+        for t in domain.evolve(yieldstep=0.05, outputstep=0.05, duration=5.0):
+            tt += t
+
+        assert num.allclose(tt,252.5)
+
+        # Open sww file to check that only store every second
+
+        # Read results for specific timesteps t=1 and t=2
+        fid = NetCDFFile(domain.get_name() + '.sww')
+        time = fid.variables['time'][:]
+        stage = fid.variables['stage'][:,:]
+        fid.close()
+
+        os.remove(domain.get_name() + '.sww')
+
+        timeslices = 101
+        msg = f' time.shape[0] = {time.shape[0]}, expected {timeslices}'
+        assert time.shape[0] == timeslices, msg
+
+        msg = f' time.shape[0] = {stage.shape[0]}, expected {timeslices}'
+        assert stage.shape[0] == timeslices
+
+    def test_evolve_outputstep_non_integer(self):
+        """Test exception if evolve outputstep is not integer multiple of yieldstep
+        """
+
+        from anuga import rectangular_cross_domain
+
+        # Create basic mesh
+        domain = rectangular_cross_domain(6, 6)
+        domain.set_name('evolve_outputstep_non_integer')
+
+        # IC
+        def x_slope(x, y):
+            return x / 3
+
+        domain.set_quantity('elevation', 0)
+        domain.set_quantity('friction', 0)
+        domain.set_quantity('stage', x_slope)
+
+        # Boundary conditions (reflective everywhere)
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+
+        domain.check_integrity()
+
+        # Evolution
+        # Test that t is a float
+        tt = 0.0
+
+        try:
+            for t in domain.evolve(yieldstep=0.05, outputstep=0.12, duration=5.0):
+                tt += t
+        except AssertionError:
+            # Getting here is good as outputstep is not an integer multiple of yieldstep
+            return
+
+        # Shouldn't get here
+        raise Exception('An AssertionError should have occurred earlier')
+
 
     def test_conservation_1(self):
         """Test that stage is conserved globally
@@ -5083,7 +5259,7 @@ class Test_Shallow_Water(unittest.TestCase):
         for V in [False, True]:
             if V:
                 # Set centroids as if system had been evolved
-                L = num.zeros(2*N*N, num.float)
+                L = num.zeros(2*N*N, float)
                 L[:32] = [7.21205592e-003, 5.35214298e-002, 1.00910824e-002,
                           5.35439433e-002, 1.00910824e-002, 5.35439433e-002,
                           1.00910824e-002, 5.35439433e-002, 1.00910824e-002,
@@ -5096,7 +5272,7 @@ class Test_Shallow_Water(unittest.TestCase):
                           4.37962142e-005, 0.00000000e+000, 4.37962142e-005,
                           0.00000000e+000, 5.57305948e-005]
 
-                X = num.zeros(2*N*N, num.float)
+                X = num.zeros(2*N*N, float)
                 X[:32] = [6.48351607e-003, 3.68571894e-002, 8.50733285e-003,
                           3.68731327e-002, 8.50733285e-003, 3.68731327e-002,
                           8.50733285e-003, 3.68731327e-002, 8.50733285e-003,
@@ -5109,7 +5285,7 @@ class Test_Shallow_Water(unittest.TestCase):
                           3.58905503e-005, 0.00000000e+000, 3.58905503e-005,
                           0.00000000e+000, 4.57662812e-005]
 
-                Y = num.zeros(2*N*N, num.float)
+                Y = num.zeros(2*N*N, float)
                 Y[:32] = [-1.39463104e-003, 6.15600298e-004, -6.03637382e-004,
                           6.18272251e-004, -6.03637382e-004, 6.18272251e-004,
                           -6.03637382e-004, 6.18272251e-004, -6.03637382e-004,
@@ -6286,7 +6462,7 @@ class Test_Shallow_Water(unittest.TestCase):
         assert num.allclose(boundary_midpoints, R)
 
         # Check spatially interpolated output at time == 1
-        domain2.time = 1
+        domain2.set_time(1)
 
         # First diagonal midpoint
         R0 = Bf.evaluate(0, 0)
@@ -6301,7 +6477,7 @@ class Test_Shallow_Water(unittest.TestCase):
         assert num.allclose(R0[0], (s1[10] + s1[15]) / 2)
 
         # Check spatially interpolated output at time == 2
-        domain2.time = 2
+        domain2.set_time(2)
 
         # First diagonal midpoint
         R0 = Bf.evaluate(0, 0)
@@ -6316,7 +6492,7 @@ class Test_Shallow_Water(unittest.TestCase):
         assert num.allclose(R0[0], (s2[10] + s2[15]) / 2)
 
         # Now check temporal interpolation
-        domain2.time = 1 + 2.0/3
+        domain2.set_time(1 + 2.0/3)
 
         # First diagonal midpoint
         R0 = Bf.evaluate(0,0)
@@ -6459,7 +6635,7 @@ class Test_Shallow_Water(unittest.TestCase):
         assert num.allclose(boundary_midpoints, R)
 
         # Check spatially interpolated output at time == 1
-        domain2.time = 1
+        domain2.set_time(1)
 
         # First diagonal midpoint
         R0 = Bf.evaluate(0, 0)
@@ -6474,7 +6650,7 @@ class Test_Shallow_Water(unittest.TestCase):
         assert num.allclose(R0[0], (s1[10] + s1[15]) / 2 + mean_stage)
 
         # Check spatially interpolated output at time == 2
-        domain2.time = 2
+        domain2.set_time(2)
 
         # First diagonal midpoint
         R0 = Bf.evaluate(0, 0)
@@ -6489,7 +6665,7 @@ class Test_Shallow_Water(unittest.TestCase):
         assert num.allclose(R0[0], (s2[10] + s2[15]) / 2 + mean_stage)
 
         #Now check temporal interpolation
-        domain2.time = 1 + 2.0/3
+        domain2.set_time(1 + 2.0/3)
 
         # First diagonal midpoint
         R0 = Bf.evaluate(0, 0)
@@ -6765,7 +6941,7 @@ class Test_Shallow_Water(unittest.TestCase):
 
         # Initial condition - with jumps
         bed = domain.quantities['elevation'].vertex_values
-        stage = num.zeros(bed.shape, num.float)
+        stage = num.zeros(bed.shape, float)
 
         h = 0.3
         for i in range(stage.shape[0]):
@@ -8477,7 +8653,7 @@ friction  \n \
         #Initial condition - with jumps
 
         bed = domain.quantities['elevation'].vertex_values
-        stage = num.zeros(bed.shape, num.float)
+        stage = num.zeros(bed.shape, float)
 
         h = 0.03
         for i in range(stage.shape[0]):
@@ -8550,7 +8726,7 @@ friction  \n \
         # Initial condition - with jumps
 
         bed = domain.quantities['elevation'].vertex_values
-        stage = num.zeros(bed.shape, num.float)
+        stage = num.zeros(bed.shape, float)
 
         h = 0.03
         for i in range(stage.shape[0]):
@@ -8636,7 +8812,7 @@ friction  \n \
         # Initial condition - with jumps
 
         bed = domain.quantities['elevation'].vertex_values
-        stage = num.zeros(bed.shape, num.float)
+        stage = num.zeros(bed.shape, float)
 
         h = 0.03
         for i in range(stage.shape[0]):

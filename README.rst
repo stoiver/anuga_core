@@ -1,16 +1,31 @@
 
-.. image:: https://travis-ci.com/anuga-community/anuga_core.svg?branch=master
-    :target: https://travis-ci.com/anuga-community/anuga_core
+.. image:: https://app.travis-ci.com/anuga-community/anuga_core.svg?branch=main
+    :target: https://app.travis-ci.com/anuga-community/anuga_core
     :alt: travis ci status
    
-
-.. image:: https://ci.appveyor.com/api/projects/status/x5airjv7eq2u805w/branch/master?svg=true
+.. image:: https://ci.appveyor.com/api/projects/status/x5airjv7eq2u805w/branch/main?svg=true
     :target: https://ci.appveyor.com/project/stoiver/anuga-core-nwgr0
     :alt: appveyor status
 
 .. image:: https://img.shields.io/pypi/v/anuga.svg
     :target: https://pypi.python.org/pypi/anuga/
-    :alt: Latest Version
+    :alt: Latest PyPi Version
+
+.. image:: https://img.shields.io/pypi/dm/anuga.svg
+    :target: https://pypistats.org/packages/anuga
+    :alt: PyPi download statistics
+
+.. image:: https://img.shields.io/conda/vn/conda-forge/anuga.svg
+    :target: https://anaconda.org/conda-forge/anuga
+    :alt: Latest Conda Version
+ 
+.. image:: https://img.shields.io/conda/dn/conda-forge/anuga.svg
+    :target: https://anaconda.org/conda-forge/anuga
+    :alt: Conda Forge download statistics
+
+.. image:: https://readthedocs.org/projects/anuga/badge/?version=latest
+    :target: https://anuga.readthedocs.io/en/latest/?badge=latest
+    :alt: Documentation Status
 
 
 =====
@@ -27,32 +42,65 @@ the shallow water equation, in particular it can be used to model tsunamis
 and floods.
 
 ANUGA is a python 3 package with some C and Cython extensions (and an optional
-fortran extension). The python 3 version of ANUGA will continue to be developed 
-and be available from this `anuga-community` repository. 
+fortran extension). 
 
-The old python 2.7 version of ANUGA is available from https://github.com/GeoscienceAustralia/anuga_core
+ANUGA is developed at Geoscience Australia, Mathematical Sciences Institute at the
+Australian National University and volunteers. 
+
+Althought ANUGA was created in a collaboration by Geoscience Australia and Mathematical Sciences Institute at the
+Australian National University, it is now developed and maintained by a community of volunteers.
+
+Copyright Commonwealth of Australia (Geoscience Australia) and Australian National University 2004-Now
 
 
-ANUGA is developed at Geoscience Australia and Mathematical Sciences Institute at the
-Australian National University.
+Where can I get ANUGA?
+----------------------
 
-Copyright Commonwealth of Australia (Geoscience Australia) and Australian National University 2017-
+ANUGA is available from either https://github.com/anuga-community/anuga_core or https://github.com/GeoscienceAustralia/anuga_core.
+
+The Python 3.x version is the default and available in the main branches of both repositories. 
+
+If you rely on the deprecated Python 2.7 version, it is available in branches named anuga_py2.
+
+The python 3 version of ANUGA will continue to be developed and the most up-to-date versions will be available from the `anuga-community <https://github.com/anuga-community/anuga_core>`_ repository. 
+
 
 
 Installation
 ------------
 
-For installation instructions, see
-`INSTALL.rst <https://github.com/anuga-community/anuga_core/blob/master/INSTALL.rst>`_
+Installing anuga from the conda-forge channel can be achieved by adding conda-forge to your channels with:
+
+.. code-block::
+
+    conda config --add channels conda-forge
+    conda config --set channel_priority strict
+
+
+
+Once the conda-forge channel has been enabled, anuga can be installed with conda:
+
+.. code-block::
+
+    conda install anuga
+
+
+
+For more detailed installation instructions, see https://anuga.readthedocs.io/en/latest/installation.html
 
 
 Documentation and Help
 ----------------------
 
-ANUGA documentation is available in the doc folder. In particular the
-`user_manual <https://github.com/anuga-community/anuga_core/raw/master/doc/anuga_user_manual.pdf>`_
 
-Also helpful information is available noline at
+ANUGA documentation is available via read the docs at 
+
+    https://anuga.readthedocs.io 
+
+Also you can obtain help via the old
+`user_manual <https://github.com/anuga-community/anuga_core/raw/main/doc/anuga_user_manual.pdf>`_
+
+Also helpful information is available online at
 
     http://anuga.anu.edu.au
 
@@ -75,15 +123,11 @@ and send questions using the address
 Web sites
 ---------
 
-The user's site is: http://anuga.anu.edu.au/
-The WikiPedia for ANUGA is: https://en.wikipedia.org/wiki/ANUGA_Hydro
-The new GitHub repository for ANUGA is: https://github.com/anuga-community/anuga_core
-
-The old GitHub repository for ANUGA is: https://github.com/GeoscienceAustralia/anuga_core
-
-A viewer is available for displaying the ANUGA sww output files. 
-ANUGA viewer repository is: https://github.com/anuga-community/anuga-viewer
-
+* http://anuga.anu.edu.au: Collection of information, talks and papers about ANUGA.
+* https://en.wikipedia.org/wiki/ANUGA_Hydro: The Wikipedia site for ANUGA. 
+* https://github.com/anuga-community/anuga_core: The active GitHub repository for ANUGA.
+* https://github.com/GeoscienceAustralia/anuga_core: Mirror GitHub repository for ANUGA. 
+* https://github.com/anuga-community/anuga-viewer: Viewer for animating the ANUGA sww output files.  
 
 
 
@@ -96,9 +140,10 @@ The latest development version of ANUGA's sources are is available at:
 
 They can be downloaded as a zip file or using the Git client as follows
 
-    `git clone https://github.com/anuga-community/anuga_core` (for read only)
-    
-    `git clone git@github.com:anuga-community/anuga_core.git` (to contribute)
+.. code-block::
+
+    git clone https://github.com/anuga-community/anuga_core #(for read only)
+    git clone git@github.com:anuga-community/anuga_core.git #(to contribute)
 
 For the latter option see e.g. https://help.github.com/articles/adding-a-new-ssh-key-to-your-github-account/ for instructions on how to authenticate using ssh keys.
 
@@ -114,20 +159,20 @@ Developer information
 ---------------------
 
 If you would like to take part in ANUGA development, take a look
-at `CONTRIBUTING.rst <https://github.com/anuga-community/anuga_core/blob/master/CONTRIBUTING.rst>`_.
+at `CONTRIBUTING.rst <https://github.com/anuga-community/anuga_core/blob/main/CONTRIBUTING.rst>`_.
 
 
 License information
 -------------------
 
-See the file `LICENSE.txt <https://github.com/anuga-community/anuga_core/blob/master/LICENCE.txt>`_
+See the file `LICENSE.txt <https://github.com/anuga-community/anuga_core/blob/main/LICENCE.txt>`_
 for information on the history of this software, terms & conditions for usage,
 and a DISCLAIMER OF ALL WARRANTIES.
 
 Contacts
 --------
-At the Australian National University:
 
+At the Australian National University:
 **Stephen Roberts**
 *Lead Developer*
 <stephen.roberts@anu.edu.au>

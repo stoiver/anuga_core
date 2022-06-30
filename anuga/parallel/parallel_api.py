@@ -13,13 +13,11 @@ from anuga.utilities.parallel_abstraction import size, rank, get_processor_name
 from anuga.utilities.parallel_abstraction import finalize, send, receive, reduce
 from anuga.utilities.parallel_abstraction import pypar_available, barrier
 
-
+from anuga.parallel.sequential_distribute import sequential_distribute_dump
+from anuga.parallel.sequential_distribute import sequential_distribute_load
 
 # ANUGA parallel engine (only load if pypar can)
 if pypar_available:
-    from anuga.parallel.sequential_distribute import sequential_distribute_dump
-    from anuga.parallel.sequential_distribute import sequential_distribute_load
-
     from anuga.parallel.distribute_mesh  import send_submesh
     from anuga.parallel.distribute_mesh  import rec_submesh
     from anuga.parallel.distribute_mesh  import extract_submesh
@@ -273,13 +271,13 @@ def old_distribute(domain, verbose=False, debug=False, parameters = None):
 
         if send_s2p :
             n = len(s2p_map)
-            s2p_map_keys_flat = num.reshape(num.array(list(s2p_map.keys()),num.int), (n,1) )
-            s2p_map_values_flat = num.array(list(s2p_map.values()),num.int)
+            s2p_map_keys_flat = num.reshape(num.array(list(s2p_map.keys()),int), (n,1) )
+            s2p_map_values_flat = num.array(list(s2p_map.values()),int)
             s2p_map_flat = num.concatenate( (s2p_map_keys_flat, s2p_map_values_flat), axis=1 )
 
             n = len(p2s_map)
-            p2s_map_keys_flat = num.reshape(num.array(list(p2s_map.keys()),num.int), (n,2) )
-            p2s_map_values_flat = num.reshape(num.array(list(p2s_map.values()),num.int) , (n,1))
+            p2s_map_keys_flat = num.reshape(num.array(list(p2s_map.keys()),int), (n,2) )
+            p2s_map_values_flat = num.reshape(num.array(list(p2s_map.values()),int) , (n,1))
             p2s_map_flat = num.concatenate( (p2s_map_keys_flat, p2s_map_values_flat), axis=1 )
 
             for p in range(1, numprocs):
@@ -500,12 +498,25 @@ def distribute_mesh(domain, verbose=False, debug=False, parameters=None):
 
 ##     return l2g
 
-def mpicmd(script_name):
+def mpicmd(script_name='echo', numprocs=3):
+
+    extra_options = mpi_extra_options()
+
+    return "mpiexec -np %d  %s  python -m mpi4py %s" % (numprocs, extra_options, script_name)  
+
+def mpi_extra_options():
 
     extra_options = '--oversubscribe'
+    cmd = 'mpiexec -np 3 ' + extra_options + ' echo '
+
+    #print(cmd)
+    import subprocess
+    result = subprocess.run(cmd.split(), capture_output=True)
+    if result.returncode != 0:
+        extra_options = ' '
 
     import platform
     if platform.system() == 'Windows':
         extra_options = ' '
 
-    return "mpiexec -np %d  %s  python %s" % (3, extra_options, script_name)  
+    return extra_options

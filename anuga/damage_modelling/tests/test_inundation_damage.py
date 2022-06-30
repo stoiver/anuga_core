@@ -91,7 +91,7 @@ class Test_inundation_damage(unittest.TestCase):
         ######################
         #Initial condition - with jumps
         bed = domain.quantities['elevation'].vertex_values
-        stage = num.zeros(bed.shape, num.float)
+        stage = num.zeros(bed.shape, float)
 
         h = 0.3
         for i in range(stage.shape[0]):
@@ -123,7 +123,7 @@ class Test_inundation_damage(unittest.TestCase):
         sww = SWW_file(self.domain)
         sww.store_connectivity()
         sww.store_timestep()
-        self.domain.time = 2.
+        self.domain.set_time(2.)
         sww.store_timestep()
         self.sww = sww # so it can be deleted
 
@@ -161,7 +161,7 @@ class Test_inundation_damage(unittest.TestCase):
         ######################
         #Initial condition - with jumps
         bed = domain.quantities['elevation'].vertex_values
-        stage = num.zeros(bed.shape, num.float)
+        stage = num.zeros(bed.shape, float)
 
         h = 30.
         for i in range(stage.shape[0]):
@@ -193,7 +193,7 @@ class Test_inundation_damage(unittest.TestCase):
         sww = SWW_file(domain)
         sww.store_connectivity()
         sww.store_timestep()
-        domain.time = 2.
+        domain.set_time(2.0)
         sww.store_timestep()
         self.swwII = sww # so it can be deleted
 
@@ -294,7 +294,7 @@ class Test_inundation_damage(unittest.TestCase):
         sww.store_connectivity()
         sww.store_timestep()
         domain.set_quantity('stage', -0.3)
-        domain.time = 2.
+        domain.set_time(2.)
         sww.store_timestep()
 
         #Create a csv file
@@ -367,7 +367,7 @@ class Test_inundation_damage(unittest.TestCase):
         sww.store_connectivity()
         sww.store_timestep()
         domain.set_quantity('stage', -0.3)
-        domain.time = 2.
+        domain.set_time(2.)
         sww.store_timestep()
 
         #Create a csv file
@@ -488,8 +488,8 @@ class Test_inundation_damage(unittest.TestCase):
     def test_calc_collapse_structures1(self):
         edm = EventDamageModel([0.0]*17, [0.0]*17, [0.0]*17,
                                [0.0]*17, [0.0]*17)
-        edm.struct_damage = num.zeros(17,num.float)
-        edm.contents_damage = num.zeros(17,num.float)
+        edm.struct_damage = num.zeros(17,float)
+        edm.contents_damage = num.zeros(17,float)
         collapse_probability = {0.4:[0], #0
                                 0.6:[1], #1
                                 0.5:[2], #1

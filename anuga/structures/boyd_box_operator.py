@@ -50,6 +50,35 @@ class Boyd_box_operator(anuga.Structure_operator):
                  logging=False,
                  verbose=False):
 
+        """Create a box culvert using Boyd flow algorithm
+
+
+        :param domain: Culvert applied to this domain
+        :param losses: Losses 
+        :param width: Width of culvert
+        :param height: height of culvert
+        :param barrels: Number of barrels
+        :param blockage: Set between 0.0 - 1.0 Set to 1.0 to close off culvert
+        :param z1: Elevation of end of Culvert
+        :param z2: Elevation of other end of Culvert
+        :param end_points: [[x1,y1], [x2,y2]] of centre of ends of culvert
+        :param exchange_lines: [ [[x1,y1], [x2,y2]], [[x1,y1], [x2,y2]] ] list of two lines defining ends of culvert
+        :param enquiry_points: [[x1,y1], [x2,y2]] location of enquiry points
+        :param invert_elevations: [ e1, e2 ] invert elevations of culvert inlets
+        :param apron: 
+        :param manning:
+        :param enquiry_gap:
+        :param smoothing_timescale:
+        :param use_momentum_jet:
+        :param use_velocity_head:
+        :param description:
+        :param label:
+        :param structure_type:
+        :param logging:
+        :param verbose:
+        
+        """
+
         anuga.Structure_operator.__init__(self,
                                           domain,
                                           end_points=end_points,
@@ -262,6 +291,8 @@ def boyd_box_function(width,
 
     local_debug = False
 
+    #print(outlet_enquiry_depth)
+
     bf = 1 - blockage
 
     if blockage >= 1.0:
@@ -425,5 +456,8 @@ def smooth_discharge(smooth_delta_total_energy,
         Q=0.
     else:
         Q = min(abs(smooth_Q), Q) #abs(self.smooth_Q)
-    barrel_velocity=old_div(Q,flow_area)
+    if flow_area == 0:
+        barrel_velocity = 0.0
+    else:
+        barrel_velocity=old_div(Q,flow_area)
     return smooth_Q, Q, barrel_velocity

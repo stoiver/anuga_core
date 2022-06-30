@@ -1,12 +1,13 @@
-"""
-Environmental forcing functions, such as wind and rainfall.
+"""Environmental forcing functions, such as wind and rainfall.
 
 Constraints: See GPL license in the user guide
 Version: 1.0 ($Revision: 7731 $)
 ModifiedBy:
     $Author: hudson $
     $Date: 2010-05-18 14:54:05 +1000 (Tue, 18 May 2010) $
+
 """
+
 from __future__ import division
 
 from builtins import str
@@ -41,8 +42,8 @@ def check_forcefield(f):
 
     if callable(f):
         N = 3
-        x = num.ones(3, num.float)
-        y = num.ones(3, num.float)
+        x = num.ones(3, float)
+        y = num.ones(3, float)
         try:
             q = f(1.0, x=x, y=y)
         except Exception as e:
@@ -51,7 +52,7 @@ def check_forcefield(f):
             raise Exception(msg)
 
         try:
-            q = num.array(q, num.float)
+            q = num.array(q, float)
         except:
             msg = ('Return value from vector function %s could not '
                    'be converted into a numeric array of floats.\nSpecified '
@@ -160,7 +161,7 @@ class Wind_stress(object):
             self.speed = s
             self.phi = phi
 
-        self.const = old_div(eta_w*rho_a,rho_w)
+        self.const = eta_w*rho_a/rho_w
 
     def __call__(self, domain):
         """Evaluate windfield based on values found in domain"""
@@ -169,7 +170,7 @@ class Wind_stress(object):
         ymom_update = domain.quantities['ymomentum'].explicit_update
 
         N = len(domain)    # number_of_triangles
-        t = domain.time
+        t = domain.get_time()
 
         if callable(self.speed):
             xc = domain.get_centroid_coordinates()
@@ -182,7 +183,7 @@ class Wind_stress(object):
         else:
             # Assume s is a scalar
             try:
-                s_vec = self.speed * num.ones(N, num.float)
+                s_vec = self.speed * num.ones(N, float)
             except:
                 msg = 'Speed must be either callable or a scalar: %s' %self.s
                 raise Exception(msg)
@@ -199,7 +200,7 @@ class Wind_stress(object):
             # Assume phi is a scalar
 
             try:
-                phi_vec = self.phi * num.ones(N, num.float)
+                phi_vec = self.phi * num.ones(N, float)
             except:
                 msg = 'Angle must be either callable or a scalar: %s' %self.phi
                 raise Exception(msg)
@@ -221,7 +222,7 @@ def assign_windfield_values(xmom_update, ymom_update,
         phi = phi_vec[k]
 
         # Convert to radians
-        phi = old_div(phi*pi,180)
+        phi = phi*pi/180.0
 
         # Compute velocity vector (u, v)
         u = s*cos(phi)
@@ -277,7 +278,6 @@ class General_forcing(object):
                  radius=None,
                  polygon=None,
                  default_rate=None,
-                 relative_time=True,
                  verbose=False):
 
         from math import pi, cos, sin
@@ -301,7 +301,6 @@ class General_forcing(object):
         self.radius = radius
         self.polygon = polygon
         self.verbose = verbose
-        self.relative_time = relative_time
         self.value = 0.0    # Can be used to remember value at
                             # previous timestep in order to obtain rate
 
@@ -415,7 +414,7 @@ class General_forcing(object):
         """Apply inflow function at time specified in domain, update stage"""
 
         # Call virtual method allowing local modifications
-        t = domain.get_time(relative_time=self.relative_time)
+        t = domain.get_time()
         try:
             rate = self.update_rate(t)
         except Modeltime_too_early as e:
@@ -451,7 +450,7 @@ class General_forcing(object):
         # Now rate is a number
         if self.verbose is True:
             log.critical('Rate of %s at time = %.2f = %f'
-                         % (self.quantity_name, domain.get_time(relative_time=self.relative_time), rate))
+                         % (self.quantity_name, domain.get_time(), rate))
 
         if self.exchange_indices is None:
             self.update[:] += rate
@@ -561,7 +560,6 @@ class Rainfall(General_forcing):
                  radius=None,
                  polygon=None,
                  default_rate=None,
-                 relative_time=True,
                  verbose=False):
 
         # Converting mm/s to m/s to apply in ANUGA)
@@ -588,7 +586,6 @@ class Rainfall(General_forcing):
                                  radius=radius,
                                  polygon=polygon,
                                  default_rate=default_rain,
-                                 relative_time=relative_time,
                                  verbose=verbose)
 
 
@@ -647,7 +644,6 @@ class Inflow(General_forcing):
                  radius=None,
                  polygon=None,
                  default_rate=None,
-                 relative_time=True,
                  verbose=False):
         """Create an instance of the class
 
@@ -669,7 +665,6 @@ class Inflow(General_forcing):
                                  radius=radius,
                                  polygon=polygon,
                                  default_rate=default_rate,
-                                 relative_time=relative_time,
                                  verbose=verbose)
 
     def update_rate(self, t):
@@ -914,20 +909,20 @@ class Barometric_pressure(object):
         ymom_update = domain.quantities['ymomentum'].explicit_update
 
         N = domain.get_number_of_nodes()
-        t = domain.time
+        t = domain.get_time()
 
         if callable(self.pressure):
             xv = domain.get_nodes()
             if ( self.use_coordinates ):
                 p_vec = self.pressure(t, xv[:,0], xv[:,1])
             else:
-                p_vec=num.empty(N,num.float)
+                p_vec=num.empty(N,float)
                 for i in range(N):
                     p_vec[i]=self.pressure(t,i)
         else:
             # Assume s is a scalar
             try:
-                p_vec = self.pressure * num.ones(N, num.float)
+                p_vec = self.pressure * num.ones(N, float)
             except:
                 msg = 'Pressure must be either callable or a scalar: %s' %self.s
                 raise Exception(msg)
@@ -983,7 +978,7 @@ class Barometric_pressure_fast(object):
         at a set o possibly irregular but increasing times. file_function 
         interpolates from the file data onto the vertices of the domain.mesh
         for each time. Two arrays are then stored p0=p(t0,:) and p1=p(t1,:) 
-        where t0<=domain.time<=t1. These arrays are recalculated when necessary
+        where t0<=domain.get_time()<=t1. These arrays are recalculated when necessary
         i.e t>t1. A linear temporal interpolation is used to approximate 
         pressure at time t.
     """
@@ -1094,13 +1089,13 @@ class Barometric_pressure_fast(object):
                     break
 
             N = domain.get_number_of_nodes()
-            self.prev_pressure_vertex_values=num.empty(N,num.float)
-            self.next_pressure_vertex_values=num.empty(N,num.float)
+            self.prev_pressure_vertex_values=num.empty(N,float)
+            self.next_pressure_vertex_values=num.empty(N,float)
             for i in range(N):
                 self.prev_pressure_vertex_values[i]=self.pressure(self.file_time[self.index],i)
                 self.next_pressure_vertex_values[i]=self.pressure(self.file_time[self.index+1],i)
 
-        self.p_vec=num.empty(N,num.float)
+        self.p_vec=num.empty(N,float)
 
 
     def __call__(self, domain):
@@ -1109,7 +1104,7 @@ class Barometric_pressure_fast(object):
         xmom_update = domain.quantities['xmomentum'].explicit_update
         ymom_update = domain.quantities['ymomentum'].explicit_update
 
-        t = domain.time
+        t = domain.get_time()
 
         if callable(self.pressure):
             if ( self.use_coordinates ):
@@ -1142,7 +1137,7 @@ class Barometric_pressure_fast(object):
                                      xmom_update, ymom_update)
 
     def update_stored_pressure_values(self,domain):
-        while (self.file_time[self.index+1]<domain.time):
+        while (self.file_time[self.index+1]<domain.get_time()):
             self.index+=1
             self.prev_pressure_vertex_values=copy(self.next_pressure_vertex_values)
             for i in range(self.prev_pressure_vertex_values.shape[0]):
@@ -1160,7 +1155,7 @@ class Wind_stress_fast(object):
         interpolates from the file data onto the centroids of the domain.mesh
         for each time. Two arrays for each wind quantity are then stored \
         q0=q(t0,:) and q1=q(t1,:) 
-        where t0<=domain.time<=t1. These arrays are recalculated when necessary
+        where t0<=domain.get_time()<=t1. These arrays are recalculated when necessary
         i.e t>t1. A linear temporal interpolation is used to approximate 
         pressure at time t.
     """
@@ -1271,18 +1266,18 @@ class Wind_stress_fast(object):
                 else:
                     break
 
-            self.prev_windspeed_centroid_values=num.empty(N,num.float)
-            self.next_windspeed_centroid_values=num.empty(N,num.float)
-            self.prev_windangle_centroid_values=num.empty(N,num.float)
-            self.next_windangle_centroid_values=num.empty(N,num.float)
+            self.prev_windspeed_centroid_values=num.empty(N,float)
+            self.next_windspeed_centroid_values=num.empty(N,float)
+            self.prev_windangle_centroid_values=num.empty(N,float)
+            self.next_windangle_centroid_values=num.empty(N,float)
             for i in range(N):
                 self.prev_windspeed_centroid_values[i]=self.speed(self.file_time[self.index],i)
                 self.next_windspeed_centroid_values[i]=self.speed(self.file_time[self.index+1],i)
                 self.prev_windangle_centroid_values[i]=self.phi(self.file_time[self.index],i)
                 self.next_windangle_centroid_values[i]=self.phi(self.file_time[self.index+1],i)
 
-        self.s_vec=num.empty(N,num.float)
-        self.phi_vec=num.empty(N,num.float)
+        self.s_vec=num.empty(N,float)
+        self.phi_vec=num.empty(N,float)
 
         self.const = old_div(eta_w*rho_a,rho_w)
 
@@ -1293,7 +1288,7 @@ class Wind_stress_fast(object):
         ymom_update = domain.quantities['ymomentum'].explicit_update
 
         N = len(domain)    # number_of_triangles
-        t = domain.time
+        t = domain.get_time()
 
         if callable(self.speed):
             if ( self.use_coordinates ):
@@ -1342,7 +1337,7 @@ class Wind_stress_fast(object):
                                 self.s_vec, self.phi_vec, self.const)
 
     def update_stored_wind_values(self,domain):
-        while (self.file_time[self.index+1]<domain.time):
+        while (self.file_time[self.index+1]<domain.get_time()):
             self.index+=1
             self.prev_windspeed_centroid_values=copy(self.next_windspeed_centroid_values)
             self.prev_windangle_centroid_values=copy(self.next_windangle_centroid_values)

@@ -92,8 +92,8 @@ def time_varying_speed(t, x, y):
 
     from math import exp, cos, pi
 
-    x = num.array(x,num.float)
-    y = num.array(y,num.float)
+    x = num.array(x,float)
+    y = num.array(y,float)
 
     N = len(x)
     s = 0*x  #New array
@@ -110,8 +110,8 @@ def time_varying_angle(t, x, y):
     """
     from math import atan, pi
 
-    x = num.array(x,num.float)
-    y = num.array(y,num.float)
+    x = num.array(x,float)
+    y = num.array(y,float)
 
     N = len(x)
     a = 0 * x    # New array
@@ -128,8 +128,8 @@ def time_varying_pressure(t, x, y):
     """
     from math import atan, pi
 
-    x = num.array(x,num.float)
-    y = num.array(y,num.float)
+    x = num.array(x,float)
+    y = num.array(y,float)
 
     N = len(x)
     p = 0 * x    # New array
@@ -196,7 +196,7 @@ def spatial_linear_varying_pressure(t, x, y):
 
 
 def grid_1d(x0,dx,nx):
-    x = num.empty(nx,dtype=num.float)
+    x = num.empty(nx,dtype=float)
     for i in range(nx):
         x[i]=x0+float(i)*dx
     return x
@@ -205,8 +205,8 @@ def grid_1d(x0,dx,nx):
 def ndgrid(x,y):
     nx = len(x)
     ny = len(y)
-    X = num.empty(nx*ny,dtype=num.float)
-    Y = num.empty(nx*ny,dtype=num.float)
+    X = num.empty(nx*ny,dtype=float)
+    Y = num.empty(nx*ny,dtype=float)
     k=0
     for i in range(nx):
         for j in range(ny):
@@ -251,14 +251,14 @@ class Test_Forcing(unittest.TestCase):
         [X,Y] = ndgrid(x,y)
         number_of_points = nrows*ncols
 
-        wind_speed = num.empty((number_of_timesteps,nrows*ncols),dtype=num.float)
-        wind_angle = num.empty((number_of_timesteps,nrows*ncols),dtype=num.float)
+        wind_speed = num.empty((number_of_timesteps,nrows*ncols),dtype=float)
+        wind_angle = num.empty((number_of_timesteps,nrows*ncols),dtype=float)
         barometric_pressure = num.empty((number_of_timesteps,nrows*ncols),
-                                        dtype=num.float)
+                                        dtype=float)
 
         if ( callable(speed) and callable(angle) and callable(pressure) ):
-            x = num.ones(3, num.float)
-            y = num.ones(3, num.float)
+            x = num.ones(3, float)
+            y = num.ones(3, float)
             try:
                 s = speed(1.0, x=x, y=y)
                 a = angle(1.0, x=x, y=y)
@@ -414,7 +414,7 @@ class Test_Forcing(unittest.TestCase):
         Br = Reflective_boundary(domain)
         domain.set_boundary({'exterior': Br})
 
-        domain.time = 5.54    # Take a random time (not zero)
+        domain.set_time(5.54)   # Take a random time (not zero)
 
         #Setup only one forcing term, constant wind stress
         s = 100
@@ -425,12 +425,12 @@ class Test_Forcing(unittest.TestCase):
         domain.compute_forcing_terms()
 
         #Compute reference solution
-        const = old_div(eta_w*rho_a, rho_w)
+        const = eta_w*rho_a/rho_w
 
         N = len(domain)    # number_of_triangles
 
         xc = domain.get_centroid_coordinates()
-        t = domain.time
+        t = domain.get_time()
 
         x = xc[:,0]
         y = xc[:,1]
@@ -486,9 +486,9 @@ class Test_Forcing(unittest.TestCase):
         Br = Reflective_boundary(domain)
         domain.set_boundary({'exterior': Br})
 
-        domain.time = 7    # Take a time that is represented in file (not zero)
+        domain.set_time(7)    # Take a time that is represented in file (not zero)
 
-        # Write wind stress file (ensure that domain.time is covered)
+        # Write wind stress file (ensure that domaim time is covered)
         # Take x=1 and y=0
         filename = 'test_windstress_from_file'
         start = time.mktime(time.strptime('2000', '%Y'))
@@ -524,7 +524,7 @@ class Test_Forcing(unittest.TestCase):
 
         N = len(domain)    # number_of_triangles
 
-        t = domain.time
+        t = domain.get_time()
 
         s = speed(t, [1], [0])[0]
         phi = angle(t, [1], [0])[0]
@@ -577,9 +577,9 @@ class Test_Forcing(unittest.TestCase):
         Br = Reflective_boundary(domain)
         domain.set_boundary({'exterior': Br})
 
-        domain.time = 7    # Take a time that is represented in file (not zero)
+        domain.set_time(7)    # Take a time that is represented in file (not zero)
 
-        # Write wind stress file (ensure that domain.time is covered)
+        # Write wind stress file (ensure that domain time is covered)
         # Take x=1 and y=0
         filename = 'test_windstress_from_file'
         start = time.mktime(time.strptime('2000', '%Y'))
@@ -613,7 +613,7 @@ class Test_Forcing(unittest.TestCase):
 
         N = len(domain)    # number_of_triangles
 
-        t = domain.time
+        t = domain.get_time()
 
         s = speed(t, [1], [0])[0]
         phi = angle(t, [1], [0])[0]
@@ -667,7 +667,7 @@ class Test_Forcing(unittest.TestCase):
         Br = Reflective_boundary(domain)
         domain.set_boundary({'exterior': Br})
 
-        domain.time = 5.54    # Take a random time (not zero)
+        domain.set_time(5.54)   # Take a random time (not zero)
 
         # Setup only one forcing term, bad func
         domain.forcing_terms = []
@@ -802,17 +802,17 @@ class Test_Forcing(unittest.TestCase):
         
         domain.forcing_terms.append(R)
 
-        domain.time = 10.
+        domain.set_time(10.0)
 
         domain.compute_forcing_terms()
 
         assert num.allclose(domain.quantities['stage'].explicit_update[1],
-                            old_div((3*domain.time + 7),1000))
+                            (3*domain.get_time() + 7)/1000)
         assert num.allclose(domain.quantities['stage'].explicit_update[0], 0)
         assert num.allclose(domain.quantities['stage'].explicit_update[2:], 0)
 
-    def test_relative_time_dependent_rainfall_using_starttime(self):
-        rainfall_poly = ensure_numeric([[1,1], [2,1], [2,2], [1,2]], num.float)
+    def test_time_dependent_rainfall_using_starttime(self):
+        rainfall_poly = ensure_numeric([[1,1], [2,1], [2,2], [1,2]], float)
 
         a = [0.0, 0.0]
         b = [0.0, 2.0]
@@ -859,7 +859,7 @@ class Test_Forcing(unittest.TestCase):
         assert num.allclose(domain.quantities['stage'].explicit_update[2:], 0)
 
     def test_absolute_time_dependent_rainfall_using_starttime(self):
-        rainfall_poly = ensure_numeric([[1,1], [2,1], [2,2], [1,2]], num.float)
+        rainfall_poly = ensure_numeric([[1,1], [2,1], [2,2], [1,2]], float)
 
         a = [0.0, 0.0]
         b = [0.0, 2.0]
@@ -887,8 +887,7 @@ class Test_Forcing(unittest.TestCase):
         domain.forcing_terms = []
         R = Rainfall(domain,
                      rate=lambda t: 3*t + 7,
-                     polygon=rainfall_poly,
-                     relative_time=False)                     
+                     polygon=rainfall_poly)                     
 
         assert num.allclose(R.exchange_area, 2)
         
@@ -906,7 +905,7 @@ class Test_Forcing(unittest.TestCase):
         assert num.allclose(domain.quantities['stage'].explicit_update[2:], 0)
 
 
-    def test_relative_time_dependent_rainfall_using_georef(self):
+    def test_time_dependent_rainfall_using_georef(self):
         """test_time_dependent_rainfall_using_georef
 
         This will also test the General forcing term using georef
@@ -916,7 +915,7 @@ class Test_Forcing(unittest.TestCase):
         x0 = 314036.58727982
         y0 = 6224951.2960092
 
-        rainfall_poly = ensure_numeric([[1,1], [2,1], [2,2], [1,2]], num.float)
+        rainfall_poly = ensure_numeric([[1,1], [2,1], [2,2], [1,2]], float)
         rainfall_poly += [x0, y0]
 
         a = [0.0, 0.0]
@@ -974,7 +973,7 @@ class Test_Forcing(unittest.TestCase):
         x0 = 314036.58727982
         y0 = 6224951.2960092
 
-        rainfall_poly = ensure_numeric([[1,1], [2,1], [2,2], [1,2]], num.float)
+        rainfall_poly = ensure_numeric([[1,1], [2,1], [2,2], [1,2]], float)
         rainfall_poly += [x0, y0]
 
         a = [0.0, 0.0]
@@ -1012,11 +1011,16 @@ class Test_Forcing(unittest.TestCase):
 
         # This will test that time is set to starttime in set_starttime
         domain.set_starttime(5.0)
+        domain.set_time(5.0)
 
         domain.compute_forcing_terms()
 
+        # print(domain.quantities['stage'].explicit_update[1])
+        # print((3*domain.get_time() + 7)/1000.0)
+        # print(domain.relative_time)
+        # print(domain.get_time())
         assert num.allclose(domain.quantities['stage'].explicit_update[1],
-                            old_div((3*domain.get_time() + 7),1000))
+                            (3*domain.get_time() + 7)/1000.0)
 
 
         assert num.allclose(domain.quantities['stage'].explicit_update[0], 0)
@@ -1069,23 +1073,22 @@ class Test_Forcing(unittest.TestCase):
         R = Rainfall(domain,
                      rate=main_rate,
                      polygon = [[1,1], [2,1], [2,2], [1,2]],
-                     default_rate=5.0,
-                     relative_time=False)
+                     default_rate=5.0)
 
         assert num.allclose(R.exchange_area, 2)
         
         domain.forcing_terms.append(R)
 
-        domain.time = 10.
+        domain.set_time(10.)
 
         domain.compute_forcing_terms()
 
         assert num.allclose(domain.quantities['stage'].explicit_update[1],
-                            old_div((3*domain.time+7),1000))
+                            (3*domain.get_time()+7)/1000)
         assert num.allclose(domain.quantities['stage'].explicit_update[0], 0)
         assert num.allclose(domain.quantities['stage'].explicit_update[2:], 0)
 
-        domain.time = 100.
+        domain.set_time(100.)
         domain.quantities['stage'].explicit_update[:] = 0.0     # Reset
         domain.compute_forcing_terms()
 
@@ -1313,7 +1316,7 @@ class Test_Forcing(unittest.TestCase):
                                                 len2=cellsize*(nrows-1),
                                                 origin=(xllcorner,yllcorner))
 
-        time=num.arange(0,10,1,num.float)
+        time=num.arange(0,10,1,float)
         eval_time=time[7];
 
         domain = Domain(points, vertices, boundary)
@@ -1324,7 +1327,7 @@ class Test_Forcing(unittest.TestCase):
         x=grid_1d(xllcorner,cellsize,ncols)
         y=grid_1d(yllcorner,cellsize,nrows)
         X,Y=num.meshgrid(x,y)
-        interpolation_points=num.empty((X.shape[0]*X.shape[1],2),num.float)
+        interpolation_points=num.empty((X.shape[0]*X.shape[1],2),float)
         k=0
         for i in range(X.shape[0]):
             for j in range(X.shape[1]):
@@ -1336,13 +1339,13 @@ class Test_Forcing(unittest.TestCase):
                                        interpolation_points[:,1])
 
         k=0
-        Z=num.empty((X.shape[0],X.shape[1]),num.float)
+        Z=num.empty((X.shape[0],X.shape[1]),float)
         for i in range(X.shape[0]):
             for j in range(X.shape[1]):
                 Z[i,j]=z[k]
                 k+=1
 
-        Q=num.empty((time.shape[0],points.shape[0]),num.float)
+        Q=num.empty((time.shape[0],points.shape[0]),float)
         for i, t in enumerate(time):
             Q[i,:]=spatial_linear_varying_speed(t,points[:,0],points[:,1])
 
@@ -1354,7 +1357,7 @@ class Test_Forcing(unittest.TestCase):
                                     interpolation_points=interpolation_points,
                                     verbose=False)
 
-        V=num.empty((X.shape[0],X.shape[1]),num.float)
+        V=num.empty((X.shape[0],X.shape[1]),float)
         for k in range(len(interpolation_points)):
             assert num.allclose(I(eval_time,k),z[k])
             V[k/X.shape[1],k%X.shape[1]]=I(eval_time,k)
@@ -1375,9 +1378,9 @@ class Test_Forcing(unittest.TestCase):
         domain.set_quantity('stage', 1.0)
         domain.set_quantity('friction', 0)
 
-        domain.time = 7*timestep    # Take a time that is represented in file (not zero)
+        domain.set_time(7*timestep)    # Take a time that is represented in file (not zero)
 
-        # Write wind stress file (ensure that domain.time is covered)
+        # Write wind stress file (ensure that domain time is covered)
 
         field_sts_filename = 'wind_field'
         self.write_wind_pressure_field_sts(field_sts_filename,
@@ -1414,7 +1417,7 @@ class Test_Forcing(unittest.TestCase):
         N = len(domain)    # number_of_triangles
 
         xc = domain.get_centroid_coordinates()
-        t = domain.time
+        t = domain.get_time()
 
         x = xc[:,0]
         y = xc[:,1]
@@ -1464,7 +1467,7 @@ class Test_Forcing(unittest.TestCase):
                                                 len2=cellsize*(nrows-1),
                                                 origin=(xllcorner,yllcorner))
 
-        time=num.arange(0,10,1,num.float)
+        time=num.arange(0,10,1,float)
         eval_time=time[7];
 
         domain = Domain(points, vertices, boundary)
@@ -1476,9 +1479,9 @@ class Test_Forcing(unittest.TestCase):
         domain.set_quantity('stage', 1.0)
         domain.set_quantity('friction', 0)
 
-        domain.time = 7*timestep    # Take a time that is represented in file (not zero)
+        domain.set_time(7*timestep)    # Take a time that is represented in file (not zero)
 
-        # Write wind stress file (ensure that domain.time is covered)
+        # Write wind stress file (ensure that domain time is covered)
 
         field_sts_filename = 'wind_field'
         self.write_wind_pressure_field_sts(field_sts_filename,
@@ -1513,7 +1516,7 @@ class Test_Forcing(unittest.TestCase):
         N = len(domain)    # number_of_triangles
 
         xc = domain.get_centroid_coordinates()
-        t = domain.time
+        t = domain.get_time()
 
         x = xc[:,0]
         y = xc[:,1]
@@ -1594,7 +1597,7 @@ class Test_Forcing(unittest.TestCase):
         domain.forcing_terms.append(W)
 
         valuesUsingFunction=num.empty((3,number_of_timesteps+1,midpoints.shape[0]),
-                                      num.float)
+                                      float)
         i=0
         for t in domain.evolve(yieldstep=1, finaltime=number_of_timesteps*timestep):
             valuesUsingFunction[0,i]=domain.quantities['stage'].explicit_update
@@ -1688,7 +1691,7 @@ class Test_Forcing(unittest.TestCase):
         domain.forcing_terms.append(W)
 
         valuesUsingFunction=num.empty((3,2*number_of_timesteps,midpoints.shape[0]),
-                                      num.float)
+                                      float)
         i=0
         for t in domain.evolve(yieldstep=timestep/2., finaltime=(number_of_timesteps-1)*timestep):
             valuesUsingFunction[0,i]=domain.quantities['stage'].explicit_update
@@ -1788,7 +1791,7 @@ class Test_Forcing(unittest.TestCase):
         domain.forcing_terms.append(W)
 
         valuesUsingFunction=num.empty((3,number_of_timesteps,midpoints.shape[0]),
-                                      num.float)
+                                      float)
         i=0
         for t in domain.evolve(yieldstep=timestep, finaltime=(number_of_timesteps-1)*timestep):
             valuesUsingFunction[0,i]=domain.quantities['stage'].explicit_update
@@ -1892,7 +1895,7 @@ class Test_Forcing(unittest.TestCase):
         domain.forcing_terms.append(P)
 
         valuesUsingFunction=num.empty((3,2*number_of_timesteps,len(domain)),
-                                      num.float)
+                                      float)
         i=0
         import time as timer
         t0=timer.time()
@@ -1993,7 +1996,7 @@ class Test_Forcing(unittest.TestCase):
         domain.forcing_terms.append(P)
 
         valuesUsingFunction=num.empty((3,number_of_timesteps,len(domain)),
-                                      num.float)
+                                      float)
         i=0
         for t in domain.evolve(yieldstep=timestep, finaltime=(number_of_timesteps-1)*timestep):
             valuesUsingFunction[0,i]=domain.quantities['stage'].explicit_update

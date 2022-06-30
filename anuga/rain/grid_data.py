@@ -13,7 +13,6 @@ from past.utils import old_div
 import anuga
 #from anuga.fit_interpolate.interpolate2d import interpolate2d
 from anuga.fit_interpolate.interpolate2d import interpolate_raster
-import pylab as pl
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -156,7 +155,7 @@ class Raster_time_slice_data(object):
         ny = len(y)
         ldx = dx/nx
         ldy = dy/ny
-
+        
         time_step = self.time_step
 
         if tid is None:
@@ -169,10 +168,11 @@ class Raster_time_slice_data(object):
 
         indices = self.grid_indices_inside_polygon(polygon)
 
-        if indices is None:
-            data_max_in_period = np.max(data)
-            total_data_volume = np.sum(data)*ldx*ldy
-            catchment_area = len(data.flat)*ldx*ldy
+        
+        if indices is None:  
+            data_max_in_period = np.max(data) 
+            total_data_volume = np.sum(data)*ldx*ldy 
+            catchment_area = data.size*ldx*ldy
         else:
             pmask = data.flat[indices]
             data_max_in_period = np.max(pmask)
@@ -180,7 +180,7 @@ class Raster_time_slice_data(object):
             catchment_area = len(pmask)*ldx*ldy
 
         #print indices
-        peak_intensity = data_max_in_period/time_step
+        peak_intensity = data_max_in_period/time_step      
 
         if print_stats or self.verbose:
             print('Time period = ',time_period)
@@ -220,18 +220,19 @@ class Raster_time_slice_data(object):
                     plt.plot(polygon[:, 0], polygon[:, 1], '--w')
 
         plot_title = 'RASTER DATA '+date_time
-        plt.suptitle(plot_title, size=20)
+        plt.suptitle(plot_title)
         s_title = 'Max Data = %.2e / period' % (np.max(data_slices[tid]))
-        plt.title(s_title, size=12)
-
+        plt.title(s_title)
+        
         plt.imshow(data_slices[tid], origin='upper', interpolation='bicubic',
-                   extent=self.extent, vmin=0, vmax=plot_vmax)
-
-        if show:
-            plt.draw()
-        if save:
-            plt.savefig(plot_title+'.jpg', format='jpg')
-
+                   extent=self.extent,vmin=0, vmax=plot_vmax)
+        
+        
+        plt.colorbar()            
+        
+        if show: plt.pause(0.001)
+        if save: plt.savefig(plot_title+'.jpg',format='jpg')
+            
         return
 
     def plot_accumulated_data(self, polygons=None):
@@ -265,12 +266,14 @@ class Raster_time_slice_data(object):
 
         plt.figure(1)
         plt.clf()
-        plt.suptitle('Accumulated Data', size=20)
-
+        plt.suptitle('Accumulated Data')
+        
+        
         s_title = 'Max Int. = %.2e, Average = %.2e, Tot Vol. = %.2e Mill. m3' \
-                  % (peak_intensity, np.mean(data_accumulated), total_data_vol)
-        plt.title(s_title, size=12)
-
+                  % (peak_intensity,np.mean(data_accumulated),total_data_vol)
+        plt.title(s_title)
+        
+        
         if not polygons is None:
             for polygon in polygons:
                 if not polygon is None:
@@ -306,12 +309,9 @@ class Raster_time_slice_data(object):
             average_values = total_values/(self.times[-1]-self.times[0])
             max_intensity = max(bar_values)/time_step
 
-            b_title = 'Total = %.2e, Average = %.2e, Max Int.= %.2e' % (
-                total_values, average_values, max_intensity)
-
-            plt.bar(t, bar_values, width=time_step,)
-            plt.suptitle(' Data for Location %s:' %
-                         lid, fontsize=14, fontweight='bold')
+            plt.bar(t,bar_values,width=time_step,)
+            #plt.suptitle(' Data for Location %s:' % lid, fontsize=12, fontweight='bold')
+            plt.suptitle(' Data for Location %s:' % lid)      
             plt.title(b_title)
 
             plt.xlabel('time (s)')

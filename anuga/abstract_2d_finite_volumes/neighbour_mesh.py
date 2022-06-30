@@ -86,9 +86,6 @@ class Mesh(General_mesh):
             triangles (sequence of 3-tuples or Nx3 numeric array of non-negative integers).
         """
 
-
-
-
         General_mesh.__init__(self, coordinates, triangles,
                               geo_reference=geo_reference,
                               use_inscribed_circle=use_inscribed_circle,
@@ -100,10 +97,10 @@ class Mesh(General_mesh):
 
         # Allocate arrays for neighbour data
 
-        self.neighbours = -1*num.ones((N, 3), num.int)
-        self.neighbour_edges = -1*num.ones((N, 3), num.int)
-        self.number_of_boundaries = num.zeros(N, num.int)
-        self.surrogate_neighbours = num.zeros((N, 3), num.int)
+        self.neighbours = -1*num.ones((N, 3), int)
+        self.neighbour_edges = -1*num.ones((N, 3), int)
+        self.number_of_boundaries = num.zeros(N, int)
+        self.surrogate_neighbours = num.zeros((N, 3), int)
 
         #Get x,y coordinates for all triangles and store
         V = self.vertex_coordinates # Relative coordinates
@@ -122,7 +119,7 @@ class Mesh(General_mesh):
 #            #x2 = V[i, 4]; y2 = V[i, 5]
 #
 #            #Compute centroid
-#            centroid = num.array([(x0 + x1 + x2)/3, (y0 + y1 + y2)/3], num.float)
+#            centroid = num.array([(x0 + x1 + x2)/3, (y0 + y1 + y2)/3], float)
 #            self.centroid_coordinates[i] = centroid
 #
 #
@@ -131,9 +128,9 @@ class Mesh(General_mesh):
 #                #inscribed circle
 #
 #                #Midpoints
-#                m0 = num.array([(x1 + x2)/2, (y1 + y2)/2], num.float)
-#                m1 = num.array([(x0 + x2)/2, (y0 + y2)/2], num.float)
-#                m2 = num.array([(x1 + x0)/2, (y1 + y0)/2], num.float)
+#                m0 = num.array([(x1 + x2)/2, (y1 + y2)/2], float)
+#                m1 = num.array([(x0 + x2)/2, (y0 + y2)/2], float)
+#                m2 = num.array([(x1 + x0)/2, (y1 + y0)/2], float)
 #
 #                #The radius is the distance from the centroid of
 #                #a triangle to the midpoint of the side of the triangle
@@ -163,22 +160,22 @@ class Mesh(General_mesh):
 #            self.neighbour_edges[i, :] = [-1, -1, -1]
 
 
-        #Build neighbour structure
+        # Build neighbour structure
         if verbose: log.critical('Mesh: Building neigbour structure')
         self.build_neighbour_structure()
 
-        #Build surrogate neighbour structure
+        # Build surrogate neighbour structure
         if verbose: log.critical('Mesh: Building surrogate neigbour structure')
         self.build_surrogate_neighbour_structure()
 
-        #Build boundary dictionary mapping (id, edge) to symbolic tags
+        # Build boundary dictionary mapping (id, edge) to symbolic tags
         if verbose: log.critical('Mesh: Building boundary dictionary')
         self.build_boundary_dictionary(boundary)
 
-        #Update boundary_enumeration
+        # Update boundary_enumeration
         self.build_boundary_neighbours()
 
-        #Build tagged element  dictionary mapping (tag) to array of elements
+        # Build tagged element dictionary mapping (tag) to array of elements
         if verbose: log.critical('Mesh: Building tagged elements dictionary')
         self.build_tagged_elements_dictionary(tagged_elements)
 
@@ -374,63 +371,6 @@ class Mesh(General_mesh):
 
         from .neighbour_mesh_ext import boundary_dictionary_construct
         boundary = boundary_dictionary_construct(len(self), default_boundary_tag, self.neighbours, boundary)
-        
-
-        self.boundary = boundary
-        self.boundary_length = len(self.boundary)
-
-
-
-    def build_boundary_dictionary_old(self, boundary = None):
-        """Build or check the dictionary of boundary tags.
-         self.boundary is a dictionary of tags,
-         keyed by volume id and edge:
-         { (id, edge): tag, ... }
-
-         Postconditions:
-            self.boundary is defined.
-        """
-
-        from anuga.config import default_boundary_tag
-
-        if boundary is None:
-            boundary = {}
-            for vol_id in range(len(self)):
-                for edge_id in range(0, 3):
-                    if self.neighbours[vol_id, edge_id] < 0:
-                        boundary[(vol_id, edge_id)] = default_boundary_tag
-        else:
-            #Check that all keys in given boundary exist
-            for vol_id, edge_id in list(boundary.keys()):
-                msg = 'Segment (%d, %d) does not exist' %(vol_id, edge_id)
-                a, b = self.neighbours.shape
-                assert vol_id < a and edge_id < b, msg
-
-                #FIXME: This assert violates internal boundaries (delete it)
-                #msg = 'Segment (%d, %d) is not a boundary' %(vol_id, edge_id)
-                #assert self.neighbours[vol_id, edge_id] < 0, msg
-
-            #Check that all boundary segments are assigned a tag
-            for vol_id in range(len(self)):
-                for edge_id in range(0, 3):
-                    if self.neighbours[vol_id, edge_id] < 0:
-                        if (vol_id, edge_id) not in boundary:
-                            msg = 'WARNING: Given boundary does not contain '
-                            msg += 'tags for edge (%d, %d). '\
-                                   %(vol_id, edge_id)
-                            msg += 'Assigning default tag (%s).'\
-                                   %default_boundary_tag
-
-                            #FIXME: Print only as per verbosity
-
-                            #FIXME: Make this situation an error in the future
-                            #and make another function which will
-                            #enable default boundary-tags where
-                            #tags a not specified
-                            boundary[ (vol_id, edge_id) ] =\
-                                      default_boundary_tag
-
-
 
         self.boundary = boundary
         self.boundary_length = len(self.boundary)
@@ -451,7 +391,7 @@ class Mesh(General_mesh):
         else:
             #Check that all keys in given boundary exist
             for tag in list(tagged_elements.keys()):
-                tagged_elements[tag] = num.array(tagged_elements[tag], num.int)
+                tagged_elements[tag] = num.array(tagged_elements[tag], int)
 
                 msg = 'Not all elements exist. '
                 assert max(tagged_elements[tag]) < len(self), msg
@@ -541,8 +481,8 @@ class Mesh(General_mesh):
 
         # Now we know number of boundaries
         M = len(self.boundary_enumeration)
-        self.boundary_cells = num.zeros((M,),num.int)
-        self.boundary_edges = num.zeros((M,),num.int)
+        self.boundary_cells = num.zeros((M,),int)
+        self.boundary_edges = num.zeros((M,),int)
 
         for id, edge in X:
             j = self.boundary_enumeration[id,edge]
@@ -864,42 +804,41 @@ class Mesh(General_mesh):
 
 
 
-
-        # check that neighbour of neighbour is self
+        # Check that neighbour of neighbour is self
 
         # 0 neighbours
         neighs = self.neighbours
         ids = num.arange(len(neighs))
 
         # 0 neighbours
-        nid = neighs[:,0]
-        eid = self.neighbour_edges[:,0]
+        nid = neighs[:, 0]
+        eid = self.neighbour_edges[:, 0]
         nnid = num.argwhere(nid>-1).reshape(-1,)
         nid = nid[nnid]
         eid = eid[nnid]
         id  = ids[nnid]
 
-        assert num.all(neighs[nid,eid] == id)
+        assert num.all(neighs[nid, eid] == id)
 
         # 1 neighbours
-        nid = neighs[:,1]
-        eid = self.neighbour_edges[:,1]
+        nid = neighs[:, 1]
+        eid = self.neighbour_edges[:, 1]
         nnid = num.argwhere(nid>-1).reshape(-1,)
         nid = nid[nnid]
         eid = eid[nnid]
         id  = ids[nnid]
 
-        assert num.all(neighs[nid,eid] == id)
+        assert num.all(neighs[nid, eid] == id)
 
         # 2 neighbours
-        nid = neighs[:,2]
-        eid = self.neighbour_edges[:,2]
+        nid = neighs[:, 2]
+        eid = self.neighbour_edges[:, 2]
         nnid = num.argwhere(nid>-1).reshape(-1,)
         nid = nid[nnid]
         eid = eid[nnid]
         id  = ids[nnid]
 
-        assert num.all(neighs[nid,eid] == id)
+        assert num.all(neighs[nid, eid] == id)
 
 
 
@@ -1132,15 +1071,7 @@ class Mesh(General_mesh):
         # because I needed it for diagnostics.
         # We should make it fast - probably based on the
         # quad tree structure.
-        from anuga.geometry.polygon import is_outside_polygon,\
-             is_inside_polygon
-
-        polygon = self.get_boundary_polygon()
-
-        if is_outside_polygon(point, polygon):
-            msg = 'Point %s is outside mesh' %str(point)
-            raise Exception(msg)
-
+        from anuga.geometry.polygon import is_inside_polygon
 
         V = self.get_vertex_coordinates(absolute=True)
 
@@ -1155,6 +1086,45 @@ class Mesh(General_mesh):
         raise Exception(msg)
 
 
+    def get_triangle_near_point(self, point, tolerance=1.0e20):
+        """
+        Function to get the index of the triangle nearest to a point (as measured by distance to 
+        centroid of the triangles).
+
+        @param point A single point (absolute units)
+        @param tolerance Raise an exception if "nearest" point is further that tolerance from the domain
+        
+        @return The index of the triangle "nearest" to point.
+        """
+
+        C = self.get_centroid_coordinates(absolute=True)
+        
+        distance2 = (C[:,0] - point[0])**2 + (C[:,1] - point[1])**2
+        
+        tid = num.argmin(distance2)
+
+        if distance2[tid] > tolerance**2:
+            msg = 'Point %s further than %g (m) from domain' % (str(point), tolerance)
+            raise Exception(msg)
+        else:
+            return tid
+
+
+    def get_triangles_inside_polygon(self, polygon):
+        """Return triangle ids for triangles whose centroid is inside given polygon
+        """
+
+        # FIXME(SR): This function is currently brute force.
+        # We should make it fast - probably based on the
+        # quad tree structure.
+        from anuga.geometry.polygon import inside_polygon
+
+        # Determine indices for polygonal region
+        points = self.get_centroid_coordinates(absolute=True)
+
+        indices = inside_polygon(points, polygon)
+
+        return indices
 
 
     def get_intersecting_segments(self, polyline,
@@ -1394,8 +1364,8 @@ def _get_intersecting_segments(V, N, line,
             # the line and the normals
 
             # Distances from line origin to the two intersections
-            z0 = num.array([x0 - xi0, y0 - eta0], num.float)
-            z1 = num.array([x1 - xi0, y1 - eta0], num.float)
+            z0 = num.array([x0 - xi0, y0 - eta0], float)
+            z1 = num.array([x1 - xi0, y1 - eta0], float)
             d0 = num.sqrt(num.sum(z0**2))
             d1 = num.sqrt(num.sum(z1**2))
 
@@ -1410,9 +1380,9 @@ def _get_intersecting_segments(V, N, line,
 
             # Normal direction:
             # Right hand side relative to line direction
-            vector = num.array([x1 - x0, y1 - y0], num.float) # Segment vector
+            vector = num.array([x1 - x0, y1 - y0], float) # Segment vector
             length = num.sqrt(num.sum(vector**2))      # Segment length
-            normal = old_div(num.array([vector[1], -vector[0]], num.float),length)
+            normal = old_div(num.array([vector[1], -vector[0]], float),length)
 
 
             segment = ((x0,y0), (x1, y1))
@@ -1492,7 +1462,7 @@ def segment_midpoints(segments):
     for segment in segments:
         assert isinstance(segment, Triangle_intersection), msg
 
-        midpoint = old_div(num.sum(num.array(segment.segment, num.float), axis=0),2)
+        midpoint = old_div(num.sum(num.array(segment.segment, float), axis=0),2)
         midpoints.append(midpoint)
 
     return midpoints

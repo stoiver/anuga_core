@@ -1017,8 +1017,8 @@ class Test_Mesh(unittest.TestCase):
                      [16, 6, 5]]
 
 
-        triangles = num.array(triangles,num.int)
-        points = num.array(points,num.float)
+        triangles = num.array(triangles,int)
+        points = num.array(points,float)
 
         mesh = Mesh(points, triangles)
         mesh.check_integrity()
@@ -1099,7 +1099,7 @@ class Test_Mesh(unittest.TestCase):
                   [  31998.23828125,  88799.84375   ],
                   [  35406.3359375 ,  79332.9140625 ]]
 
-        scaled_points = old_div(ensure_numeric(points, num.int),1000)  # Simplify for ease of interpretation
+        scaled_points = old_div(ensure_numeric(points, int),1000)  # Simplify for ease of interpretation
 
         triangles = [[ 0, 1, 2],
                      [ 3, 4, 5],
@@ -1232,6 +1232,66 @@ class Test_Mesh(unittest.TestCase):
         for i, point in enumerate(mesh.get_centroid_coordinates()):
             id = mesh.get_triangle_containing_point(point)
             assert id == i        
+
+    def test_get_triangle_near_point(self):
+
+        a = [0.0, 0.0]
+        b = [0.0, 2.0]
+        c = [2.0, 0.0]
+        d = [0.0, 4.0]
+        e = [2.0, 2.0]
+        f = [4.0, 0.0]
+
+        points = [a, b, c, d, e, f]
+        #bac, bce, ecf, dbe
+        vertices = [ [1,0,2], [1,2,4], [4,2,5], [3,1,4]]
+        mesh = Mesh(points, vertices)
+        
+        mesh.check_integrity()
+
+        id = mesh.get_triangle_near_point([3.0, 5.0])
+        assert id == 3
+
+        try:
+            id = mesh.get_triangle_near_point([3.0, 5.0], tolerance=1.0)
+        except:
+            pass
+        else:
+            msg = 'Should have caught point further than tolerance from centroid'            
+            raise Exception(msg)
+
+        id = mesh.get_triangle_near_point([-1.0, -1.0])
+        assert id == 0       
+
+        for i, point in enumerate(mesh.get_centroid_coordinates()):
+            id = mesh.get_triangle_near_point(point)
+            assert id == i
+
+    def test_get_triangles_inside_polygon(self):
+
+        a = [0.0, 0.0]
+        b = [0.0, 2.0]
+        c = [2.0, 0.0]
+        d = [0.0, 4.0]
+        e = [2.0, 2.0]
+        f = [4.0, 0.0]
+
+        points = [a, b, c, d, e, f]
+        #bac, bce, ecf, dbe
+        vertices = [ [1,0,2], [1,2,4], [4,2,5], [3,1,4]]
+        mesh = Mesh(points, vertices)
+        
+        mesh.check_integrity()
+            
+        polygon =[[1.0, -1.0], [1.0, 4.0], [5.0, 4.0], [5.0, -2.0]]
+        ids = mesh.get_triangles_inside_polygon(polygon)
+        assert num.allclose(ids, [1,2])
+
+        polygon =[[4.0, -1.0], [4.0, 4.0], [5.0, 4.0], [5.0, -2.0]]
+        ids = mesh.get_triangles_inside_polygon(polygon)
+        assert not ids       
+
+        
 
     def test_get_triangle_neighbours(self):
         a = [0.0, 0.0]
@@ -1850,6 +1910,6 @@ class Test_Mesh(unittest.TestCase):
 #-------------------------------------------------------------
 
 if __name__ == "__main__":
-    suite = unittest.makeSuite(Test_Mesh, 'test_mesh_and_neighbours')
+    suite = unittest.makeSuite(Test_Mesh, 'test_')
     runner = unittest.TextTestRunner()#verbosity=2)
     runner.run(suite)

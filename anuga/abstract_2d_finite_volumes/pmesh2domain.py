@@ -59,6 +59,7 @@ def _pmesh_to_domain_instance(source, DomainClass):
 
     (vertex_coordinates, vertices, tag_dict, vertex_quantity_dict,
      tagged_elements_dict, geo_reference) = pmesh_to_domain(**parm)
+     
 
     domain = DomainClass(coordinates = vertex_coordinates,
                          vertices = vertices,
@@ -171,7 +172,7 @@ def pmesh_dict_to_tag_dict_old(mesh_dict):
 
     triangles = mesh_dict['triangles']
 
-    triangles = num.array(triangles,num.int)
+    triangles = num.array(triangles,int)
 
     sides = {}
     for id, triangle in enumerate(triangles):
@@ -207,8 +208,8 @@ def pmesh_dict_to_tag_dict(mesh_dict):
     segments = mesh_dict['segments']
     segment_tags = mesh_dict['segment_tags']
 
-    triangles = num.array(triangles,num.int)
-    segments = num.array(segments,num.int)
+    triangles = num.array(triangles,int)
+    segments = num.array(segments,int)
     tag_dict = {}
 
     #print triangles
@@ -219,6 +220,7 @@ def pmesh_dict_to_tag_dict(mesh_dict):
 
     segment_tags = [seg.encode() for seg in segment_tags]  # Convert to binary form
     tag_dict = build_boundary_dictionary(triangles, segments, segment_tags, tag_dict)
+    
 
     for key in tag_dict.keys():
         x = tag_dict[key]
@@ -228,12 +230,12 @@ def pmesh_dict_to_tag_dict(mesh_dict):
 
 
 def calc_sides_old(triangles):
-    '''Build dictionary mapping from sides (2-tuple of points)
+    """Build dictionary mapping from sides (2-tuple of points)
     to left hand side neighbouring triangle
-    '''
+    """
 
     sides = {}
-    triangles = num.array(triangles,num.int)
+    triangles = num.array(triangles,int)
     for id, triangle in enumerate(triangles):
         a = triangle[0]
         b = triangle[1]
@@ -248,14 +250,14 @@ def calc_sides_old(triangles):
 
 
 def calc_sides_zip(triangles):
-    '''Build dictionary mapping from sides (2-tuple of points)
+    """ Build dictionary mapping from sides (2-tuple of points)
     to left hand side neighbouring triangle
-    '''
+    """
 
     sides = {}
 
 
-    triangles = num.array(triangles,num.int)
+    triangles = num.array(triangles,int)
 
 
     a = triangles[:,0]
@@ -271,14 +273,14 @@ def calc_sides_zip(triangles):
     return sides
 
 def calc_sides_c(triangles):
-    '''Build dictionary mapping from sides (2-tuple of points)
+    """Build dictionary mapping from sides (2-tuple of points)
     to left hand side neighbouring triangle
-    '''
+    """
 
     sides = {}
 
 
-    triangles = num.array(triangles,num.int)
+    triangles = num.array(triangles,int)
     ntriangles = len(triangles)
 
 #    print 'calc_sides'

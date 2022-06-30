@@ -409,7 +409,7 @@ class triangTestCase(unittest.TestCase):
                                     correct.flat),
                         'Failed!')
 
-        correct = num.array(segattlist, num.int)
+        correct = num.array(segattlist, int)
         self.assertTrue(num.allclose(data['generatedsegmentmarkerlist'].flat,
                                      correct.flat),
                         'Failed')
@@ -462,6 +462,6 @@ class triangTestCase(unittest.TestCase):
 
 
 if __name__ == "__main__":
-    suite = unittest.makeSuite(triangTestCase, 'test')
+    suite = unittest.makeSuite(triangTestCase, 'test_')
     runner = unittest.TextTestRunner(verbosity=2)
     runner.run(suite)

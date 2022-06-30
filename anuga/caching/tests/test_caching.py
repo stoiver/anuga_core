@@ -6,8 +6,12 @@ from builtins import object
 import unittest
 
 from copy import deepcopy
+
+import os
         
-from anuga.caching import *
+from anuga.caching import cache, set_option, options, myhash, system_tools, get_bytecode
+from anuga.caching import get_bytecode, myopen, file_types, checkdir, cachedir
+
 from anuga.caching.dummy_classes_for_testing import Dummy, Dummy_memorytest
 
 import numpy as num
@@ -439,7 +443,7 @@ class Test_Caching(unittest.TestCase):
         msg = 'Byte code should be different'
         assert bc1 != bc2, msg
         
-        x = num.arange(10).astype(num.float)
+        x = num.arange(10).astype(float)
         
         ref1 = f1(x)
         ref2 = f2(x)
