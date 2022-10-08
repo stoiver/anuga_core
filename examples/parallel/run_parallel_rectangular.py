@@ -91,9 +91,11 @@ verbose = args.verbose
 evolve_verbose = args.evolve_verbose
 fixed_flux_timestep = args.fixed_dt
 test_allreduce = args.test_allreduce
+ghost_layer = args.ghost_layer
+ncpus = anuga.numprocs
 
 dist_params = {}
-dist_params['ghost_layer_width'] = args.ghost_layer
+dist_params['ghost_layer_width'] = ghost_layer
 
 if fixed_flux_timestep == 0.0:
     fixed_flux_timestep = None
@@ -118,7 +120,7 @@ if myid == 0:
     domain.set_quantity('elevation', lambda x,y : -1.0-x )
     domain.set_quantity('stage', 1.0)
     domain.set_flow_algorithm('DE0')
-    domain.set_name('sw_rectangle')
+    domain.set_name(f'rect_{ghost_layer}_{sqrtN}_{ncpus}')
  
     if verbose: domain.print_statistics()
 else:
