@@ -80,6 +80,8 @@ parser.add_argument('-v', '--verbose', action='store_true', help='turn on verbos
 
 parser.add_argument('-ve', '--evolve_verbose', action='store_true', help='turn on evolve verbosity')
 
+parser.add_argument('-sww', '--store_sww', action='store_true', help='turn on storing sww file')
+
 args = parser.parse_args()
 
 if myid == 0: print(args)
@@ -92,6 +94,8 @@ evolve_verbose = args.evolve_verbose
 fixed_flux_timestep = args.fixed_dt
 test_allreduce = args.test_allreduce
 ghost_layer = args.ghost_layer
+store_sww = args.store_sww
+
 ncpus = anuga.numprocs
 
 dist_params = {}
@@ -116,11 +120,11 @@ if myid == 0:
                                       verbose=verbose)
 
 
-    domain.set_store(True)
+    domain.set_store(store_sww)
     domain.set_quantity('elevation', lambda x,y : -1.0-x )
     domain.set_quantity('stage', 1.0)
     domain.set_flow_algorithm('DE0')
-    domain.set_name(f'rect_{ghost_layer}_{sqrtN}_{ncpus}')
+    domain.set_name(f'rect_gl_{ghost_layer}_sqrtn_{sqrtN}_ncpus_{ncpus}')
  
     if verbose: domain.print_statistics()
 else:
