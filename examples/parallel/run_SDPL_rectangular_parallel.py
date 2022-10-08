@@ -47,9 +47,6 @@ t0 = time.time()
 #----------------------------
 # simulation parameters
 #----------------------------
-refinement_factor = 100
-sqrtN = int((numprocs)**(1.0/2.0)*refinement_factor)
-
 sqrtN = 100
 length = 2.0
 width = 2.0
@@ -70,6 +67,7 @@ parser.add_argument('-sn', '--sqrtN', type=int, default=sqrtN,
                     help='Size of grid: 500 -> 1_000_000 triangles')
 parser.add_argument('-gl', '--ghost_layer', type=int, default=2,
                     help='Size of ghost layer')
+
 
 parser.add_argument('-fdt', '--fixed_dt', type=float, default=fixed_flux_timestep,
                     help='Set a fixed flux timestep')
@@ -104,50 +102,31 @@ dist_params['ghost_layer_width'] = ghost_layer
 if fixed_flux_timestep == 0.0:
     fixed_flux_timestep = None
 
+domain_name = f'rect_gl_{ghost_layer}_sqrtn_{sqrtN}_ncpus_{ncpus}'
+partition_dir = 'Partitions'
+
 #print('fixed_flux_timestep ',fixed_flux_timestep)
 
-domain_name = f'rect_gl_{ghost_layer}_sqrtn_{sqrtN}_ncpus_{ncpus}'
+creation_time = 0.0
 
+if myid == 0: 
+    print ('Loading partitions')
+    sys.stdout.flush()
 
-#--------------------------------------------------------------------------
-# Setup Domain only on processor 0
-#--------------------------------------------------------------------------
-if myid == 0:
-
-    domain = rectangular_cross_domain(sqrtN, sqrtN,
-                                      len1=length, len2=width, 
-                                      origin=(-length/2, -width/2), 
-                                      verbose=verbose)
-
-
-    domain.set_store(store_sww)
-    domain.set_quantity('elevation', lambda x,y : -1.0-x )
-    domain.set_quantity('stage', 1.0)
-    domain.set_flow_algorithm('DE0')
-    domain.set_name(domain_name)
- 
-    if verbose: domain.print_statistics()
-else:
-    domain = None
+barrier()
 
 t1 = time.time()
 
-creation_time = t1-t0
+domain = anuga.sequential_distribute_load(filename=domain_name, partition_dir=partition_dir)
 
-if myid == 0 :
-    print ('Creation of sequential domain: Time =',t1-t0)
-    print ('Creation of sequential domain: Number of Triangles =',domain.number_of_global_triangles)
+t2 = time.time()
 
-if myid == 0: 
-    print ('DISTRIBUTING DOMAIN')
-    sys.stdout.flush()
-    
 barrier()
 
-#-------------------------------------------------------------------------
-# Distribute domain
-#-------------------------------------------------------------------------
-domain = distribute(domain,verbose=verbose,parameters=dist_params)
+if myid == 0 :
+    distribute_time = t2-t1
+    print ('Load Domain: Time ',distribute_time)
+
 
 
 # FIXME: THis should be able to be set in the sequential domain
@@ -158,14 +137,6 @@ if myid == 0:
     print('fixed_flux_timestep ',domain.fixed_flux_timestep)
 domain.test_allreduce = test_allreduce
 
-t2 = time.time()
-
-distribute_time = t2-t1
-
-if myid == 0 :
-    print ('Distribute domain: Time ',distribute_time)
-    
-if myid == 0 : print ('After parallel domain')
 
 #Boundaries
 T = Transmissive_boundary(domain)
