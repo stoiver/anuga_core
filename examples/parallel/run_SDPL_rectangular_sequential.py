@@ -143,7 +143,7 @@ sys.stdout.flush()
 
 t2 = time.time()
 
-anuga.sequential_distribute_dump(domain,numprocs=ncpus, verbose=verbose, partition_dir=partition_dir)
+anuga.sequential_distribute_dump(domain,numprocs=ncpus, verbose=verbose, partition_dir=partition_dir, parameters=dist_params)
 
 t3 = time.time()
 
