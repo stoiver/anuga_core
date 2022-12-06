@@ -43,12 +43,7 @@ Key routines:
 
     
 """
-from __future__ import print_function
-from __future__ import division
-from builtins import str
-from builtins import range
-from past.utils import old_div
-from future.utils import raise_
+
 import sys
 import os
 import os.path
@@ -95,7 +90,7 @@ if gdal_available:
         layerType=ogr.GeometryTypeToName(layer.GetGeomType())
         if not layerType=='Polygon':
             msg= shapefile +' is not a polygon shapefile'
-            raise_(Exception, msg)
+            raise Exception(msg)
 
         # Need a single polygon 
         try:
@@ -137,7 +132,7 @@ if gdal_available:
         layerType=ogr.GeometryTypeToName(layer.GetGeomType())
         if not layerType=='Line String':
             msg= shapefile +' is not a line shapefile'
-            raise_(Exception, msg) 
+            raise Exception(msg) 
 
         # Need a single line 
         try:
@@ -403,10 +398,10 @@ if gdal_available:
         seg_unitVec_y = float(p1[1]-p0[1])
         segLen = (seg_unitVec_x**2+seg_unitVec_y**2)**0.5
         if(segLen == 0.):
-            raise_(Exception, 'Line has repeated points: Line %s Pt %s' % (str(line),str(pt)))
+            raise Exception('Line has repeated points: Line %s Pt %s' % (str(line),str(pt)))
 
-        seg_unitVec_x = old_div(seg_unitVec_x,segLen)
-        seg_unitVec_y = old_div(seg_unitVec_y,segLen)
+        seg_unitVec_x = seg_unitVec_x/segLen
+        seg_unitVec_y = seg_unitVec_y/segLen
 
         # Get vector from pt to p0 
         pt_p0_vec_x = float(pt[0]-p0[0])
@@ -541,7 +536,7 @@ if gdal_available:
                    (L1_pts[tmp[1]][1]-L1_pts[tmp[1]+1][1])**2.)**0.5
                 d1=((L1_pts[tmp[1]+2][0]-L1_pts[tmp[1]+1][0])**2.+\
                    (L1_pts[tmp[1]+2][1]-L1_pts[tmp[1]+1][1])**2.)**0.5
-                L1_pts[tmp[1]+1][2] = old_div((d0*L1_pts[tmp[1]+2][2] + d1*L1_pts[tmp[1]][2]),(d0+d1))
+                L1_pts[tmp[1]+1][2] = (d0*L1_pts[tmp[1]+2][2] + d1*L1_pts[tmp[1]][2])/(d0+d1)
     
         else:
             if verbose:
@@ -741,8 +736,8 @@ if gdal_available:
         pixelHeight = transform[5] # Negative
         
         # Get coordinates in pixel values
-        px = old_div((xy[:,0] - xOrigin), pixelWidth)
-        py = old_div((xy[:,1] - yOrigin), pixelHeight)
+        px = (xy[:,0] - xOrigin)/pixelWidth
+        py = (xy[:,1] - yOrigin)/pixelHeight
       
         # Hold elevation 
         elev = px*0. 
@@ -770,7 +765,7 @@ if gdal_available:
             pass
         else:
             msg = 'Trying to extract point values that exceed the raster extent'
-            raise_(Exception, msg)
+            raise Exception(msg)
 
         # Get values -- seems we have to loop, but it is efficient enough
         for i in range(len(px)):
@@ -910,10 +905,10 @@ if gdal_available:
         poly_ymax = polygonArr[:,1].max()
     
         # Make a 'grid' of points which covers the polygon
-        xGridCount = max( numpy.ceil( old_div((poly_xmax-poly_xmin),approx_grid_spacing[0])+1. ).astype(int), 4)
+        xGridCount = max( numpy.ceil( (poly_xmax-poly_xmin)/approx_grid_spacing[0]+1. ).astype(int), 4)
         R = (poly_xmax-poly_xmin)*eps
         Xvals = numpy.linspace(poly_xmin+R,poly_xmax-R, xGridCount)
-        yGridCount = max( numpy.ceil( old_div((poly_ymax-poly_ymin),approx_grid_spacing[1])+1. ).astype(int), 4)
+        yGridCount = max( numpy.ceil( (poly_ymax-poly_ymin)/approx_grid_spacing[1]+1. ).astype(int), 4)
         R = (poly_ymax-poly_ymin)*eps
         Yvals = numpy.linspace(poly_ymin+R,poly_ymax-R, yGridCount)
     
@@ -1119,7 +1114,7 @@ if gdal_available:
                         print(bounding_polygon)
                         print('Line \n')
                         print(blCat[n1])
-                        raise_(Exception, msg)
+                        raise Exception(msg)
 
         return [bounding_polygon, breakLines, riverWalls]
 
@@ -1301,7 +1296,7 @@ if gdal_available:
 
         if(len(matchers)==0):
             msg = 'Cannot match ' + pattern + ' in breaklines file names'
-            raise_(Exception, msg)
+            raise Exception(msg)
 
         if(len(matchers)!=2):
             print('Need exactly 2 matches, but pattern matched these', bk[matchers])
@@ -1339,82 +1334,82 @@ else: # gdal_available == False
 
 
     def readShp_1PolyGeo(shapefile, dropLast=True):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
     def readShp_1LineGeo(shapefile):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
 
     def read_csv_optional_header(filename):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
     def read_polygon(filename):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
     def readShpPtsAndAttributes(shapefile):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
     def read_points(filename):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
     def ListPts2Wkb( ptsIn, geometry_type='line', appendFirstOnEnd=None):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
     def Wkb2ListPts(wkb_geo, removeLast=False, drop_third_dimension=False):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
     def compute_squared_distance_to_segment(pt, line):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
     def find_nearest_segment(pt, segments):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
     def shift_point_on_line(pt, lineIn, nearest_segment_index):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
     def insert_intersection_point(intersectionPt, line_pts, 
                                   point_movement_threshold,verbose=False):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
 
     def check_polygon_is_small(intersection, buf, tol2=100.):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
     def addIntersectionPtsToLines(L1,L2, point_movement_threshold=0.0, 
                                   buf=1.0e-06, tol2 = 100,
                                   verbose=True, nameFlag=''):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
    
     def getRasterExtent(rasterFile, asPolygon=False): 
-        raise_(ImportError, msg)
+        raise ImportError(msg)
 
     def rasterValuesAtPoints(xy, rasterFile, band=1):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
     
     def gridPointsInPolygon(polygon, approx_grid_spacing=[1.,1.], eps=1.0e-06):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
 
     def matchInds(pattern, stringList):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
     
     def add_intersections_to_domain_features(bounding_polygonIn,
                 breakLinesIn={ }, riverWallsIn={ }, point_movement_threshold=0.,
                 verbose=True):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
     
     def readRegionPtAreas(shapefile, convert_length_to_area=False):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
     def readListOfBreakLines(shapefileList):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
 
     def combine_breakLines_and_riverwalls_for_mesh(breakLines, riverWalls):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     
     def polygon_from_matching_breaklines(pattern,breakLinesIn, reverse2nd=None):
-        raise_(ImportError, msg)
+        raise ImportError(msg)
     ###################    
 
 

@@ -1,9 +1,7 @@
 #!/usr/bin/env python
 
 """Polygon manipulations"""
-from __future__ import print_function
-from __future__ import absolute_import
-from __future__ import division
+
 
 from .polygon_ext import _is_inside_triangle
 from .polygon_ext import _interpolate_polyline
@@ -11,10 +9,7 @@ from .polygon_ext import _line_intersect
 from .polygon_ext import _polygon_overlap
 from .polygon_ext import _separate_points_by_polygon
 from .polygon_ext import _point_on_line
-from builtins import str
-from builtins import range
-from past.utils import old_div
-from future.utils import raise_
+
 import numpy as num
 import math
 
@@ -172,8 +167,8 @@ def intersection(line0, line1, rtol=1.0e-5, atol=1.0e-8):
             return 4, None  # FIXME (Ole): Add distance here instead of None
     else:
         # Lines are not parallel, check if they intersect
-        u0 = old_div(u0, denom)
-        u1 = old_div(u1, denom)
+        u0 = u0/ denom
+        u1 = u1/ denom
 
         x = x0 + u0*(x1-x0)
         y = y0 + u0*(y1-y0)
@@ -230,7 +225,7 @@ def polygon_overlap(triangles, polygon, verbose=False):
     polygon = ensure_numeric(polygon)
     triangles = ensure_numeric(triangles)
 
-    M = old_div(triangles.shape[0], 3)  # Number of triangles
+    M = triangles.shape[0]//3 # Number of triangles
 
     indices = num.zeros(M, int)
 
@@ -250,7 +245,7 @@ def not_polygon_overlap(triangles, polygon, verbose=False):
     polygon = ensure_numeric(polygon)
     triangles = ensure_numeric(triangles)
 
-    M = old_div(triangles.shape[0], 3)  # Number of triangles
+    M = triangles.shape[0]// 3  # Number of triangles
 
     indices = num.zeros(M, int)
 
@@ -264,13 +259,13 @@ def not_polygon_overlap(triangles, polygon, verbose=False):
 
 
 def line_intersect(triangles, line, verbose=False):
-    """Determine which of a list of trianglee intersect a line
+    """Determine which of a list of triangles intersect a line
 
     """
     line = ensure_numeric(line)
     triangles = ensure_numeric(triangles)
 
-    M = old_div(triangles.shape[0], 3)  # Number of triangles
+    M = triangles.shape[0]// 3  # Number of triangles
 
     indices = num.zeros(M, int)
 
@@ -299,7 +294,7 @@ def not_line_intersect(triangles, line, verbose=False):
     line = ensure_numeric(line)
     triangles = ensure_numeric(triangles)
 
-    M = old_div(triangles.shape[0], 3)  # Number of triangles
+    M = triangles.shape[0]// 3  # Number of triangles
 
     indices = num.zeros(M, int)
 
@@ -462,23 +457,23 @@ def inside_polygon(points, polygon, closed=True, verbose=False):
     try:
         points = ensure_absolute(points)
     except NameError as err:
-        raise_(NameError, err)
+        raise NameError(err)
     except:
         # If this fails it is going to be because the points can't be
         # converted to a numeric array.
         msg = 'Points could not be converted to numeric array'
-        raise_(Exception, msg)
+        raise Exception(msg)
 
     try:
         polygon = ensure_absolute(polygon)
     except NameError as e:
-        raise_(NameError, e)
+        raise NameError(e)
     except:
         # If this fails it is going to be because the points can't be
         # converted to a numeric array.
         msg = ('Polygon %s could not be converted to numeric array'
                % (str(polygon)))
-        raise_(Exception, msg)
+        raise Exception(msg)
 
     if len(points.shape) == 1:
         # Only one point was passed in. Convert to array of points
@@ -507,7 +502,7 @@ def is_outside_polygon(point, polygon, closed=True, verbose=False,
         return False
     else:
         msg = 'is_outside_polygon must be invoked with one point only'
-        raise_(Exception, msg)
+        raise Exception(msg)
 
 
 def outside_polygon(points, polygon, closed=True, verbose=False):
@@ -523,18 +518,18 @@ def outside_polygon(points, polygon, closed=True, verbose=False):
     try:
         points = ensure_numeric(points, float)
     except NameError as e:
-        raise_(NameError, e)
+        raise NameError(e)
     except:
         msg = 'Points could not be converted to numeric array'
-        raise_(Exception, msg)
+        raise Exception(msg)
 
     try:
         polygon = ensure_numeric(polygon, float)
     except NameError as e:
-        raise_(NameError, e)
+        raise NameError(e)
     except:
         msg = 'Polygon could not be converted to numeric array'
-        raise_(Exception, msg)
+        raise Exception(msg)
 
     if len(points.shape) == 1:
         # Only one point was passed in. Convert to array of points
@@ -563,18 +558,18 @@ def in_and_outside_polygon(points, polygon, closed=True, verbose=False):
     try:
         points = ensure_numeric(points, float)
     except NameError as e:
-        raise_(NameError, e)
+        raise NameError(e)
     except:
         msg = 'Points could not be converted to numeric array'
-        raise_(Exception, msg)
+        raise Exception(msg)
 
     try:
         polygon = ensure_numeric(polygon, float)
     except NameError as e:
-        raise_(NameError, e)
+        raise NameError(e)
     except:
         msg = 'Polygon could not be converted to numeric array'
-        raise_(Exception, msg)
+        raise Exception(msg)
 
     if len(points.shape) == 1:
         # Only one point was passed in. Convert to array of points
@@ -647,7 +642,7 @@ def separate_points_by_polygon(points, polygon,
         try:
             points = ensure_numeric(points, float)
         except NameError as e:
-            raise_(NameError, e)
+            raise NameError(e)
         except:
             msg = 'Points could not be converted to numeric array'
             raise Exception(msg)
@@ -731,7 +726,7 @@ def polygon_area(input_polygon):
         yi = pti[1]
         poly_area += xi*yi1 - xi1*yi
 
-    return abs(old_div(poly_area, 2))
+    return abs(poly_area/ 2)
 
 
 def plot_polygons(polygons_points,
@@ -835,11 +830,11 @@ def _poly_xy(polygon):
     try:
         polygon = ensure_numeric(polygon, float)
     except NameError as err:
-        raise_(NameError, err)
+        raise NameError(err)
     except:
         msg = ('Polygon %s could not be converted to numeric array'
                % (str(polygon)))
-        raise_(Exception, msg)
+        raise Exception(msg)
 
     pts_x = num.concatenate((polygon[:, 0], [polygon[0, 0]]), axis=0)
     pts_y = num.concatenate((polygon[:, 1], [polygon[0, 1]]), axis=0)
@@ -881,7 +876,7 @@ def read_polygon(filename, delimiter=',', closed=True, verbose=False):
         msg += filename + '. A complex polygon will not '
         msg += 'necessarily break the algorithms within ANUGA, but it'
         msg += 'usually signifies pathological data. Please fix this file.'
-        raise_(Exception, msg)
+        raise Exception(msg)
 
     return polygon
 
@@ -1008,21 +1003,21 @@ def number_mesh_triangles(interior_regions, bounding_poly, remainder_res):
 
     for poly, resolution in interior_regions:
         this_area = polygon_area(poly)
-        this_triangles = old_div(this_area, resolution)
+        this_triangles = this_area/ resolution
         no_triangles += this_triangles
         area -= this_area
 
         log.info('Interior %s%s%d'
                  % (('%.0f' % resolution).ljust(25),
-                    ('%.2f' % (old_div(this_area, 1000000))).ljust(19),
+                    ('%.2f' % (this_area/ 1_000_000)).ljust(19),
                     this_triangles))
 
-    bound_triangles = old_div(area, remainder_res)
+    bound_triangles = area/remainder_res
     no_triangles += bound_triangles
 
     log.info('Bounding %s%s%d'
              % (('%.0f' % remainder_res).ljust(25),
-                ('%.2f' % (old_div(area, 1000000))).ljust(19),
+                ('%.2f' % (area/ 1_000_000)).ljust(19),
                 bound_triangles))
 
     total_number_of_triangles = no_triangles/0.7
@@ -1122,7 +1117,7 @@ def interpolate_polyline(data,
     if num_nodes == 1:
         assert_msg = 'Polyline contained only one point. I need more. '
         assert_msg += str(data)
-        raise_(Exception, assert_msg)
+        raise Exception(assert_msg)
     elif num_nodes > 1:
         _interpolate_polyline(data,
                               polyline_nodes,

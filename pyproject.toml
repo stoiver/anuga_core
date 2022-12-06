@@ -1,11 +1,10 @@
 [build-system]
-requires = ["setuptools <= 60", "future", "Cython", "wheel", "numpy", "gitpython", "dill"]
+requires = ["setuptools <= 60", "Cython", "wheel", "numpy", "gitpython", "dill"]
 build-backend = "setuptools.build_meta"
 
 
 [tool.pytest.ini_options]
 minversion = "6.0"
-addopts = "--disable-warnings"
 testpaths = [
     "anuga"
 ]

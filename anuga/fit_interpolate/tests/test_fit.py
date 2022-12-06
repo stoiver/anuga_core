@@ -6,11 +6,7 @@ test_quantity.test_set_values_from_UTM_pts.
 """
 
 #TEST
-from builtins import zip
-from builtins import map
-from builtins import str
-from builtins import range
-import sys
+
 import unittest
 from math import sqrt
 import tempfile
@@ -1134,7 +1130,7 @@ class Test_Fit(unittest.TestCase):
         fd.close()
 
         #This a deliberately illegal filename to invoke the error.
-        mesh_output_file = ".../\z\z:ya.tsh"
+        mesh_output_file = r".../\z\z:ya.tsh"
 
         try:
             fit_to_mesh_file(mesh_file, point_file,

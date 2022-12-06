@@ -35,19 +35,16 @@ test() --       Conducts a basic test of the caching functionality.
 
 See doc strings of individual functions for detailed documentation.
 """
-from __future__ import division
+
 
 # -----------------------------------------------------------------------------
 # Initialisation code
 
 # Determine platform
 #
-from builtins import zip
-from builtins import input
-from builtins import str
-from builtins import range
-from past.builtins import basestring
-from past.utils import old_div
+
+
+
 from os import getenv
 import collections
 import inspect
@@ -65,8 +62,6 @@ import anuga.utilities.log as log
 from anuga.utilities import system_tools
 
 import numpy as num
-
-#from future
 
 cache_dir = '.python_cache'
 
@@ -309,13 +304,13 @@ def cache(my_F,
   CD = checkdir(cachedir,verbose)
 
   # Handle the case cache('clear')
-  if isinstance(my_F, basestring):
+  if isinstance(my_F, str):
     if my_F.lower() == 'clear':
       clear_cache(CD,verbose=verbose)
       return
 
   # Handle the case cache(my_F, 'clear')
-  if isinstance(args, basestring):
+  if isinstance(args, str):
     if args.lower() == 'clear':
       clear_cache(CD,my_F,verbose=verbose)
       return
@@ -735,7 +730,7 @@ def test(cachedir=None, verbose=False, compression=None):
   if T1 == T2:
     if t1 > t2:
       logtestOK('Performance test: relative time saved = %s pct' \
-              %str(round(old_div((t1-t2)*100,t1),2)))
+              %str(round((t1-t2)*100/t1,2)))
   else:       
     logtesterror('Basic caching failed for new problem')
             
@@ -1721,7 +1716,7 @@ def get_depstats(dependencies):
 
     
     for FN in expanded_dependencies:
-      if not isinstance(FN, basestring):
+      if not isinstance(FN, str):
         errmsg = 'ERROR (caching.py): Dependency must be a string.\n'
         errmsg += '                   Dependency given: %s' %FN
         raise Exception(errmsg)
@@ -2073,7 +2068,7 @@ def __cachestat(sortidx=4, period=-1, showuser=None, cachedir=None):
             saving = cputime-loadtime
 
             if cputime != 0:
-              rel_saving = round(old_div(100.0*saving,cputime),2)
+              rel_saving = round(100.0*saving/cputime,2)
             else:
               #rel_saving = round(1.0*saving,2)
               rel_saving = 100.0 - round(1.0*saving,2)  # A bit of a hack
@@ -2123,7 +2118,7 @@ def __cachestat(sortidx=4, period=-1, showuser=None, cachedir=None):
       rec = Dict[key]
       for n in range(len(rec)):
         if n > 0:
-          rec[n] = round(old_div(1.0*rec[n],rec[0]),2)
+          rec[n] = round(1.0*rec[n]/rec[0],2)
       Dict[key] = rec
 
     # Sort and output
@@ -2496,7 +2491,7 @@ def mkargstr(args, textwidth, argstr = '', level=0):
   WasTruncated = 0
 
   if not isinstance(args, (tuple, list, dict)):
-    if isinstance(args, basestring):
+    if isinstance(args, str):
       argstr = argstr + "'"+str(args)+"'"
     else:
       # Truncate large numeric arrays before using str()

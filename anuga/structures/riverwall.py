@@ -1,10 +1,4 @@
-from __future__ import print_function
-from __future__ import division
-from builtins import str
-from builtins import range
-from builtins import object
-from past.utils import old_div
-from future.utils import raise_
+
 import os
 from anuga import barrier, numprocs, myid
 import numpy
@@ -268,7 +262,7 @@ class RiverWall(object):
         for i in list(default_riverwallPar.keys()):
             if(i not in self.default_riverwallPar):
                 msg='Key ', i + ' in default_riverwallPar not recognized'
-                raise_(Exception, msg)
+                raise Exception(msg)
         # Final default river-wall parameters
         default_riverwallPar=self.default_riverwallPar
         
@@ -277,7 +271,7 @@ class RiverWall(object):
         for i in list(riverwallPar.keys()):
             if i not in riverwalls:
                 msg= 'Key ', i, ' in riverwallPar has no corresponding key in riverwall'
-                raise_(Exception, msg)
+                raise Exception(msg)
             #
             # Check that all hydraulic parameter names in riverwallPar correspond
             # to names in default_riverwallPar
@@ -286,7 +280,7 @@ class RiverWall(object):
                 if j not in default_riverwallPar:
                     msg = 'Hydraulic parameter named ', j ,\
                           ' not recognised in default_riverwallPar'
-                    raise_(Exception, msg)
+                    raise Exception(msg)
         
         if(verbose):
             print('Setting riverwall elevations (P'+str(myid)+')...')
@@ -331,7 +325,7 @@ class RiverWall(object):
 
                 if(len(start)!=3 | len(end)!=3):
                     msg='Each riverwall coordinate must have at exactly 3 values [xyz]'
-                    raise_(Exception, msg)
+                    raise Exception(msg)
 
                 # Find length
                 segLen=( (start[0]-end[0])**2+(start[1]-end[1])**2)**0.5
@@ -345,8 +339,8 @@ class RiverWall(object):
                 # except for very complex riverwalls]
                 
                 # Unit vector along segment
-                se_0=old_div(-(start[0]-end[0]),segLen)
-                se_1=old_div(-(start[1]-end[1]),segLen)
+                se_0=-(start[0]-end[0])/segLen
+                se_1=-(start[1]-end[1])/segLen
 
                 # Vector from 'start' to every point on mesh
                 # NOTE: We account for georeferencing
@@ -376,7 +370,7 @@ class RiverWall(object):
                 domain.edge_flux_type[onLevee]=1
      
                 # Get edge elevations as weighted averages of start/end elevations 
-                w0=old_div(pv_dot_se[onLevee],segLen)
+                w0=pv_dot_se[onLevee]/segLen
                 w0=w0*(w0>=0.0) # Enforce min of 0
                 w0=w0*(w0<=1.0) + 1.0*(w0>1.0) # Max of 1
                 riverwall_elevation[onLevee]= start[2]*(1.0-w0)+w0*end[2]
@@ -445,7 +439,7 @@ class RiverWall(object):
         for i in nw:
             if(hydraulicTmp[i,1]>= hydraulicTmp[i,2]):
                 msg = 's1 >= s2 on riverwall ' + nw_names[i] +'. This is not allowed' 
-                raise_(Exception, msg)
+                raise Exception(msg)
             if( (hydraulicTmp[i,1]<0.) or (hydraulicTmp[i,2] < 0.)):
                 raise Exception('s1 and s2 must be positive, with s1<s2')
 
@@ -453,7 +447,7 @@ class RiverWall(object):
         for i in nw:
             if(hydraulicTmp[i,3]>= hydraulicTmp[i,4]):
                 msg = 'h1 >= h2 on riverwall ' + nw_names[i] +'. This is not allowed' 
-                raise_(Exception, msg)
+                raise Exception(msg)
             if((hydraulicTmp[i,3]<0.) or (hydraulicTmp[i,4] < 0.)):
                 raise Exception('h1 and h2 must be positive, with h1<h2')
        
@@ -477,7 +471,7 @@ class RiverWall(object):
                     msg='Riverwall discontinuity -- possible round-off error in'+\
                          'finding edges on wall -- try increasing value of tol'
                     if(not connectedness[1]):
-                        raise_(Exception, msg)
+                        raise Exception(msg)
                 if domain.parallel : barrier()
         return 
     

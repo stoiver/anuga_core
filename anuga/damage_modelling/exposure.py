@@ -1,8 +1,4 @@
-from past.builtins import cmp
-from builtins import zip
-from builtins import range
-from builtins import object
-from future.utils import raise_
+
 import csv
 
 from anuga.anuga_exceptions import TitleValueError, \
@@ -18,7 +14,8 @@ LONG_TITLE = 'LONGITUDE'
 X_TITLE = 'x'
 Y_TITLE = 'y'
 
-
+def cmp_0(a, b):
+    return (a > b) - (a < b)
 
 class Exposure(object):
     """Class for National Exposure Database storage (NEXIS).
@@ -91,7 +88,7 @@ class Exposure(object):
             except KeyError:
                 # maybe a warning..
                 msg = "Could not find location information."
-                raise_(TitleValueError, msg)
+                raise TitleValueError(msg)
             else:
                 self._geospatial = Geospatial_data(data_points=points)
 
@@ -111,17 +108,17 @@ class Exposure(object):
 
         #check that 'other' is an instance of this class
         if isinstance(self, type(other)):
-            result = cmp(self._attribute_dic, other._attribute_dic)
+            result = cmp_0(self._attribute_dic, other._attribute_dic)
             if result != 0:
                 return result
 
             # The order of the columns is important. Therefore..
-            result = cmp(self._title_index_dic, other._title_index_dic)
+            result = cmp_0(self._title_index_dic, other._title_index_dic)
             if result != 0:
                 return result
             for self_ls, other_ls in zip(self._attribute_dic,
                                          other._attribute_dic):
-                result = cmp(self._attribute_dic[self_ls],
+                result = cmp_0(self._attribute_dic[self_ls],
                              other._attribute_dic[other_ls])
                 if result != 0:
                     return result
@@ -162,12 +159,12 @@ class Exposure(object):
             #    return result
 
             # The order of the columns is important. Therefore..
-            #result = cmp(self._title_index_dic, other._title_index_dic)
+            #result = cmp_0(self._title_index_dic, other._title_index_dic)
             #if result != 0:
             #    return result
             #for self_ls, other_ls in zip(self._attribute_dic,
             #                             other._attribute_dic):
-            #    result = cmp(self._attribute_dic[self_ls],
+            #    result = cmp_0(self._attribute_dic[self_ls],
             #                 other._attribute_dic[other_ls])
             #    if result != 0:
             #        return result
@@ -191,7 +188,7 @@ class Exposure(object):
 
         if column_name not in self._attribute_dic:
             msg = 'There is no column called %s!' % column_name
-            raise_(TitleValueError, msg)
+            raise TitleValueError(msg)
 
         return self._attribute_dic[column_name]
 
@@ -235,13 +232,13 @@ class Exposure(object):
                 len(self._attribute_dic[list(self._title_index_dic.keys())[0]])
         if len(column_values) != value_row_count:
             msg = 'The number of column values must equal the number of rows.'
-            raise_(DataMissingValuesError, msg)
+            raise DataMissingValuesError(msg)
 
         # check new column name isn't already used, and we aren't overwriting
         if column_name in self._attribute_dic:
             if not overwrite:
                 msg = 'Column name %s already in use!' % column_name
-                raise_(TitleValueError, msg)
+                raise TitleValueError(msg)
         else:
             # New title.  Add it to the title index.
             self._title_index_dic[column_name] = len(self._title_index_dic)
