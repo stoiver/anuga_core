@@ -1970,13 +1970,39 @@ int _extrapolate_second_order_edge_sw(struct domain *D){
   } // for k=0 to number_of_elements-1
 
 
-  // Compute vertex values of quantities
   for (k=0; k< D->number_of_elements; k++){
       if(D->extrapolate_velocity_second_order==1){
           //Convert velocity back to momenta at centroids
           D->xmom_centroid_values[k] = D->x_centroid_work[k];
           D->ymom_centroid_values[k] = D->y_centroid_work[k];
       }
+
+      // Don't proceed if we didn't update the edge/vertex values
+      if(D->update_extrapolation[k]==0){
+         continue;
+      }
+
+      k3=3*k;
+
+      // If needed, convert from velocity to momenta
+      if(D->extrapolate_velocity_second_order==1){
+          // Re-compute momenta at edges
+          for (i=0; i<3; i++){
+              dk= D->height_edge_values[k3+i];
+              D->xmom_edge_values[k3+i] = D->xmom_edge_values[k3+i]*dk;
+              D->ymom_edge_values[k3+i] = D->ymom_edge_values[k3+i]*dk;
+          }
+      }
+  }
+
+
+  // Compute vertex values of quantities
+  for (k=0; k< D->number_of_elements; k++){
+      // if(D->extrapolate_velocity_second_order==1){
+      //     //Convert velocity back to momenta at centroids
+      //     D->xmom_centroid_values[k] = D->x_centroid_work[k];
+      //     D->ymom_centroid_values[k] = D->y_centroid_work[k];
+      // }
 
       // Don't proceed if we didn't update the edge/vertex values
       if(D->update_extrapolation[k]==0){
@@ -1996,14 +2022,14 @@ int _extrapolate_second_order_edge_sw(struct domain *D){
       D->height_vertex_values[k3+2] =  D->height_edge_values[k3] + D->height_edge_values[k3+1]- D->height_edge_values[k3+2];
 
       // If needed, convert from velocity to momenta
-      if(D->extrapolate_velocity_second_order==1){
-          // Re-compute momenta at edges
-          for (i=0; i<3; i++){
-              dk= D->height_edge_values[k3+i];
-              D->xmom_edge_values[k3+i] = D->xmom_edge_values[k3+i]*dk;
-              D->ymom_edge_values[k3+i] = D->ymom_edge_values[k3+i]*dk;
-          }
-      }
+      // if(D->extrapolate_velocity_second_order==1){
+      //     // Re-compute momenta at edges
+      //     for (i=0; i<3; i++){
+      //         dk= D->height_edge_values[k3+i];
+      //         D->xmom_edge_values[k3+i] = D->xmom_edge_values[k3+i]*dk;
+      //         D->ymom_edge_values[k3+i] = D->ymom_edge_values[k3+i]*dk;
+      //     }
+      // }
       // Compute momenta at vertices
       D->xmom_vertex_values[k3]   =  D->xmom_edge_values[k3+1] + D->xmom_edge_values[k3+2] - D->xmom_edge_values[k3] ;
       D->xmom_vertex_values[k3+1] =  D->xmom_edge_values[k3] + D->xmom_edge_values[k3+2]- D->xmom_edge_values[k3+1];
