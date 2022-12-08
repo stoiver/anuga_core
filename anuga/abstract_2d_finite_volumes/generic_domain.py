@@ -1824,7 +1824,7 @@ class Generic_Domain(object):
         """
 
         # From centroid values calculate edge and vertex values
-        self.distribute_to_vertices_and_edges()
+        self.distribute_to_vertices_and_edges(update_vertices=False)
 
         # Apply boundary conditions
         self.update_boundary()
@@ -1861,7 +1861,7 @@ class Generic_Domain(object):
         ######
 
         # From centroid values calculate edge and vertex values
-        self.distribute_to_vertices_and_edges()
+        self.distribute_to_vertices_and_edges(update_vertices=False)
 
         # Apply boundary conditions
         self.update_boundary()
@@ -1889,7 +1889,7 @@ class Generic_Domain(object):
             self.update_ghosts()
 
         # Update vertex and edge values
-        self.distribute_to_vertices_and_edges()
+        self.distribute_to_vertices_and_edges(update_vertices=False)
 
         # Update boundary values
         self.update_boundary()
@@ -1943,7 +1943,7 @@ class Generic_Domain(object):
         ######
 
         # From centroid values calculate edge and vertex values
-        self.distribute_to_vertices_and_edges()
+        self.distribute_to_vertices_and_edges(update_vertices=False)
 
         # Apply boundary conditions
         self.update_boundary()
@@ -1970,7 +1970,7 @@ class Generic_Domain(object):
         self.update_ghosts()
 
         # Update vertex and edge values
-        self.distribute_to_vertices_and_edges()
+        self.distribute_to_vertices_and_edges(update_vertices=False)
 
         # Update boundary values
         self.update_boundary()
@@ -2009,7 +2009,7 @@ class Generic_Domain(object):
         self.update_ghosts()
 
         # Update vertex and edge values
-        self.distribute_to_vertices_and_edges()
+        self.distribute_to_vertices_and_edges(update_vertices=False)
 
         # Update boundary values
         self.update_boundary()
@@ -2361,7 +2361,7 @@ class Generic_Domain(object):
         """
         pass
 
-    def distribute_to_vertices_and_edges(self):
+    def distribute_to_vertices_and_edges(self, update_vertices=True):
         """Extrapolate conserved quantities from centroid to
         vertices and edge-midpoints for each volume
 

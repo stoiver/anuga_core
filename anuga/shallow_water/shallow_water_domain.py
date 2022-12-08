@@ -2135,8 +2135,7 @@ class Domain(Generic_Domain):
             # Flux calculation and gravity incorporated in same
             # procedure
 
-            from .swDE1_domain_ext import compute_fluxes_ext_central \
-                                      as compute_fluxes_ext
+            from .swDE1_domain_ext import compute_fluxes_ext_central as compute_fluxes_ext
 
             timestep = self.evolve_max_timestep
 
