@@ -1994,12 +1994,12 @@ int _extrapolate_second_order_edge_sw(struct domain *D){
   }
 
 
- _update_vertex_values_from_edge_values(D);
+ _update_edge_values_to_vertex_values(D);
 
   return 0;
 }
 
-int _update_vertex_values_from_edge_values(struct domain *D){
+int _update_edge_values_to_vertex_values(struct domain *D){
   int k, k3;
 
   // Compute vertex values of quantities
