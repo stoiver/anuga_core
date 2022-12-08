@@ -84,6 +84,7 @@ cdef extern from "swDE1_domain.c" nogil:
 	double _compute_fluxes_central(domain* D, double timestep)
 	double _protect_new(domain* D)
 	int _extrapolate_second_order_edge_sw(domain* D)
+	int _update_edge_values_to_vertex_values(domain* D)
 
 
 cdef int pointer_flag = 0
@@ -348,6 +349,20 @@ def extrapolate_second_order_edge_sw(object domain_object):
 
 	if e == -1:
 		return None
+
+def update_edge_values_to_vertex_values(object domain_object):
+
+	cdef domain D
+	cdef int e
+
+	get_python_domain_parameters(&D, domain_object)
+	get_python_domain_pointers(&D, domain_object)
+
+	with nogil:
+		e = _update_edge_values_to_vertex_values(&D)
+
+	if e == -1:
+		return None		
 
 def protect_new(object domain_object):
 

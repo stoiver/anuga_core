@@ -2156,7 +2156,7 @@ class Domain(Generic_Domain):
 
 
 
-    def distribute_to_vertices_and_edges(self):
+    def distribute_to_vertices_and_edges(self, update_vertices=True):
         """ Call correct module function """
 
 
@@ -2218,7 +2218,10 @@ class Domain(Generic_Domain):
             self.protect_against_infinitesimal_and_negative_heights()
             # Do extrapolation step
             from .swDE1_domain_ext import extrapolate_second_order_edge_sw as extrapol2
+            from .swDE1_domain_ext import update_edge_values_to_vertex_values
             extrapol2(self)
+            if update_vertices:
+                update_edge_values_to_vertex_values(self)
 
         else:
             # Code for original method

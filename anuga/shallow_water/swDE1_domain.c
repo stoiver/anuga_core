@@ -1994,7 +1994,7 @@ int _extrapolate_second_order_edge_sw(struct domain *D){
   }
 
 
- _update_edge_values_to_vertex_values(D);
+  //_update_edge_values_to_vertex_values(D);
 
   return 0;
 }
@@ -2039,5 +2039,5 @@ int _update_edge_values_to_vertex_values(struct domain *D){
       D->bed_vertex_values[k3+2] =  D->bed_edge_values[k3] + D->bed_edge_values[k3+1] - D->bed_edge_values[k3+2];
   }
 
-return 0;
+  return 0;
 }
