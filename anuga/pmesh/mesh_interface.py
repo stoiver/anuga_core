@@ -227,7 +227,7 @@ def _create_mesh_from_regions(bounding_polygon,
 # interior polygons are inside the bounding_poly... however it might need
 # to be change a bit
 #
-#count = 0
+# count = 0
 # for i in range(len(interior_regions)):
 #    region = interior_regions[i]
 #    interior_polygon = region[0]
