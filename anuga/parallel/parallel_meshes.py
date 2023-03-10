@@ -12,20 +12,68 @@ Modified by Linda Stals, March 2006, to include ghost boundaries
 
 """
 
-
-
-from builtins import range
-from builtins import object
 import sys
 import numpy as num
-
 from anuga.config import epsilon
+from .parallel_api import myid, numprocs
+
+def balance(N, P, p):
+    """Compute p'th interval when N is distributed over P bins.
+
+    This function computes boundaries of sub intervals of [0:N] such
+    that they are almost equally sized with their sizes differening
+    by no more than 1.
+
+    As such, this function  is suitable for partitioning an interval equally
+    across P processors.
+
+    Inputs:
+       N: Upper bound of full interval.
+       P: Total number of processors
+       p: Local processor id
 
 
-from .parallel_api import distribute
-from .parallel_api import myid, numprocs, get_processor_name
-from .parallel_api import send, receive
-from .parallel_api import pypar_available, barrier, finalize
+    Outputs:
+       Nlo: Lower bound of p'th sub-interval
+       Nhi: Upper bound of p'th sub-interval
+
+
+    Example:
+       To partition the interval [0:29] among 4 processors:
+
+       Nlo, Nhi = balance(29, 4, p)
+
+       with p in [0,1,2,3]
+
+       and the subintervals are
+
+       p          Nlo      Nhi
+       -----------------------
+       0           0        8
+       1           8       15
+       2          15       22
+       3          22       29
+
+
+
+    Note that the interval bounds following the Python convention of
+    list slicing such that the last element of Nlo:Nhi is, in fact, Nhi-1
+    """
+
+    N = int(N)
+    P = int(P)
+    p = int(p)
+    if p >= P:
+        return N, N
+    L, K = N // P, N % P
+    if p < K:
+        Nlo = p * L + p
+        Nhi = Nlo + L + 1
+    else:
+        Nlo = p * L + K
+        Nhi = Nlo + L
+
+    return Nlo, Nhi
 
 
 
@@ -43,9 +91,7 @@ def parallel_rectangle(m_g, n_g, len1_g=1.0, len2_g=1.0, origin_g = (0.0, 0.0)):
 
     """
 
-
-    from anuga.utilities import parallel_abstraction as pypar
-    m_low, m_high = pypar.balance(m_g, numprocs, myid)
+    m_low, m_high = balance(m_g, numprocs, myid)
     
     n = n_g
     m_low  = m_low-1
@@ -179,7 +225,6 @@ def parallel_rectangle(m_g, n_g, len1_g=1.0, len2_g=1.0, origin_g = (0.0, 0.0)):
         full_send_dict[myid]  = [Idfl, Idfl]
         ghost_recv_dict[myid] = [Idgr, Idgr]
 
-
     elif numprocs == 2:
         Idfl.extend(Idfr)
         Idgr.extend(Idgl)
@@ -187,6 +232,7 @@ def parallel_rectangle(m_g, n_g, len1_g=1.0, len2_g=1.0, origin_g = (0.0, 0.0)):
         Idgr = num.array(Idgr,int)
         full_send_dict[(myid-1)%numprocs]  = [Idfl, Idfl]
         ghost_recv_dict[(myid-1)%numprocs] = [Idgr, Idgr]
+
     else:
         Idfl = num.array(Idfl,int)
         Idgl = num.array(Idgl,int)
