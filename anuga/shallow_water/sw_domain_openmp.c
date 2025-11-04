@@ -1225,6 +1225,8 @@ void _openmp_extrapolate_second_order_edge_sw(struct domain *__restrict D)
     // reconstruct_vertex_values(D->bed_edge_values, D->bed_vertex_values, k3);
   }
   // for k=0 to number_of_elements-1
+
+  
 // Fix xmom and ymom centroid values
 if(extrapolate_velocity_second_order == 1)
 {
@@ -2484,6 +2486,7 @@ void _openmp_set_omp_num_threads(anuga_int num_threads)
   // This is a global setting and will affect all subsequent OpenMP parallel regions
   omp_set_num_threads(num_threads);
 }
+
 void _openmp_evaluate_reflective_segment(struct domain *D, anuga_int N,
    anuga_int *edge_segment, anuga_int *vol_ids, anuga_int *edge_ids){
 

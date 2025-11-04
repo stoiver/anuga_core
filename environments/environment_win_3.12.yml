@@ -11,6 +11,9 @@ dependencies:
   - future
   - gdal
   - gitpython
+  - libpython
+  - gcc_win-64
+  - gxx_win-64
   - matplotlib
   - meshpy
   - meson

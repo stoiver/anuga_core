@@ -30,7 +30,7 @@ import anuga.alpha_shape.alpha_shape
 from anuga.geospatial_data.geospatial_data import Geospatial_data, \
     ensure_geospatial, ensure_absolute, ensure_numeric
 from anuga.mesh_engine.mesh_engine import generate_mesh
-import anuga.utilities.log as log
+
 
 from anuga.file.ungenerate import load_ungenerate
 
@@ -461,19 +461,21 @@ class Mesh(object):
         return """
         mesh Triangles: %s 
         mesh Attribute Titles: %s 
-        mesh Segments: %s  
+        mesh Segments: %s 
+        mesh Segment Tags: %s 
         mesh Vertices: %s 
         user Segments: %s  
-        user Vertices: %s  
+        user Vertices: %s 
         holes: %s 
-        regions: %s""" % (self.meshTriangles,
+        regions: %s""" % (self.getTriangulation(),
                           self.attributeTitles,
-                          self.meshSegments,
-                          self.meshVertices,
+                          self.getMeshSegments().tolist(),
+                          self.getMeshSegmentTags(),
+                          self.getMeshVertices().tolist(),
                           self.getUserSegments(),
-                          self.userVertices,
-                          self.holes,
-                          self.regions)
+                          self.getUserVertices(),
+                          self.getHoles(),
+                          self.getRegions())
 
     def __init__(self,
                  userSegments=None,
@@ -2131,6 +2133,8 @@ class Mesh(object):
                 genDict['regions'],
                 genDict['region_tags'],
                 genDict['region_max_areas']):
+            if maxArea is None:
+                maxArea = NOMAXAREA
             if maxArea > 0:  # maybe I should ref NOMAXAREA? Prob' not though
                 Object = Region(reg[0],
                                 reg[1],

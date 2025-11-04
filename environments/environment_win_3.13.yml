@@ -1,8 +1,9 @@
-name: anuga_env_3.12
+name: anuga_env_3.13
 channels:
   - conda-forge
 dependencies:
-  - python=3.12
+  - python=3.13
+  - python_abi
   - pip
   - affine
   - cartopy
@@ -11,6 +12,9 @@ dependencies:
   - future
   - gdal
   - gitpython
+  - libpython
+  - gcc_win-64
+  - gxx_win-64
   - matplotlib
   - meshpy
   - meson

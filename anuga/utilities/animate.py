@@ -444,6 +444,7 @@ class SWW_plotter(object):
         self.xllcorner = p.xllcorner
         self.yllcorner = p.yllcorner
         self.zone = p.zone
+        self.starttime = p.starttime
 
         if absolute is True:
             self.x[:] = self.x + self.xllcorner
@@ -832,3 +833,21 @@ class SWW_plotter(object):
             else:
                 os.mkdir("%s" % plot_dir)
             print("Figure files for each frame will be stored in " + plot_dir)
+
+    def triplot(self, *args, **kwargs):
+
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots()
+
+        lines = ax.triplot(self.triang, *args, **kwargs)
+        return ax
+
+
+    def tripcolor(self, *args, **kwargs):
+
+        import matplotlib.pyplot as plt
+        fig, ax = plt.subplots()
+        
+        lines = ax.tripcolor(self.triang,  *args, **kwargs)
+        return ax
+
