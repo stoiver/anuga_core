@@ -43,18 +43,77 @@ the device interface: mode recorded immediately, interface built eagerly if boun
 are ready, else lazily at first `evolve()`. Removes the "boundaries before mode" ordering
 constraint so mode 2 can be selected at `__init__`. Awaiting Jorge's review.
 
-### Step 2 — Audit fall-back for kernel-less operators  ⬜ NEXT (correctness gate)
+### Step 2 — Audit fall-back for kernel-less operators  ✅ DONE 2026-06-12 (audit + Inlet fix)
 The equivalence tests only cover operators that HAVE C kernels (rate, inlet, culvert,
 weir). Before any default switch, confirm every other operator behaves correctly in
 mode 2 — **graceful fall-through to Python, never a silent no-op**.
-- Operators to check: `Kinematic_viscosity_operator`, `Bed_shear_erosion_operator` and
-  other erosion/sediment operators, `Sanddune_erosion_operator`, any `Rate_operator`
-  subclasses with `rate_spatial`/`rate_xarray` paths, generic/user operators.
-- For each: does its `__call__` run correctly when `multiprocessor_mode==2`? Trace the
-  dispatch — `rate_operators.py` already falls through to Python for spatial/xarray
-  rates (good pattern); confirm the others either have a kernel or fall through.
-- Deliverable: a short table operator → {has C kernel | falls back to Python | BROKEN}.
-  Any BROKEN must be fixed (add fallback) before step 5.
+
+**How dispatch works (verified).** `Domain.apply_fractional_steps()`
+(`shallow_water_domain.py:4391`) is overridden in mode 2. It runs **every** operator's
+`__call__` in the loop — nothing is skipped or no-op'd by mode. Operators with no
+mode-2 branch simply execute their normal Python body. `_has_cpu_only_fractional_operators()`
+(`:4316`) classifies each op; any operator not in the known-GPU-safe set
+(Rate / boundary_flux / Inlet / Collect_max / Boyd-via-manager) is flagged "CPU-only"
+and the loop is wrapped in `sync_from_device()` … `sync_to_device()`.
+
+**CPU-multicore (`gpu_offload=false`) is safe.** In that build `set_gpu_interface()`
+still creates a `GPU_OMP_interface` (`:5109`), so `gpu_interface is not None` and the
+sync path *does* run — but the C sync (`gpu_domain_sync_to/from_device`,
+`gpu_domain_core.c:1098/1111`) is `#pragma omp target update` on shared host memory,
+i.e. a no-op under `CPU_ONLY_MODE`, guarded by `if (!GD->gpu_initialized) return;`.
+Host == device, so every Python operator reads/writes the same arrays the gpu_ext
+kernels use. **No silent no-ops, no corruption for the CPU default.**
+
+**Audit table** (operator → status in mode 2):
+
+| Operator | Mode-2 branch? | Status |
+|----------|---------------|--------|
+| `Rate_operator` (scalar/t/quantity/centroid_array) | yes | **C kernel**; graceful `_init_gpu` returns → CPU fallback |
+| `Rate_operator` (`rate_spatial` / `rate_xarray`) | guarded out | **Falls back to Python** (good pattern) |
+| `Inlet_operator` | yes | **C kernel**; ⚠ `_init_gpu` *re-raises* on failure (no graceful fallback) — see fix below |
+| `Boyd_box` / `Boyd_pipe` / `Weir_orifice_trapezoid` | via `GPUCulvertManager` | **C kernel** (`is_boyd_operator` covers all three) |
+| `Internal_boundary_operator` | no | Python `__call__` runs; classified CPU-only → sync wrap ✓ |
+| `Collect_max_quantities_operator` | yes | **C kernel**; falls through to NumPy when `_gpu_initialized` False ✓ |
+| `Collect_max_stage_operator` | no | Python ✓ |
+| `Kinematic_viscosity_operator` | no | Python / C-CG (+MPI) on host arrays ✓ CPU; ⚠ GPU edge sync (real-GPU only) |
+| `Erosion_operator` + subclasses (`Bed_shear`, `Circular`, `Polygonal`, `Flat_slice`, `Flat_fill_slice`) | no | Python ✓ CPU; ⚠ modifies **elevation**, not covered by centroid sync (real-GPU only) |
+| `Sanddune_erosion_operator` | no | Python ✓ CPU; ⚠ elevation sync (real-GPU only) |
+| `Mannings_operator`, `Wind_stress_operator` | no | Python ✓ |
+| `set_elevation` / `set_friction` / `set_quantity` / `set_stage` / `set_w_uh_vh` | no | Python ✓ CPU; `set_elevation` ⚠ elevation/edge sync (real-GPU only) |
+| `boundary_flux_integral_operator` | classified skip | GPU-safe (reads `boundary_flux_sum` only) ✓ |
+| `elliptic_operator` | no | Python ✓ |
+
+**Conclusion for the CPU-multicore default (this plan's target): nothing is BROKEN.**
+Every operator either has a CPU-OpenMP C kernel or runs its Python body correctly on the
+shared host arrays.
+
+**Fix applied (robustness):** `Inlet_operator._init_gpu` (`inlet_operator.py`) used to
+**re-raise** on any failure, so an inlet whose GPU init failed — missing/partial
+`gpu_interface`, or `MAX_INLET_OPERATORS=32` slot limit exceeded — **crashed** instead of
+falling back to Python. Rewritten to mirror `Rate_operator._init_gpu`: graceful
+precondition guard (`gpu_interface`/`gpu_dom` missing → silent `return`), and
+`warnings.warn(...) + return` on init exception or `op_id < 0`, leaving
+`_gpu_initialized=False` so `__call__`'s existing `if self._gpu_initialized:` guard falls
+through to the Python path. This also makes `_has_cpu_only_fractional_operators` correctly
+classify a failed-init inlet as CPU-only → it gets the sync wrap the Python path needs.
+Verified: mode-2 inlet with `gpu_interface=None` returns silently and runs the Python
+`__call__` without crashing; `test_inlet_operator.py` 14/14 pass.
+
+**Rate fix applied (same class of issue):** `Rate_operator._init_gpu`
+(`rate_operators.py`) previously hard-`raise`d on the `MAX_RATE_OPERATORS=64` slot limit
+(and an unguarded kernel import/init could propagate too). Its precondition guards were
+already graceful; the init call + slot-limit check are now wrapped to `warnings.warn(...)
++ return` (leaving `_gpu_initialized=False`, `_gpu_op_id=None`), matching Inlet. Verified:
+`test_rate_operators.py` 37/37 pass; mode-2 rate with `gpu_interface=None` falls through
+to the Python path without crashing. Both kernel-backed fractional operators now share one
+graceful-fallback contract.
+
+**Real-GPU follow-up (out of scope here, gate for step 5 under `gpu_offload=true`):**
+the host/device sync only covers centroid values (stage/xmom/ymom/height). Operators
+that modify **elevation** (erosion, sanddune, set_elevation) or read **edge** values
+(kinematic viscosity) would not have those changes reflected on the device. Harmless in
+CPU-multicore (host == device); must be addressed before erosion/KV operators are used
+in real-GPU runs. Track separately from the CPU-default switch.
 
 ### Step 3 — Build/packaging: default `gpu_offload=false`  ⬜
 - Confirm `sw_domain_gpu_ext` builds on a minimal **no-MPI** conda env (meson says it's
