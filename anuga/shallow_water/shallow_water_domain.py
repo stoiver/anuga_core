@@ -4991,24 +4991,121 @@ class Domain(Generic_Domain):
 # Multiprocessor Mode (1=openmp, 2=cupy (in development))
 # ==============================================================================
 
+    # User-facing compute backends. These map onto the internal
+    # ``multiprocessor_mode`` (1/2) dispatch:
+    #   'legacy' -> mode 1: sw_domain_openmp_ext solver + serial-Python operators
+    #   'cpu'    -> mode 2: unified gpu_ext kernels compiled for CPU multicore
+    #   'gpu'    -> mode 2: unified gpu_ext kernels offloaded to a GPU device
+    # 'cpu' and 'gpu' run the *same* mode-2 code path; whether it offloads is a
+    # build property (gpu_offload=true) plus device presence, queried at runtime.
+    COMPUTE_MODES = ('legacy', 'cpu', 'gpu')
+
+    def _gpu_offload_capable(self) -> bool:
+        """True if the installed ``sw_domain_gpu_ext`` can offload to a GPU device.
+
+        False for a CPU-only build (``gpu_offload=false`` / ``CPU_ONLY_MODE`` —
+        the standard pip/conda install) or when no offload device is present.
+        """
+        try:
+            from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
+            return bool(gpu_ext.gpu_available())
+        except Exception:
+            return False
+
+    def set_compute_mode(self, mode: str = 'cpu', verbose: bool = False) -> None:
+        """Select the compute backend, resolving the request against the build.
+
+        Parameters
+        ----------
+        mode : {'legacy', 'cpu', 'gpu'}
+            - ``'legacy'`` — mode 1: the ``sw_domain_openmp_ext`` solver with
+              serial-Python fractional-step operators.
+            - ``'cpu'`` — mode 2: the unified ``sw_domain_gpu_ext`` kernels
+              (solver and operators) running as CPU-multicore OpenMP.
+            - ``'gpu'`` — mode 2: the same kernels offloaded to a GPU device.
+
+        Requesting ``'gpu'`` on a build without GPU offload (the default
+        ``gpu_offload=false`` install) or with no device present emits a warning
+        and falls back to ``'cpu'`` — it never hard-fails. The active mode is
+        recorded in ``self.compute_mode``; the original request in
+        ``self.requested_compute_mode``.
+        """
+        import warnings
+
+        if mode not in self.COMPUTE_MODES:
+            raise ValueError(
+                f"Invalid compute mode {mode!r}. Must be one of {self.COMPUTE_MODES}.")
+
+        requested = mode
+        if mode in ('cpu', 'gpu'):
+            capable = self._gpu_offload_capable()
+            if mode == 'gpu' and not capable:
+                # Warn once (rank 0 only under MPI); the fall-back itself happens
+                # on every rank.
+                try:
+                    from anuga import myid
+                except Exception:
+                    myid = 0
+                if myid == 0:
+                    warnings.warn(
+                        "compute mode 'gpu' requested but this ANUGA build has no GPU "
+                        "offload support (built with gpu_offload=false) or no device is "
+                        "present; falling back to 'cpu' (CPU multicore). Rebuild with "
+                        "-Dgpu_offload=true and a GPU-capable compiler to enable GPU "
+                        "offload.",
+                        stacklevel=2)
+                mode = 'cpu'
+            if mode == 'cpu' and capable:
+                # GPU-capable build explicitly forced to CPU: disable offload at
+                # the OpenMP runtime (best-effort; set before the first target
+                # region). CPU-only builds need no override.
+                os.environ['OMP_TARGET_OFFLOAD'] = 'disabled'
+                self._auto_disabled_offload = True
+            elif mode == 'gpu' and getattr(self, '_auto_disabled_offload', False):
+                # Re-enable offload if we previously auto-disabled it for 'cpu'.
+                if os.environ.get('OMP_TARGET_OFFLOAD', '').lower() == 'disabled':
+                    del os.environ['OMP_TARGET_OFFLOAD']
+                self._auto_disabled_offload = False
+
+        self.requested_compute_mode = requested
+        self.compute_mode = mode
+
+        if mode == 'legacy':
+            self.multiprocessor_mode = MULTIPROCESSOR_OPENMP
+            self.use_c_rk_loop = False
+        else:  # 'cpu' or 'gpu' -> mode 2 (unified gpu_ext kernels)
+            self.multiprocessor_mode = MULTIPROCESSOR_GPU
+            self.use_c_rk_loop = True
+            self.set_gpu_interface()
+
+        if verbose:
+            print(f"Compute mode: requested {requested!r} -> active {self.compute_mode!r} "
+                  f"(multiprocessor_mode={self.multiprocessor_mode})")
+
+    def get_compute_mode(self) -> str:
+        """Return the active compute backend: 'legacy', 'cpu', or 'gpu'."""
+        return getattr(self, 'compute_mode', 'legacy')
+
     def set_multiprocessor_mode(self, multiprocessor_mode: int = 1) -> None:
         """
-        Set multiprocessor mode
-         1. openmp - Python RK loop (use_c_rk_loop=False)
-         2. gpu/mpi - C RK loop (use_c_rk_loop=True, keeps data on device)
-        """
+        Set multiprocessor mode (legacy integer API).
 
+        1. openmp - Python RK loop (use_c_rk_loop=False)
+        2. gpu/mpi - C RK loop (use_c_rk_loop=True, keeps data on device)
+
+        Thin wrapper over :meth:`set_compute_mode`: 1 maps to ``'legacy'``; 2
+        auto-resolves to ``'gpu'`` when the build supports offload, else
+        ``'cpu'`` — preserving the historical "mode 2 just works" behaviour on
+        both CPU-only and GPU builds. New code should prefer
+        :meth:`set_compute_mode`.
+        """
         if multiprocessor_mode not in [MULTIPROCESSOR_OPENMP, MULTIPROCESSOR_GPU]:
             raise ValueError('Invalid multiprocessor mode. Must be one of [1,2] (openmp, gpu/mpi)')
 
-        self.multiprocessor_mode = multiprocessor_mode
-
-        # Mode 1: Python RK loop (more flexible, easier debugging)
-        # Mode 2: C RK loop (faster, data stays on GPU device)
-        self.use_c_rk_loop = (multiprocessor_mode == MULTIPROCESSOR_GPU)
-
-        if self.multiprocessor_mode == MULTIPROCESSOR_GPU:
-            self.set_gpu_interface()
+        if multiprocessor_mode == MULTIPROCESSOR_OPENMP:
+            self.set_compute_mode('legacy')
+        else:
+            self.set_compute_mode('gpu' if self._gpu_offload_capable() else 'cpu')
 
     @property
     def use_c_rk2_loop(self):
@@ -5112,13 +5209,19 @@ class Domain(Generic_Domain):
                 from anuga import myid, numprocs
                 omp_target_offload = os.environ.get('OMP_TARGET_OFFLOAD', '').lower()
                 omp_num_threads = os.environ.get('OMP_NUM_THREADS', '1')
-                # Track whether GPU offload is actually active (not disabled by env var)
-                self.gpu_offload_active = (omp_target_offload != 'disabled')
+                # Offload is active only if the build supports it (gpu_offload=true,
+                # device present) AND it hasn't been disabled via the env var. On a
+                # CPU-only build this is False — mode 2 is CPU multicore, not GPU.
+                build_can_offload = self._gpu_offload_capable()
+                self.gpu_offload_active = build_can_offload and (omp_target_offload != 'disabled')
                 if myid == 0:
                     device_id = self.gpu_interface.gpu_dom.device_id
                     print('+==============================================================================+')
-                    if not self.gpu_offload_active:
-                        print('| WARNING: GPU mode enabled but OMP_TARGET_OFFLOAD=disabled                   |')
+                    if not build_can_offload:
+                        print('| ANUGA compute mode: CPU multicore (unified gpu_ext kernels, no offload)     |')
+                        print(f'| OMP_NUM_THREADS={omp_num_threads}')
+                    elif not self.gpu_offload_active:
+                        print('| WARNING: GPU build but OMP_TARGET_OFFLOAD=disabled                          |')
                         print(f'| Running on CPUs with OMP_NUM_THREADS={omp_num_threads}')
                     elif device_id < 0:
                         print('| WARNING: No GPU devices found, running on CPU via OpenMP target offloading  |')

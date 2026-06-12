@@ -13,6 +13,7 @@ python_sources = [
 'test_data_manager.py',
 'test_sw_domain_openmp.py',
 'test_DE_gpu_omp.py',
+'test_compute_mode.py',
 'test_forcing.py',
 'test_friction.py',
 'test_loadsave.py',

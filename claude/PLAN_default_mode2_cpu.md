@@ -115,24 +115,50 @@ that modify **elevation** (erosion, sanddune, set_elevation) or read **edge** va
 CPU-multicore (host == device); must be addressed before erosion/KV operators are used
 in real-GPU runs. Track separately from the CPU-default switch.
 
-### Step 3 — Build/packaging: default `gpu_offload=false`  ⬜
-- Confirm `sw_domain_gpu_ext` builds on a minimal **no-MPI** conda env (meson says it's
-  always built with MPI stubs — verify on a clean env, since a mode-2 default hard-fails
-  on import if the extension is missing).
-- Decide the default value of the `gpu_offload` meson option for distribution builds
-  (currently defaults to ? — check `meson.options`/`meson_options.txt`). For wheels/
-  conda-forge it should be `false` (CPU multicore). GPU users opt in with
-  `-Dgpu_offload=true -Dgpu_arch=...`.
-- Verify CI builds and the conda recipes pass with the CPU-multicore extension.
+### Step 3 — Build/packaging: default `gpu_offload=false`  🔄 IN PROGRESS 2026-06-12
+- **`gpu_offload` already defaults to `false`** (`meson_options.txt:8`) — a stock
+  `pip install` already builds the CPU-multicore extension. GPU users opt in with
+  `-Dgpu_offload=true -Dgpu_arch=...`. ✅ (no change needed)
+- ⬜ Confirm `sw_domain_gpu_ext` builds/imports on a minimal **no-MPI** conda env (meson
+  builds it with MPI stubs — verify on a clean env, since a mode-2 default hard-fails on
+  import if the extension is missing). **Still to do — needs a clean no-MPI env / CI run.**
+- ⬜ Verify CI builds and conda recipes pass with the CPU-multicore extension.
 
-### Step 4 — Rename the mode concept  ⬜ (do before flipping default, to avoid churn)
-Replace the misleading "GPU" label. Proposed: a `backend` selector with values
-`python` (= old mode 1), `openmp_c` (= mode 2 on CPU), `gpu` (= mode 2 with offload).
-- Keep `set_multiprocessor_mode()` / `multiprocessor_mode` as deprecated aliases mapping
-  1→python, 2→openmp_c|gpu (resolved by build). Emit `DeprecationWarning`.
-- Update `-mpm` CLI help and docs.
-- This is optional-but-recommended; can be deferred if it risks scope creep, but the
-  default-switch reads badly if "GPU" is the CPU default.
+### Step 4 — Compute-backend selector  ✅ DONE 2026-06-12 (API shipped; CLI/docs follow)
+Replaced the misleading "GPU" label with an explicit, build-resolved backend selector.
+Chosen names (user decision): **`legacy` / `cpu` / `gpu`**; new method alongside the
+kept integer API (no deprecation warning yet).
+
+New on `shallow_water.Domain`:
+- `set_compute_mode(mode, verbose=False)` — `'legacy'`→mode 1 (`sw_domain_openmp_ext` +
+  serial-Python ops); `'cpu'`→mode 2 unified `gpu_ext` CPU-multicore; `'gpu'`→mode 2 with
+  offload. Resolves against the build: `'gpu'` on a CPU-only build (or no device) emits a
+  warning and **falls back to `'cpu'`**, never hard-fails. Records `self.compute_mode` and
+  `self.requested_compute_mode`.
+- `get_compute_mode()` → `'legacy'|'cpu'|'gpu'`.
+- `_gpu_offload_capable()` — wraps `sw_domain_gpu_ext.gpu_available()` (False in
+  `CPU_ONLY_MODE` or with no device).
+- `set_multiprocessor_mode(1|2)` is now a thin wrapper: 1→`'legacy'`; 2→`'gpu'` if the
+  build can offload else `'cpu'` — preserves the historical "mode 2 just works" behaviour.
+- Fixed `set_gpu_interface()`: `gpu_offload_active` is now gated on
+  `_gpu_offload_capable()`, so it is **False on CPU-only builds** and the banner reads
+  "CPU multicore (unified gpu_ext kernels, no offload)" instead of falsely claiming
+  "GPU interface initialized". This also suppresses the misleading "GPU<->CPU sync every
+  RK2 step" warning on CPU-only builds (host == device, sync is a no-op).
+
+**Key constraint documented:** CPU vs GPU within mode 2 is a **build-time** property
+(`-DCPU_ONLY_MODE`), not freely runtime-switchable. A default CPU-only install supports
+`{legacy, cpu}`; `gpu` requires a `-Dgpu_offload=true` build + device. A GPU build can be
+forced to CPU at runtime (`set_compute_mode('cpu')` sets `OMP_TARGET_OFFLOAD=disabled`,
+best-effort before the first target region).
+
+Tests: `anuga/shallow_water/tests/test_compute_mode.py` (8 tests, registered in
+`tests/meson.build`) — default/legacy/cpu/gpu-fallback/invalid/int-API/switch-back; robust
+to both build types via `gpu_available()`. 56/56 `test_DE_gpu_omp.py` equivalence + main
+`test_shallow_water_domain.py` (48) still pass.
+
+⬜ **Follow-up:** wire a `--compute-mode` CLI option into the standard arg parser
+(`-mpm` stays); update `-mpm` help and user docs (rolls into Step 6).
 
 ### Step 5 — Flip the default  ⬜ (the actual switch)
 - In `Domain.__init__` (shallow_water), default to mode 2 **with an auto-fallback**:
