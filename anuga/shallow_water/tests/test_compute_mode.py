@@ -1,10 +1,12 @@
-"""Tests for the compute-backend selector (set_compute_mode / get_compute_mode).
+"""Tests for the compute-backend model.
 
-These exercise the mode-resolution logic that maps the user-facing
-'legacy'/'cpu'/'gpu' backends onto the internal multiprocessor_mode (1/2)
-dispatch, including the graceful fall-back from 'gpu' to 'cpu' on a build
-without GPU offload. Robust to both CPU-only (gpu_offload=false) and GPU
-(gpu_offload=true) builds.
+Two orthogonal knobs:
+  * per-domain compute mode  — Domain.set_compute_mode('legacy' | 'unified'),
+    selecting the internal multiprocessor_mode (1 / 2);
+  * process-global GPU offload — anuga.set_gpu_offload(bool), deciding whether
+    'unified' domains run on a GPU or CPU-multicore.
+
+Robust to both CPU-only (gpu_offload=false) and GPU (gpu_offload=true) builds.
 """
 
 import unittest
@@ -41,39 +43,19 @@ class Test_compute_mode(unittest.TestCase):
         self.assertEqual(domain.multiprocessor_mode, MULTIPROCESSOR_OPENMP)
         self.assertFalse(domain.use_c_rk_loop)
 
-    def test_cpu_maps_to_mode2(self):
+    def test_unified_maps_to_mode2(self):
         domain = _make_domain()
-        domain.set_compute_mode('cpu')
-        self.assertEqual(domain.get_compute_mode(), 'cpu')
+        domain.set_compute_mode('unified')
+        self.assertEqual(domain.get_compute_mode(), 'unified')
         self.assertEqual(domain.multiprocessor_mode, MULTIPROCESSOR_GPU)
         self.assertTrue(domain.use_c_rk_loop)
         self.assertIsNotNone(domain.gpu_interface)
-        # CPU mode never reports offload as active.
-        self.assertFalse(domain.gpu_offload_active)
 
-    def test_gpu_request_resolves_against_build(self):
+    def test_cpu_and_gpu_are_not_modes(self):
         domain = _make_domain()
-        with warnings.catch_warnings(record=True) as caught:
-            warnings.simplefilter('always')
-            domain.set_compute_mode('gpu')
-            fell_back = any('falling back' in str(w.message) for w in caught)
-
-        self.assertEqual(domain.requested_compute_mode, 'gpu')
-        if gpu_available():
-            # GPU build with a device: request honoured.
-            self.assertEqual(domain.get_compute_mode(), 'gpu')
-            self.assertFalse(fell_back)
-        else:
-            # CPU-only build: warn + fall back to cpu, never hard-fail.
-            self.assertEqual(domain.get_compute_mode(), 'cpu')
-            self.assertTrue(fell_back)
-        # Either way we end up in mode 2.
-        self.assertEqual(domain.multiprocessor_mode, MULTIPROCESSOR_GPU)
-
-    def test_invalid_mode_raises(self):
-        domain = _make_domain()
-        with self.assertRaises(ValueError):
-            domain.set_compute_mode('bogus')
+        for bad in ('cpu', 'gpu', 'bogus'):
+            with self.assertRaises(ValueError):
+                domain.set_compute_mode(bad)
 
     def test_legacy_int_api_maps_to_compute_mode(self):
         domain = _make_domain()
@@ -82,9 +64,7 @@ class Test_compute_mode(unittest.TestCase):
         self.assertEqual(domain.multiprocessor_mode, MULTIPROCESSOR_OPENMP)
 
         domain.set_multiprocessor_mode(2)
-        # mode 2 auto-resolves to gpu when the build supports it, else cpu.
-        expected = 'gpu' if gpu_available() else 'cpu'
-        self.assertEqual(domain.get_compute_mode(), expected)
+        self.assertEqual(domain.get_compute_mode(), 'unified')
         self.assertEqual(domain.multiprocessor_mode, MULTIPROCESSOR_GPU)
 
     def test_invalid_int_mode_raises(self):
@@ -94,7 +74,7 @@ class Test_compute_mode(unittest.TestCase):
 
     def test_switch_back_to_legacy(self):
         domain = _make_domain()
-        domain.set_compute_mode('cpu')
+        domain.set_compute_mode('unified')
         domain.set_compute_mode('legacy')
         self.assertEqual(domain.get_compute_mode(), 'legacy')
         self.assertEqual(domain.multiprocessor_mode, MULTIPROCESSOR_OPENMP)
@@ -105,13 +85,13 @@ class Test_compute_mode(unittest.TestCase):
         caps = domain.compute_capabilities()
         self.assertEqual(set(caps), {'gpu_offload', 'num_gpu_devices', 'mpi', 'modes'})
         self.assertIn('legacy', caps['modes'])
-        self.assertIn('cpu', caps['modes'])
-        # 'gpu' is selectable iff the build can offload.
-        self.assertEqual('gpu' in caps['modes'], caps['gpu_offload'])
-        self.assertEqual(caps['gpu_offload'], gpu_available())
+        # 'unified' is available whenever the gpu_ext extension imports (it does
+        # here, since the domain built a gpu_interface in other tests).
+        self.assertIn('unified', caps['modes'])
+        self.assertEqual(caps['gpu_offload'], anuga.gpu_offload_enabled())
 
     def test_parallel_without_mpi_build_falls_back_to_legacy(self):
-        # Simulate a multi-rank run on a gpu_ext built WITHOUT MPI: mode 2's
+        # Simulate a multi-rank run on a gpu_ext built WITHOUT MPI: 'unified'
         # C ghost exchange would be a silent no-op, so the selector must fall
         # back to 'legacy' rather than compute wrong parallel results.
         domain = _make_domain()
@@ -121,7 +101,7 @@ class Test_compute_mode(unittest.TestCase):
             anuga.numprocs = 2
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter('always')
-                domain.set_compute_mode('cpu')
+                domain.set_compute_mode('unified')
                 warned = any('Python MPI exchange' in str(w.message) for w in caught)
         finally:
             anuga.numprocs = saved
@@ -130,18 +110,60 @@ class Test_compute_mode(unittest.TestCase):
         self.assertEqual(domain.multiprocessor_mode, MULTIPROCESSOR_OPENMP)
         self.assertTrue(warned)
 
-    def test_parallel_with_mpi_build_keeps_mode2(self):
-        # With an MPI-enabled build, a multi-rank mode-2 request is honoured.
+    def test_parallel_with_mpi_build_keeps_unified(self):
         domain = _make_domain()
         domain._mode2_mpi_available = lambda: True
         saved = anuga.numprocs
         try:
             anuga.numprocs = 2
-            domain.set_compute_mode('cpu')
+            domain.set_compute_mode('unified')
         finally:
             anuga.numprocs = saved
-        self.assertEqual(domain.get_compute_mode(), 'cpu')
+        self.assertEqual(domain.get_compute_mode(), 'unified')
         self.assertEqual(domain.multiprocessor_mode, MULTIPROCESSOR_GPU)
+
+
+class Test_gpu_offload(unittest.TestCase):
+    """Process-global offload toggle. Restores state after each test."""
+
+    def setUp(self):
+        import anuga.shallow_water.shallow_water_domain as swd
+        self._saved = swd._GPU_OFFLOAD_REQUESTED
+
+    def tearDown(self):
+        import anuga.shallow_water.shallow_water_domain as swd
+        import os
+        swd._GPU_OFFLOAD_REQUESTED = self._saved
+        # Don't leak a forced-disable into other tests.
+        os.environ.pop('OMP_TARGET_OFFLOAD', None)
+
+    def test_disable_is_process_global(self):
+        state = anuga.set_gpu_offload(False, verbose=False)
+        self.assertFalse(state)
+        self.assertFalse(anuga.gpu_offload_enabled())
+
+    def test_enable_on_cpu_only_build_warns_and_stays_off(self):
+        if gpu_available():
+            self.skipTest("GPU build: enabling offload is valid here")
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            state = anuga.set_gpu_offload(True, verbose=False)
+            warned = any('no GPU offload support' in str(w.message) for w in caught)
+        self.assertFalse(state)
+        self.assertTrue(warned)
+
+    def test_offload_state_drives_domain_bookkeeping(self):
+        # With offload disabled, a 'unified' domain reports CPU (offload inactive)
+        # regardless of build.
+        anuga.set_gpu_offload(False, verbose=False)
+        points, vertices, boundary = rectangular_cross(6, 6, len1=6.0, len2=6.0)
+        domain = Domain(points, vertices, boundary)
+        domain.set_quantity('elevation', 0.0)
+        domain.set_quantity('stage', 1.0)
+        R = Reflective_boundary(domain)
+        domain.set_boundary({'left': R, 'right': R, 'top': R, 'bottom': R})
+        domain.set_compute_mode('unified')
+        self.assertFalse(domain.gpu_offload_active)
 
 
 if __name__ == '__main__':

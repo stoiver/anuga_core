@@ -53,6 +53,8 @@ def test(*args, **kwargs):
 # Important basic classes
 # --------------------------------
 from anuga.shallow_water.shallow_water_domain import Domain
+from anuga.shallow_water.shallow_water_domain import (
+    set_gpu_offload, gpu_offload_enabled, gpu_offload_supported)
 from anuga.abstract_2d_finite_volumes.quantity import Quantity
 from anuga.abstract_2d_finite_volumes.region import Region
 from anuga.geospatial_data.geospatial_data import Geospatial_data
@@ -369,6 +371,9 @@ __all__ = [
     'Domain',
     'Domain_plotter',
     'Generic_Domain',
+    'set_gpu_offload',
+    'gpu_offload_enabled',
+    'gpu_offload_supported',
     'Geo_reference',
     'Geospatial_data',
     'Mesh',

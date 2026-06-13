@@ -154,6 +154,100 @@ except ImportError:
     pass
 
 
+#-----------------------------------------------------
+# Process-global GPU offload control
+#
+# Whether mode 2 ('unified') offloads to a GPU is a *process-level* OpenMP
+# setting (the target-offload runtime ICV), not a per-domain property: a single
+# process cannot run one domain on the GPU and another on the CPU with the same
+# unified kernels. These module functions own that process-wide decision; the
+# per-domain choice (legacy vs unified) lives on Domain.set_compute_mode().
+#-----------------------------------------------------
+
+# None = follow the build default (offload on a GPU build, off on CPU-only);
+# True/False = explicit user choice via set_gpu_offload().
+_GPU_OFFLOAD_REQUESTED = None
+
+
+def gpu_offload_supported() -> bool:
+    """True if this build can offload mode 2 to a GPU device.
+
+    False for a CPU-only build (``gpu_offload=false`` / ``CPU_ONLY_MODE`` — the
+    standard pip/conda install), when no device is present, or when offload was
+    disabled at launch via ``OMP_TARGET_OFFLOAD=disabled`` (``gpu_available()``
+    reflects all three).
+    """
+    try:
+        from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
+        return bool(gpu_ext.gpu_available())
+    except Exception:
+        return False
+
+
+def gpu_offload_enabled() -> bool:
+    """Return the resolved process-global offload state for mode 2 ('unified').
+
+    Combines the explicit :func:`set_gpu_offload` request (if any) with what the
+    build actually supports. On a CPU-only build this is always False.
+    """
+    if _GPU_OFFLOAD_REQUESTED is False:
+        return False
+    return gpu_offload_supported()
+
+
+def set_gpu_offload(enable: bool = True, verbose: bool = True) -> bool:
+    """Enable or disable GPU offload for mode-2 ('unified') domains, process-wide.
+
+    This is a *process-level* switch, not per-domain: it affects every domain
+    that runs in 'unified' mode, because OpenMP target offload is a process-wide
+    runtime setting. Call it **before the first** ``evolve()`` / target region —
+    the OpenMP runtime reads ``OMP_TARGET_OFFLOAD`` at initialisation, so a later
+    flip is not guaranteed to take effect.
+
+    Parameters
+    ----------
+    enable : bool
+        True to offload 'unified' domains to a GPU (GPU build + device required);
+        False to force 'unified' to run CPU-multicore.
+    verbose : bool
+        Print a one-line confirmation.
+
+    Returns
+    -------
+    bool
+        The resolved offload state (:func:`gpu_offload_enabled`). Requesting
+        ``enable=True`` on a build without offload support warns and returns
+        False — never hard-fails.
+    """
+    global _GPU_OFFLOAD_REQUESTED
+    import warnings
+
+    if enable:
+        if not gpu_offload_supported():
+            warnings.warn(
+                "set_gpu_offload(True): this ANUGA build has no GPU offload support "
+                "(built with gpu_offload=false) or no device is present; 'unified' "
+                "domains will run on CPU multicore. Rebuild with -Dgpu_offload=true "
+                "and a GPU-capable compiler to enable offload.",
+                stacklevel=2)
+            _GPU_OFFLOAD_REQUESTED = False
+            os.environ['OMP_TARGET_OFFLOAD'] = 'disabled'
+        else:
+            _GPU_OFFLOAD_REQUESTED = True
+            # Clear a prior disable so the runtime can offload.
+            if os.environ.get('OMP_TARGET_OFFLOAD', '').lower() == 'disabled':
+                del os.environ['OMP_TARGET_OFFLOAD']
+    else:
+        _GPU_OFFLOAD_REQUESTED = False
+        os.environ['OMP_TARGET_OFFLOAD'] = 'disabled'
+
+    state = gpu_offload_enabled()
+    if verbose:
+        print(f"GPU offload {'enabled' if state else 'disabled'} "
+              f"(process-wide; 'unified' domains run on {'GPU' if state else 'CPU multicore'})")
+    return state
+
+
 class Domain(Generic_Domain):
     """Object which encapulates the shallow water model
 
@@ -4991,35 +5085,24 @@ class Domain(Generic_Domain):
 # Multiprocessor Mode (1=openmp, 2=cupy (in development))
 # ==============================================================================
 
-    # User-facing compute backends. These map onto the internal
-    # ``multiprocessor_mode`` (1/2) dispatch:
-    #   'legacy' -> mode 1: sw_domain_openmp_ext solver + serial-Python operators
-    #   'cpu'    -> mode 2: unified gpu_ext kernels compiled for CPU multicore
-    #   'gpu'    -> mode 2: unified gpu_ext kernels offloaded to a GPU device
-    # 'cpu' and 'gpu' run the *same* mode-2 code path; whether it offloads is a
-    # build property (gpu_offload=true) plus device presence, queried at runtime.
-    COMPUTE_MODES = ('legacy', 'cpu', 'gpu')
-
-    def _gpu_offload_capable(self) -> bool:
-        """True if the installed ``sw_domain_gpu_ext`` can offload to a GPU device.
-
-        False for a CPU-only build (``gpu_offload=false`` / ``CPU_ONLY_MODE`` —
-        the standard pip/conda install) or when no offload device is present.
-        """
-        try:
-            from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
-            return bool(gpu_ext.gpu_available())
-        except Exception:
-            return False
+    # User-facing *per-domain* compute mode. This is the only genuinely
+    # per-domain choice — it selects the internal ``multiprocessor_mode``:
+    #   'legacy'  -> mode 1: sw_domain_openmp_ext solver + serial-Python operators
+    #   'unified' -> mode 2: the unified gpu_ext C kernels (solver + operators)
+    # Whether 'unified' runs on CPU or offloads to a GPU is NOT a per-domain
+    # property: it is a *process-global* OpenMP offload setting controlled by
+    # the module function ``set_gpu_offload()`` (and only possible on a GPU
+    # build). On a CPU-only build, 'unified' simply runs CPU-multicore.
+    COMPUTE_MODES = ('legacy', 'unified')
 
     def _mode2_mpi_available(self) -> bool:
         """True if ``sw_domain_gpu_ext`` was built with real C MPI support.
 
-        Mode 2 ('cpu'/'gpu') performs its halo exchange at the C level
+        Mode 2 ('unified') performs its halo exchange at the C level
         (``exchange_ghosts``). Without an MPI-enabled build that exchange is a
-        silent no-op, so a multi-rank mode-2 run would compute wrong results —
+        silent no-op, so a multi-rank 'unified' run would compute wrong results —
         the selector falls back to 'legacy' (Python MPI exchange) in that case.
-        Serial (single-rank) mode-2 needs no MPI and is unaffected.
+        Serial (single-rank) 'unified' needs no MPI and is unaffected.
         """
         try:
             from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
@@ -5031,39 +5114,47 @@ class Domain(Generic_Domain):
         """Report which compute backends this build/run supports.
 
         Returns a dict with:
-            'gpu_offload'     : bool — gpu_ext can offload to a GPU device
+            'gpu_offload'     : bool — process can offload mode-2 to a GPU device
+                                       (build supports it, device present, offload
+                                       not disabled); see :func:`set_gpu_offload`
             'num_gpu_devices' : int  — number of offload devices visible
-            'mpi'             : bool — gpu_ext built with C MPI (mode-2 parallel ok)
-            'modes'           : list — compute modes selectable on this build
-                                       ('gpu' only when gpu_offload is True)
+            'mpi'             : bool — gpu_ext built with C MPI ('unified' parallel ok)
+            'modes'           : list — per-domain modes available ('unified' only
+                                       when the gpu_ext extension is importable)
         """
         try:
-            from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
-            offload = bool(gpu_ext.gpu_available())
+            from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext  # noqa: F401
+            unified = True
             ndev = int(gpu_ext.get_num_gpu_devices())
             mpi = bool(gpu_ext.gpu_has_mpi())
         except Exception:
-            offload, ndev, mpi = False, 0, False
-        modes = ['legacy', 'cpu'] + (['gpu'] if offload else [])
-        return {'gpu_offload': offload, 'num_gpu_devices': ndev,
+            unified, ndev, mpi = False, 0, False
+        modes = ['legacy'] + (['unified'] if unified else [])
+        return {'gpu_offload': gpu_offload_enabled(), 'num_gpu_devices': ndev,
                 'mpi': mpi, 'modes': modes}
 
-    def set_compute_mode(self, mode: str = 'cpu', verbose: bool = False) -> None:
-        """Select the compute backend, resolving the request against the build.
+    def set_compute_mode(self, mode: str = 'unified', verbose: bool = False) -> None:
+        """Select this domain's compute mode (per-domain).
 
         Parameters
         ----------
-        mode : {'legacy', 'cpu', 'gpu'}
+        mode : {'legacy', 'unified'}
             - ``'legacy'`` — mode 1: the ``sw_domain_openmp_ext`` solver with
               serial-Python fractional-step operators.
-            - ``'cpu'`` — mode 2: the unified ``sw_domain_gpu_ext`` kernels
-              (solver and operators) running as CPU-multicore OpenMP.
-            - ``'gpu'`` — mode 2: the same kernels offloaded to a GPU device.
+            - ``'unified'`` — mode 2: the unified ``sw_domain_gpu_ext`` C kernels
+              (solver and operators). Runs CPU-multicore by default; offloads to
+              a GPU only when GPU offload is enabled process-wide via
+              :func:`anuga.set_gpu_offload` on a GPU-capable build.
 
-        Requesting ``'gpu'`` on a build without GPU offload (the default
-        ``gpu_offload=false`` install) or with no device present emits a warning
-        and falls back to ``'cpu'`` — it never hard-fails. The active mode is
-        recorded in ``self.compute_mode``; the original request in
+        This is a per-domain setting — different domains in one script may use
+        different modes. Whether 'unified' uses a GPU is a separate, process-wide
+        decision (see :func:`set_gpu_offload`), because OpenMP target offload is
+        a process-level runtime setting, not a per-domain one.
+
+        Under MPI, 'unified' requires a gpu_ext built with MPI; otherwise this
+        falls back to 'legacy' (whose Python MPI exchange is correct in parallel)
+        with a rank-0 warning. The active mode is recorded in
+        ``self.compute_mode``; the original request in
         ``self.requested_compute_mode``.
         """
         import warnings
@@ -5073,29 +5164,10 @@ class Domain(Generic_Domain):
                 f"Invalid compute mode {mode!r}. Must be one of {self.COMPUTE_MODES}.")
 
         requested = mode
-        if mode in ('cpu', 'gpu'):
-            capable = self._gpu_offload_capable()
-            if mode == 'gpu' and not capable:
-                # Warn once (rank 0 only under MPI); the fall-back itself happens
-                # on every rank.
-                try:
-                    from anuga import myid
-                except Exception:
-                    myid = 0
-                if myid == 0:
-                    warnings.warn(
-                        "compute mode 'gpu' requested but this ANUGA build has no GPU "
-                        "offload support (built with gpu_offload=false) or no device is "
-                        "present; falling back to 'cpu' (CPU multicore). Rebuild with "
-                        "-Dgpu_offload=true and a GPU-capable compiler to enable GPU "
-                        "offload.",
-                        stacklevel=2)
-                mode = 'cpu'
-
-            # Parallel guard: mode 2 exchanges ghosts at the C level, which is a
-            # silent no-op without an MPI-enabled gpu_ext build. Under MPI that
-            # would produce wrong results, so fall back to 'legacy' (mode 1 with
-            # the Python MPI exchange). Serial mode 2 needs no MPI.
+        if mode == 'unified':
+            # Parallel guard: 'unified' exchanges ghosts at the C level, a silent
+            # no-op without an MPI-enabled gpu_ext build. Under MPI that gives
+            # wrong results, so fall back to 'legacy' (Python MPI exchange).
             try:
                 from anuga import numprocs
             except Exception:
@@ -5107,25 +5179,13 @@ class Domain(Generic_Domain):
                     myid = 0
                 if myid == 0:
                     warnings.warn(
-                        f"compute mode {mode!r} selected under MPI ({numprocs} ranks) but "
+                        f"compute mode 'unified' selected under MPI ({numprocs} ranks) but "
                         "this ANUGA build's sw_domain_gpu_ext was compiled without MPI; the "
                         "C-level ghost exchange would be a silent no-op and give wrong "
                         "parallel results. Falling back to 'legacy' (mode 1, Python MPI "
-                        "exchange). Rebuild with MPI to run mode 2 in parallel.",
+                        "exchange). Rebuild with MPI to run 'unified' in parallel.",
                         stacklevel=2)
                 mode = 'legacy'
-
-            if mode == 'cpu' and capable:
-                # GPU-capable build explicitly forced to CPU: disable offload at
-                # the OpenMP runtime (best-effort; set before the first target
-                # region). CPU-only builds need no override.
-                os.environ['OMP_TARGET_OFFLOAD'] = 'disabled'
-                self._auto_disabled_offload = True
-            elif mode == 'gpu' and getattr(self, '_auto_disabled_offload', False):
-                # Re-enable offload if we previously auto-disabled it for 'cpu'.
-                if os.environ.get('OMP_TARGET_OFFLOAD', '').lower() == 'disabled':
-                    del os.environ['OMP_TARGET_OFFLOAD']
-                self._auto_disabled_offload = False
 
         self.requested_compute_mode = requested
         self.compute_mode = mode
@@ -5133,17 +5193,18 @@ class Domain(Generic_Domain):
         if mode == 'legacy':
             self.multiprocessor_mode = MULTIPROCESSOR_OPENMP
             self.use_c_rk_loop = False
-        else:  # 'cpu' or 'gpu' -> mode 2 (unified gpu_ext kernels)
+        else:  # 'unified' -> mode 2 (unified gpu_ext kernels)
             self.multiprocessor_mode = MULTIPROCESSOR_GPU
             self.use_c_rk_loop = True
             self.set_gpu_interface()
 
         if verbose:
             print(f"Compute mode: requested {requested!r} -> active {self.compute_mode!r} "
-                  f"(multiprocessor_mode={self.multiprocessor_mode})")
+                  f"(multiprocessor_mode={self.multiprocessor_mode}, "
+                  f"gpu_offload={'on' if gpu_offload_enabled() else 'off'})")
 
     def get_compute_mode(self) -> str:
-        """Return the active compute backend: 'legacy', 'cpu', or 'gpu'."""
+        """Return the active per-domain compute mode: 'legacy' or 'unified'."""
         return getattr(self, 'compute_mode', 'legacy')
 
     def set_multiprocessor_mode(self, multiprocessor_mode: int = 1) -> None:
@@ -5151,13 +5212,12 @@ class Domain(Generic_Domain):
         Set multiprocessor mode (legacy integer API).
 
         1. openmp - Python RK loop (use_c_rk_loop=False)
-        2. gpu/mpi - C RK loop (use_c_rk_loop=True, keeps data on device)
+        2. gpu/mpi - C RK loop (use_c_rk_loop=True)
 
-        Thin wrapper over :meth:`set_compute_mode`: 1 maps to ``'legacy'``; 2
-        auto-resolves to ``'gpu'`` when the build supports offload, else
-        ``'cpu'`` — preserving the historical "mode 2 just works" behaviour on
-        both CPU-only and GPU builds. New code should prefer
-        :meth:`set_compute_mode`.
+        Thin wrapper over :meth:`set_compute_mode`: 1 maps to ``'legacy'``, 2 to
+        ``'unified'``. Whether 'unified' offloads to a GPU is a separate,
+        process-wide choice — see :func:`anuga.set_gpu_offload`. New code should
+        prefer :meth:`set_compute_mode`.
         """
         if multiprocessor_mode not in [MULTIPROCESSOR_OPENMP, MULTIPROCESSOR_GPU]:
             raise ValueError('Invalid multiprocessor mode. Must be one of [1,2] (openmp, gpu/mpi)')
@@ -5165,7 +5225,7 @@ class Domain(Generic_Domain):
         if multiprocessor_mode == MULTIPROCESSOR_OPENMP:
             self.set_compute_mode('legacy')
         else:
-            self.set_compute_mode('gpu' if self._gpu_offload_capable() else 'cpu')
+            self.set_compute_mode('unified')
 
     @property
     def use_c_rk2_loop(self):
@@ -5267,22 +5327,17 @@ class Domain(Generic_Domain):
                 self.gpu_interface.setup()
                 # Only print from rank 0
                 from anuga import myid, numprocs
-                omp_target_offload = os.environ.get('OMP_TARGET_OFFLOAD', '').lower()
                 omp_num_threads = os.environ.get('OMP_NUM_THREADS', '1')
-                # Offload is active only if the build supports it (gpu_offload=true,
-                # device present) AND it hasn't been disabled via the env var. On a
-                # CPU-only build this is False — mode 2 is CPU multicore, not GPU.
-                build_can_offload = self._gpu_offload_capable()
-                self.gpu_offload_active = build_can_offload and (omp_target_offload != 'disabled')
+                # Offload is a process-wide decision (set_gpu_offload), resolved
+                # against the build. False on a CPU-only build: 'unified' is CPU
+                # multicore, not GPU.
+                self.gpu_offload_active = gpu_offload_enabled()
                 if myid == 0:
                     device_id = self.gpu_interface.gpu_dom.device_id
                     print('+==============================================================================+')
-                    if not build_can_offload:
-                        print('| ANUGA compute mode: CPU multicore (unified gpu_ext kernels, no offload)     |')
+                    if not self.gpu_offload_active:
+                        print("| ANUGA compute mode: 'unified' CPU multicore (gpu_ext kernels, no offload)   |")
                         print(f'| OMP_NUM_THREADS={omp_num_threads}')
-                    elif not self.gpu_offload_active:
-                        print('| WARNING: GPU build but OMP_TARGET_OFFLOAD=disabled                          |')
-                        print(f'| Running on CPUs with OMP_NUM_THREADS={omp_num_threads}')
                     elif device_id < 0:
                         print('| WARNING: No GPU devices found, running on CPU via OpenMP target offloading  |')
                     else:

@@ -124,59 +124,69 @@ in real-GPU runs. Track separately from the CPU-default switch.
   import if the extension is missing). **Still to do — needs a clean no-MPI env / CI run.**
 - ⬜ Verify CI builds and conda recipes pass with the CPU-multicore extension.
 
-### Step 4 — Compute-backend selector  ✅ DONE 2026-06-12 (API shipped; CLI/docs follow)
-Replaced the misleading "GPU" label with an explicit, build-resolved backend selector.
-Chosen names (user decision): **`legacy` / `cpu` / `gpu`**; new method alongside the
-kept integer API (no deprecation warning yet).
+### Step 4 — Compute model: two orthogonal knobs  ✅ DONE 2026-06-13 (API shipped; CLI/docs follow)
+**Design correction (user decision).** The first cut exposed `legacy`/`cpu`/`gpu` as three
+peer *per-domain* modes — but `cpu` and `gpu` are the **same** mode-2 path differing only
+by GPU offload, which is a **process-global** OpenMP setting, not a per-domain property.
+That scope-mismatch is what produced the cross-domain offload bug. The model is now split
+into two orthogonal knobs:
 
-New on `shallow_water.Domain`:
+**Knob 1 — per-domain compute mode** (`Domain`): **`legacy` / `unified`** (mode-2 named
+`unified` — user choice).
 - `set_compute_mode(mode, verbose=False)` — `'legacy'`→mode 1 (`sw_domain_openmp_ext` +
-  serial-Python ops); `'cpu'`→mode 2 unified `gpu_ext` CPU-multicore; `'gpu'`→mode 2 with
-  offload. Resolves against the build: `'gpu'` on a CPU-only build (or no device) emits a
-  warning and **falls back to `'cpu'`**, never hard-fails. Records `self.compute_mode` and
-  `self.requested_compute_mode`.
-- `get_compute_mode()` → `'legacy'|'cpu'|'gpu'`.
-- `_gpu_offload_capable()` — wraps `sw_domain_gpu_ext.gpu_available()` (False in
-  `CPU_ONLY_MODE` or with no device).
-- `set_multiprocessor_mode(1|2)` is now a thin wrapper: 1→`'legacy'`; 2→`'gpu'` if the
-  build can offload else `'cpu'` — preserves the historical "mode 2 just works" behaviour.
-- Fixed `set_gpu_interface()`: `gpu_offload_active` is now gated on
-  `_gpu_offload_capable()`, so it is **False on CPU-only builds** and the banner reads
-  "CPU multicore (unified gpu_ext kernels, no offload)" instead of falsely claiming
-  "GPU interface initialized". This also suppresses the misleading "GPU<->CPU sync every
-  RK2 step" warning on CPU-only builds (host == device, sync is a no-op).
+  serial-Python ops); `'unified'`→mode 2 (unified `gpu_ext` C kernels, solver + operators).
+  Per-domain: different domains may use different modes. No offload side-effects.
+- `get_compute_mode()` → `'legacy'|'unified'`. `set_multiprocessor_mode(1|2)` → `'legacy'`
+  / `'unified'`.
+- Parallel guard retained: under MPI, `'unified'` on a no-MPI gpu_ext build falls back to
+  `'legacy'` (rank-0 warning) — see below.
 
-**Key constraint documented:** CPU vs GPU within mode 2 is a **build-time** property
-(`-DCPU_ONLY_MODE`), not freely runtime-switchable. A default CPU-only install supports
-`{legacy, cpu}`; `gpu` requires a `-Dgpu_offload=true` build + device. A GPU build can be
-forced to CPU at runtime (`set_compute_mode('cpu')` sets `OMP_TARGET_OFFLOAD=disabled`,
-best-effort before the first target region).
+**Knob 2 — process-global GPU offload** (module functions, exported from `anuga`):
+- `set_gpu_offload(enable=True, verbose=True)` — process-wide; decides whether `'unified'`
+  domains offload to a GPU or run CPU-multicore. Enabling on a CPU-only build (or no
+  device) warns and stays off; never hard-fails. Must be called **before the first
+  `evolve()`** (OpenMP reads `OMP_TARGET_OFFLOAD` at init). Returns the resolved state.
+- `gpu_offload_enabled()` — resolved process state (explicit request ∧ build support).
+- `gpu_offload_supported()` — wraps `sw_domain_gpu_ext.gpu_available()` (False in
+  `CPU_ONLY_MODE`, no device, or launch-time `OMP_TARGET_OFFLOAD=disabled`).
+- Module-global `_GPU_OFFLOAD_REQUESTED` (None=build default) replaces the old per-instance
+  `_auto_disabled_offload` flag — fixing the bug where domain B asking to offload couldn't
+  clear a disable set by domain A.
 
-**Parallel (MPI) safety guard.** Mode 2 exchanges ghosts at the C level
-(`exchange_ghosts`), which is a *silent no-op* unless `sw_domain_gpu_ext` was compiled
-with MPI (`gpu_has_mpi()` — build-time `HAVE_MPI4PY`). A multi-rank mode-2 run on a
-no-MPI build would therefore compute wrong results. `set_compute_mode` now guards this:
-when `numprocs > 1` and `_mode2_mpi_available()` is False, it warns (rank 0) and falls
-back to `'legacy'` (mode 1 uses the Python/mpi4py exchange, which is correct in
-parallel). Serial mode 2 needs no MPI and is unaffected. So the supported matrix is:
+So `cpu` = `unified` + offload off; `gpu` = `unified` + offload on — *compositions of the
+two knobs*, not primitives. `set_gpu_interface()` now sets `gpu_offload_active =
+gpu_offload_enabled()`; banner reads "'unified' CPU multicore … no offload" when off, and
+the misleading "GPU<->CPU sync every RK2 step" warning stays suppressed on CPU (host==device).
+
+**Why offload is process-global, not per-domain:** OpenMP target offload is a process-level
+runtime ICV — one process cannot run the same unified kernels on GPU for domain A and CPU
+for domain B. Hence knob 2 is a module function. (Reliable runtime CPU-forcing on a GPU
+build would use `omp_set_default_device(host)` — a future C-exposed refinement; current
+impl uses `OMP_TARGET_OFFLOAD`, effective when set before the first target region.)
+
+**Parallel (MPI) safety guard.** `'unified'` exchanges ghosts at the C level
+(`exchange_ghosts`), a *silent no-op* unless `sw_domain_gpu_ext` was compiled with MPI
+(`gpu_has_mpi()` — build-time `HAVE_MPI4PY`). `set_compute_mode('unified')` with
+`numprocs > 1` and no MPI build warns (rank 0) and falls back to `'legacy'` (correct
+Python/mpi4py exchange). Supported matrix:
 
 | build | serial | MPI (numprocs>1) |
 |-------|--------|------------------|
-| CPU-only, **no** MPI | legacy, cpu | legacy only (cpu→legacy with warning) |
-| CPU-only, **with** MPI | legacy, cpu | legacy, **cpu** (hybrid MPI+OpenMP) |
-| GPU build, with MPI | legacy, cpu, gpu | legacy, cpu, gpu |
+| CPU-only, **no** MPI | legacy, unified | legacy only (unified→legacy with warning) |
+| CPU-only, **with** MPI | legacy, unified | legacy, **unified** (hybrid MPI+OpenMP) |
+| GPU build, with MPI | legacy, unified (+offload) | legacy, unified (+offload) |
 
-New introspection: `Domain.compute_capabilities()` → `{gpu_offload, num_gpu_devices,
-mpi, modes}`. `gpu_has_mpi()` already provided the MPI-build signal; no new C function
-was needed — it's now surfaced backend-neutrally and wired into the selector.
+Introspection: `Domain.compute_capabilities()` → `{gpu_offload, num_gpu_devices, mpi,
+modes}` (`modes` = `legacy` always, `unified` when gpu_ext imports).
 
-Tests: `anuga/shallow_water/tests/test_compute_mode.py` (8 tests, registered in
-`tests/meson.build`) — default/legacy/cpu/gpu-fallback/invalid/int-API/switch-back; robust
-to both build types via `gpu_available()`. 56/56 `test_DE_gpu_omp.py` equivalence + main
-`test_shallow_water_domain.py` (48) still pass.
+Tests: `anuga/shallow_water/tests/test_compute_mode.py` (13 tests — legacy/unified, int
+API, cpu/gpu rejected as modes, capabilities, parallel-no-MPI fallback, parallel+MPI keeps
+unified, and a `Test_gpu_offload` class for the process toggle), registered in
+`tests/meson.build`, robust to both build types. Regression green: `test_DE_gpu_omp.py`
+56/56, `test_shallow_water_domain.py` + `test_sw_domain_openmp.py` (106), parallel mode-2.
 
-⬜ **Follow-up:** wire a `--compute-mode` CLI option into the standard arg parser
-(`-mpm` stays); update `-mpm` help and user docs (rolls into Step 6).
+⬜ **Follow-up:** wire `--compute-mode {legacy,unified}` and a `--gpu-offload` flag into the
+standard arg parser (`-mpm` stays); update help and user docs (rolls into Step 6).
 
 ### Step 5 — Flip the default  ⬜ (the actual switch)
 - In `Domain.__init__` (shallow_water), default to mode 2 **with an auto-fallback**:
