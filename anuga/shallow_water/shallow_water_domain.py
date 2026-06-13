@@ -5012,6 +5012,42 @@ class Domain(Generic_Domain):
         except Exception:
             return False
 
+    def _mode2_mpi_available(self) -> bool:
+        """True if ``sw_domain_gpu_ext`` was built with real C MPI support.
+
+        Mode 2 ('cpu'/'gpu') performs its halo exchange at the C level
+        (``exchange_ghosts``). Without an MPI-enabled build that exchange is a
+        silent no-op, so a multi-rank mode-2 run would compute wrong results —
+        the selector falls back to 'legacy' (Python MPI exchange) in that case.
+        Serial (single-rank) mode-2 needs no MPI and is unaffected.
+        """
+        try:
+            from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
+            return bool(gpu_ext.gpu_has_mpi())
+        except Exception:
+            return False
+
+    def compute_capabilities(self) -> dict:
+        """Report which compute backends this build/run supports.
+
+        Returns a dict with:
+            'gpu_offload'     : bool — gpu_ext can offload to a GPU device
+            'num_gpu_devices' : int  — number of offload devices visible
+            'mpi'             : bool — gpu_ext built with C MPI (mode-2 parallel ok)
+            'modes'           : list — compute modes selectable on this build
+                                       ('gpu' only when gpu_offload is True)
+        """
+        try:
+            from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
+            offload = bool(gpu_ext.gpu_available())
+            ndev = int(gpu_ext.get_num_gpu_devices())
+            mpi = bool(gpu_ext.gpu_has_mpi())
+        except Exception:
+            offload, ndev, mpi = False, 0, False
+        modes = ['legacy', 'cpu'] + (['gpu'] if offload else [])
+        return {'gpu_offload': offload, 'num_gpu_devices': ndev,
+                'mpi': mpi, 'modes': modes}
+
     def set_compute_mode(self, mode: str = 'cpu', verbose: bool = False) -> None:
         """Select the compute backend, resolving the request against the build.
 
@@ -5055,6 +5091,30 @@ class Domain(Generic_Domain):
                         "offload.",
                         stacklevel=2)
                 mode = 'cpu'
+
+            # Parallel guard: mode 2 exchanges ghosts at the C level, which is a
+            # silent no-op without an MPI-enabled gpu_ext build. Under MPI that
+            # would produce wrong results, so fall back to 'legacy' (mode 1 with
+            # the Python MPI exchange). Serial mode 2 needs no MPI.
+            try:
+                from anuga import numprocs
+            except Exception:
+                numprocs = 1
+            if numprocs > 1 and not self._mode2_mpi_available():
+                try:
+                    from anuga import myid
+                except Exception:
+                    myid = 0
+                if myid == 0:
+                    warnings.warn(
+                        f"compute mode {mode!r} selected under MPI ({numprocs} ranks) but "
+                        "this ANUGA build's sw_domain_gpu_ext was compiled without MPI; the "
+                        "C-level ghost exchange would be a silent no-op and give wrong "
+                        "parallel results. Falling back to 'legacy' (mode 1, Python MPI "
+                        "exchange). Rebuild with MPI to run mode 2 in parallel.",
+                        stacklevel=2)
+                mode = 'legacy'
+
             if mode == 'cpu' and capable:
                 # GPU-capable build explicitly forced to CPU: disable offload at
                 # the OpenMP runtime (best-effort; set before the first target

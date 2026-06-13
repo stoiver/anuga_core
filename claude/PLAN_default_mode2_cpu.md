@@ -152,6 +152,24 @@ New on `shallow_water.Domain`:
 forced to CPU at runtime (`set_compute_mode('cpu')` sets `OMP_TARGET_OFFLOAD=disabled`,
 best-effort before the first target region).
 
+**Parallel (MPI) safety guard.** Mode 2 exchanges ghosts at the C level
+(`exchange_ghosts`), which is a *silent no-op* unless `sw_domain_gpu_ext` was compiled
+with MPI (`gpu_has_mpi()` — build-time `HAVE_MPI4PY`). A multi-rank mode-2 run on a
+no-MPI build would therefore compute wrong results. `set_compute_mode` now guards this:
+when `numprocs > 1` and `_mode2_mpi_available()` is False, it warns (rank 0) and falls
+back to `'legacy'` (mode 1 uses the Python/mpi4py exchange, which is correct in
+parallel). Serial mode 2 needs no MPI and is unaffected. So the supported matrix is:
+
+| build | serial | MPI (numprocs>1) |
+|-------|--------|------------------|
+| CPU-only, **no** MPI | legacy, cpu | legacy only (cpu→legacy with warning) |
+| CPU-only, **with** MPI | legacy, cpu | legacy, **cpu** (hybrid MPI+OpenMP) |
+| GPU build, with MPI | legacy, cpu, gpu | legacy, cpu, gpu |
+
+New introspection: `Domain.compute_capabilities()` → `{gpu_offload, num_gpu_devices,
+mpi, modes}`. `gpu_has_mpi()` already provided the MPI-build signal; no new C function
+was needed — it's now surfaced backend-neutrally and wired into the selector.
+
 Tests: `anuga/shallow_water/tests/test_compute_mode.py` (8 tests, registered in
 `tests/meson.build`) — default/legacy/cpu/gpu-fallback/invalid/int-API/switch-back; robust
 to both build types via `gpu_available()`. 56/56 `test_DE_gpu_omp.py` equivalence + main

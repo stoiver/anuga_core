@@ -100,6 +100,49 @@ class Test_compute_mode(unittest.TestCase):
         self.assertEqual(domain.multiprocessor_mode, MULTIPROCESSOR_OPENMP)
         self.assertFalse(domain.use_c_rk_loop)
 
+    def test_compute_capabilities(self):
+        domain = _make_domain()
+        caps = domain.compute_capabilities()
+        self.assertEqual(set(caps), {'gpu_offload', 'num_gpu_devices', 'mpi', 'modes'})
+        self.assertIn('legacy', caps['modes'])
+        self.assertIn('cpu', caps['modes'])
+        # 'gpu' is selectable iff the build can offload.
+        self.assertEqual('gpu' in caps['modes'], caps['gpu_offload'])
+        self.assertEqual(caps['gpu_offload'], gpu_available())
+
+    def test_parallel_without_mpi_build_falls_back_to_legacy(self):
+        # Simulate a multi-rank run on a gpu_ext built WITHOUT MPI: mode 2's
+        # C ghost exchange would be a silent no-op, so the selector must fall
+        # back to 'legacy' rather than compute wrong parallel results.
+        domain = _make_domain()
+        domain._mode2_mpi_available = lambda: False
+        saved = anuga.numprocs
+        try:
+            anuga.numprocs = 2
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter('always')
+                domain.set_compute_mode('cpu')
+                warned = any('Python MPI exchange' in str(w.message) for w in caught)
+        finally:
+            anuga.numprocs = saved
+
+        self.assertEqual(domain.get_compute_mode(), 'legacy')
+        self.assertEqual(domain.multiprocessor_mode, MULTIPROCESSOR_OPENMP)
+        self.assertTrue(warned)
+
+    def test_parallel_with_mpi_build_keeps_mode2(self):
+        # With an MPI-enabled build, a multi-rank mode-2 request is honoured.
+        domain = _make_domain()
+        domain._mode2_mpi_available = lambda: True
+        saved = anuga.numprocs
+        try:
+            anuga.numprocs = 2
+            domain.set_compute_mode('cpu')
+        finally:
+            anuga.numprocs = saved
+        self.assertEqual(domain.get_compute_mode(), 'cpu')
+        self.assertEqual(domain.multiprocessor_mode, MULTIPROCESSOR_GPU)
+
 
 if __name__ == '__main__':
     unittest.main()
