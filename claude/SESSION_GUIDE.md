@@ -134,6 +134,12 @@ The two optimisations are **super-additive**: C operators alone save ~1.6 s, reo
 cache-sensitive (17.03→12.27 s with reorder) while the operators become parallel C.
 This closes the OpenMP→MPI gap to within ~11%.
 
+**Re-confirmed 2026-06-13** on the RTX 5070 laptop with a fresh gcc `gpu_offload=false`
+build (this session's compute-model work): `-mpm 2 -nt 16 -ro metis_rcm` = **11.27 s**,
+vs **19.18 s** without reorder — a 1.7× reorder win, and 11.27 s now *matches* MPI-16+rcm
+(11.08 s) with no MPI setup. Validates a stock single-node `pip install` + `-mpm 2 -ro
+metis_rcm` as the CPU path the migration targets.
+
 **Note:** `gpu_offload=false` overwrites the GPU build. Rebuild with
 `-Dgpu_offload=true -Dgpu_arch=cc120` (and `CC=nvc`) to restore GPU mode.
 
