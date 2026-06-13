@@ -232,6 +232,7 @@ def set_gpu_offload(enable: bool = True, verbose: bool = True) -> bool:
     import warnings
 
     ge = _gpu_ext_or_none()
+    was_supported = gpu_offload_supported()
 
     if enable:
         # Clear any prior disable BEFORE checking capability, so re-enabling is
@@ -245,6 +246,24 @@ def set_gpu_offload(enable: bool = True, verbose: bool = True) -> bool:
                 "and a GPU-capable compiler to enable offload.",
                 stacklevel=2)
             enable = False
+    elif was_supported:
+        # Disabling offload on a GPU build. This forces the unified kernels onto
+        # the host, but a GPU build (nvc -mp=gpu,multicore) runs the `omp target`
+        # regions on the host through a slow fallback that does NOT scale with
+        # threads — so this is for correctness A/B (GPU vs CPU give the same
+        # results), NOT for performance. For fast CPU multicore, use a
+        # gpu_offload=false (gcc) build instead.
+        try:
+            from anuga import myid
+        except Exception:
+            myid = 0
+        if myid == 0:
+            warnings.warn(
+                "set_gpu_offload(False) on a GPU build: 'unified' will run on the "
+                "host, but the nvc GPU build's host fallback is slow and does not "
+                "scale with threads (use it for correctness checks, not timing). "
+                "For fast CPU multicore, build with -Dgpu_offload=false.",
+                stacklevel=2)
 
     if not enable:
         # OMP_TARGET_OFFLOAD=disabled is what actually keeps the `omp target`

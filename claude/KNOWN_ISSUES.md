@@ -259,3 +259,28 @@ legacy artifact and should be removed once meson-only builds are confirmed in CI
 
 Zero pre-commit hooks, no ruff/flake8 config, 4,189 functions with no type annotations.
 Current approach is manual `pyflakes` / `autopep8` before commits.
+
+### GPU build forced to CPU (`set_gpu_offload(False)` / `-ngo`) is slow — nvc limitation
+
+A `gpu_offload=true` (nvc `-mp=gpu,multicore`) build forced onto the host runs the
+`omp target teams distribute` regions through nvc's host fallback, which **does not
+scale with threads** (it gets *slower* with more threads). Microbenchmark (40M-element
+memory-bound loop, 60 iters, RTX 5070 box, HPC SDK 26.3):
+
+| config | 1t | 8t | 16t |
+|--------|----|----|-----|
+| nvc `-mp=gpu,multicore` + `OMP_TARGET_OFFLOAD=disabled` | 0.91s | 4.48s | 3.00s (pathological) |
+| nvc `-mp=multicore` (multicore-only build) | 0.92s | 0.73s | 0.64s |
+| gcc `-fopenmp` (`#pragma omp parallel for`) | 0.92s | 0.76s | 0.61s |
+| nvc GPU offload | — | — | 0.12s |
+
+Neither `OMP_TARGET_OFFLOAD=disabled` nor `CUDA_VISIBLE_DEVICES=` engages the good
+multicore variant of the dual build — the host always gets the GPU variant's serial-ish
+fallback. towradgi small (256k tri, -ft 200 -ys 50) confirms it: GPU 6.35s, `-ngo`
+60–100s (1.7× scaling 1→16 threads), vs a gcc `gpu_offload=false` build at ~17s.
+
+**Implication:** a GPU build is not a substitute for a CPU build. `set_gpu_offload(False)` /
+`-ngo` is for **correctness A/B** (verify GPU and CPU give identical results — they are
+bit-identical) only, NOT timing. For CPU-multicore performance, build with
+`-Dgpu_offload=false` (gcc → host-optimised `omp parallel for` via the `CPU_ONLY_MODE`
+macros). `set_gpu_offload(False)` warns about this on a GPU build.
