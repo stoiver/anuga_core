@@ -232,19 +232,34 @@ def set_gpu_offload(enable: bool = True, verbose: bool = True) -> bool:
     import warnings
 
     ge = _gpu_ext_or_none()
-    if enable and not gpu_offload_supported():
-        warnings.warn(
-            "set_gpu_offload(True): this ANUGA build has no GPU offload support "
-            "(built with gpu_offload=false) or no device is present; 'unified' "
-            "domains will run on CPU multicore. Rebuild with -Dgpu_offload=true "
-            "and a GPU-capable compiler to enable offload.",
-            stacklevel=2)
-        enable = False
 
+    if enable:
+        # Clear any prior disable BEFORE checking capability, so re-enabling is
+        # not blocked by our own OMP_TARGET_OFFLOAD=disabled.
+        os.environ.pop('OMP_TARGET_OFFLOAD', None)
+        if not gpu_offload_supported():
+            warnings.warn(
+                "set_gpu_offload(True): this ANUGA build has no GPU offload support "
+                "(built with gpu_offload=false) or no device is present; 'unified' "
+                "domains will run on CPU multicore. Rebuild with -Dgpu_offload=true "
+                "and a GPU-capable compiler to enable offload.",
+                stacklevel=2)
+            enable = False
+
+    if not enable:
+        # OMP_TARGET_OFFLOAD=disabled is what actually keeps the `omp target`
+        # regions (solver AND operators) on the host. The default-device flag
+        # alone does NOT stop the solver offloading, so it must be set here.
+        # The OpenMP runtime reads this at its first target region, so call
+        # set_gpu_offload() before the first evolve()/domain build.
+        os.environ['OMP_TARGET_OFFLOAD'] = 'disabled'
+
+    # Keep the C-side flag consistent so gpu_domain_init picks the host device
+    # and the inlet/culvert operators route there too (gpu_compute_device).
     if ge is not None:
         ge.set_offload_enabled(bool(enable))
 
-    state = gpu_offload_enabled()
+    state = bool(enable)
     if verbose:
         print(f"GPU offload {'enabled' if state else 'disabled'} "
               f"(process-wide; 'unified' domains run on {'GPU' if state else 'CPU multicore'})")

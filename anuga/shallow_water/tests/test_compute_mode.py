@@ -131,9 +131,12 @@ class Test_gpu_offload(unittest.TestCase):
         self._saved = gpu_ext.get_offload_enabled()
 
     def tearDown(self):
-        # Restore the process-global offload flag directly (avoids the
-        # not-supported warning that set_gpu_offload(True) emits on CPU builds).
+        # Restore the process-global offload state: clear any disable env var we
+        # set and restore the C flag directly (avoids the not-supported warning
+        # that set_gpu_offload(True) emits on CPU builds).
+        import os
         from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
+        os.environ.pop('OMP_TARGET_OFFLOAD', None)
         gpu_ext.set_offload_enabled(self._saved)
 
     def test_disable_is_process_global(self):

@@ -162,21 +162,29 @@ the misleading "GPU<->CPU sync every RK2 step" warning stays suppressed on CPU (
 runtime ICV — one process cannot run the same unified kernels on GPU for domain A and CPU
 for domain B. Hence knob 2 is a module function.
 
-**Offload mechanism (robust, re-enableable).** The kernels carry no `device()` clause and
-map arrays via `omp target enter data map` to the **default device**, and `gpu_domain_init`
-picks that device. So the offload decision must be honoured **at domain init** (where data
-is mapped), not flipped after. Implemented via a process-global flag in the C extension:
-- New C exposure in `sw_domain_gpu_ext`: `set_default_device`/`get_default_device`/
-  `get_initial_device` (wrap `omp_set_default_device` etc.) and
-  `set_offload_enabled`/`get_offload_enabled` (a `g_gpu_offload_enabled` flag, default on).
-- `gpu_domain_init` now routes to the host (`device_id=-1`,
-  `omp_set_default_device(omp_get_initial_device())`) when the flag is off — keeping data
-  mapping and execution consistently on CPU even on a GPU build.
-- `set_gpu_offload()` drives that flag (no `OMP_TARGET_OFFLOAD` mutation), so
-  `gpu_offload_supported()` (= `gpu_available()`, device count) stays stable and offload is
-  **re-enableable** — fixing the env-var trap where a disable made devices vanish.
-- Contract: call `set_gpu_offload()` **before building the first 'unified' domain** (device
-  chosen at init); toggling an already-mapped domain is unsupported.
+**Offload mechanism (what actually works — learned the hard way).** Two parts are needed;
+neither alone is enough:
+1. **`OMP_TARGET_OFFLOAD=disabled` is the real lever.** It is what keeps the `omp target`
+   regions (solver AND operators) on the host. Confirmed on towradgi (256k tri, -ft 200):
+   GPU = 6.35 s; `set_gpu_offload(False)` *without* the env var still ran on the GPU
+   (6.35 s — the default-device flag alone does NOT stop nvc offloading); with
+   `OMP_TARGET_OFFLOAD=disabled` it ran on CPU (≈60 s). So `set_gpu_offload()` sets/clears
+   this env var. The OpenMP runtime reads it at the first target region, so call
+   `set_gpu_offload()` **before the first evolve()/domain build**.
+2. **Device-id consistency** still matters so data mapping and operator device selection
+   agree on the host. The kernels carry no `device()` clause and map arrays via
+   `omp target enter data map` to the **default device**, chosen in `gpu_domain_init`.
+   - `gpu_domain_init` routes to the host (`device_id=-1`) when offload is off (the
+     `g_gpu_offload_enabled` flag, set via `set_offload_enabled`).
+   - **Critical bug fixed:** the inlet/culvert operators re-set the default device with
+     `omp_set_default_device(GD->device_id)`; with `device_id=-1` that is an invalid device
+     number that silently re-routed work back to the GPU. Added `gpu_compute_device(GD)`
+     (`device_id>=0 ? device_id : omp_get_initial_device()`) and used it at all 7 sites.
+   - New C exposure: `set_default_device`/`get_default_device`/`get_initial_device` and
+     `set_offload_enabled`/`get_offload_enabled`.
+- Contract: call `set_gpu_offload()` **before building the first 'unified' domain**;
+  toggling an already-mapped domain is unsupported. Runtime re-enable after a disable is
+  best-effort (the OpenMP runtime may not re-read `OMP_TARGET_OFFLOAD`).
 
 **`set_omp_num_threads` is now process-level too.** OpenMP thread count is a process ICV,
 so it moved to a module function `anuga.set_omp_num_threads()` (one `omp_set_num_threads`
