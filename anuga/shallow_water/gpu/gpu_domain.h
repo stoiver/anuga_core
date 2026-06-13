@@ -615,6 +615,7 @@ int gpu_get_default_device(void);
 void gpu_set_default_device(int device_id);
 void gpu_set_offload_enabled(int enabled);
 int gpu_get_offload_enabled(void);
+int gpu_compute_device(struct gpu_domain *GD);
 void print_gpu_domain_info(struct gpu_domain *GD);
 
 // FLOP counter functions (Gordon Bell performance profiling)

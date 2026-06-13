@@ -290,6 +290,9 @@ def set_omp_num_threads(omp_num_threads: int | None = None, verbose: bool = True
     # thread count for the unified gpu_ext kernels.
     from .sw_domain_openmp_ext import set_omp_num_threads as set_omp_num_threads_ext
     set_omp_num_threads_ext(omp_num_threads)
+    # Keep the env var consistent so banners / introspection / any subprocess
+    # report the same count (the runtime ICV is already set above).
+    os.environ['OMP_NUM_THREADS'] = str(omp_num_threads)
 
     if verbose:
         print(f'Setting omp_num_threads to {omp_num_threads}')

@@ -103,7 +103,7 @@ int gpu_inlet_operator_init(struct gpu_domain *GD, int num_indices,
     // Map to GPU if already initialized
     if (GD->gpu_initialized) {
         // Ensure we map to the correct device for this domain
-        omp_set_default_device(GD->device_id);
+        omp_set_default_device(gpu_compute_device(GD));
 
         int ni = op->num_indices;
         int *idx = op->indices;
@@ -210,7 +210,7 @@ double gpu_inlet_get_volume(struct gpu_domain *GD, int op_id) {
     struct inlet_operator_info *op = &GD->inlet_ops.ops[op_id];
     if (!op->active || op->num_indices == 0) return 0.0;
 
-    omp_set_default_device(GD->device_id);
+    omp_set_default_device(gpu_compute_device(GD));
 
     int num = op->num_indices;
     int * restrict indices = op->indices;
@@ -253,7 +253,7 @@ void gpu_inlet_get_velocities(struct gpu_domain *GD, int op_id,
     struct inlet_operator_info *op = &GD->inlet_ops.ops[op_id];
     if (!op->active || op->num_indices == 0) return;
 
-    omp_set_default_device(GD->device_id);
+    omp_set_default_device(gpu_compute_device(GD));
 
     // Debug: verify all pointers are mapped (skip in host fallback mode)
     int n = op->num_indices;
@@ -415,7 +415,7 @@ void gpu_inlet_set_stages_evenly(struct gpu_domain *GD, int op_id, double volume
     struct inlet_operator_info *op = &GD->inlet_ops.ops[op_id];
     if (!op->active || op->num_indices == 0) return;
 
-    omp_set_default_device(GD->device_id);
+    omp_set_default_device(gpu_compute_device(GD));
 
     int n = op->num_indices;
     int * restrict indices = op->indices;
@@ -514,7 +514,7 @@ double gpu_inlet_apply(struct gpu_domain *GD, int op_id, double volume,
     struct inlet_operator_info *op = &GD->inlet_ops.ops[op_id];
     if (!op->active || op->num_indices == 0) return 0.0;
 
-    omp_set_default_device(GD->device_id);
+    omp_set_default_device(gpu_compute_device(GD));
 
     int n = op->num_indices;
     int * restrict indices = op->indices;

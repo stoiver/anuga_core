@@ -218,6 +218,20 @@ static int g_gpu_offload_enabled = 1;
 void gpu_set_offload_enabled(int enabled) { g_gpu_offload_enabled = enabled ? 1 : 0; }
 int gpu_get_offload_enabled(void) { return g_gpu_offload_enabled; }
 
+// The OpenMP device that target regions for this domain should run on. A real
+// GPU id when offloading; the host (initial) device when not (device_id < 0,
+// e.g. offload disabled on a GPU build). Use this for omp_set_default_device —
+// NEVER pass GD->device_id directly, since -1 is not a valid device number and
+// would silently re-route work to the default GPU.
+int gpu_compute_device(struct gpu_domain *GD) {
+#ifdef CPU_ONLY_MODE
+    (void)GD;
+    return 0;
+#else
+    return GD->device_id >= 0 ? GD->device_id : omp_get_initial_device();
+#endif
+}
+
 void print_gpu_domain_info(struct gpu_domain *GD) {
     if (!GD->verbose) return;
     printf("\n--- GPU Domain (rank %d/%d) ---\n", GD->rank, GD->nprocs);
