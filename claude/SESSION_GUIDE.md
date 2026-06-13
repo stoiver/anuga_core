@@ -135,10 +135,18 @@ cache-sensitive (17.03→12.27 s with reorder) while the operators become parall
 This closes the OpenMP→MPI gap to within ~11%.
 
 **Re-confirmed 2026-06-13** on the RTX 5070 laptop with a fresh gcc `gpu_offload=false`
-build (this session's compute-model work): `-mpm 2 -nt 16 -ro metis_rcm` = **11.27 s**,
-vs **19.18 s** without reorder — a 1.7× reorder win, and 11.27 s now *matches* MPI-16+rcm
-(11.08 s) with no MPI setup. Validates a stock single-node `pip install` + `-mpm 2 -ro
-metis_rcm` as the CPU path the migration targets.
+build (this session's compute-model work):
+
+| `-mpm 2` config | no reorder | `-ro metis_rcm` | reorder win |
+|-----------------|-----------:|----------------:|------------:|
+| `-nt 1`  (serial)   | 95.12 s | 46.22 s | **2.06×** |
+| `-nt 16` (16 cores) | 19.18 s | 11.27 s | **1.7×**  |
+
+11.27 s now *matches* MPI-16+rcm (11.08 s) with no MPI setup. Reorder helps more
+serially (cache locality dominates) than at 16 threads (closer to memory-bandwidth
+bound on this single-NUMA box). Thread scaling 1→16: ~5.0× (no reorder), ~4.1×
+(reorder). Validates a stock single-node `pip install` + `-mpm 2 -ro metis_rcm` as
+the CPU path the migration targets.
 
 **Note:** `gpu_offload=false` overwrites the GPU build. Rebuild with
 `-Dgpu_offload=true -Dgpu_arch=cc120` (and `CC=nvc`) to restore GPU mode.
