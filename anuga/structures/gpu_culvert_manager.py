@@ -285,7 +285,16 @@ class GPUCulvertManager:
 
         rank = getattr(self.domain, 'processor', 0)
         if self.culvert_ids:
-            msg = f"[Rank {rank}] GPU CulvertManager: registered {len(self.culvert_ids)} culverts"
+            # The unified culvert kernels target a GPU only when offload is active;
+            # otherwise they run as CPU-multicore OpenMP. Report where they run so
+            # the log is not misleading on a CPU build / with offload disabled.
+            try:
+                from anuga import gpu_offload_enabled
+                backend = 'GPU offload' if gpu_offload_enabled() else 'CPU multicore'
+            except Exception:
+                backend = 'CPU multicore'
+            msg = (f"[Rank {rank}] CulvertManager: registered "
+                   f"{len(self.culvert_ids)} culverts (unified C kernels, {backend})")
             if n_parallel:
                 msg += f" ({n_local} local, {n_parallel} cross-boundary MPI)"
             print(msg)
