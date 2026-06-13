@@ -2928,7 +2928,12 @@ class Domain(Generic_Domain):
         if self.store is True and (self.get_relative_time() == 0.0 or self.evolved_called is False):
             self.initialise_storage()
 
-
+        # Eagerly run the mode-2 fractional-step setup (Boyd culvert registration
+        # and CPU-only-operator detection) so its log lines print before the first
+        # yielded step instead of after the t=0 yield. Cached, so the first
+        # apply_fractional_steps() does not repeat it.
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+            self._has_cpu_only_fractional_operators()
 
         #nvtx marker
         nvtxRangePush('_evolve_base')
