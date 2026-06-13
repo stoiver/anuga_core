@@ -183,6 +183,19 @@ so it moved to a module function `anuga.set_omp_num_threads()` (one `omp_set_num
 covers both the legacy and unified kernels). `Domain.set_omp_num_threads` stays as a thin
 backward-compatible wrapper that delegates and records `self.omp_num_threads`.
 
+**Validated on real GPU hardware (2026-06-13).** GPU build via
+`CC=nvc … -Dgpu_offload=true -Dgpu_arch=cc120` (RTX 5070 Laptop, 1 device, HPC SDK 26.3).
+`gpu_available()`=True, `gpu_has_mpi()`=True. Verified end-to-end:
+- `test_DE_gpu_omp.py` 56/56 (GPU path), `test_compute_mode.py` 12 pass + 1 skip
+  (CPU-only-warning test correctly skipped), 172 broader domain/operator tests pass.
+- Three-way run of the same scenario — `legacy` / `unified`+GPU / `unified`+offload-off —
+  agree to machine precision: GPU vs legacy = 1.5e-15, CPU vs legacy = 1.5e-15, **GPU vs
+  CPU = 0.0 (bit-identical)**.
+- The robust toggle works on the GPU build: `set_gpu_offload(False)` routed the unified
+  domain to the host (banner "CPU multicore", `device_id=-1`, `gpu_offload_active=False`);
+  `set_gpu_offload(True)` back to the GPU (`device_id=0`) — re-enableable, no env mutation.
+- Multi-rank parallel GPU tests skip cleanly on a 1-GPU box (need 1 GPU/rank).
+
 **Parallel (MPI) safety guard.** `'unified'` exchanges ghosts at the C level
 (`exchange_ghosts`), a *silent no-op* unless `sw_domain_gpu_ext` was compiled with MPI
 (`gpu_has_mpi()` — build-time `HAVE_MPI4PY`). `set_compute_mode('unified')` with
