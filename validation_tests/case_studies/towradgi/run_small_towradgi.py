@@ -79,10 +79,24 @@ outputstep = getattr(args, 'outputstep', yieldstep)      # -os / --outputstep
 scale = 1 # For coarse mesh set to 10 (135237 triangles), fine mesh set to 1 (256688 triangles)
 maximum_triangle_area = 1000 # This doesn't make much difference for this mesh
 
-# Choices are 1 (openmp/cpu) 2 (openmp/gpu offloading)
+# Choices are 1 (legacy CPU OpenMP) 2 (unified gpu_ext kernels)
 multiprocessor_mode = args.multiprocessor_mode
 reorder_method = args.reorder            # 'none', 'hilbert', 'morton', 'metis', 'rcm', ...
 partition_scheme = args.partition_scheme  # 'metis', 'hilbert', 'morton', 'rcm'
+
+# --------------------------------------------------------------------------
+# Process-wide OpenMP / GPU offload settings (CLI overrides).
+# Apply early: OMP thread count affects the OpenMP-heavy domain setup, and the
+# GPU offload choice must be set before the unified gpu_ext domain is built
+# (set_multiprocessor_mode(2), below). Both are process-level, not per-domain.
+# --------------------------------------------------------------------------
+omp_num_threads = getattr(args, 'omp_num_threads', None)  # -nt / --omp_num_threads
+if omp_num_threads is not None:
+    anuga.set_omp_num_threads(omp_num_threads, verbose=(myid == 0))
+
+gpu_offload = getattr(args, 'gpu_offload', None)  # -go/--gpu_offload / --no-gpu_offload
+if gpu_offload is not None:
+    anuga.set_gpu_offload(gpu_offload, verbose=(myid == 0))
 
 checkpoint_time = max(600/scale, 60)
 checkpoint_dir = 'CHECKPOINTS'

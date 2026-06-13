@@ -56,7 +56,18 @@ def create_standard_parser():
 
     parser.add_argument('-mpm', '--multiprocessor_mode', type=int, default=1,
                        choices=[1, 2],
-                       help='multiprocessor mode: 1=CPU OpenMP, 2=GPU OpenMP offload')
+                       help='multiprocessor mode: 1=legacy CPU OpenMP, 2=unified gpu_ext kernels')
+
+    parser.add_argument('-nt', '--omp_num_threads', type=int, default=argparse.SUPPRESS,
+                       help='number of OpenMP threads (process-wide). '
+                            'Defaults to the OMP_NUM_THREADS environment variable if unset')
+
+    parser.add_argument('-go', '--gpu_offload', action=argparse.BooleanOptionalAction,
+                       default=None,
+                       help='enable/disable GPU offload for mode-2 (unified) domains, '
+                            'process-wide: --gpu_offload to offload to a GPU, '
+                            '--no-gpu_offload to force CPU multicore. '
+                            'Default: follow the build (offload on a GPU build)')
 
     parser.add_argument('-ps', '--partition_scheme', type=str, default='metis',
                        choices=['metis', 'hilbert', 'morton', 'rcm'],
