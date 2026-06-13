@@ -127,15 +127,14 @@ class Test_gpu_offload(unittest.TestCase):
     """Process-global offload toggle. Restores state after each test."""
 
     def setUp(self):
-        import anuga.shallow_water.shallow_water_domain as swd
-        self._saved = swd._GPU_OFFLOAD_REQUESTED
+        from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
+        self._saved = gpu_ext.get_offload_enabled()
 
     def tearDown(self):
-        import anuga.shallow_water.shallow_water_domain as swd
-        import os
-        swd._GPU_OFFLOAD_REQUESTED = self._saved
-        # Don't leak a forced-disable into other tests.
-        os.environ.pop('OMP_TARGET_OFFLOAD', None)
+        # Restore the process-global offload flag directly (avoids the
+        # not-supported warning that set_gpu_offload(True) emits on CPU builds).
+        from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
+        gpu_ext.set_offload_enabled(self._saved)
 
     def test_disable_is_process_global(self):
         state = anuga.set_gpu_offload(False, verbose=False)

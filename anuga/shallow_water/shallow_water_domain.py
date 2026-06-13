@@ -164,35 +164,37 @@ except ImportError:
 # per-domain choice (legacy vs unified) lives on Domain.set_compute_mode().
 #-----------------------------------------------------
 
-# None = follow the build default (offload on a GPU build, off on CPU-only);
-# True/False = explicit user choice via set_gpu_offload().
-_GPU_OFFLOAD_REQUESTED = None
+def _gpu_ext_or_none():
+    try:
+        from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
+        return gpu_ext
+    except Exception:
+        return None
 
 
 def gpu_offload_supported() -> bool:
-    """True if this build can offload mode 2 to a GPU device.
+    """True if this build/run can offload mode 2 to a GPU device.
 
-    False for a CPU-only build (``gpu_offload=false`` / ``CPU_ONLY_MODE`` — the
-    standard pip/conda install), when no device is present, or when offload was
-    disabled at launch via ``OMP_TARGET_OFFLOAD=disabled`` (``gpu_available()``
-    reflects all three).
+    Reflects build + hardware: False for a CPU-only build (``gpu_offload=false`` /
+    ``CPU_ONLY_MODE`` — the standard pip/conda install), when no device is
+    present, or when offload was disabled at launch via
+    ``OMP_TARGET_OFFLOAD=disabled`` (``gpu_available()`` covers all three). This
+    is a static capability and is *not* affected by :func:`set_gpu_offload`.
     """
-    try:
-        from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
-        return bool(gpu_ext.gpu_available())
-    except Exception:
-        return False
+    ge = _gpu_ext_or_none()
+    return bool(ge.gpu_available()) if ge is not None else False
 
 
 def gpu_offload_enabled() -> bool:
     """Return the resolved process-global offload state for mode 2 ('unified').
 
-    Combines the explicit :func:`set_gpu_offload` request (if any) with what the
-    build actually supports. On a CPU-only build this is always False.
+    True only when the build supports offload *and* it has not been switched off
+    via :func:`set_gpu_offload`. Always False on a CPU-only build.
     """
-    if _GPU_OFFLOAD_REQUESTED is False:
+    if not gpu_offload_supported():
         return False
-    return gpu_offload_supported()
+    ge = _gpu_ext_or_none()
+    return bool(ge.get_offload_enabled()) if ge is not None else False
 
 
 def set_gpu_offload(enable: bool = True, verbose: bool = True) -> bool:
@@ -200,9 +202,17 @@ def set_gpu_offload(enable: bool = True, verbose: bool = True) -> bool:
 
     This is a *process-level* switch, not per-domain: it affects every domain
     that runs in 'unified' mode, because OpenMP target offload is a process-wide
-    runtime setting. Call it **before the first** ``evolve()`` / target region —
-    the OpenMP runtime reads ``OMP_TARGET_OFFLOAD`` at initialisation, so a later
-    flip is not guaranteed to take effect.
+    runtime setting (one process cannot run the same unified kernels on a GPU for
+    one domain and on the CPU for another).
+
+    The setting is honoured at GPU-domain init, where arrays are mapped to the
+    chosen device. **Call it before building the first 'unified' domain** — once
+    a domain's data is mapped to a device, switching this domain's offload would
+    leave data and execution on different devices.
+
+    Implemented via the OpenMP default-device ICV (``omp_set_default_device`` /
+    a process-global flag in ``sw_domain_gpu_ext``) — robust and re-enableable,
+    unlike mutating ``OMP_TARGET_OFFLOAD`` after the runtime has initialised.
 
     Parameters
     ----------
@@ -219,33 +229,71 @@ def set_gpu_offload(enable: bool = True, verbose: bool = True) -> bool:
         ``enable=True`` on a build without offload support warns and returns
         False — never hard-fails.
     """
-    global _GPU_OFFLOAD_REQUESTED
     import warnings
 
-    if enable:
-        if not gpu_offload_supported():
-            warnings.warn(
-                "set_gpu_offload(True): this ANUGA build has no GPU offload support "
-                "(built with gpu_offload=false) or no device is present; 'unified' "
-                "domains will run on CPU multicore. Rebuild with -Dgpu_offload=true "
-                "and a GPU-capable compiler to enable offload.",
-                stacklevel=2)
-            _GPU_OFFLOAD_REQUESTED = False
-            os.environ['OMP_TARGET_OFFLOAD'] = 'disabled'
-        else:
-            _GPU_OFFLOAD_REQUESTED = True
-            # Clear a prior disable so the runtime can offload.
-            if os.environ.get('OMP_TARGET_OFFLOAD', '').lower() == 'disabled':
-                del os.environ['OMP_TARGET_OFFLOAD']
-    else:
-        _GPU_OFFLOAD_REQUESTED = False
-        os.environ['OMP_TARGET_OFFLOAD'] = 'disabled'
+    ge = _gpu_ext_or_none()
+    if enable and not gpu_offload_supported():
+        warnings.warn(
+            "set_gpu_offload(True): this ANUGA build has no GPU offload support "
+            "(built with gpu_offload=false) or no device is present; 'unified' "
+            "domains will run on CPU multicore. Rebuild with -Dgpu_offload=true "
+            "and a GPU-capable compiler to enable offload.",
+            stacklevel=2)
+        enable = False
+
+    if ge is not None:
+        ge.set_offload_enabled(bool(enable))
 
     state = gpu_offload_enabled()
     if verbose:
         print(f"GPU offload {'enabled' if state else 'disabled'} "
               f"(process-wide; 'unified' domains run on {'GPU' if state else 'CPU multicore'})")
     return state
+
+
+def set_omp_num_threads(omp_num_threads: int | None = None, verbose: bool = True) -> int:
+    """Set the OpenMP thread count for ANUGA kernels (process-wide).
+
+    ``OMP_NUM_THREADS`` / ``omp_set_num_threads`` controls the whole process, so
+    this is a module-level setting, not per-domain — it affects every domain's
+    OpenMP regions (both the legacy ``sw_domain_openmp_ext`` solver and the
+    unified ``gpu_ext`` kernels). ``Domain.set_omp_num_threads`` delegates here.
+
+    Parameters
+    ----------
+    omp_num_threads : int or None
+        Thread count. If None, use ``OMP_NUM_THREADS`` from the environment,
+        defaulting to 1 when unset.
+    verbose : bool
+        Print a one-line confirmation.
+
+    Returns
+    -------
+    int
+        The thread count applied.
+    """
+    if omp_num_threads is None:
+        omp_num_threads = os.environ.get('OMP_NUM_THREADS', None)
+        if verbose:
+            print(f'Using OMP_NUM_THREADS from environment: {omp_num_threads}')
+
+    if omp_num_threads is None:
+        omp_num_threads = 1  # Default to 1 if not set
+
+    try:
+        omp_num_threads = int(omp_num_threads)
+    except (ValueError, TypeError):
+        raise ValueError('OMP_NUM_THREADS must be an integer')
+
+    # omp_set_num_threads is process-global: one call covers every OpenMP region
+    # in the process, so routing through the legacy extension also sets the
+    # thread count for the unified gpu_ext kernels.
+    from .sw_domain_openmp_ext import set_omp_num_threads as set_omp_num_threads_ext
+    set_omp_num_threads_ext(omp_num_threads)
+
+    if verbose:
+        print(f'Setting omp_num_threads to {omp_num_threads}')
+    return omp_num_threads
 
 
 class Domain(Generic_Domain):
@@ -5254,35 +5302,14 @@ class Domain(Generic_Domain):
         return self.multiprocessor_mode
 
     def set_omp_num_threads(self, omp_num_threads: int | None = None, verbose: bool = True) -> None:
+        """Set the OpenMP thread count (process-wide).
+
+        OpenMP thread count is a process-level setting, not per-domain. This is a
+        thin wrapper that delegates to the module-level
+        :func:`anuga.set_omp_num_threads`; prefer that in new code. Kept for
+        backward compatibility, and records ``self.omp_num_threads``.
         """
-        Set the number of OpenMP threads to use for multithread processing.
-        If OMP_NUM_THREADS is not set, this will set it to the specified
-        omp_num_threads value.
-        By default omp_num_threads is set to 1, other, it will use the default setting.
-        """
-
-        if omp_num_threads is None:
-            # Use the environment setting
-            omp_num_threads = os.environ.get('OMP_NUM_THREADS', None)
-            if verbose:
-                print(f'Using OMP_NUM_THREADS from environment: {omp_num_threads}')
-
-
-        if omp_num_threads is None:
-            omp_num_threads = 1  # Default to 1 if not set
-
-        try:
-            omp_num_threads = int(omp_num_threads)
-        except ValueError:
-            raise ValueError('OMP_NUM_THREADS must be an integer')
-
-        # Set the number of OpenMP threads
-        self.omp_num_threads = omp_num_threads
-        from .sw_domain_openmp_ext import set_omp_num_threads as set_omp_num_threads_ext
-        set_omp_num_threads_ext(omp_num_threads)
-
-        if verbose:
-            print(f'Setting omp_num_threads to {omp_num_threads}')
+        self.omp_num_threads = set_omp_num_threads(omp_num_threads, verbose=verbose)
 
 
     @property

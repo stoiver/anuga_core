@@ -160,9 +160,28 @@ the misleading "GPU<->CPU sync every RK2 step" warning stays suppressed on CPU (
 
 **Why offload is process-global, not per-domain:** OpenMP target offload is a process-level
 runtime ICV — one process cannot run the same unified kernels on GPU for domain A and CPU
-for domain B. Hence knob 2 is a module function. (Reliable runtime CPU-forcing on a GPU
-build would use `omp_set_default_device(host)` — a future C-exposed refinement; current
-impl uses `OMP_TARGET_OFFLOAD`, effective when set before the first target region.)
+for domain B. Hence knob 2 is a module function.
+
+**Offload mechanism (robust, re-enableable).** The kernels carry no `device()` clause and
+map arrays via `omp target enter data map` to the **default device**, and `gpu_domain_init`
+picks that device. So the offload decision must be honoured **at domain init** (where data
+is mapped), not flipped after. Implemented via a process-global flag in the C extension:
+- New C exposure in `sw_domain_gpu_ext`: `set_default_device`/`get_default_device`/
+  `get_initial_device` (wrap `omp_set_default_device` etc.) and
+  `set_offload_enabled`/`get_offload_enabled` (a `g_gpu_offload_enabled` flag, default on).
+- `gpu_domain_init` now routes to the host (`device_id=-1`,
+  `omp_set_default_device(omp_get_initial_device())`) when the flag is off — keeping data
+  mapping and execution consistently on CPU even on a GPU build.
+- `set_gpu_offload()` drives that flag (no `OMP_TARGET_OFFLOAD` mutation), so
+  `gpu_offload_supported()` (= `gpu_available()`, device count) stays stable and offload is
+  **re-enableable** — fixing the env-var trap where a disable made devices vanish.
+- Contract: call `set_gpu_offload()` **before building the first 'unified' domain** (device
+  chosen at init); toggling an already-mapped domain is unsupported.
+
+**`set_omp_num_threads` is now process-level too.** OpenMP thread count is a process ICV,
+so it moved to a module function `anuga.set_omp_num_threads()` (one `omp_set_num_threads`
+covers both the legacy and unified kernels). `Domain.set_omp_num_threads` stays as a thin
+backward-compatible wrapper that delegates and records `self.omp_num_threads`.
 
 **Parallel (MPI) safety guard.** `'unified'` exchanges ghosts at the C level
 (`exchange_ghosts`), a *silent no-op* unless `sw_domain_gpu_ext` was compiled with MPI

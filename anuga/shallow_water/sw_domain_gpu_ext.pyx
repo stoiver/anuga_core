@@ -285,6 +285,11 @@ cdef extern from "gpu_domain.h" nogil:
     int detect_gpu_aware_mpi()
     int gpu_is_available()
     int gpu_get_num_devices()
+    int gpu_get_initial_device()
+    int gpu_get_default_device()
+    void gpu_set_default_device(int device_id)
+    void gpu_set_offload_enabled(int enabled)
+    int gpu_get_offload_enabled()
 
     # Rate operators (rain, extraction, etc.)
     int gpu_rate_operator_init(gpu_domain *GD, int num_indices, int *indices,
@@ -906,6 +911,51 @@ def get_num_gpu_devices():
             pytest.skip(f'need 4 GPUs, have {n}')
     """
     return gpu_get_num_devices()
+
+
+def get_initial_device():
+    """Return the OpenMP initial (host) device number.
+
+    Pass this to :func:`set_default_device` to route subsequent ``omp target``
+    regions back to the host (CPU). Returns 0 in CPU_ONLY_MODE.
+    """
+    return gpu_get_initial_device()
+
+
+def get_default_device():
+    """Return the current OpenMP default offload device number.
+
+    The unified kernels run on the default device (no ``device()`` clause), so
+    this is the device they will use. Returns 0 in CPU_ONLY_MODE.
+    """
+    return gpu_get_default_device()
+
+
+def set_default_device(int device_id):
+    """Route subsequent ``omp target`` regions to ``device_id`` (process-wide).
+
+    The unified kernels carry no ``device()`` clause, so changing the default
+    device is a robust, runtime way to move work between a GPU and the host —
+    unlike ``OMP_TARGET_OFFLOAD``, which the runtime only reads at init. Pass
+    :func:`get_initial_device` to force the host (CPU). No-op in CPU_ONLY_MODE.
+    """
+    gpu_set_default_device(device_id)
+
+
+def set_offload_enabled(enabled):
+    """Set the process-global offload flag honoured at GPU-domain init.
+
+    When False, domains built afterwards stay on the host (CPU) even on a GPU
+    build, keeping data mapping and kernel execution consistent. Decide before
+    building the first 'unified' domain — the device is chosen when arrays are
+    mapped. Use :func:`anuga.set_gpu_offload` rather than calling this directly.
+    """
+    gpu_set_offload_enabled(1 if enabled else 0)
+
+
+def get_offload_enabled():
+    """Return the process-global offload flag (see :func:`set_offload_enabled`)."""
+    return bool(gpu_get_offload_enabled())
 
 
 def gpu_has_mpi():

@@ -54,7 +54,8 @@ def test(*args, **kwargs):
 # --------------------------------
 from anuga.shallow_water.shallow_water_domain import Domain
 from anuga.shallow_water.shallow_water_domain import (
-    set_gpu_offload, gpu_offload_enabled, gpu_offload_supported)
+    set_gpu_offload, gpu_offload_enabled, gpu_offload_supported,
+    set_omp_num_threads)
 from anuga.abstract_2d_finite_volumes.quantity import Quantity
 from anuga.abstract_2d_finite_volumes.region import Region
 from anuga.geospatial_data.geospatial_data import Geospatial_data
@@ -374,6 +375,7 @@ __all__ = [
     'set_gpu_offload',
     'gpu_offload_enabled',
     'gpu_offload_supported',
+    'set_omp_num_threads',
     'Geo_reference',
     'Geospatial_data',
     'Mesh',
