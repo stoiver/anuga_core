@@ -284,3 +284,22 @@ fallback. towradgi small (256k tri, -ft 200 -ys 50) confirms it: GPU 6.35s, `-ng
 bit-identical) only, NOT timing. For CPU-multicore performance, build with
 `-Dgpu_offload=false` (gcc → host-optimised `omp parallel for` via the `CPU_ONLY_MODE`
 macros). `set_gpu_offload(False)` warns about this on a GPU build.
+
+**This is a confirmed, documented NVHPC limitation, not an ANUGA bug** (investigated
+2026-06-13). The NVHPC Reference Guide defines `-mp=gpu` as "compiled for GPU execution
+*as well as host fallback to the CPU*" — and that host fallback runs **single-threaded**.
+A peer-reviewed compiler comparison (IPDPSW 2023, Iowa State) measured NVHPC host fallback
+at "OMP 1" (1 CPU thread) and found "the GPU code version on CPU in host fallback mode
+performs worse than the CPU version with 1 thread". NVHPC is also documented to handle
+nested/inner parallel regions poorly (NVIDIA recommends the `loop` directive over
+`teams distribute parallel for` for this reason). The fast multicore variant only exists
+when `-mp=multicore` is the *sole* mode; `-mp=gpu,multicore` does not let the runtime pick
+it on the host (verified across `OMP_TARGET_OFFLOAD=disabled`, `CUDA_VISIBLE_DEVICES=`,
+argument order, and `ACC_DEVICE_TYPE` — the last hangs). So a single nvc binary cannot be
+fast on both GPU and CPU; the two-build split (gcc CPU / nvc GPU) is required.
+
+References:
+- NVHPC Compilers Reference Guide 26.3 — https://docs.nvidia.com/hpc-sdk/compilers/hpc-compilers-ref-guide/index.html
+- "OpenMP Offload Features and Strategies for High Performance across Architectures and
+  Compilers", IPDPSW 2023 — https://swapp.cs.iastate.edu/files/inline-files/OpenMP_Offload_Features_and_Strategies_for_High_Performance_across_Architectures_and_Compilers-ipdpsw-may-2023.pdf
+- OMP_TARGET_OFFLOAD, OpenMP 5.0 spec — https://www.openmp.org/spec-html/5.0/openmpse65.html

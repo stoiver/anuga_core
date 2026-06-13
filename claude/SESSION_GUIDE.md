@@ -65,7 +65,33 @@ pytest anuga/shallow_water/tests/test_shallow_water_domain.py  # single file
 ```bash
 conda activate anuga_env_3.14
 pip install --no-build-isolation -e .
+
+# CPU multicore (distribution default — fast on CPU). gcc, host omp parallel for:
+CC=gcc pip install --no-build-isolation -e . -Csetup-args=-Dgpu_offload=false
+
+# GPU offload (fast on GPU). nvc from the NVIDIA HPC SDK:
+CC=nvc pip install --no-build-isolation -e . \
+    -Csetup-args=-Dgpu_offload=true -Csetup-args=-Dgpu_arch=cc120
 ```
+**CPU and GPU are separate builds** — one nvc binary can't be fast on both (NVHPC's OpenMP
+host fallback is single-threaded; see KNOWN_ISSUES). For CPU performance use the gcc
+`gpu_offload=false` build; the GPU build is for GPU runs (and correctness A/B on CPU only).
+
+### Compute model (v4.0) — two orthogonal knobs
+```python
+# Per-domain: which compute path (legacy mode 1 vs unified C kernels mode 2)
+domain.set_compute_mode('legacy')    # = set_multiprocessor_mode(1): openmp_ext + Python ops
+domain.set_compute_mode('unified')   # = set_multiprocessor_mode(2): unified gpu_ext C kernels
+
+# Process-global (call before the first evolve()):
+anuga.set_gpu_offload(True/False)    # offload unified kernels to GPU (GPU build only)
+anuga.set_omp_num_threads(16)        # OpenMP thread count for the whole process
+anuga.gpu_offload_enabled()          # resolved offload state
+domain.compute_capabilities()        # {gpu_offload, num_gpu_devices, mpi, modes}
+```
+`cpu` = unified + offload off; `gpu` = unified + offload on (compositions, not modes).
+CLI: `-mpm 1|2`, `-nt N`, `-go`/`-ngo` (gpu offload on/off), `-ro metis_rcm` (reorder).
+Rationale + the nvc finding: `claude/DECISIONS.md` and `claude/KNOWN_ISSUES.md`.
 
 ### Check code quality
 ```bash
