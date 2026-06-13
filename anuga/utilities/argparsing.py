@@ -62,11 +62,15 @@ def create_standard_parser():
                        help='number of OpenMP threads (process-wide). '
                             'Defaults to the OMP_NUM_THREADS environment variable if unset')
 
-    parser.add_argument('-go', '--gpu_offload', action=argparse.BooleanOptionalAction,
-                       default=None,
-                       help='enable/disable GPU offload for mode-2 (unified) domains, '
-                            'process-wide: --gpu_offload to offload to a GPU, '
-                            '--no-gpu_offload to force CPU multicore. '
+    # GPU offload for mode-2 (unified) domains, process-wide. Tri-state: leave
+    # unset to follow the build (offload on a GPU build), or force on/off.
+    parser.add_argument('-go', '--gpu_offload', dest='gpu_offload',
+                       action='store_const', const=True, default=None,
+                       help='enable GPU offload for mode-2 (unified) domains (process-wide)')
+    parser.add_argument('-ngo', '--no-gpu_offload', '--no_gpu_offload', dest='gpu_offload',
+                       action='store_const', const=False,
+                       help='force CPU multicore for mode-2 (unified) domains '
+                            '(process-wide); shortcut for the -go off case. '
                             'Default: follow the build (offload on a GPU build)')
 
     parser.add_argument('-ps', '--partition_scheme', type=str, default='metis',
