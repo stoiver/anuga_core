@@ -2492,6 +2492,32 @@ class Domain(Generic_Domain):
 
         nvtxRangePop()
 
+    def _warn_unsupported_mode2_forcing(self):
+        """Warn (once) if forcing terms other than Manning friction are present
+        in mode 2.
+
+        The mode-2 C step loop applies forcing in C and only handles Manning
+        friction, so Python ``forcing_terms`` (e.g. the Rainfall / Wind_stress /
+        Barometric_pressure forcing-function classes) are NOT applied — they are
+        silently skipped. Use the equivalent operators instead. This converts
+        that silent correctness gap into a loud, actionable message.
+        """
+        if getattr(self, '_warned_mode2_forcing', False):
+            return
+        self._warned_mode2_forcing = True
+        ignored = [getattr(f, '__name__', None) or f.__class__.__name__
+                   for f in self.forcing_terms
+                   if getattr(f, '__name__', None) != 'manning_friction_semi_implicit']
+        if ignored:
+            import warnings
+            warnings.warn(
+                "multiprocessor_mode=2 ('unified') applies forcing in C and only "
+                "handles Manning friction; these Python forcing terms are NOT "
+                f"applied and are silently skipped: {ignored}. Use the equivalent "
+                "operators instead — Rate_operator.rainfall()/inflow(), "
+                "Wind_stress_operator, Barometric_pressure_operator.",
+                stacklevel=2)
+
     def distribute_to_vertices_and_edges(self, distribute_to_vertices=True):
         """ extrapolate centroid values to vertices and edges"""
 
@@ -2955,6 +2981,7 @@ class Domain(Generic_Domain):
         # apply_fractional_steps() does not repeat it.
         if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
             self._has_cpu_only_fractional_operators()
+            self._warn_unsupported_mode2_forcing()
 
         #nvtx marker
         nvtxRangePush('_evolve_base')

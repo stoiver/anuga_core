@@ -362,3 +362,37 @@ runtime knob re-routes the host execution to the fast multicore variant.
 **Decision:** Standard arg parser (`anuga.get_args`) gains `-nt/--omp_num_threads`,
 `-go/--gpu_offload`, and `-ngo/--no-gpu_offload` (tri-state; unset = follow the build).
 Scripts apply them right after parsing, before building the domain.
+
+### Forcing-function classes → operators: confirm removal, add mode-2 safety (2026-06-14)
+
+**Context:** `forcing.py`'s `Wind_stress`, `Rainfall`, `Inflow`, `Barometric_pressure`
+were already **deprecated** in session 25 (`DeprecationWarning`, suppressed in tests via
+`pyproject.toml`). Operator equivalents exist: `Rate_operator.rainfall()`/`inflow()`,
+`Wind_stress_operator`, `Barometric_pressure_operator`. Manning friction
+(`manning_friction_semi_implicit`) stays a forcing term and is NOT deprecated.
+
+**Decision:** Mode 2 confirms the direction toward **removal** (the next phase after
+deprecation). Interim safety warning added now; remove after a release (see FUTURE_WORK).
+Also verify the `_fast` variants (`Wind_stress_fast`, `Barometric_pressure_fast`) carry
+the same deprecation.
+
+**Why:** Forcing terms are evaluated *inside* the timestep (`compute_forcing_terms`).
+The mode-2 C step loop does forcing in C and only handles Manning, so Python forcing
+terms are **silently skipped** in mode 2 (surfaced by
+`test_rainfall_forcing_with_evolve_1`). Honouring them would require a
+`sync_from_device → f() → sync_to_device` every step — the serial-Python-per-step cost
+the mode-2 work exists to eliminate. Operators run via `apply_fractional_steps`
+(fractional-step splitting), which mode 2 already supports — C kernels where they exist
+(rate/inlet/culvert) and a clean one-sync Python fallback where they don't
+(wind/barometric). So operators are the architecturally correct path for mode 2, and the
+forcing classes are redundant.
+
+**Caveats:** (1) Manning must stay in-step (semi-implicit, stability) — the
+`forcing_terms` mechanism is kept for it; only the optional classes are deprecated.
+(2) Forcing-as-forcing-term (in-step) vs operator (end-of-step fractional split) are NOT
+bit-identical; for slowly-varying rain/wind/barometric the difference is negligible and
+operators are the modern standard, but it is a documented numerics change.
+
+**Interim safety (done 2026-06-14):** until the classes are removed, mode 2 warns once
+(`Domain._warn_unsupported_mode2_forcing`) when `forcing_terms` contains anything other
+than Manning, turning the silent skip into a loud, actionable message.

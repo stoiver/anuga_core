@@ -42,6 +42,20 @@ C header, Cython wrapper, scenario system, and tests. Deleted
 
 ## Priority 2 — Medium effort (1–2 weeks each)
 
+**P2.10 Remove the deprecated forcing-function classes** — `Wind_stress`, `Rainfall`,
+`Inflow`, `Barometric_pressure` (and `_fast` variants) in `shallow_water/forcing.py` were
+deprecated in session 25 (P1.5). Now driven by mode 2: the C step loop only applies
+Manning friction, so these are **silently skipped** in mode 2 (a one-time warning was
+added 2026-06-14 — `Domain._warn_unsupported_mode2_forcing`). Next phase = removal: (1)
+migrate any remaining `validation_tests/`, `examples/`, and unit tests off the forcing
+classes onto the operators (`Rate_operator.rainfall()`/`inflow()`, `Wind_stress_operator`,
+`Barometric_pressure_operator`); (2) the mode-2 unified-default suite has a handful of
+failures from forcing-as-forcing-term tests (`test_rainfall_forcing_with_evolve_1`,
+`test_volume_conservation_rain`) — migrate or scope to legacy; (3) delete the classes +
+their `pyproject.toml` `filterwarnings` entries after a release. Keep `manning_friction_
+semi_implicit` (in-step semi-implicit; not an operator). See `DECISIONS.md` → "Forcing-
+function classes → operators". Verify `_fast` variants carry the deprecation warning too.
+
 ~~**P2.1 Type hints on the public API**~~ — Done (session 33). Annotated ~130 public methods
 across four files using `from __future__ import annotations` (PEP 563, Python 3.10+ compatible).
 `base_operator.Operator` (11 methods, full coverage), `quantity.Quantity` (~28 methods),
