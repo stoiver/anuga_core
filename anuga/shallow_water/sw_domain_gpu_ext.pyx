@@ -197,7 +197,7 @@ cdef extern from "gpu_domain.h" nogil:
     # Dirichlet boundary
     int gpu_dirichlet_init(gpu_domain *GD, int num_edges,
                            int *boundary_indices, int *vol_ids, int *edge_ids,
-                           double stage_value, double xmom_value, double ymom_value)
+                           double *stage_values, double *xmom_values, double *ymom_values)
     void gpu_dirichlet_finalize(gpu_domain *GD)
     void gpu_evaluate_dirichlet_boundary(gpu_domain *GD)
 
@@ -1235,26 +1235,34 @@ def init_dirichlet_boundary(GPUDomain gpu_dom, object domain_object):
     cdef np.ndarray[int, ndim=1, mode="c"] boundary_indices
     cdef np.ndarray[int, ndim=1, mode="c"] vol_ids_arr
     cdef np.ndarray[int, ndim=1, mode="c"] edge_ids_arr
-    cdef double stage_value = 0.0
-    cdef double xmom_value = 0.0
-    cdef double ymom_value = 0.0
+    cdef np.ndarray[double, ndim=1, mode="c"] stage_values_arr
+    cdef np.ndarray[double, ndim=1, mode="c"] xmom_values_arr
+    cdef np.ndarray[double, ndim=1, mode="c"] ymom_values_arr
 
     if domain_object.boundary_map is None:
         return
 
-    # Find Dirichlet boundaries - note: all Dirichlet boundaries must have same values
-    # for GPU evaluation (limitation - could be extended to per-tag values)
+    # Collect every Dirichlet boundary edge with that boundary's own values, so
+    # multiple Dirichlet boundaries with different values are handled per-edge.
     all_ids = []
+    all_stage = []
+    all_xmom = []
+    all_ymom = []
     for tag, boundary in domain_object.boundary_map.items():
         if boundary is not None and boundary.__class__.__name__ == 'Dirichlet_boundary':
             segment_edges = domain_object.tag_boundary_cells.get(tag, None)
             if segment_edges is not None and len(segment_edges) > 0:
-                all_ids.extend(segment_edges)
-                # Get Dirichlet values from first boundary found
                 if hasattr(boundary, 'dirichlet_values') and len(boundary.dirichlet_values) >= 3:
-                    stage_value = float(boundary.dirichlet_values[0])
-                    xmom_value = float(boundary.dirichlet_values[1])
-                    ymom_value = float(boundary.dirichlet_values[2])
+                    s = float(boundary.dirichlet_values[0])
+                    x = float(boundary.dirichlet_values[1])
+                    y = float(boundary.dirichlet_values[2])
+                else:
+                    s = x = y = 0.0
+                for e in segment_edges:
+                    all_ids.append(e)
+                    all_stage.append(s)
+                    all_xmom.append(x)
+                    all_ymom.append(y)
 
     if len(all_ids) == 0:
         return
@@ -1264,10 +1272,13 @@ def init_dirichlet_boundary(GPUDomain gpu_dom, object domain_object):
     boundary_indices = ids
     vol_ids_arr = np.ascontiguousarray(domain_object.boundary_cells[ids], dtype=np.intc)
     edge_ids_arr = np.ascontiguousarray(domain_object.boundary_edges[ids], dtype=np.intc)
+    stage_values_arr = np.ascontiguousarray(all_stage, dtype=np.float64)
+    xmom_values_arr = np.ascontiguousarray(all_xmom, dtype=np.float64)
+    ymom_values_arr = np.ascontiguousarray(all_ymom, dtype=np.float64)
 
     gpu_dirichlet_init(&gpu_dom.GD, num_edges,
                        &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0],
-                       stage_value, xmom_value, ymom_value)
+                       &stage_values_arr[0], &xmom_values_arr[0], &ymom_values_arr[0])
 
 
 def evaluate_dirichlet_boundary_gpu(GPUDomain gpu_dom):

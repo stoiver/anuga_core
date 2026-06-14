@@ -2465,9 +2465,11 @@ class Domain(Generic_Domain):
         nvtxRangePush('compute_forcing_terms')
 
         if self.multiprocessor_mode == MULTIPROCESSOR_GPU:
-            # GPU mode: use GPU Manning friction, fall back to CPU for others
+            # GPU mode: use GPU Manning friction, fall back to CPU for others.
+            # Forcing terms may be plain functions (with __name__) or callable
+            # operator objects (Rainfall, Wind_stress, ...) which have none.
             for f in self.forcing_terms:
-                if f.__name__ == 'manning_friction_semi_implicit':
+                if getattr(f, '__name__', None) == 'manning_friction_semi_implicit':
                     self.gpu_interface.manning_friction_kernel(self)
                 else:
                     # Other forcing terms (rain, etc.) run on CPU

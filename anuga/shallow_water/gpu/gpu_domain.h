@@ -72,9 +72,9 @@ struct dirichlet_boundary {
     int *boundary_indices;       // Where to write in boundary_values arrays [num_edges]
     int *vol_ids;                // Interior cell IDs [num_edges]
     int *edge_ids;               // Which edge (0, 1, or 2) [num_edges]
-    double stage_value;          // Constant stage value
-    double xmom_value;           // Constant xmom value
-    double ymom_value;           // Constant ymom value
+    double *stage_values;        // Per-edge constant stage value [num_edges]
+    double *xmom_values;         // Per-edge constant xmom value  [num_edges]
+    double *ymom_values;         // Per-edge constant ymom value  [num_edges]
     int mapped;                  // Whether arrays are mapped to GPU
 };
 
@@ -480,7 +480,7 @@ void gpu_evaluate_reflective_boundary(struct gpu_domain *GD);
 // Dirichlet boundary - constant values at boundary
 int gpu_dirichlet_init(struct gpu_domain *GD, int num_edges,
                        int *boundary_indices, int *vol_ids, int *edge_ids,
-                       double stage_value, double xmom_value, double ymom_value);
+                       double *stage_values, double *xmom_values, double *ymom_values);
 void gpu_dirichlet_finalize(struct gpu_domain *GD);
 void gpu_evaluate_dirichlet_boundary(struct gpu_domain *GD);
 

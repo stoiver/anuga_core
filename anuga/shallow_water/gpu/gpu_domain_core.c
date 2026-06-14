@@ -304,9 +304,9 @@ int gpu_domain_init(struct gpu_domain *GD, MPI_Comm comm, int rank, int nprocs) 
     GD->dirichlet.boundary_indices = NULL;
     GD->dirichlet.vol_ids = NULL;
     GD->dirichlet.edge_ids = NULL;
-    GD->dirichlet.stage_value = 0.0;
-    GD->dirichlet.xmom_value = 0.0;
-    GD->dirichlet.ymom_value = 0.0;
+    GD->dirichlet.stage_values = NULL;
+    GD->dirichlet.xmom_values = NULL;
+    GD->dirichlet.ymom_values = NULL;
     GD->dirichlet.mapped = 0;
 
     // Initialize transmissive boundary to empty
@@ -574,8 +574,12 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
         int *b_idx = Dir->boundary_indices;
         int *v_ids = Dir->vol_ids;
         int *e_ids = Dir->edge_ids;
+        double *s_val = Dir->stage_values;
+        double *x_val = Dir->xmom_values;
+        double *y_val = Dir->ymom_values;
 
-        #pragma omp target enter data map(to: b_idx[0:ne], v_ids[0:ne], e_ids[0:ne])
+        #pragma omp target enter data map(to: b_idx[0:ne], v_ids[0:ne], e_ids[0:ne], \
+                                              s_val[0:ne], x_val[0:ne], y_val[0:ne])
         Dir->mapped = 1;
 
         if (GD->rank == 0 && GD->verbose) {
