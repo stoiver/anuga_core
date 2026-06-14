@@ -3494,7 +3494,16 @@ class Domain(Generic_Domain):
                 stage_val = float(value[0])
             set_flather_value(gpu_dom, stage_val)
 
-        remaining_yieldstep = yieldstep - (self.get_relative_time() % yieldstep)
+        # Time remaining to the next yield boundary. Use the explicitly tracked
+        # relative_yieldtime (set and incremented by the evolve loop), NOT
+        # (relative_time % yieldstep): the modulo is floating-point fragile, e.g.
+        # 0.3 % 0.1 == 0.0999... gives remaining ~1e-17 -> max_timestep ~0 ->
+        # the step never advances and evolve() spins. Mirrors update_timestep().
+        relative_yieldtime = getattr(self, 'relative_yieldtime', None)
+        if relative_yieldtime is not None:
+            remaining_yieldstep = relative_yieldtime - self.get_relative_time()
+        else:
+            remaining_yieldstep = yieldstep
         if finaltime is not None:
             remaining_finaltime = finaltime - self.get_time()
             max_timestep = min(self.evolve_max_timestep, remaining_yieldstep, remaining_finaltime)
@@ -3853,7 +3862,16 @@ class Domain(Generic_Domain):
             set_flather_value(gpu_dom, stage_val)
 
         # Compute max allowed timestep (mirrors update_timestep() logic)
-        remaining_yieldstep = yieldstep - (self.get_relative_time() % yieldstep)
+        # Time remaining to the next yield boundary. Use the explicitly tracked
+        # relative_yieldtime (set and incremented by the evolve loop), NOT
+        # (relative_time % yieldstep): the modulo is floating-point fragile, e.g.
+        # 0.3 % 0.1 == 0.0999... gives remaining ~1e-17 -> max_timestep ~0 ->
+        # the step never advances and evolve() spins. Mirrors update_timestep().
+        relative_yieldtime = getattr(self, 'relative_yieldtime', None)
+        if relative_yieldtime is not None:
+            remaining_yieldstep = relative_yieldtime - self.get_relative_time()
+        else:
+            remaining_yieldstep = yieldstep
         if finaltime is not None:
             remaining_finaltime = finaltime - self.get_time()
             max_timestep = min(self.evolve_max_timestep, remaining_yieldstep, remaining_finaltime)
@@ -3988,7 +4006,16 @@ class Domain(Generic_Domain):
 
         # Compute max allowed timestep (respecting yieldstep and finaltime)
         # This mirrors the logic in update_timestep()
-        remaining_yieldstep = yieldstep - (self.get_relative_time() % yieldstep)
+        # Time remaining to the next yield boundary. Use the explicitly tracked
+        # relative_yieldtime (set and incremented by the evolve loop), NOT
+        # (relative_time % yieldstep): the modulo is floating-point fragile, e.g.
+        # 0.3 % 0.1 == 0.0999... gives remaining ~1e-17 -> max_timestep ~0 ->
+        # the step never advances and evolve() spins. Mirrors update_timestep().
+        relative_yieldtime = getattr(self, 'relative_yieldtime', None)
+        if relative_yieldtime is not None:
+            remaining_yieldstep = relative_yieldtime - self.get_relative_time()
+        else:
+            remaining_yieldstep = yieldstep
         if finaltime is not None:
             remaining_finaltime = finaltime - self.get_time()
             max_timestep = min(self.evolve_max_timestep, remaining_yieldstep, remaining_finaltime)
@@ -4324,7 +4351,16 @@ class Domain(Generic_Domain):
             set_flather_value(gpu_dom, stage_val)
 
         # Compute max allowed timestep (respecting yieldstep and finaltime)
-        remaining_yieldstep = yieldstep - (self.get_relative_time() % yieldstep)
+        # Time remaining to the next yield boundary. Use the explicitly tracked
+        # relative_yieldtime (set and incremented by the evolve loop), NOT
+        # (relative_time % yieldstep): the modulo is floating-point fragile, e.g.
+        # 0.3 % 0.1 == 0.0999... gives remaining ~1e-17 -> max_timestep ~0 ->
+        # the step never advances and evolve() spins. Mirrors update_timestep().
+        relative_yieldtime = getattr(self, 'relative_yieldtime', None)
+        if relative_yieldtime is not None:
+            remaining_yieldstep = relative_yieldtime - self.get_relative_time()
+        else:
+            remaining_yieldstep = yieldstep
         if finaltime is not None:
             remaining_finaltime = finaltime - self.get_time()
             max_timestep = min(self.evolve_max_timestep, remaining_yieldstep, remaining_finaltime)
