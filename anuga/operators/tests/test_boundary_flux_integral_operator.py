@@ -121,6 +121,26 @@ class Test_boundary_flux_integral_operator(unittest.TestCase):
         if verbose: print(flowalg, vol, boundaryFluxInt)
         assert(numpy.allclose(vol,boundaryFluxInt))
 
+    def test_boundary_flux_operator_DE_ader2(self):
+        """
+        A (the) boundary flux operator is instantiated when a domain is created.
+        This tests the calculation for ader2 timestepping
+        """
+
+        flowalg = 'DE_ader2'
+
+        domain=self.create_domain(flowalg)
+        for t in domain.evolve(yieldstep=1.0,finaltime=5.0):
+            if verbose: domain.print_timestepping_statistics()
+            if verbose: print(domain.get_water_volume(), domain.get_boundary_flux_integral())
+            pass
+        # The domain was initially dry
+        vol=domain.get_water_volume()
+        boundaryFluxInt=domain.get_boundary_flux_integral()
+
+        if verbose: print(flowalg, vol, boundaryFluxInt)
+        assert(numpy.allclose(vol,boundaryFluxInt))
+
 
 class Test_boundary_flux_integral_operator_extra(unittest.TestCase):
     """Tests for uncovered methods in boundary_flux_integral_operator."""

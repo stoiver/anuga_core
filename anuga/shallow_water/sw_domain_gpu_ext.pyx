@@ -89,6 +89,9 @@ cdef extern from "gpu_domain.h" nogil:
         double* max_speed
         double* centroid_coordinates
         double* edge_coordinates
+        # Boundary flux accumulator (written by core_compute_fluxes_central,
+        # read by the Python boundary_flux_integral_operator)
+        double* boundary_flux_sum
         # Work arrays for extrapolation
         double* x_centroid_work
         double* y_centroid_work
@@ -254,7 +257,7 @@ cdef extern from "gpu_domain.h" nogil:
 
     # GPU kernels
     void gpu_extrapolate_second_order(gpu_domain *GD)
-    double gpu_compute_fluxes(gpu_domain *GD)
+    double gpu_compute_fluxes(gpu_domain *GD, int substep_count, int timestep_fluxcalls)
     void gpu_update_conserved_quantities(gpu_domain *GD, double timestep)
     void gpu_backup_conserved_quantities(gpu_domain *GD)
     void gpu_saxpy_conserved_quantities(gpu_domain *GD, double a, double b)
@@ -511,6 +514,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     cdef double[:,::1] centroid_coords, edge_coords
     cdef double[::1] x_centroid_work, y_centroid_work
     cdef int64_t[::1] tri_full_flag
+    cdef double[::1] boundary_flux_sum_arr
 
     # Get basic parameters
     D.number_of_elements = domain_object.number_of_elements
@@ -627,6 +631,12 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
 
     max_speed = domain_object.max_speed
     D.max_speed = &max_speed[0]
+
+    # Boundary flux accumulator. core_compute_fluxes_central writes the per-substep
+    # boundary flux here (host-side, after the reduction), and the Python
+    # boundary_flux_integral_operator reads domain.boundary_flux_sum.
+    boundary_flux_sum_arr = domain_object.boundary_flux_sum
+    D.boundary_flux_sum = &boundary_flux_sum_arr[0]
 
     # tri_full_flag: 1 for owned (full) triangles, 0 for ghost triangles.
     # Required so compute_fluxes excludes ghosts from the local timestep minimum.
@@ -1865,7 +1875,8 @@ def compute_fluxes_gpu(GPUDomain gpu_dom):
     float
         The local minimum timestep (caller should do MPI_Allreduce for global min)
     """
-    return gpu_compute_fluxes(&gpu_dom.GD)
+    # Standalone single flux call: substep 0 of 1 (euler-equivalent).
+    return gpu_compute_fluxes(&gpu_dom.GD, 0, 1)
 
 
 def update_conserved_quantities_gpu(GPUDomain gpu_dom, double timestep):
