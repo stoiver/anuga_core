@@ -392,8 +392,10 @@ class Test_GPU_Boundaries(unittest.TestCase):
 class Test_GPU_Initialization(unittest.TestCase):
     """Tests for GPU initialization and error handling."""
 
-    def test_boundary_before_gpu_mode(self):
-        """Test that boundaries must be set before GPU mode."""
+    def test_mode2_without_boundaries_defers_interface(self):
+        """Mode 2 can be selected before boundaries are set: the device
+        interface build is deferred to the first evolve() (boundaries are
+        typically set after construction), so this must NOT raise."""
         domain = rectangular_cross_domain(5, 5, len1=50., len2=50.)
         domain.set_flow_algorithm('DE0')
         domain.set_name('test_init')
@@ -403,12 +405,11 @@ class Test_GPU_Initialization(unittest.TestCase):
         domain.set_quantity('elevation', -1.0)
         domain.set_quantity('stage', 0.0)
 
-        # Do NOT set boundaries, then try to enable GPU mode
-        # This should raise RuntimeError
-        with self.assertRaises(RuntimeError) as context:
-            domain.set_multiprocessor_mode(2)
-
-        self.assertIn("boundaries", str(context.exception).lower())
+        # No boundaries set: selecting mode 2 records the mode but defers the
+        # device interface (built lazily once boundaries are available).
+        domain.set_multiprocessor_mode(2)
+        self.assertEqual(domain.multiprocessor_mode, 2)
+        self.assertIsNone(domain.gpu_interface)
 
     def test_correct_initialization_order(self):
         """Test that correct initialization order works."""

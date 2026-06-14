@@ -523,7 +523,13 @@ class Domain(Generic_Domain):
         #-------------------------------
         self.gpu_interface = None
         self.use_c_rk_loop = True  # Use C RK loop (faster) vs Python-orchestrated GPU loop
-        self.set_multiprocessor_mode(MULTIPROCESSOR_OPENMP)  # Default to OpenMP (use MULTIPROCESSOR_GPU for GPU)
+        # Default compute mode: 'legacy' (mode 1). Set ANUGA_DEFAULT_COMPUTE_MODE=unified
+        # to default new domains to mode 2 (the migration target); the device interface
+        # is then built lazily at first evolve() so construction needs no boundaries.
+        if os.environ.get('ANUGA_DEFAULT_COMPUTE_MODE', 'legacy').lower() == 'unified':
+            self.set_compute_mode('unified')
+        else:
+            self.set_compute_mode('legacy')
 
         #-------------------------------
         # C extension domain structure
@@ -2282,6 +2288,7 @@ class Domain(Generic_Domain):
         # procedure
 
         nvtxRangePush("compute_fluxes")
+        self._ensure_gpu_interface()
         # Choose the correct extension module
         if self.multiprocessor_mode == MULTIPROCESSOR_OPENMP:
             from .sw_domain_openmp_ext import compute_fluxes_ext_central
@@ -2464,6 +2471,8 @@ class Domain(Generic_Domain):
 
         nvtxRangePush('compute_forcing_terms')
 
+        self._ensure_gpu_interface()
+
         if self.multiprocessor_mode == MULTIPROCESSOR_GPU:
             # GPU mode: use GPU Manning friction, fall back to CPU for others.
             # Forcing terms may be plain functions (with __name__) or callable
@@ -2487,6 +2496,10 @@ class Domain(Generic_Domain):
         """ extrapolate centroid values to vertices and edges"""
 
         nvtxRangePush('distribute_to_vertices_and_edges')
+
+        # Build a deferred mode-2 device interface on demand (a default-'unified'
+        # domain may reach here, e.g. from a test, without going through evolve()).
+        self._ensure_gpu_interface()
 
         # Sync from GPU if in GPU mode (needed before CPU reads data at yieldsteps)
         if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
@@ -2919,6 +2932,12 @@ class Domain(Generic_Domain):
 
         msg = 'Attribute self.beta_w must be in the interval [0, 2]'
         assert 0 <= self.beta_w <= 2.0, msg
+
+        # Build the mode-2 device interface lazily if it was deferred (a
+        # default-'unified' domain constructed before boundaries were set). Must
+        # happen before distribute_to_vertices_and_edges(), which uses the
+        # interface in mode 2.
+        self._ensure_gpu_interface()
 
         # Initial update of vertex and edge values before any STORAGE
         # and or visualisation.
@@ -5288,12 +5307,41 @@ class Domain(Generic_Domain):
         else:  # 'unified' -> mode 2 (unified gpu_ext kernels)
             self.multiprocessor_mode = MULTIPROCESSOR_GPU
             self.use_c_rk_loop = True
-            self.set_gpu_interface()
+            # Build the device interface now if boundaries are ready; otherwise
+            # defer to the first evolve(). Boundaries are typically set AFTER
+            # construction, so a default-'unified' domain must not require them
+            # at __init__ time.
+            if self._boundaries_ready():
+                self.set_gpu_interface()
 
         if verbose:
             print(f"Compute mode: requested {requested!r} -> active {self.compute_mode!r} "
                   f"(multiprocessor_mode={self.multiprocessor_mode}, "
                   f"gpu_offload={'on' if gpu_offload_enabled() else 'off'})")
+
+    def _boundaries_ready(self) -> bool:
+        """True if real boundary objects are set — required to build the gpu_ext
+        device interface. After distribute() boundary_map may be
+        ``{'exterior': None, 'ghost': None}`` (not None but no real boundaries).
+        """
+        bmap = getattr(self, 'boundary_map', None)
+        return bool(bmap) and any(b is not None for b in bmap.values())
+
+    def _ensure_gpu_interface(self) -> None:
+        """Build a deferred mode-2 device interface on demand.
+
+        For a default-'unified' domain the interface is built lazily (boundaries
+        are set after construction). Build it the first time a mode-2 path needs
+        it. If boundaries are still not set — e.g. a test that pokes the domain
+        without a full boundary setup — fall back to 'legacy' so the operation
+        can proceed rather than hit a None gpu_interface.
+        """
+        if self.multiprocessor_mode != MULTIPROCESSOR_GPU or self.gpu_interface is not None:
+            return
+        if self._boundaries_ready():
+            self.set_gpu_interface()
+        else:
+            self.set_compute_mode('legacy')
 
     def get_compute_mode(self) -> str:
         """Return the active per-domain compute mode: 'legacy' or 'unified'."""
