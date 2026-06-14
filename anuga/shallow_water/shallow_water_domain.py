@@ -3543,7 +3543,8 @@ class Domain(Generic_Domain):
         self.timestep = evolve_one_ader2_step_gpu(gpu_dom, max_timestep, 1, self._ader2_prev_dt)
         self._ader2_prev_dt = self.timestep
 
-        self.set_relative_time(self.get_relative_time() + self.timestep)
+        # Do NOT advance relative_time here — the evolve loop does it after
+        # apply_fractional_steps(); see _evolve_one_euler_step_c for why.
         self.recorded_max_timestep = max(self.timestep, self.recorded_max_timestep)
         self.recorded_min_timestep = min(self.timestep, self.recorded_min_timestep)
 
@@ -3908,8 +3909,11 @@ class Domain(Generic_Domain):
         # Execute full Euler step in C (includes MPI timestep reduction)
         self.timestep = evolve_one_euler_step_gpu(gpu_dom, max_timestep, 1)
 
-        # Update internal time tracking
-        self.set_relative_time(self.get_relative_time() + self.timestep)
+        # NOTE: do NOT advance relative_time here. The evolve loop advances it
+        # (relative_time = initial_relative_time + timestep) AFTER
+        # apply_fractional_steps(), so advancing it here makes time-dependent
+        # operators (variable-Q inlet, time-varying rate, ...) see the time one
+        # step too far — they would evaluate forcing at t+dt instead of t.
 
         # Record timestep stats
         self.recorded_max_timestep = max(self.timestep, self.recorded_max_timestep)
@@ -4053,8 +4057,8 @@ class Domain(Generic_Domain):
         # apply_forcing=1 enables Manning friction on GPU
         self.timestep = evolve_one_rk2_step_gpu(gpu_dom, max_timestep, 1)
 
-        # Update internal time tracking
-        self.set_relative_time(self.get_relative_time() + self.timestep)
+        # Do NOT advance relative_time here — the evolve loop does it after
+        # apply_fractional_steps(); see _evolve_one_euler_step_c for why.
 
         # Record timestep stats
         self.recorded_max_timestep = max(self.timestep, self.recorded_max_timestep)

@@ -118,6 +118,13 @@ class Inlet_operator(anuga.Operator):
         Q1 = self.update_Q(t)
         Q2 = self.update_Q(t + timestep)
         Q = 0.5 * (Q1 + Q2)
+        # update_Q may return a length-1 array (time-varying / file Q); the GPU
+        # kernel (and the scalar volume tracking below) need a Python float —
+        # numpy 2.x rejects float() on a >0-d array.
+        try:
+            Q = float(Q)
+        except (TypeError, ValueError):
+            Q = float(numpy.asarray(Q).ravel()[0])
         volume = Q * timestep
 
         self.applied_Q = Q
