@@ -526,7 +526,17 @@ class Domain(Generic_Domain):
         # Default compute mode: 'legacy' (mode 1). Set ANUGA_DEFAULT_COMPUTE_MODE=unified
         # to default new domains to mode 2 (the migration target); the device interface
         # is then built lazily at first evolve() so construction needs no boundaries.
-        if os.environ.get('ANUGA_DEFAULT_COMPUTE_MODE', 'legacy').lower() == 'unified':
+        # SERIAL ONLY: under MPI (numprocs > 1) the env opt-in is ignored and domains
+        # stay 'legacy'. Mode-2 parallel is validated for purpose-built setups (it must
+        # be selected explicitly), but is not yet robust as a blanket default for every
+        # parallel test's evolve pattern — defaulting all parallel domains to mode 2
+        # deadlocks the MPI path. Parallel unified is a later migration step.
+        try:
+            from anuga import numprocs
+        except Exception:
+            numprocs = 1
+        if (numprocs == 1
+                and os.environ.get('ANUGA_DEFAULT_COMPUTE_MODE', 'legacy').lower() == 'unified'):
             self.set_compute_mode('unified')
         else:
             self.set_compute_mode('legacy')
