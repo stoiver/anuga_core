@@ -129,6 +129,15 @@ It also crashes the *whole* `pytest --pyargs anuga.shallow_water` run (in either
 these GPU tests set mode 2 explicitly regardless of the env default — the abort
 at ~3% kills the run before the rest of the suite executes.
 
+**On a GPU build, `ANUGA_DEFAULT_COMPUTE_MODE=unified` over the full suite is not
+viable even with the GPU file excluded:** every default domain then offloads to
+the GPU, so the whole suite churns hundreds of mode-2 GPU domains in one process
+and aborts early (~20%). This is the same root cause. Validate the unified
+default over the full suite on the **gcc CPU build** (`-Dgpu_offload=false`),
+where it is the documented 2657-passed run; on a GPU build, drive the bulk suite
+with `ANUGA_DEFAULT_COMPUTE_MODE=legacy` and cover GPU paths via the per-class
+runner below.
+
 **Impact:** production use (a single, or a few sequential, mode-2 GPU domains)
 is unaffected — single-domain evolve and each test class pass. Only running many
 GPU-domain tests in *one* process trips it.
