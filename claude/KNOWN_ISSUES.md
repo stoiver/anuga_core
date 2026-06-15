@@ -142,14 +142,22 @@ runner below.
 is unaffected — single-domain evolve and each test class pass. Only running many
 GPU-domain tests in *one* process trips it.
 
+**Auto-skip:** on a GPU-offload build, `test_DE_gpu_omp.py` skips itself at
+collection (module-level `pytest.skip`, gated on `anuga.gpu_offload_supported()`
+and `not ANUGA_GPU_TESTS_ISOLATED`), so a normal `pytest --pyargs anuga` no longer
+crashes — the file is reported as skipped with a message pointing here. On a CPU
+build the guard is inert and the file runs in-process as usual.
+
 **Workaround — run the GPU file with one fresh process per class:**
 ```bash
 bash anuga/shallow_water/tests/run_gpu_tests_isolated.sh
 ```
-Every class passes this way. Then run the rest of the suite normally (it does not
-trip the issue):
+The runner sets `ANUGA_GPU_TESTS_ISOLATED=1` to bypass the auto-skip; every class
+passes this way. Then run the rest of the suite normally (it does not trip the
+issue) under the **legacy** default:
 ```bash
-pytest anuga/shallow_water/tests/ --ignore=anuga/shallow_water/tests/test_DE_gpu_omp.py
+ANUGA_DEFAULT_COMPUTE_MODE=legacy \
+  pytest anuga/shallow_water/tests/ --ignore=anuga/shallow_water/tests/test_DE_gpu_omp.py
 ```
 **Do NOT use `pytest --forked`** for these tests: CUDA contexts are fork-unsafe,
 so forking from a GPU-initialised parent poisons every child (it turns the abort

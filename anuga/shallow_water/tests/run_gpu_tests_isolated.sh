@@ -18,6 +18,9 @@ set -u
 
 TESTFILE="$(dirname "$0")/test_DE_gpu_omp.py"
 export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+# Opt back in to the GPU tests: the file skips itself in a normal in-process run
+# on a GPU-offload build (see the module-level skip in test_DE_gpu_omp.py).
+export ANUGA_GPU_TESTS_ISOLATED=1
 
 mapfile -t CLASSES < <(python -m pytest "$TESTFILE" --collect-only -q -p no:cacheprovider 2>/dev/null \
   | sed -n 's/\(.*::[A-Za-z_0-9]*\)::test.*/\1/p' | sort -u)

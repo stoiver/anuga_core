@@ -4,6 +4,7 @@ Tests for GPU (OpenMP target offloading) implementation of ANUGA's shallow water
 These tests verify that the GPU implementation produces results matching the CPU implementation.
 """
 
+import os
 import tempfile
 import unittest
 import sys
@@ -40,6 +41,25 @@ def _gpu_skip_reason():
     if _gpu_error:
         return f"GPU OpenMP interface not available: {_gpu_error}"
     return "GPU OpenMP interface not available"
+
+
+# On a GPU-offload build (nvc, -Dgpu_offload=true) the NVHPC OpenMP-target
+# runtime aborts the process once many mode-2 GPU domains have been created in
+# it, so running this whole file in a single pytest process crashes partway
+# through (see claude/KNOWN_ISSUES.md, "test_DE_gpu_omp.py aborts mid-file").
+# Skip the file in a normal in-process run on such a build and point at the
+# isolated runner, which executes one class per fresh process. The runner sets
+# ANUGA_GPU_TESTS_ISOLATED=1 to opt back in. On a CPU build (gpu_offload not
+# supported) the omp-target regions run on the host with no device present
+# table, so the file runs fine in one process and is NOT skipped.
+if (gpu_available() and anuga.gpu_offload_supported()
+        and not os.environ.get('ANUGA_GPU_TESTS_ISOLATED')):
+    pytest.skip(
+        "GPU-offload build: run this file via "
+        "anuga/shallow_water/tests/run_gpu_tests_isolated.sh (one fresh process "
+        "per class) — running it in one process aborts the NVHPC OpenMP-target "
+        "runtime. Set ANUGA_GPU_TESTS_ISOLATED=1 to force in-process collection.",
+        allow_module_level=True)
 
 
 @pytest.mark.skipif(not gpu_available(), reason=_gpu_skip_reason())

@@ -63,6 +63,33 @@ pytest anuga/shallow_water/tests/test_shallow_water_domain.py::TestCase::test_na
 cd sandpit && OMP_NUM_THREADS=1 pytest -rs --pyargs anuga
 ```
 
+### Testing a GPU-offload (nvc) build
+
+On the standard **CPU build** (`-Dgpu_offload=false`, gcc) everything above runs
+as-is, in one process — including the mode-2 GPU tests (`test_DE_gpu_omp.py`),
+whose `omp target` regions execute on the host.
+
+On a **GPU-offload build** (`-Dgpu_offload=true`, nvc) the NVHPC OpenMP-target
+runtime aborts the process once many mode-2 GPU domains have been created in it,
+so the full suite cannot run in one process. Do this instead:
+
+```bash
+# 1. Bulk suite — legacy default (domains stay on the CPU), GPU file excluded:
+OMP_NUM_THREADS=1 ANUGA_DEFAULT_COMPUTE_MODE=legacy \
+  pytest anuga/shallow_water/tests/ \
+  --ignore=anuga/shallow_water/tests/test_DE_gpu_omp.py
+
+# 2. GPU tests — one fresh process per class (do NOT use --forked: CUDA is
+#    fork-unsafe). test_DE_gpu_omp.py auto-skips in a normal in-process run on a
+#    GPU build; this runner sets ANUGA_GPU_TESTS_ISOLATED=1 to opt back in:
+bash anuga/shallow_water/tests/run_gpu_tests_isolated.sh
+```
+
+Do **not** run `ANUGA_DEFAULT_COMPUTE_MODE=unified` over the full suite on a GPU
+build — every default domain then offloads and the suite aborts early. Validate
+the unified default over the full suite on the **CPU build** (it is the
+documented all-green run). See `claude/KNOWN_ISSUES.md` for the root cause.
+
 Tests are marked slow with `@pytest.mark.slow`. All tests under `anuga/parallel/tests/`
 are automatically treated as slow (they spawn MPI subprocesses). To mark a new slow test:
 
