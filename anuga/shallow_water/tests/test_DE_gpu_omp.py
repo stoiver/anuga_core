@@ -2177,5 +2177,101 @@ class Test_GPU_NonGPUBoundaryFallback(unittest.TestCase):
         self._assert_modes_agree('DE_ader2')
 
 
+class Test_GPU_ForcingOperators(unittest.TestCase):
+    """Wind_stress / Barometric_pressure / Rate OPERATORS must give identical
+    results in mode 1 (legacy) and mode 2 (unified).
+
+    These fractional-step operators are the supported replacements for the
+    deprecated Wind_stress / Barometric_pressure / Rainfall FORCING-FUNCTION
+    classes. Mode 2 silently skips the forcing-function classes (it applies
+    forcing in C and only handles Manning friction — see
+    _warn_unsupported_mode2_forcing and the warnings under
+    ANUGA_DEFAULT_COMPUTE_MODE=unified), but fractional-step operators are
+    applied by apply_fractional_steps() in BOTH modes. This mirrors
+    test_forcing.py's wind/pressure evolve tests, but for the operators and
+    across both compute modes — confirming the operators really are applied in
+    unified mode and agree with legacy.
+    """
+
+    def _make_domain(self, name):
+        d = rectangular_cross_domain(10, 5, len1=100., len2=50.)
+        d.set_flow_algorithm('DE0')
+        d.set_low_froude(0)
+        d.set_name(name)
+        d.set_datadir(tempfile.mkdtemp())
+        d.store = False
+        d.set_quantity('elevation', 0.0)
+        d.set_quantity('friction', 0.0)
+        d.set_quantity('stage', 1.0)        # still water, depth 1 m
+        Br = Reflective_boundary(d)
+        d.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+        return d
+
+    def _run(self, mode, add_operator, name):
+        from anuga.shallow_water.sw_domain_gpu_ext import sync_to_device, sync_from_device
+        d = self._make_domain(name)
+        add_operator(d)
+        d.set_multiprocessor_mode(mode)
+        if mode == 2:
+            sync_to_device(d.gpu_interface.gpu_dom)
+        for _ in d.evolve(yieldstep=1.0, finaltime=5.0):
+            pass
+        if mode == 2:
+            sync_from_device(d.gpu_interface.gpu_dom)
+        return d
+
+    def _assert_modes_agree(self, add_operator, label):
+        d1 = self._run(1, add_operator, f'{label}_m1')
+        d2 = self._run(2, add_operator, f'{label}_m2')
+        atol = 1e-8 if anuga.gpu_offload_enabled() else 1e-12
+        for q in ['stage', 'xmomentum', 'ymomentum']:
+            np.testing.assert_allclose(
+                d2.quantities[q].centroid_values,
+                d1.quantities[q].centroid_values,
+                rtol=0, atol=atol,
+                err_msg=f'{label}: {q} mode1 vs mode2 mismatch')
+        return d1
+
+    def test_wind_stress_constant(self):
+        from anuga.operators.wind_stress_operator import Wind_stress_operator
+        d1 = self._assert_modes_agree(
+            lambda d: Wind_stress_operator(d, speed=15.0, phi=0.0), 'wind_const')
+        # east wind (phi=0) must build positive x-momentum
+        self.assertGreater(np.max(d1.quantities['xmomentum'].centroid_values), 0.0)
+
+    def test_wind_stress_temporally_varying(self):
+        from anuga.operators.wind_stress_operator import Wind_stress_operator
+        def speed(t, x, y):
+            return 5.0 + 2.0 * t
+        d1 = self._assert_modes_agree(
+            lambda d: Wind_stress_operator(d, speed=speed, phi=90.0), 'wind_temporal')
+        # north wind (phi=90) must build positive y-momentum
+        self.assertGreater(np.max(d1.quantities['ymomentum'].centroid_values), 0.0)
+
+    def test_wind_stress_spatially_varying(self):
+        from anuga.operators.wind_stress_operator import Wind_stress_operator
+        def speed(t, x, y):
+            return 5.0 + 0.1 * x
+        self._assert_modes_agree(
+            lambda d: Wind_stress_operator(d, speed=speed, phi=0.0), 'wind_spatial')
+
+    def test_barometric_pressure_spatially_varying(self):
+        from anuga.operators.barometric_pressure import Barometric_pressure_operator
+        def pressure(t, x, y):
+            return 101325.0 + 50.0 * x      # ∂p/∂x drives momentum
+        d1 = self._assert_modes_agree(
+            lambda d: Barometric_pressure_operator(d, pressure=pressure), 'pressure_spatial')
+        # a non-zero pressure gradient must move the water
+        self.assertGreater(
+            np.max(np.abs(d1.quantities['xmomentum'].centroid_values)), 0.0)
+
+    def test_rate_operator_rainfall(self):
+        from anuga.operators.rate_operators import Rate_operator
+        d1 = self._assert_modes_agree(
+            lambda d: Rate_operator(d, rate=1.0e-3), 'rain')   # 1 mm/s rain
+        # rainfall must raise the stage above the initial 1.0 m
+        self.assertGreater(np.max(d1.quantities['stage'].centroid_values), 1.0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
