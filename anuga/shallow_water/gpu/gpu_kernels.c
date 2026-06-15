@@ -181,8 +181,13 @@ double gpu_compute_water_volume(struct gpu_domain *GD) {
 
 void gpu_manning_friction(struct gpu_domain *GD) {
     NVTX_PUSH("gpu_manning_friction");
-    // Delegate to core kernel
-    core_manning_friction_flat_semi_implicit(&GD->D);
+    // Delegate to core kernel — sloped (edge-based) or flat, matching legacy's
+    // friction.py dispatch on domain.use_sloped_mannings.
+    if (GD->use_sloped_mannings) {
+        core_manning_friction_sloped_semi_implicit_edge_based(&GD->D);
+    } else {
+        core_manning_friction_flat_semi_implicit(&GD->D);
+    }
 
     // Count FLOPs: 15 FLOPs per element (sqrt, pow, semi-implicit)
     if (GD->flops.enabled) {
@@ -285,6 +290,7 @@ double gpu_evolve_one_ader2_step(struct gpu_domain *GD, double max_timestep, int
             fixed_ts_printed_ader2 = 1;
         }
         timestep = GD->fixed_flux_timestep;
+        GD->recorded_flux_timestep = GD->fixed_flux_timestep;
         if (timestep > max_timestep) timestep = max_timestep;
     } else {
         if (GD->nprocs > 1) {
@@ -293,6 +299,9 @@ double gpu_evolve_one_ader2_step(struct gpu_domain *GD, double max_timestep, int
             global_timestep = local_timestep;
         }
         timestep = GD->CFL * global_timestep;
+        // CFL constraint before the yieldstep/finaltime cap (for recorded stats)
+        GD->recorded_flux_timestep =
+            (timestep < GD->evolve_max_timestep) ? timestep : GD->evolve_max_timestep;
         if (timestep > max_timestep) timestep = max_timestep;
     }
 
@@ -340,6 +349,7 @@ double gpu_evolve_one_euler_step(struct gpu_domain *GD, double max_timestep, int
             fixed_ts_printed_euler = 1;
         }
         timestep = GD->fixed_flux_timestep;
+        GD->recorded_flux_timestep = GD->fixed_flux_timestep;
         if (timestep > max_timestep) timestep = max_timestep;
     } else {
         if (GD->nprocs > 1) {
@@ -348,6 +358,9 @@ double gpu_evolve_one_euler_step(struct gpu_domain *GD, double max_timestep, int
             global_timestep = local_timestep;
         }
         timestep = GD->CFL * global_timestep;
+        // CFL constraint before the yieldstep/finaltime cap (for recorded stats)
+        GD->recorded_flux_timestep =
+            (timestep < GD->evolve_max_timestep) ? timestep : GD->evolve_max_timestep;
         if (timestep > max_timestep) timestep = max_timestep;
     }
 
@@ -419,6 +432,7 @@ double gpu_evolve_one_rk2_step(struct gpu_domain *GD, double max_timestep, int a
             fixed_ts_printed = 1;
         }
         timestep = GD->fixed_flux_timestep;
+        GD->recorded_flux_timestep = GD->fixed_flux_timestep;
         if (timestep > max_timestep) {
             timestep = max_timestep;
         }
@@ -432,6 +446,9 @@ double gpu_evolve_one_rk2_step(struct gpu_domain *GD, double max_timestep, int a
 
         // Apply CFL condition and respect max_timestep from Python
         timestep = GD->CFL * global_timestep;
+        // CFL constraint before the yieldstep/finaltime cap (for recorded stats)
+        GD->recorded_flux_timestep =
+            (timestep < GD->evolve_max_timestep) ? timestep : GD->evolve_max_timestep;
         if (timestep > max_timestep) {
             timestep = max_timestep;
         }
@@ -536,6 +553,7 @@ double gpu_evolve_one_rk3_step(struct gpu_domain *GD, double max_timestep, int a
             fixed_ts_printed_rk3 = 1;
         }
         timestep = GD->fixed_flux_timestep;
+        GD->recorded_flux_timestep = GD->fixed_flux_timestep;
         if (timestep > max_timestep) timestep = max_timestep;
     } else {
         if (GD->nprocs > 1) {
@@ -544,6 +562,9 @@ double gpu_evolve_one_rk3_step(struct gpu_domain *GD, double max_timestep, int a
             global_timestep = local_timestep;
         }
         timestep = GD->CFL * global_timestep;
+        // CFL constraint before the yieldstep/finaltime cap (for recorded stats)
+        GD->recorded_flux_timestep =
+            (timestep < GD->evolve_max_timestep) ? timestep : GD->evolve_max_timestep;
         if (timestep > max_timestep) timestep = max_timestep;
     }
 

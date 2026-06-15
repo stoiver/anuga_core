@@ -419,6 +419,15 @@ struct gpu_domain {
     double CFL;
     double evolve_max_timestep;
     double fixed_flux_timestep;  // <= 0 means disabled (use CFL-based timestep)
+    // CFL-constrained step from the most recent evolve_one_*_step, BEFORE the
+    // yieldstep/finaltime cap is applied. Mirrors the value legacy's
+    // update_timestep() feeds into recorded_min/max_timestep, so mode-2 reports
+    // the mathematical (CFL) constraint rather than the yield-limited step taken.
+    double recorded_flux_timestep;
+    // Manning friction variant: 1 => sloped (edge-based) like legacy when
+    // domain.use_sloped_mannings is set, 0 => flat. Set from the domain in
+    // get_domain_pointers(); selected in gpu_manning_friction().
+    int use_sloped_mannings;
 
     // RK2 backup arrays (allocated on GPU)
     // These may already exist in base domain, but we track GPU copies here

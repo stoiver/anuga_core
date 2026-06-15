@@ -676,12 +676,19 @@ class Domain(Generic_Domain):
         state = self.__dict__.copy()
         # Do not pickle the C wrapper; it can be recreated
         state.pop('_Domain_C_struct', None)
+        # The mode-2 ('unified') GPU interface wraps a cdef GPUDomain with a
+        # non-trivial __cinit__ (not picklable) and holds device handles. Drop
+        # it; _ensure_gpu_interface() rebuilds it lazily after unpickling.
+        state.pop('gpu_interface', None)
+        state.pop('_gpu_boundary_info_initialized', None)
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
         # Recreate C wrapper lazily when needed
         self._Domain_C_struct = None
+        # Force the mode-2 device interface to be rebuilt on demand.
+        self.gpu_interface = None
 
     def update_domain_c_struct(self):
         """Update the C domain structure from the Python Domain object.
@@ -2528,6 +2535,33 @@ class Domain(Generic_Domain):
                 "Wind_stress_operator, Barometric_pressure_operator.",
                 stacklevel=2)
 
+    def set_boundary(self, boundary_map):
+        """Associate boundary objects with tagged segments (see base class).
+
+        Mode-2 ('unified') captures a device-side boundary classification and
+        the per-edge Dirichlet/Time/File/... mappings when the GPU interface is
+        first built. A later set_boundary() — e.g. switching a tag from
+        Reflective to Dirichlet partway through a simulation — must invalidate
+        those caches, otherwise the stale boundary keeps being applied on the
+        device and the new condition is silently ignored.
+        """
+        super().set_boundary(boundary_map)
+
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+            # Preserve current conserved-quantity state before tearing the
+            # interface down. In CPU-no-offload mode host arrays alias the
+            # device; the sync makes this correct for the offload case too.
+            try:
+                self.gpu_interface.sync_from_device()
+            except Exception:
+                pass
+            self.gpu_interface = None
+            if hasattr(self, '_gpu_boundary_info_initialized'):
+                del self._gpu_boundary_info_initialized
+            # Rebuild immediately from the new boundary map so subsequent
+            # mode-2 steps see a valid interface.
+            self._ensure_gpu_interface()
+
     def distribute_to_vertices_and_edges(self, distribute_to_vertices=True):
         """ extrapolate centroid values to vertices and edges"""
 
@@ -2537,9 +2571,22 @@ class Domain(Generic_Domain):
         # domain may reach here, e.g. from a test, without going through evolve()).
         self._ensure_gpu_interface()
 
-        # Sync from GPU if in GPU mode (needed before CPU reads data at yieldsteps)
         if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+            # Output path (yieldsteps / direct reads). This method is NOT on the
+            # mode-2 stepping path (the C RK loop extrapolates on the device
+            # itself); it exists to make vertex/edge values readable from Python
+            # (SWW writer, inundation queries, tests). The gpu edge kernel does
+            # NOT compute vertex values, so sync centroids from the device and
+            # run the host (openmp) protect + extrapolate, which produces edges
+            # AND vertices. The host protect does not affect the device
+            # trajectory — the next C step re-protects on the device.
             self.gpu_interface.sync_from_device()
+            from .sw_domain_openmp_ext import (protect_new,
+                                               extrapolate_second_order_edge_sw)
+            protect_new(self)
+            extrapolate_second_order_edge_sw(self, distribute_to_vertices=distribute_to_vertices)
+            nvtxRangePop()
+            return
 
         # Do protection step
         self.protect_against_infinitesimal_and_negative_heights()
@@ -2548,8 +2595,6 @@ class Domain(Generic_Domain):
         # Choose the correct extension module
         if self.multiprocessor_mode == MULTIPROCESSOR_OPENMP:
             from .sw_domain_openmp_ext import extrapolate_second_order_edge_sw
-        elif self.multiprocessor_mode == MULTIPROCESSOR_GPU:
-            extrapolate_second_order_edge_sw = self.gpu_interface.extrapolate_second_order_edge_sw_kernel
         else:
             raise Exception('Not implemented')
 
@@ -3427,8 +3472,11 @@ class Domain(Generic_Domain):
         update_conserved_quantities_gpu(gpu_dom, self.timestep)
 
         self.set_relative_time(self.get_relative_time() + self.timestep)
-        self.recorded_max_timestep = max(self.timestep, self.recorded_max_timestep)
-        self.recorded_min_timestep = min(self.timestep, self.recorded_min_timestep)
+        # Record the CFL-constrained step (pre yield/final cap), matching legacy
+        # update_timestep(), rather than the yield-limited step actually taken.
+        cfl_dt = min(self.CFL * self.flux_timestep, self.evolve_max_timestep)
+        self.recorded_max_timestep = max(cfl_dt, self.recorded_max_timestep)
+        self.recorded_min_timestep = min(cfl_dt, self.recorded_min_timestep)
 
         # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
         if self.ghost_layer_width < 4:
@@ -3555,8 +3603,11 @@ class Domain(Generic_Domain):
 
         # Do NOT advance relative_time here — the evolve loop does it after
         # apply_fractional_steps(); see _evolve_one_euler_step_c for why.
-        self.recorded_max_timestep = max(self.timestep, self.recorded_max_timestep)
-        self.recorded_min_timestep = min(self.timestep, self.recorded_min_timestep)
+        # Record the CFL-constrained step (pre yield/final cap), matching legacy
+        # update_timestep(), rather than the yield-limited step actually taken.
+        cfl_dt = gpu_dom.recorded_flux_timestep
+        self.recorded_max_timestep = max(cfl_dt, self.recorded_max_timestep)
+        self.recorded_min_timestep = min(cfl_dt, self.recorded_min_timestep)
 
         # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
         if self.ghost_layer_width < 4:
@@ -3925,9 +3976,11 @@ class Domain(Generic_Domain):
         # operators (variable-Q inlet, time-varying rate, ...) see the time one
         # step too far — they would evaluate forcing at t+dt instead of t.
 
-        # Record timestep stats
-        self.recorded_max_timestep = max(self.timestep, self.recorded_max_timestep)
-        self.recorded_min_timestep = min(self.timestep, self.recorded_min_timestep)
+        # Record the CFL-constrained step (pre yield/final cap), matching legacy
+        # update_timestep(), rather than the yield-limited step actually taken.
+        cfl_dt = gpu_dom.recorded_flux_timestep
+        self.recorded_max_timestep = max(cfl_dt, self.recorded_max_timestep)
+        self.recorded_min_timestep = min(cfl_dt, self.recorded_min_timestep)
 
         # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
         if self.ghost_layer_width < 4:
@@ -4070,9 +4123,11 @@ class Domain(Generic_Domain):
         # Do NOT advance relative_time here — the evolve loop does it after
         # apply_fractional_steps(); see _evolve_one_euler_step_c for why.
 
-        # Record timestep stats
-        self.recorded_max_timestep = max(self.timestep, self.recorded_max_timestep)
-        self.recorded_min_timestep = min(self.timestep, self.recorded_min_timestep)
+        # Record the CFL-constrained step (pre yield/final cap), matching legacy
+        # update_timestep(), rather than the yield-limited step actually taken.
+        cfl_dt = gpu_dom.recorded_flux_timestep
+        self.recorded_max_timestep = max(cfl_dt, self.recorded_max_timestep)
+        self.recorded_min_timestep = min(cfl_dt, self.recorded_min_timestep)
 
         # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
         if self.ghost_layer_width < 4:
@@ -4415,9 +4470,11 @@ class Domain(Generic_Domain):
         # Update internal time tracking
         self.set_relative_time(self.get_relative_time() + self.timestep)
 
-        # Record timestep stats
-        self.recorded_max_timestep = max(self.timestep, self.recorded_max_timestep)
-        self.recorded_min_timestep = min(self.timestep, self.recorded_min_timestep)
+        # Record the CFL-constrained step (pre yield/final cap), matching legacy
+        # update_timestep(), rather than the yield-limited step actually taken.
+        cfl_dt = gpu_dom.recorded_flux_timestep
+        self.recorded_max_timestep = max(cfl_dt, self.recorded_max_timestep)
+        self.recorded_min_timestep = min(cfl_dt, self.recorded_min_timestep)
 
         # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
         if self.ghost_layer_width < 4:

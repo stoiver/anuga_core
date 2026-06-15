@@ -164,6 +164,8 @@ cdef extern from "gpu_domain.h" nogil:
         double CFL
         double evolve_max_timestep
         double fixed_flux_timestep
+        double recorded_flux_timestep
+        int use_sloped_mannings
 
     # Function declarations - initialization and cleanup
     int gpu_domain_init(gpu_domain *GD, MPI_Comm comm, int rank, int nprocs)
@@ -444,6 +446,13 @@ cdef class GPUDomain:
     def num_neighbors(self):
         return self.GD.halo.num_neighbors
 
+    @property
+    def recorded_flux_timestep(self):
+        """CFL-constrained step of the most recent evolve_one_*_step, before the
+        yieldstep/finaltime cap. Mirrors what legacy update_timestep() records
+        into recorded_min/max_timestep."""
+        return self.GD.recorded_flux_timestep
+
 
 # ============================================================================
 # MPI Communicator Extraction
@@ -531,6 +540,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     GD.evolve_max_timestep = domain_object.evolve_max_timestep
     fft = getattr(domain_object, 'fixed_flux_timestep', None)
     GD.fixed_flux_timestep = fft if fft is not None else -1.0
+    GD.use_sloped_mannings = 1 if getattr(domain_object, 'use_sloped_mannings', False) else 0
     D.low_froude = domain_object.low_froude
     D.extrapolate_velocity_second_order = domain_object.extrapolate_velocity_second_order
 
