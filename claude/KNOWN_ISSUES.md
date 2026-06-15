@@ -88,6 +88,51 @@ Tests in `anuga/parallel/tests/` spawn `mpiexec` subprocesses. They cannot be
 parallelised with `pytest-xdist` and must run serially. They are marked slow
 and skipped by `--run-fast`.
 
+### GPU build: `test_DE_gpu_omp.py` aborts mid-file (NVHPC target present-table) (2026-06-15)
+
+On a GPU build (`-Dgpu_offload=true`, nvc), running the whole
+`anuga/shallow_water/tests/test_DE_gpu_omp.py` file in one process **aborts
+silently** (exit 1, no traceback, not a SIGSEGV, GPU idle/no-OOM) partway
+through — around the 9th–11th test (`Test_GPU_InletOperator::test_inlet_operator_basic`).
+The NVHPC OpenMP-target runtime calls `exit()`.
+
+**Not caused by the mode-2 session changes** — reproduces identically on the
+pre-change commit (`d96ae357`) rebuilt with nvc.
+
+**It is NOT a simple cumulative-resource leak.** Diagnostics:
+- Each test class *alone*, and `test_inlet_operator_basic` alone, pass.
+- Creating 16–20 GPU domains in a loop — both dropped each iteration *and* kept
+  simultaneously live — works fine.
+- The crash only appears with the file's specific mix of low-level kernel tests,
+  `set_multiprocessor_mode(1)`↔`(2)` switching, `sync_to/from_device`, and
+  operator setup, accumulated across ≥9 tests.
+- Forcing finalization between tests (`gc.collect()`, or nulling
+  `domain.gpu_interface`) makes it **worse**: introduces assertion *failures*
+  before the abort.
+
+**Root cause (diagnosed, not yet fixed):** device arrays are bound with
+`#pragma omp target enter data map(to: host_ptr...)` keyed on the *host* pointer,
+and released with `map(delete:)` (`gpu_domain_unmap_arrays` /
+`gpu_domain_finalize`). The OpenMP present table is reference-counted and
+host-pointer-keyed, so repeated map/unmap of arrays whose host addresses numpy
+recycles across domains corrupts the table (stale entry reused, or a live
+entry deleted) — hence both the "leak then abort" and the "eager-unmap then
+assertion failure" signatures. Two reference cycles
+(`domain ↔ gpu_interface`, and `gpu_dom → python_domain → domain`) also defer
+`GPUDomain.__dealloc__`/`gpu_domain_finalize` to the cyclic GC, so finalization
+timing is non-deterministic — but breaking either cycle does not fix the
+underlying present-table issue (the other cycle still pins the domain, and eager
+finalize corrupts).
+
+**Impact:** production use (a single, or a few sequential, mode-2 GPU domains)
+is unaffected — single-domain evolve and each test class pass. Only running the
+*whole* GPU test file in one process trips it. **Workaround:** run the GPU test
+classes separately (e.g. one `pytest` invocation per class), or with per-test
+process isolation. A real fix (FUTURE_WORK P1.10) needs either process isolation
+for the GPU test file, strict 1:1 map/unmap reference-count discipline per
+domain, or device-pointer allocation (`omp_target_alloc` + `is_device_ptr`)
+instead of host-pointer-keyed `map(to:)`.
+
 ### Targeted `--cov=anuga.submodule` runs corrupt numpy's `_NoValue` sentinel
 
 Running `pytest --cov=anuga.structures.structure_operator` (or any sub-package

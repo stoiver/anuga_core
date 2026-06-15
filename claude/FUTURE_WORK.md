@@ -38,6 +38,18 @@ C header, Cython wrapper, scenario system, and tests. Deleted
 
 ~~**P1.8 Clean up `file_function.py` FIXMEs**~~ — Done (session 24). FIXMEs already resolved; deleted dead commented-out blocks, replaced raw `fid.xllcorner`/`fid.yllcorner`/`fid.zone` reads with `Geo_reference(NetCDFObject=fid)`, cleaned up redundant `.csv` branch and trailing NOTE comment.
 
+**P1.10 Fix GPU-build `test_DE_gpu_omp.py` mid-file abort (NVHPC present-table)** — Running
+the whole file in one process aborts (~9th–11th test) on a GPU build; the NVHPC OpenMP-target
+runtime calls `exit()`. Pre-existing (reproduces on `d96ae357`). Not a simple leak: each class
+alone passes and 16–20 looped/live domains are fine; forcing finalization between tests makes it
+worse (assertion failures). Root cause is host-pointer-keyed, reference-counted OpenMP present-table
+management (`map(to:)`/`map(delete:)` in `gpu_domain_core.c`) corrupted by numpy host-address reuse
+across domains, plus two reference cycles deferring finalization. Fix options: per-test process
+isolation for the GPU test file (e.g. `pytest-forked`/subprocess), strict 1:1 map/unmap reference
+discipline per domain, or switch to `omp_target_alloc` + `is_device_ptr` device-pointer allocation.
+Production (single/few sequential GPU domains) is unaffected. See `claude/KNOWN_ISSUES.md`
+("GPU build: `test_DE_gpu_omp.py` aborts mid-file").
+
 **P1.9 Root-cause and fix mode-2 ('unified') riverwall flux divergence** — A riverwall
 simulation run in `multiprocessor_mode=2` diverges from legacy (~0.095 m max stage on
 `run_parallel_riverwall.py`, growing from 0 over time). The riverwall data is correctly
