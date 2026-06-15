@@ -1563,6 +1563,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         domain = Domain(points, vertices, boundary)
+        domain.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
         midpoints = domain.get_centroid_coordinates()
 
         # Flat surface with 1m of water
@@ -1610,6 +1611,7 @@ class Test_Forcing(unittest.TestCase):
 
 
         domain_II = Domain(points, vertices, boundary)
+        domain_II.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
 
         # Flat surface with 1m of water
         domain_II.set_quantity('elevation', 0)
@@ -1657,6 +1659,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         domain = Domain(points, vertices, boundary)
+        domain.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
         midpoints = domain.get_centroid_coordinates()
 
         # Flat surface with 1m of water
@@ -1704,6 +1707,7 @@ class Test_Forcing(unittest.TestCase):
 
 
         domain_II = Domain(points, vertices, boundary)
+        domain_II.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
 
         # Flat surface with 1m of water
         domain_II.set_quantity('elevation', 0)
@@ -1758,6 +1762,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         domain = Domain(points, vertices, boundary)
+        domain.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
         midpoints = domain.get_centroid_coordinates()
 
         # Flat surface with 1m of water
@@ -1804,6 +1809,7 @@ class Test_Forcing(unittest.TestCase):
 
 
         domain_II = Domain(points, vertices, boundary)
+        domain_II.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
 
         # Flat surface with 1m of water
         domain_II.set_quantity('elevation', 0)
@@ -1857,6 +1863,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         domain = Domain(points, vertices, boundary)
+        domain.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
         vertexpoints = domain.get_nodes()
 
         # Flat surface with 1m of water
@@ -1913,6 +1920,7 @@ class Test_Forcing(unittest.TestCase):
 
 
         domain_II = Domain(points, vertices, boundary)
+        domain_II.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
 
         # Flat surface with 1m of water
         domain_II.set_quantity('elevation', 0)
@@ -1963,6 +1971,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         domain = Domain(points, vertices, boundary)
+        domain.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
         vertexpoints = domain.get_nodes()
 
         # Flat surface with 1m of water
@@ -2009,6 +2018,7 @@ class Test_Forcing(unittest.TestCase):
 
 
         domain_II = Domain(points, vertices, boundary)
+        domain_II.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
 
         # Flat surface with 1m of water
         domain_II.set_quantity('elevation', 0)
