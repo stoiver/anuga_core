@@ -1196,6 +1196,12 @@ class Test_Forcing(unittest.TestCase):
             else:
                 return 3*t + 7
 
+        # Forcing-function classes (Rainfall/Wind_stress/...) are legacy-only;
+        # multiprocessor_mode=2 ('unified') applies forcing in C (Manning only)
+        # and deliberately skips them. Pin legacy so this test exercises the
+        # forcing-function machinery it is written for.
+        domain.set_compute_mode('legacy')
+
         domain.forcing_terms = []
         R = Rainfall(domain,
                      rate=main_rate,

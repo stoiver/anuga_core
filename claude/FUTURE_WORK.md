@@ -38,6 +38,20 @@ C header, Cython wrapper, scenario system, and tests. Deleted
 
 ~~**P1.8 Clean up `file_function.py` FIXMEs**~~ — Done (session 24). FIXMEs already resolved; deleted dead commented-out blocks, replaced raw `fid.xllcorner`/`fid.yllcorner`/`fid.zone` reads with `Geo_reference(NetCDFObject=fid)`, cleaned up redundant `.csv` branch and trailing NOTE comment.
 
+**P1.9 Root-cause and fix mode-2 ('unified') riverwall flux divergence** — A riverwall
+simulation run in `multiprocessor_mode=2` diverges from legacy (~0.095 m max stage on
+`run_parallel_riverwall.py`, growing from 0 over time). The riverwall data is correctly
+wired into the GPU domain and the GPU flux kernel implements the elevation override +
+Villemonte weir correction, so this is a subtle numerical mismatch in the GPU vs legacy
+(`sw_domain_openmp_ext`) riverwall flux/extrapolation path, not a missing feature. Diff
+the riverwall branches of `gpu/core_kernels.c` `core_compute_fluxes_central` /
+`gpu_adjust_edgeflux_with_weir` against the legacy openmp flux, check the hydraulic-property
+column ordering and the edge-value extrapolation at riverwall edges. Then add a dedicated
+mode-2-vs-legacy riverwall equivalence test and remove the `set_compute_mode('legacy')`
+pin in `anuga/parallel/tests/run_parallel_riverwall.py`. See `claude/KNOWN_ISSUES.md`
+("Mode-2 ('unified') riverwall flux diverges from legacy"). The non-riverwall solver is
+bit-identical between modes; riverwalls are the one known exception.
+
 ---
 
 ## Priority 2 — Medium effort (1–2 weeks each)

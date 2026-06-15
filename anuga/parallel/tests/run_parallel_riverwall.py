@@ -103,6 +103,15 @@ else:
     domain = distribute(base_domain, verbose=verbose)
     domain.set_name('p_riverwall')
 domain.set_store_vertices_uniquely()
+
+# This test checks that the SEQUENTIAL and PARALLEL solver outputs are
+# identical, so both runs must use the same compute backend. Pin legacy
+# (multiprocessor_mode=1): mode-2 ('unified') riverwall flux currently diverges
+# from legacy (see claude/KNOWN_ISSUES.md), and parallel mode-2 is not yet a
+# validated path. Pinning keeps this a meaningful legacy seq-vs-parallel test
+# even when the suite is run with ANUGA_DEFAULT_COMPUTE_MODE=unified.
+domain.set_compute_mode('legacy')
+
 domain.riverwallData.create_riverwalls(riverWall,
                                        riverWall_Par,
                                        verbose=verbose)

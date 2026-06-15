@@ -31,6 +31,12 @@ def _make_domain():
 class Test_compute_mode(unittest.TestCase):
 
     def test_default_is_legacy(self):
+        # The default is legacy only when not overridden by the opt-in env var
+        # ANUGA_DEFAULT_COMPUTE_MODE (the test suite sets it to 'unified' to
+        # exercise the whole suite in mode 2). Skip when that override is active.
+        import os
+        if os.environ.get('ANUGA_DEFAULT_COMPUTE_MODE', 'legacy').lower() != 'legacy':
+            self.skipTest('ANUGA_DEFAULT_COMPUTE_MODE overrides the default mode')
         domain = _make_domain()
         self.assertEqual(domain.get_compute_mode(), 'legacy')
         self.assertEqual(domain.multiprocessor_mode, MULTIPROCESSOR_OPENMP)
