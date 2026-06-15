@@ -12,6 +12,7 @@ import pytest
 
 import anuga
 from anuga import Reflective_boundary, Dirichlet_boundary
+from anuga import Transmissive_momentum_set_stage_boundary
 from anuga import rectangular_cross_domain
 from anuga import Inlet_operator
 
@@ -2102,6 +2103,77 @@ class Test_TimestepTimeAdvance(unittest.TestCase):
 
     def test_DE_ader2(self):
         """DE_ader2 (ADER-2) — same bug as Euler; fixed in evolve_one_ader2_step."""
+        self._assert_modes_agree('DE_ader2')
+
+
+class Test_GPU_NonGPUBoundaryFallback(unittest.TestCase):
+    """Mode 2 must fall back to host boundary evaluation for boundary types the
+    C loop cannot evaluate on the device — for EVERY flow algorithm, including
+    DE0/Euler.
+
+    Regression for a bug where evolve_one_euler_step() dispatched straight to the
+    C Euler loop and silently ignored non-GPU boundary types (rk2/rk3/ader2
+    already fell back to a Python-orchestrated loop; euler did not). The 'right'
+    boundary here is a Transmissive_momentum_set_stage_boundary, which is NOT a
+    GPU-supported type, so mode 2 must use the host-evaluation fallback and match
+    mode 1. Symptom of the bug: DE0 results diverged from legacy by ~0.1 m while
+    DE1/DE2/DE_ader2 matched. (This is what made run_parallel_riverwall.py — a
+    DE0 + Transmissive_momentum_set_stage case — diverge.)
+    """
+
+    def _make_domain(self, name, algorithm):
+        d = rectangular_cross_domain(10, 5, len1=100., len2=50.)
+        d.set_flow_algorithm(algorithm)
+        d.set_low_froude(0)
+        d.set_name(name)
+        d.set_datadir(tempfile.mkdtemp())
+        d.store = False
+        d.set_quantity('elevation', lambda x, y: -x / 100.0)
+        d.set_quantity('friction', 0.03)
+        d.set_quantity('stage', lambda x, y: -x / 100.0)  # initially dry
+        Br = Reflective_boundary(d)
+        Bt = Transmissive_momentum_set_stage_boundary(
+            domain=d, function=lambda t: min(-0.4 * np.exp(-t / 5.0) - 0.1, -0.11))
+        d.set_boundary({'left': Br, 'right': Bt, 'top': Br, 'bottom': Br})
+        return d
+
+    def _assert_modes_agree(self, algorithm):
+        from anuga.shallow_water.sw_domain_gpu_ext import sync_to_device, sync_from_device
+
+        d1 = self._make_domain(f'{algorithm}_m1', algorithm)
+        d1.set_multiprocessor_mode(1)
+        for _ in d1.evolve(yieldstep=2.0, finaltime=10.0):
+            pass
+
+        d2 = self._make_domain(f'{algorithm}_m2', algorithm)
+        d2.set_multiprocessor_mode(2)
+        sync_to_device(d2.gpu_interface.gpu_dom)
+        for _ in d2.evolve(yieldstep=2.0, finaltime=10.0):
+            pass
+        sync_from_device(d2.gpu_interface.gpu_dom)
+
+        # Bit-identical on a CPU build (same compiled kernels); ~1e-9 FP-order
+        # differences on a real GPU.
+        atol = 1e-8 if anuga.gpu_offload_enabled() else 1e-12
+        for q in ['stage', 'xmomentum', 'ymomentum']:
+            np.testing.assert_allclose(
+                d2.quantities[q].centroid_values,
+                d1.quantities[q].centroid_values,
+                rtol=0, atol=atol,
+                err_msg=f'{algorithm} + Transmissive_momentum_set_stage: '
+                        f'{q} mode1 vs mode2 mismatch')
+
+    def test_DE0_euler(self):
+        """DE0/Euler — the boundary that was silently ignored before the fix."""
+        self._assert_modes_agree('DE0')
+
+    def test_DE1_rk2(self):
+        self._assert_modes_agree('DE1')
+
+    def test_DE2_rk3(self):
+        self._assert_modes_agree('DE2')
+
+    def test_DE_ader2(self):
         self._assert_modes_agree('DE_ader2')
 
 

@@ -52,19 +52,15 @@ Production (single/few sequential GPU domains) is unaffected. **Interim workarou
 (all classes pass); `--forked` does NOT work (CUDA is fork-unsafe). See `claude/KNOWN_ISSUES.md`
 ("GPU build: `test_DE_gpu_omp.py` aborts mid-file").
 
-**P1.9 Root-cause and fix mode-2 ('unified') riverwall flux divergence** — A riverwall
-simulation run in `multiprocessor_mode=2` diverges from legacy (~0.095 m max stage on
-`run_parallel_riverwall.py`, growing from 0 over time). The riverwall data is correctly
-wired into the GPU domain and the GPU flux kernel implements the elevation override +
-Villemonte weir correction, so this is a subtle numerical mismatch in the GPU vs legacy
-(`sw_domain_openmp_ext`) riverwall flux/extrapolation path, not a missing feature. Diff
-the riverwall branches of `gpu/core_kernels.c` `core_compute_fluxes_central` /
-`gpu_adjust_edgeflux_with_weir` against the legacy openmp flux, check the hydraulic-property
-column ordering and the edge-value extrapolation at riverwall edges. Then add a dedicated
-mode-2-vs-legacy riverwall equivalence test and remove the `set_compute_mode('legacy')`
-pin in `anuga/parallel/tests/run_parallel_riverwall.py`. See `claude/KNOWN_ISSUES.md`
-("Mode-2 ('unified') riverwall flux diverges from legacy"). The non-riverwall solver is
-bit-identical between modes; riverwalls are the one known exception.
+~~**P1.9 Root-cause and fix mode-2 ('unified') riverwall flux divergence**~~ — DONE
+(2026-06-15). Misdiagnosed: the riverwall flux is correct (bit-identical mode-1 vs mode-2
+with a GPU-supported boundary). The real cause was a DE0/Euler-specific boundary bug —
+`evolve_one_euler_step()` went straight to the C Euler loop and silently ignored non-GPU
+boundary types (`run_parallel_riverwall.py` uses `Transmissive_momentum_set_stage_boundary`),
+while rk2/rk3/ader2 already fell back to host evaluation. Fixed by adding
+`_evolve_one_euler_step_gpu()` and delegating to it from `_evolve_one_euler_step_c()` when
+`not self._gpu_all_on_gpu`. `run_parallel_riverwall.py` un-pinned; regression test
+`Test_GPU_NonGPUBoundaryFallback`. See `claude/KNOWN_ISSUES.md` ("RESOLVED … DE0 boundary bug").
 
 ---
 

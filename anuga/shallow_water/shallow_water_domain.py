@@ -3848,6 +3848,150 @@ class Domain(Generic_Domain):
             exchange_ghosts(gpu_dom)
 
 
+    def _evolve_one_euler_step_gpu(self, yieldstep, finaltime):
+        """Python-orchestrated GPU Euler (DE0) step.
+
+        Fallback for _evolve_one_euler_step_c() when the boundary map contains a
+        type the C Euler loop cannot evaluate on the device (e.g.
+        Transmissive_momentum_set_stage_boundary). GPU-supported boundaries are
+        evaluated on the device; any others are evaluated on the host via
+        evaluate_segment() and synced back. This keeps DE0 results correct
+        (identical to legacy) for every boundary type — the same fallback that
+        rk2/rk3/ader2 already perform. Prefer _evolve_one_euler_step_c() (faster)
+        when all boundaries are GPU-supported.
+        """
+        from anuga.shallow_water.sw_domain_gpu_ext import (
+            extrapolate_second_order_gpu,
+            protect_gpu,
+            compute_fluxes_gpu,
+            update_conserved_quantities_gpu,
+            sync_boundary_values,
+            init_boundary_edge_sync,
+            boundary_edge_sync,
+            exchange_ghosts,
+            evaluate_reflective_boundary_gpu,
+            evaluate_dirichlet_boundary_gpu,
+            evaluate_transmissive_boundary_gpu,
+            set_transmissive_n_zero_t_stage,
+            evaluate_transmissive_n_zero_t_boundary_gpu,
+            set_time_boundary_values,
+            evaluate_time_boundary_gpu,
+            set_file_boundary_values_from_domain,
+            evaluate_file_boundary_gpu,
+            set_absorbing_wave_value,
+            evaluate_absorbing_wave_boundary_gpu,
+            set_characteristic_wave_value,
+            evaluate_characteristic_wave_boundary_gpu,
+        )
+        import numpy as np
+
+        gpu_dom = self.gpu_interface.gpu_dom
+
+        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
+                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
+                              'Time_boundary', 'File_boundary', 'Field_boundary',
+                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary'}
+
+        if not hasattr(self, '_gpu_boundary_info_initialized'):
+            self._gpu_cpu_tags = []
+            self._gpu_all_on_gpu = True
+            cpu_boundary_types = []
+            self._gpu_transmissive_n_zero_t_boundaries = []
+            self._gpu_time_boundaries = []
+            self._gpu_absorbing_wave_boundaries = []
+            self._gpu_characteristic_wave_boundaries = []
+
+            for tag, B in self.boundary_map.items():
+                if B is not None:
+                    btype = B.__class__.__name__
+                    if btype not in GPU_BOUNDARY_TYPES:
+                        self._gpu_cpu_tags.append(tag)
+                        self._gpu_all_on_gpu = False
+                        cpu_boundary_types.append((tag, btype))
+                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
+                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
+                    elif btype == 'Time_boundary':
+                        self._gpu_time_boundaries.append(B)
+                    elif btype == 'Absorbing_wave_boundary':
+                        self._gpu_absorbing_wave_boundaries.append(B)
+                    elif btype == 'Characteristic_wave_boundary':
+                        self._gpu_characteristic_wave_boundaries.append(B)
+
+            if not self._gpu_all_on_gpu:
+                boundary_cell_ids = np.unique(self.boundary_cells).astype(np.intc)
+                init_boundary_edge_sync(gpu_dom, boundary_cell_ids)
+
+            self._gpu_boundary_info_initialized = True
+
+        protect_gpu(gpu_dom)
+        extrapolate_second_order_gpu(gpu_dom)
+
+        if self._gpu_all_on_gpu:
+            evaluate_reflective_boundary_gpu(gpu_dom)
+            evaluate_dirichlet_boundary_gpu(gpu_dom)
+            evaluate_transmissive_boundary_gpu(gpu_dom)
+            for B in self._gpu_transmissive_n_zero_t_boundaries:
+                stage_val = B.get_boundary_values()
+                try:
+                    stage_val = float(stage_val)
+                except (TypeError, ValueError):
+                    stage_val = float(stage_val[0])
+                set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
+            evaluate_transmissive_n_zero_t_boundary_gpu(gpu_dom)
+            for B in self._gpu_time_boundaries:
+                q = B.get_boundary_values()
+                set_time_boundary_values(gpu_dom, float(q[0]), float(q[1]), float(q[2]))
+            evaluate_time_boundary_gpu(gpu_dom)
+            set_file_boundary_values_from_domain(gpu_dom, self)
+            evaluate_file_boundary_gpu(gpu_dom)
+            for B in self._gpu_absorbing_wave_boundaries:
+                value = B.get_boundary_values()
+                try:
+                    wave_val = float(value)
+                except (TypeError, ValueError):
+                    wave_val = float(value[0])
+                set_absorbing_wave_value(gpu_dom, wave_val)
+            evaluate_absorbing_wave_boundary_gpu(gpu_dom)
+            for B in self._gpu_characteristic_wave_boundaries:
+                value = B.get_boundary_values()
+                try:
+                    perturb = float(value)
+                except (TypeError, ValueError):
+                    perturb = float(value[0])
+                set_characteristic_wave_value(gpu_dom, perturb)
+            evaluate_characteristic_wave_boundary_gpu(gpu_dom)
+        else:
+            # Host evaluation of any non-GPU boundary type (e.g.
+            # Transmissive_momentum_set_stage_boundary), then sync edge values
+            # back to the device for the flux kernel.
+            boundary_edge_sync(gpu_dom)
+            for tag in self.tag_boundary_cells:
+                B = self.boundary_map[tag]
+                if B is not None:
+                    B.evaluate_segment(self, self.tag_boundary_cells[tag])
+            sync_boundary_values(gpu_dom)
+
+        # Compute fluxes (sets flux_timestep = CFL flux step)
+        self.flux_timestep = compute_fluxes_gpu(gpu_dom)
+
+        # Forcing terms (friction)
+        self.compute_forcing_terms()
+
+        # Update timestep to fit yieldstep/finaltime (also records
+        # recorded_min/max_timestep from the CFL constraint).
+        self.update_timestep(yieldstep, finaltime)
+
+        # Update conserved quantities
+        update_conserved_quantities_gpu(gpu_dom, self.timestep)
+
+        # Do NOT advance relative_time here — the evolve loop advances it after
+        # apply_fractional_steps(); see _evolve_one_euler_step_c for why.
+
+        # Post-step ghost exchange
+        if self.ghost_layer_width < 4:
+            exchange_ghosts(gpu_dom)
+
+
     def _evolve_one_euler_step_c(self, yieldstep, finaltime):
         """Euler step executed entirely in C - eliminates Python round-trip overhead.
 
@@ -3907,9 +4051,18 @@ class Domain(Generic_Domain):
 
             if not self._gpu_all_on_gpu:
                 print("WARNING: C Euler loop requires all GPU-supported boundary types")
+                print("  Falling back to Python-orchestrated GPU loop")
                 print("  Unsupported types: " + str(cpu_boundary_types))
 
             self._gpu_boundary_info_initialized = True
+
+        # Boundaries the C loop cannot evaluate on the device (e.g.
+        # Transmissive_momentum_set_stage_boundary) are handled by the
+        # Python-orchestrated fallback, which evaluates them on the host and
+        # syncs — matching rk2/rk3/ader2. Without this, those boundaries are
+        # silently ignored in DE0 and results diverge from legacy.
+        if not self._gpu_all_on_gpu:
+            return self._evolve_one_euler_step_gpu(yieldstep, finaltime)
 
         # Set time-dependent boundary values before calling C function
         for B in self._gpu_transmissive_n_zero_t_boundaries:

@@ -256,27 +256,38 @@ These are marked `@pytest.mark.slow` at module level.
 requires a domain with a mesh that has breaklines (specific mesh construction).
 Simple rectangular domains don't suffice.
 
-### Mode-2 ('unified') riverwall flux diverges from legacy (2026-06-15)
+### RESOLVED (2026-06-15): "riverwall flux divergence" was really a DE0 boundary bug
 
-A riverwall simulation run under `multiprocessor_mode=2` produces a **different**
-result from `multiprocessor_mode=1` (legacy). On `run_parallel_riverwall.py`
-(sequential), stage diverges progressively from 0 at t=0 to ~0.095 m by
-t≈100 s (mean ~0.006 m). All the riverwall data is correctly wired into the
-GPU domain (`edge_flux_type`, `riverwall_elevation`, `edge_river_wall_counter`,
-hydraulic properties — see `sw_domain_gpu_ext.pyx` `get_domain_pointers`), and
-the GPU flux kernel (`core_compute_fluxes_central` in `gpu/core_kernels.c`) does
-implement the riverwall elevation override + Villemonte weir correction. The
-divergence is a subtle numerical mismatch between the GPU and legacy
-(`sw_domain_openmp_ext`) riverwall flux/extrapolation paths — not a missing
-feature — and has **not** yet been root-caused.
+**Symptom (now fixed):** a riverwall simulation under `multiprocessor_mode=2`
+diverged from legacy — on `run_parallel_riverwall.py` (sequential), stage drifted
+from 0 at t=0 to ~0.095 m by t≈100 s.
 
-**Implication / workaround:** mode-2 + riverwalls is not a validated path. The
-non-riverwall solver is bit-identical between modes; riverwalls are the
-exception. `anuga/parallel/tests/run_parallel_riverwall.py` pins
-`set_compute_mode('legacy')` so the seq-vs-parallel equivalence test stays
-meaningful even when the suite runs with `ANUGA_DEFAULT_COMPUTE_MODE=unified`.
-Fixing the kernel and adding a dedicated mode-2 riverwall equivalence test is
-tracked in `claude/FUTURE_WORK.md`.
+**Misdiagnosis → real cause.** It was *not* the riverwall flux. The riverwall
+kernel (`core_compute_fluxes_central` elevation override + Villemonte weir) is
+correct: with a GPU-supported boundary (e.g. `Dirichlet`), mode-1 vs mode-2
+riverwall results are **bit-identical (0.0)**. The actual bug was the **boundary**:
+`run_parallel_riverwall.py` uses `Transmissive_momentum_set_stage_boundary`
+(*not* in `GPU_BOUNDARY_TYPES`), and it was **euler-specific** —
+`evolve_one_euler_step()` dispatched straight to `_evolve_one_euler_step_c`, which
+handles only GPU boundary types in C and **skips `update_boundary()` entirely**,
+so the Transmissive boundary was silently never evaluated (stale edge values →
+drift). rk2/rk3/ader2 already fell back to a Python-orchestrated `_gpu` loop for
+non-GPU boundaries; **euler had no such fallback**. Confirmed by DE1/DE2/DE_ader2
+matching (0.0) while DE0 diverged.
+
+**Fix:** added `_evolve_one_euler_step_gpu()` (host evaluation of non-GPU
+boundaries via `evaluate_segment` + `sync_boundary_values`, mirroring rk2/rk3),
+and `_evolve_one_euler_step_c()` now delegates to it when
+`not self._gpu_all_on_gpu`. DE0 + `Transmissive_momentum_set_stage` + riverwall is
+now bit-identical to legacy; `run_parallel_riverwall.py` is **un-pinned** (passes
+under `ANUGA_DEFAULT_COMPUTE_MODE=unified` again). Regression test:
+`test_DE_gpu_omp.py::Test_GPU_NonGPUBoundaryFallback` (DE0/DE1/DE2/DE_ader2 with a
+Transmissive_momentum_set_stage boundary).
+
+**General lesson:** in mode 2, a boundary type not in `GPU_BOUNDARY_TYPES` is only
+correct if the active step path falls back to host evaluation. All four DE
+algorithms now do. If you add a new evolve path, replicate the
+`if not self._gpu_all_on_gpu: return self._evolve_one_*_step_gpu(...)` fallback.
 
 ---
 
