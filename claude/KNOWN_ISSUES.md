@@ -124,14 +124,36 @@ timing is non-deterministic — but breaking either cycle does not fix the
 underlying present-table issue (the other cycle still pins the domain, and eager
 finalize corrupts).
 
+It also crashes the *whole* `pytest --pyargs anuga.shallow_water` run (in either
+`ANUGA_DEFAULT_COMPUTE_MODE`) because `test_DE_gpu_omp.py` collects early and
+these GPU tests set mode 2 explicitly regardless of the env default — the abort
+at ~3% kills the run before the rest of the suite executes.
+
 **Impact:** production use (a single, or a few sequential, mode-2 GPU domains)
-is unaffected — single-domain evolve and each test class pass. Only running the
-*whole* GPU test file in one process trips it. **Workaround:** run the GPU test
-classes separately (e.g. one `pytest` invocation per class), or with per-test
-process isolation. A real fix (FUTURE_WORK P1.10) needs either process isolation
-for the GPU test file, strict 1:1 map/unmap reference-count discipline per
+is unaffected — single-domain evolve and each test class pass. Only running many
+GPU-domain tests in *one* process trips it.
+
+**Workaround — run the GPU file with one fresh process per class:**
+```bash
+bash anuga/shallow_water/tests/run_gpu_tests_isolated.sh
+```
+Every class passes this way. Then run the rest of the suite normally (it does not
+trip the issue):
+```bash
+pytest anuga/shallow_water/tests/ --ignore=anuga/shallow_water/tests/test_DE_gpu_omp.py
+```
+**Do NOT use `pytest --forked`** for these tests: CUDA contexts are fork-unsafe,
+so forking from a GPU-initialised parent poisons every child (it turns the abort
+into ~53 spurious failures). Isolation must be *fresh* processes (separate
+`python -m pytest` invocations), not `os.fork()`.
+
+A real fix (FUTURE_WORK P1.10) needs either per-test fresh-process isolation
+baked into the GPU test file, strict 1:1 map/unmap reference-count discipline per
 domain, or device-pointer allocation (`omp_target_alloc` + `is_device_ptr`)
-instead of host-pointer-keyed `map(to:)`.
+instead of host-pointer-keyed `map(to:)`. (`omp target enter/exit data` cleanup
+is reference-counted and host-pointer-keyed; forcing finalization between tests
+removes the abort but still yields ~7 aliasing failures, so clean teardown alone
+is not sufficient.)
 
 ### Targeted `--cov=anuga.submodule` runs corrupt numpy's `_NoValue` sentinel
 

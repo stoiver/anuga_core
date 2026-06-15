@@ -1085,7 +1085,16 @@ class Test_GPU_RK3(unittest.TestCase):
 
     @pytest.mark.slow
     def test_rk3_mode1_vs_mode2_dam_break(self):
-        """DE2 (RK3) dam-break: mode=1 and mode=2 must agree to machine precision."""
+        """DE2 (RK3) dam-break: mode=1 and mode=2 must agree.
+
+        On a CPU build (gpu_offload=false) both modes run the identically
+        compiled host kernels, so they agree to machine precision. On a real
+        GPU (gpu_offload=true) the device executes the same algorithm with a
+        different floating-point evaluation order (fma/contraction, reduction
+        order), so the agreement is only to ~1e-9, not 1e-12. Pick the tolerance
+        accordingly.
+        """
+        import anuga
         from anuga.shallow_water.sw_domain_gpu_ext import sync_to_device, sync_from_device
 
         cpu_d = self._create_domain('rk3_cpu')
@@ -1101,11 +1110,12 @@ class Test_GPU_RK3(unittest.TestCase):
             pass
         sync_from_device(gpu_d.gpu_interface.gpu_dom)
 
+        atol = 1e-8 if anuga.gpu_offload_enabled() else 1e-12
         for qname in ['stage', 'xmomentum', 'ymomentum']:
             np.testing.assert_allclose(
                 gpu_d.quantities[qname].centroid_values,
                 cpu_d.quantities[qname].centroid_values,
-                rtol=0, atol=1e-12,
+                rtol=0, atol=atol,
                 err_msg=f'RK3 dam-break: {qname} mismatch mode=1 vs mode=2')
 
     def test_saxpy3_kernel(self):

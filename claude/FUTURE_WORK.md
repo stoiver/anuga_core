@@ -47,7 +47,9 @@ management (`map(to:)`/`map(delete:)` in `gpu_domain_core.c`) corrupted by numpy
 across domains, plus two reference cycles deferring finalization. Fix options: per-test process
 isolation for the GPU test file (e.g. `pytest-forked`/subprocess), strict 1:1 map/unmap reference
 discipline per domain, or switch to `omp_target_alloc` + `is_device_ptr` device-pointer allocation.
-Production (single/few sequential GPU domains) is unaffected. See `claude/KNOWN_ISSUES.md`
+Production (single/few sequential GPU domains) is unaffected. **Interim workaround in place:**
+`anuga/shallow_water/tests/run_gpu_tests_isolated.sh` runs the file one fresh process per class
+(all classes pass); `--forked` does NOT work (CUDA is fork-unsafe). See `claude/KNOWN_ISSUES.md`
 ("GPU build: `test_DE_gpu_omp.py` aborts mid-file").
 
 **P1.9 Root-cause and fix mode-2 ('unified') riverwall flux divergence** — A riverwall
