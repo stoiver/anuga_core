@@ -148,13 +148,17 @@ and `not ANUGA_GPU_TESTS_ISOLATED`), so a normal `pytest --pyargs anuga` no long
 crashes — the file is reported as skipped with a message pointing here. On a CPU
 build the guard is inert and the file runs in-process as usual.
 
-**Workaround — run the GPU file with one fresh process per class:**
+**Workaround — run the GPU tests in isolated processes:**
 ```bash
+# one fresh process per CLASS (fast):
 bash anuga/shallow_water/tests/run_gpu_tests_isolated.sh
+# one fresh process per TEST FUNCTION, with a per-test timeout (most robust;
+# turns a genuine hang into a reported TIMEOUT). Works on any pytest target:
+python anuga/shallow_water/tests/run_isolated_tests.py [TARGET] [--timeout S] [-k EXPR]
 ```
-The runner sets `ANUGA_GPU_TESTS_ISOLATED=1` to bypass the auto-skip; every class
-passes this way. Then run the rest of the suite normally (it does not trip the
-issue) under the **legacy** default:
+Both set `ANUGA_GPU_TESTS_ISOLATED=1` to bypass the auto-skip; all tests pass
+this way (verified 65/65 per-function on the nvc build). Then run the rest of the
+suite normally (it does not trip the issue) under the **legacy** default:
 ```bash
 ANUGA_DEFAULT_COMPUTE_MODE=legacy \
   pytest anuga/shallow_water/tests/ --ignore=anuga/shallow_water/tests/test_DE_gpu_omp.py

@@ -79,10 +79,16 @@ OMP_NUM_THREADS=1 ANUGA_DEFAULT_COMPUTE_MODE=legacy \
   pytest anuga/shallow_water/tests/ \
   --ignore=anuga/shallow_water/tests/test_DE_gpu_omp.py
 
-# 2. GPU tests — one fresh process per class (do NOT use --forked: CUDA is
-#    fork-unsafe). test_DE_gpu_omp.py auto-skips in a normal in-process run on a
-#    GPU build; this runner sets ANUGA_GPU_TESTS_ISOLATED=1 to opt back in:
+# 2a. GPU tests — one fresh process per CLASS (fast). Do NOT use --forked
+#     (CUDA is fork-unsafe). test_DE_gpu_omp.py auto-skips in a normal in-process
+#     run on a GPU build; this runner sets ANUGA_GPU_TESTS_ISOLATED=1 to opt in:
 bash anuga/shallow_water/tests/run_gpu_tests_isolated.sh
+
+# 2b. Maximum isolation — one fresh process per TEST FUNCTION, with a per-test
+#     timeout so a genuine hang is reported (not stuck). Works on any target:
+python anuga/shallow_water/tests/run_isolated_tests.py            # the GPU file
+python anuga/shallow_water/tests/run_isolated_tests.py --timeout 120 -k riverwall
+python anuga/shallow_water/tests/run_isolated_tests.py --pyargs anuga.shallow_water
 ```
 
 Do **not** run `ANUGA_DEFAULT_COMPUTE_MODE=unified` over the full suite on a GPU
