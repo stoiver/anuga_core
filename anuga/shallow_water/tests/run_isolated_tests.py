@@ -47,6 +47,7 @@ Examples
 import argparse
 import concurrent.futures
 import os
+import re
 import subprocess
 import sys
 import time
@@ -54,6 +55,22 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 DEFAULT_TARGET = str(HERE / "test_DE_gpu_omp.py")
+
+# Disable pytest-isolate in the spawned subprocesses if it is installed: it forks
+# (fork-unsafe with CUDA — that is exactly what this harness exists to avoid) and
+# its 'Failed to get GPU count using pynvml' warning is just noise here. Harmless
+# no-op when the plugin is absent.
+try:
+    import pytest_isolate  # noqa: F401
+    _EXTRA_ARGS = ["-p", "no:isolate"]
+except Exception:
+    _EXTRA_ARGS = []
+
+# Match pytest's own summary counts ("1 passed", "2 failed", ...), anchored on a
+# leading integer so incidental words (e.g. the 'Failed to get GPU count'
+# warning) are NOT misread as a result.
+_COUNT_RE = re.compile(
+    r'(\d+)\s+(passed|failed|errors?|skipped|xfailed|xpassed|deselected)\b')
 
 # Status -> short label used in the live log and summary
 PASS, FAIL, SKIP, ERROR, CRASH, TIMEOUT, NOTESTS = (
@@ -73,7 +90,7 @@ def _base_env():
 def collect(targets, pyargs, k_expr):
     """Return the list of test node ids pytest would run for the targets."""
     cmd = [sys.executable, "-m", "pytest", "--collect-only", "-q",
-           "-p", "no:cacheprovider"]
+           "-p", "no:cacheprovider", *_EXTRA_ARGS]
     if pyargs:
         cmd.append("--pyargs")
     if k_expr:
@@ -92,33 +109,38 @@ def collect(targets, pyargs, k_expr):
     return ids
 
 
-def classify(returncode, stdout):
-    """Map a single-test pytest run to one of the status labels."""
+def classify(returncode, output):
+    """Map a single-test pytest run to a status label from its exit code and
+    pytest's own summary counts (parsed via _COUNT_RE, so incidental 'failed'
+    text in warnings is ignored)."""
     if returncode is None:
         return TIMEOUT
-    tail = "\n".join(stdout.strip().splitlines()[-4:]).lower()
-    if returncode == 5:
-        return NOTESTS
     if returncode < 0:                       # killed by a signal (segfault/abort)
         return CRASH
-    if "failed" in tail:
+    counts = {}
+    for n, word in _COUNT_RE.findall(output):
+        key = "error" if word.startswith("error") else word
+        counts[key] = counts.get(key, 0) + int(n)
+    if counts.get("failed"):
         return FAIL
-    if "error" in tail and "passed" not in tail:
+    if counts.get("error"):
         return ERROR
+    if returncode == 5:
+        return NOTESTS
+    if counts.get("passed"):
+        return PASS
+    if counts.get("skipped"):
+        return SKIP
     if returncode == 0:
-        if "passed" in tail:
-            return PASS
-        if "skipped" in tail and "passed" not in tail:
-            return SKIP
-        return PASS                          # collected & green, no count word
-    # Non-zero exit with no recognisable failure summary == hard crash
-    # (this is the NVHPC-runtime abort signature: exit 1, no pytest summary).
+        return PASS
+    # Non-zero exit but pytest printed no result counts — the process died
+    # before summarising (the NVHPC OpenMP-target abort is exit 1, no summary).
     return CRASH
 
 
 def run_one(nodeid, timeout):
     cmd = [sys.executable, "-m", "pytest", nodeid, "-p", "no:cacheprovider",
-           "-q", "--no-header", "-o", "addopts="]
+           "-q", "--no-header", "-o", "addopts=", *_EXTRA_ARGS]
     start = time.time()
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
