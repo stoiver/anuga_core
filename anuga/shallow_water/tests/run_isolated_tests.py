@@ -72,6 +72,45 @@ except Exception:
 _COUNT_RE = re.compile(
     r'(\d+)\s+(passed|failed|errors?|skipped|xfailed|xpassed|deselected)\b')
 
+
+def _find_rootdir(start):
+    """Nearest ancestor of *start* with a project/config marker — the directory
+    pytest treats as rootdir and emits node ids relative to."""
+    p = Path(start).resolve()
+    if not p.is_dir():
+        p = p.parent
+    for d in (p, *p.parents):
+        if any((d / m).exists() for m in
+               ("pyproject.toml", "setup.py", "setup.cfg", "tox.ini", ".git")):
+            return d
+    return p
+
+
+# Run every child pytest process from the project root and use absolute paths, so
+# the harness works no matter which directory it was launched from (e.g.
+# sandpit/). pytest emits node ids relative to the rootdir; running the children
+# anywhere else makes them "file or directory not found".
+ROOTDIR = _find_rootdir(HERE)
+
+
+def _abs_target(tok):
+    """Make a file/dir target absolute (relative to the *current* cwd, before we
+    switch the children to ROOTDIR). Node-id suffixes and bare names pass through."""
+    path, sep, rest = tok.partition("::")
+    p = Path(path)
+    if not p.is_absolute() and p.exists():
+        return str(p.resolve()) + sep + rest
+    return tok
+
+
+def _abs_nodeid(nodeid):
+    """Resolve a (rootdir-relative) collected node id to an absolute one."""
+    path, sep, rest = nodeid.partition("::")
+    p = Path(path)
+    if not p.is_absolute():
+        p = ROOTDIR / path
+    return str(p) + sep + rest
+
 # Status -> short label used in the live log and summary
 PASS, FAIL, SKIP, ERROR, CRASH, TIMEOUT, NOTESTS = (
     "PASS", "FAIL", "SKIP", "ERROR", "CRASH", "TIMEOUT", "NOTESTS")
@@ -96,7 +135,8 @@ def collect(targets, pyargs, k_expr):
     if k_expr:
         cmd += ["-k", k_expr]
     cmd += targets
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=_base_env())
+    proc = subprocess.run(cmd, capture_output=True, text=True,
+                          env=_base_env(), cwd=str(ROOTDIR))
     ids = []
     for line in proc.stdout.splitlines():
         line = line.strip()
@@ -144,7 +184,7 @@ def run_one(nodeid, timeout):
     start = time.time()
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
-                              env=_base_env(), timeout=timeout)
+                              env=_base_env(), timeout=timeout, cwd=str(ROOTDIR))
         rc, out = proc.returncode, proc.stdout + proc.stderr
     except subprocess.TimeoutExpired as e:
         rc, out = None, (e.stdout or "") + (e.stderr or "")
@@ -165,9 +205,11 @@ def main(argv=None):
     ap.add_argument("-j", "--jobs", type=int, default=1)
     args = ap.parse_args(argv)
     targets = args.targets or [DEFAULT_TARGET]
+    if not args.pyargs:
+        targets = [_abs_target(t) for t in targets]
 
     print(f"Collecting tests from: {' '.join(targets)}", flush=True)
-    ids = collect(targets, args.pyargs, args.k_expr)
+    ids = [_abs_nodeid(n) for n in collect(targets, args.pyargs, args.k_expr)]
     if not ids:
         print("No tests collected.", file=sys.stderr)
         return 2
@@ -178,10 +220,18 @@ def main(argv=None):
     bad = []
     width = len(str(len(ids)))
 
+    def _short(nodeid):
+        path, sep, rest = nodeid.partition("::")
+        try:
+            path = os.path.relpath(path, ROOTDIR)
+        except ValueError:
+            pass
+        return path + sep + rest
+
     def record(i, nodeid, status, out, dt):
         counts[status] += 1
         mark = status if status in BAD else status.lower()
-        print(f"[{i:>{width}}/{len(ids)}] {mark:<7} {dt:5.1f}s  {nodeid}",
+        print(f"[{i:>{width}}/{len(ids)}] {mark:<7} {dt:5.1f}s  {_short(nodeid)}",
               flush=True)
         if status in BAD:
             bad.append((nodeid, status))
@@ -211,7 +261,7 @@ def main(argv=None):
     if bad:
         print(f"\n{len(bad)} test(s) did not pass:")
         for nodeid, status in bad:
-            print(f"  {status:<7} {nodeid}")
+            print(f"  {status:<7} {_short(nodeid)}")
         return 1
     print("All tests passed (or were skipped).")
     return 0
