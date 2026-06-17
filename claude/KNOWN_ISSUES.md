@@ -184,9 +184,10 @@ The per-function isolated runner now passes the **entire** `anuga.shallow_water`
 set under the unified default on a GPU-offload build:
 
 ```bash
-ANUGA_DEFAULT_COMPUTE_MODE=unified \
-  anuga_run_isolated_tests --pyargs anuga.shallow_water
+anuga_run_isolated_tests --pyargs anuga.shallow_water -cm unified
 # 410 collected -> pass=408 skip=2 (2 skips are pre-existing legacy-default guards)
+# (-cm/--compute-mode sets ANUGA_DEFAULT_COMPUTE_MODE for every child; omit to
+#  inherit the environment.)
 ```
 
 This works because each test runs in its own fresh process (no mode-2 domain

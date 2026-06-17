@@ -32,6 +32,10 @@ Options
                         it is recorded as TIMEOUT and its process is killed)
     -k EXPR             pytest -k expression to select tests
     --pyargs            interpret TARGETs as importable modules
+    -cm, --compute-mode {legacy,unified}
+                        default per-domain compute mode for every child process
+                        (sets ANUGA_DEFAULT_COMPUTE_MODE); omit to inherit the
+                        current environment
     -x / --exitfirst    stop at the first non-pass
     -v / --verbose      echo each failing test's captured output
     -j N / --jobs N     run N tests concurrently (default 1; keep 1 on a GPU —
@@ -42,7 +46,8 @@ Exit status is 0 only if every test passed or was skipped.
 Examples
     anuga_run_isolated_tests
     anuga_run_isolated_tests --pyargs anuga.shallow_water -k riverwall
-    anuga_run_isolated_tests --pyargs anuga.shallow_water --timeout 120
+    anuga_run_isolated_tests --pyargs anuga.shallow_water -cm unified
+    anuga_run_isolated_tests --pyargs anuga.shallow_water --compute-mode legacy
 """
 
 import argparse
@@ -153,12 +158,22 @@ PASS, FAIL, SKIP, ERROR, CRASH, TIMEOUT, NOTESTS = (
 BAD = {FAIL, ERROR, CRASH, TIMEOUT}
 
 
+# Default per-domain compute mode for the child processes ('legacy' | 'unified'),
+# or None to inherit the caller's ANUGA_DEFAULT_COMPUTE_MODE. Set from --compute-mode
+# in main().
+COMPUTE_MODE = None
+
+
 def _base_env():
     env = dict(os.environ)
     # Opt back in to the GPU tests, which skip themselves in a normal in-process
     # run on a GPU build (see the module-level skip in test_DE_gpu_omp.py).
     env["ANUGA_GPU_TESTS_ISOLATED"] = "1"
     env.setdefault("OMP_NUM_THREADS", "1")
+    # --compute-mode overrides the default per-domain compute path for every child;
+    # left unset, the caller's existing ANUGA_DEFAULT_COMPUTE_MODE is inherited.
+    if COMPUTE_MODE is not None:
+        env["ANUGA_DEFAULT_COMPUTE_MODE"] = COMPUTE_MODE
     return env
 
 
@@ -236,6 +251,11 @@ def main(argv=None):
     ap.add_argument("--timeout", type=float, default=180.0)
     ap.add_argument("-k", dest="k_expr", default=None)
     ap.add_argument("--pyargs", action="store_true")
+    ap.add_argument("-cm", "--compute-mode", choices=("legacy", "unified"),
+                    default=None,
+                    help="default per-domain compute mode for every child "
+                         "(sets ANUGA_DEFAULT_COMPUTE_MODE); omit to inherit the "
+                         "current environment")
     ap.add_argument("-x", "--exitfirst", action="store_true")
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("-j", "--jobs", type=int, default=1)
@@ -244,6 +264,11 @@ def main(argv=None):
     if not args.pyargs:
         targets = [_abs_target(t) for t in targets]
 
+    global COMPUTE_MODE
+    COMPUTE_MODE = args.compute_mode
+    mode = COMPUTE_MODE or os.environ.get("ANUGA_DEFAULT_COMPUTE_MODE", "legacy")
+    print(f"Compute mode: {mode}"
+          f"{'' if COMPUTE_MODE else ' (inherited)'}", flush=True)
     print(f"Collecting tests from: {' '.join(targets)}", flush=True)
     ids = [_abs_nodeid(n) for n in collect(targets, args.pyargs, args.k_expr)]
     if not ids:
