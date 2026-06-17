@@ -181,12 +181,27 @@ if gpu_offload
       gpu_c_args = ['-O3', '-fopenmp', '-fopenmp-targets=nvptx64-nvidia-cuda',
                     '-Xopenmp-target=nvptx64-nvidia-cuda', '-march=' + sm_arch, '-g']
     endif
+  elif effective_compiler_id == 'gcc'
+    # GCC cannot build the GPU offload kernels: the unified kernels use the
+    # OpenMP 5.0 'omp target teams loop' construct. gcc < 11 rejects it outright
+    # ("expected '#pragma omp' clause before 'loop'"), and newer gcc ICEs in the
+    # nvptx backend (ompdevlow GIMPLE pass). Fail fast with actionable guidance
+    # rather than emitting a wall of compiler errors. (Most commonly this means
+    # CC was not pointed at nvc, so meson fell back to the system cc=gcc.)
+    error(
+      'gpu_offload=true is not supported with gcc (found gcc ' + cc.version() +
+      '). The GPU kernels need the NVIDIA HPC SDK (nvc). Rebuild with:\n' +
+      '    module load nvhpc            # on HPC systems (gadi: check `module avail nvhpc`)\n' +
+      '    rm -rf build/cp314           # required when switching compiler\n' +
+      '    CC=$(which nvc) pip install --no-build-isolation -e . \\\n' +
+      '        -Csetup-args=-Dgpu_offload=true -Csetup-args=-Dgpu_arch=' + gpu_arch + '\n' +
+      '  Or build for CPU multicore instead with -Dgpu_offload=false.')
   else
-    # GCC with nvptx offloading (NVIDIA only, AMD not well supported)
-    # -foffload=-fcf-protection=none: Ubuntu GCC enables cf-protection by default
-    # but nvptx target does not support it.
-    # -foffload=-O1: GCC 15 nvptx backend ICEs at -O3 on complex omp target teams loop
-    # kernels (ompdevlow GIMPLE pass segfault); -O1 avoids the problematic inlining.
+    # Other/unknown compilers: best-effort gcc-style nvptx offloading.
+    # -foffload=-fcf-protection=none: some GCCs enable cf-protection by default
+    # but the nvptx target does not support it.
+    # -foffload=-O1: GCC nvptx backend can ICE at -O3 on the omp target teams loop
+    # kernels; -O1 avoids the problematic inlining.
     gpu_c_args = ['-O3', '-fopenmp', '-foffload=nvptx-none',
                   '-foffload=-fcf-protection=none', '-foffload=-O1', '-g']
   endif

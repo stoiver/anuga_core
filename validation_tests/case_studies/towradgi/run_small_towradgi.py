@@ -416,7 +416,8 @@ Creating domain from scratch.
         except:
             pass
         domain.set_name(domain_name)
-    
+        domain.set_epsg(epsg)
+
         print(domain.statistics())
     
         # ------------------------------------------------------------------------------
