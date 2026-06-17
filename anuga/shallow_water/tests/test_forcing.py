@@ -2065,6 +2065,10 @@ class Test_Forcing(unittest.TestCase):
         vertices = [[1,0,2], [1,2,4], [4,2,5], [3,1,4]]
 
         domain = Domain(points, vertices)
+        # Mode-2 ('unified') computes fluxes/forcing on-device and never syncs the
+        # host explicit_update/semi_implicit_update arrays this white-box test reads.
+        # Pin legacy to exercise the in-Python machinery it is written for.
+        domain.set_compute_mode('legacy')
         domain.set_flow_algorithm('DE0')
 
         B = Reflective_boundary(domain)
@@ -2115,6 +2119,10 @@ class Test_Forcing(unittest.TestCase):
         vertices = [[1,0,2], [1,2,4], [4,2,5], [3,1,4]]
 
         domain = Domain(points, vertices)
+        # Mode-2 ('unified') computes friction on-device and never syncs the host
+        # semi_implicit_update array this white-box test reads. Pin legacy to
+        # exercise the in-Python forcing machinery it is written for.
+        domain.set_compute_mode('legacy')
 
         # Use the old function which doesn't take into account the extra
         # wetted area due to slope of bed
@@ -2200,6 +2208,10 @@ class Test_Forcing(unittest.TestCase):
         vertices = [[1,0,2], [1,2,4], [4,2,5], [3,1,4]]
 
         domain = Domain(points, vertices)
+        # Mode-2 ('unified') computes friction on-device and never syncs the host
+        # semi_implicit_update array this white-box test reads. Pin legacy to
+        # exercise the in-Python forcing machinery it is written for.
+        domain.set_compute_mode('legacy')
         B = Reflective_boundary(domain)
         domain.set_boundary( {'exterior': B})
 

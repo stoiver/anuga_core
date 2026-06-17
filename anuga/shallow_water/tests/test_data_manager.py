@@ -330,6 +330,11 @@ class Test_Data_Manager(Test_Mux):
         """
 
         domain = self.domain
+        # Mode-2 ('unified') runs the step in C and updates monitored extrema
+        # (xmomentum/ymomentum) from on-device values, diverging from the host
+        # quantity_statistics path this test checks. Pin legacy to exercise the
+        # in-Python monitoring machinery it is written for.
+        domain.set_compute_mode('legacy')
 
         domain.set_name('extrema_test' + str(id(self)))
         domain.format = 'sww'

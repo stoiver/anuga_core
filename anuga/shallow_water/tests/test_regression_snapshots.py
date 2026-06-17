@@ -23,6 +23,11 @@ def _make_dam_break_domain(algorithm='DE0', friction=0.0, cells_x=10, cells_y=5)
     """Simple dam-break domain: left half stage=1, right half stage=0."""
     domain = anuga.rectangular_cross_domain(
         cells_x, cells_y, len1=10.0, len2=5.0)
+    # These baselines are legacy-recorded numerical references; mode-2 ('unified')
+    # differs at the ~1e-6 level from a different reduction/eval order. Pin legacy
+    # so the snapshots are deterministic under any ANUGA_DEFAULT_COMPUTE_MODE
+    # (mode-2 fidelity is covered by the mode1-vs-mode2 tests in test_DE_gpu_omp.py).
+    domain.set_compute_mode('legacy')
     domain.set_name('regression_db')
     domain.set_store(False)
     domain.set_flow_algorithm(algorithm)
@@ -50,6 +55,8 @@ def _make_thacker_domain(algorithm='DE0'):
     domain = anuga.rectangular_cross_domain(
         20, 20, len1=2 * a, len2=2 * a,
         origin=(-a, -a))
+    # Legacy-recorded baseline — pin legacy (see _make_dam_break_domain).
+    domain.set_compute_mode('legacy')
     domain.set_name('regression_thacker')
     domain.set_store(False)
     domain.set_flow_algorithm(algorithm)

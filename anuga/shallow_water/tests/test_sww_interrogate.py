@@ -66,6 +66,11 @@ class Test_sww_Interrogate(unittest.TestCase):
 
         # Create shallow water domain
         domain = Domain(points, vertices, boundary)
+        # Runup/location asserts are against legacy-recorded reference values;
+        # mode-2 ('unified') diverges at the ~1e-6 level from a different
+        # reduction/eval order. Pin legacy so this test is deterministic under
+        # any ANUGA_DEFAULT_COMPUTE_MODE.
+        domain.set_compute_mode('legacy')
 
         domain.set_flow_algorithm('DE0')
         domain.set_low_froude(0)

@@ -215,6 +215,10 @@ class Test_Shallow_Water(unittest.TestCase):
         vertices = [[1,0,2], [1,2,4], [4,2,5], [3,1,4]]
 
         domain = Domain(points, vertices)
+        # Mode-2 ('unified') computes friction on-device and never syncs the host
+        # semi_implicit_update array this white-box test reads. Pin legacy to
+        # exercise the in-Python forcing machinery it is written for.
+        domain.set_compute_mode('legacy')
 
         domain.set_sloped_mannings_function(False)
 
@@ -296,6 +300,10 @@ class Test_Shallow_Water(unittest.TestCase):
         vertices = [[1,0,2], [1,2,4], [4,2,5], [3,1,4]]
 
         domain = Domain(points, vertices)
+        # Mode-2 ('unified') computes friction on-device and never syncs the host
+        # semi_implicit_update array this white-box test reads. Pin legacy to
+        # exercise the in-Python forcing machinery it is written for.
+        domain.set_compute_mode('legacy')
         B = Reflective_boundary(domain)
         domain.set_boundary( {'exterior': B})
 
@@ -378,6 +386,10 @@ class Test_Shallow_Water(unittest.TestCase):
         vertices = [[1,0,2], [1,2,4], [4,2,5], [3,1,4]]
 
         domain = Domain(points, vertices)
+        # Mode-2 ('unified') computes friction on-device and never syncs the host
+        # semi_implicit_update array this white-box test reads. Pin legacy to
+        # exercise the in-Python forcing machinery it is written for.
+        domain.set_compute_mode('legacy')
         B = Reflective_boundary(domain)
         domain.set_boundary( {'exterior': B})
 
