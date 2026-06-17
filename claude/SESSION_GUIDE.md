@@ -137,10 +137,9 @@ Case: `run_small_towradgi.py -ft 200 -ys 50`, ~256k triangles, DE1 algorithm.
 
 First multi-GPU run via the GPU-aware-MPI build (`-Dgpu_aware_mpi=true`, nvc,
 cc70). Times are the **evolve-loop** wall time for `run_small_towradgi.py -mpm 2
--ro hilbert`. NOTE: these are a *longer* run than the laptop table above (evolve
-~200 s vs ~6 s there → a higher `-ft`; exact finaltime TBC), so the absolute
-seconds are NOT comparable to the 5.62 s reference — only the V100 scaling below
-is meaningful.
+-ro hilbert -ft 3600` (18× the laptop table's `-ft 200`). The absolute seconds
+are therefore NOT comparable to the 5.62 s reference above — only the V100
+scaling below is meaningful.
 
 | Config | Evolve (s) | Speedup vs 1×V100 | Parallel eff. |
 |--------|-----------:|-------------------|---------------|
