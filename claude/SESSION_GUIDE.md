@@ -133,6 +133,28 @@ Case: `run_small_towradgi.py -ft 200 -ys 50`, ~256k triangles, DE1 algorithm.
 
 **Best reorder by mode: OpenMP → `metis_rcm` (17.43 s, 5.5×); MPI → `rcm` (11.63 s); GPU → `hilbert` (5.62 s, 17.1×).**
 
+### Multi-GPU strong scaling — gadi (NVIDIA V100, GPU-aware MPI), 2026-06-17
+
+First multi-GPU run via the GPU-aware-MPI build (`-Dgpu_aware_mpi=true`, nvc,
+cc70). Times are the **evolve-loop** wall time for `run_small_towradgi.py -mpm 2
+-ro hilbert`. NOTE: these are a *longer* run than the laptop table above (evolve
+~200 s vs ~6 s there → a higher `-ft`; exact finaltime TBC), so the absolute
+seconds are NOT comparable to the 5.62 s reference — only the V100 scaling below
+is meaningful.
+
+| Config | Evolve (s) | Speedup vs 1×V100 | Parallel eff. |
+|--------|-----------:|-------------------|---------------|
+| RTX 5070 (1 GPU, local) | 200 | — | — |
+| V100 ×1 | 151 | 1.00× | — |
+| V100 ×2 | 105 | 1.44× | 72% |
+| V100 ×4 | 83 | 1.82× | 45% |
+
+- A single **V100 (151 s) beats the RTX 5070 (200 s)** — this solver is
+  memory-bandwidth-bound and V100 HBM2 (~900 GB/s) > 5070 GDDR7.
+- Strong scaling tails off (72% → 45%): "small" Towradgi (~257k tris) gives only
+  ~64k cells/rank at 4 GPUs, so halo-exchange/compute ratio rises and the GPUs
+  underutilise. A larger mesh should scale substantially better.
+
 ### CPU multicore via the unified gpu_ext C kernels (mode=2, gpu_offload=false)
 
 The operators (rainfall/culverts/inlet) run as **serial Python** in mode=1 — profiling showed
