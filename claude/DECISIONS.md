@@ -387,6 +387,27 @@ the mode-2 work exists to eliminate. Operators run via `apply_fractional_steps`
 (wind/barometric). So operators are the architecturally correct path for mode 2, and the
 forcing classes are redundant.
 
+### Mode-2 testing: pin white-box host-state tests to legacy (2026-06-17)
+
+**Context:** Running `anuga.shallow_water` under the unified default *on a GPU build*
+(via `anuga_run_isolated_tests -cm unified`) failed 11 tests that pass on the CPU build.
+On a CPU build mode-2 device memory *is* host memory (`CPU_ONLY_MODE` stubs), so the
+divergence only appears with real offload.
+
+**Decision:** Pin such tests to legacy with `domain.set_compute_mode('legacy')` rather
+than teaching mode-2 to sync or loosening tolerances. Two kinds qualify: (1) **white-box**
+tests that call `compute_forcing_terms()` / `compute_fluxes()` and assert on the host
+`semi_implicit_update` / `explicit_update` arrays (mode-2 computes those on-device and
+never syncs back → stale zeros); (2) **numerical reference/snapshot** tests recorded under
+legacy that diverge at ~1e-6 from mode-2's reduction/eval order. End-to-end evolve tests
+are NOT pinned — they pass in both modes. Documented as a convention in `CONVENTIONS.md`.
+
+**Why:** These probe mode-1 internals or a legacy-recorded baseline, not behaviour that
+mode 2 must reproduce bit-for-bit; mode-1-vs-mode-2 equivalence is covered separately by
+`test_DE_gpu_omp.py`. Adding per-step device syncs purely to satisfy a white-box assertion
+would reintroduce exactly the cost mode 2 exists to remove. The pin is a no-op for the
+distribution-default legacy path.
+
 **Caveats:** (1) Manning must stay in-step (semi-implicit, stability) — the
 `forcing_terms` mechanism is kept for it; only the optional classes are deprecated.
 (2) Forcing-as-forcing-term (in-step) vs operator (end-of-step fractional split) are NOT

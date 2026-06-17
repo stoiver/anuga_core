@@ -91,12 +91,32 @@ bash anuga/shallow_water/tests/run_gpu_tests_isolated.sh
 anuga_run_isolated_tests                                  # the GPU file
 anuga_run_isolated_tests --pyargs anuga.shallow_water -k riverwall --timeout 120
 anuga_run_isolated_tests --pyargs anuga.shallow_water
+
+# 2c. Whole anuga.shallow_water set under the unified default — GREEN on a GPU
+#     build *only via the isolated runner* (each test in a fresh process, so the
+#     NVHPC abort never accumulates). -cm/--compute-mode sets the default per-domain
+#     compute path (ANUGA_DEFAULT_COMPUTE_MODE) for every child:
+anuga_run_isolated_tests --pyargs anuga.shallow_water -cm unified   # 408 pass, 2 skip
 ```
 
-Do **not** run `ANUGA_DEFAULT_COMPUTE_MODE=unified` over the full suite on a GPU
-build — every default domain then offloads and the suite aborts early. Validate
-the unified default over the full suite on the **CPU build** (it is the
-documented all-green run). See `claude/KNOWN_ISSUES.md` for the root cause.
+`-cm legacy|unified` (omit to inherit the environment) is the ergonomic way to
+flip compute mode; it is equivalent to exporting `ANUGA_DEFAULT_COMPUTE_MODE`.
+
+Do **not** run `ANUGA_DEFAULT_COMPUTE_MODE=unified` over the full suite **in one
+process** on a GPU build — every default domain then offloads and the suite
+aborts early. Use the isolated runner (2c) on a GPU build, or validate the
+unified default in one process on the **CPU build** (the documented all-green
+run). See `claude/KNOWN_ISSUES.md` for the root cause.
+
+**Compute mode and tests:** a handful of white-box tests probe mode-1-only host
+state — they call `compute_forcing_terms()` / `compute_fluxes()` and assert on
+the host `semi_implicit_update` / `explicit_update` arrays, which mode-2
+('unified') computes on-device and never syncs back. Such tests pin themselves
+to legacy with `domain.set_compute_mode('legacy')` right after constructing the
+domain (see the existing pins in `test_forcing.py`, `test_friction.py`,
+`test_physics_sw.py`). Follow that pattern for any new test that inspects those
+internal Python update arrays. See `claude/CONVENTIONS.md` → "Compute mode in
+tests".
 
 Tests are marked slow with `@pytest.mark.slow`. All tests under `anuga/parallel/tests/`
 are automatically treated as slow (they spawn MPI subprocesses). To mark a new slow test:

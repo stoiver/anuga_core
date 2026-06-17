@@ -59,7 +59,13 @@ pytest --pyargs anuga                    # full suite (~163s)
 pytest --pyargs anuga --run-fast         # skip slow tests (~41s)
 pytest --pyargs anuga -m slow            # only slow tests
 pytest anuga/shallow_water/tests/test_shallow_water_domain.py  # single file
+
+# Per-test process isolation (required on a GPU build; works on any build).
+# -cm legacy|unified sets the default compute mode for every child.
+anuga_run_isolated_tests --pyargs anuga.shallow_water -cm unified   # 408 pass, 2 skip
+anuga_run_isolated_tests                                            # the GPU file
 ```
+See `CLAUDE.md` → "Testing a GPU-offload (nvc) build" for the full GPU recipe.
 
 ### Build
 ```bash
@@ -258,7 +264,33 @@ Key findings:
 
 ---
 
-## Recent session summaries (sessions 21–39)
+## Recent session summaries (sessions 21–40)
+
+**Session 40 (2026-06-17):** Mode-2 ('unified') triage on the **GPU build** + the
+isolated runner became a first-class installed tool. Running
+`anuga_run_isolated_tests --pyargs anuga.shallow_water` under the unified default on
+a GPU-offload build surfaced 11 failures — all GPU-offload artifacts, not solver
+regressions (Session 39's all-green was the CPU build, where device memory == host
+memory). Two groups: (1) **9 white-box tests** call `compute_forcing_terms()` /
+`compute_fluxes()` and assert on the host `semi_implicit_update` / `explicit_update`
+arrays, which mode-2 GPU computes on-device and never syncs back (`test_forcing.py`,
+`test_friction.py`, `test_physics_sw.py` Manning cases, `test_data_manager.py::
+test_sww_extrema`); (2) **2 numerical tests** compare against legacy-recorded
+references and diverge at ~1e-6 from mode-2's reduction/eval order
+(`test_regression_snapshots.py::test_dam_break_DE1_stage_snapshot`,
+`test_sww_interrogate.py::test_get_maximum_inundation_de0`). Fix: pin each to legacy
+with `domain.set_compute_mode('legacy')` (snapshot helpers pinned so the whole file
+is deterministic); no-op for the legacy default. The shallow_water set is now
+**408 pass / 2 skip** under `-cm unified` on the GPU build (commit `0c50947d`).
+Then **moved** the harness `anuga/shallow_water/tests/run_isolated_tests.py` →
+`scripts/anuga_run_isolated_tests.py`, installed it to bindir via `meson.build`
+(`configure_file`, matching the other `anuga_*` scripts), and made it install-safe
+(importlib-resolved default target; cwd-seeded rootdir; `_abs_nodeid` passes through
+absolute/`--pyargs` ids) — commit `37eccc6d`. Added **`-cm`/`--compute-mode
+{legacy,unified}`** to set `ANUGA_DEFAULT_COMPUTE_MODE` for every child (omit to
+inherit; banner prints the resolved mode) — commit `34401cde`. Docs: `KNOWN_ISSUES.md`
+(green-run note + new command/flag), `CLAUDE.md` (testing section), new
+`CONVENTIONS.md` → "Compute mode in tests" (commit `f57d0532` + this session's docs).
 
 **Session 39 (2026-06-15):** Mode-2 ('unified') unit-suite triage — drove the fast suite
 to **zero failures** under `ANUGA_DEFAULT_COMPUTE_MODE=unified` (2657 passed; 2658 in
@@ -444,6 +476,8 @@ suite: 58.13% → 58.68%.
 | Add public API export | `anuga/__init__.py` (import + `__all__`) |
 | Add slow test marker | `@pytest.mark.slow` decorator or module-level `pytestmark` |
 | Configure pytest options | `conftest.py` (repo root), `pyproject.toml` `[tool.pytest.ini_options]` |
+| Per-test process isolation runner | `scripts/anuga_run_isolated_tests.py` (installed `anuga_run_isolated_tests`; `-cm legacy\|unified`) |
+| Default compute mode | `ANUGA_DEFAULT_COMPUTE_MODE` env var; `domain.set_compute_mode('legacy'\|'unified')` |
 | Memory reporting | `anuga/utilities/system_tools.py::memory_stats()` |
 | Timestepping output | `anuga/abstract_2d_finite_volumes/generic_domain.py::timestepping_statistics()` |
 | Triangle quiet/verbose | `anuga/pmesh/mesh.py::_generateMesh_impl()` |
