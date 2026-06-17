@@ -176,6 +176,40 @@ is reference-counted and host-pointer-keyed; forcing finalization between tests
 removes the abort but still yields ~7 aliasing failures, so clean teardown alone
 is not sufficient.)
 
+### GPU build: `anuga.shallow_water` is green under `unified` via the isolated runner (2026-06-17)
+
+The per-function isolated runner now passes the **entire** `anuga.shallow_water`
+set under the unified default on a GPU-offload build:
+
+```bash
+ANUGA_DEFAULT_COMPUTE_MODE=unified \
+  python anuga/shallow_water/tests/run_isolated_tests.py --pyargs anuga.shallow_water
+# 410 collected -> pass=408 skip=2 (2 skips are pre-existing legacy-default guards)
+```
+
+This works because each test runs in its own fresh process (no mode-2 domain
+accumulation -> no NVHPC abort), **and** because 11 tests that probed mode-1-only
+host state are now pinned to `legacy` (`domain.set_compute_mode('legacy')`):
+
+- 9 white-box tests call `compute_forcing_terms()` / `compute_fluxes()` and assert
+  on the host `semi_implicit_update` / `explicit_update` arrays, which mode-2 GPU
+  computes on-device and never syncs back (so the host arrays read stale zeros) —
+  in `test_forcing.py`, `test_friction.py`, `test_physics_sw.py` (Manning friction
+  cases) and `test_data_manager.py::test_sww_extrema` (extrema monitoring).
+- 2 numerical tests compare against legacy-recorded references and diverge at the
+  ~1e-6 level under mode-2's different reduction/eval order
+  (`test_regression_snapshots.py::test_dam_break_DE1_stage_snapshot` and
+  `test_sww_interrogate.py::test_get_maximum_inundation_de0`). The two
+  regression-snapshot domain helpers are pinned so that whole file stays
+  deterministic under any `ANUGA_DEFAULT_COMPUTE_MODE`.
+
+These are test-harness artifacts, not solver bugs; the pins are no-ops for the
+distribution-default legacy path. Mode-2 numerical fidelity remains covered by the
+mode1-vs-mode2 comparison tests in `test_DE_gpu_omp.py`. Note this complements —
+does not replace — the guidance above: the *full* `pytest --pyargs anuga.shallow_water`
+(non-isolated) under `unified` on a GPU build still aborts; use the isolated runner.
+Commit `0c50947d`.
+
 ### Targeted `--cov=anuga.submodule` runs corrupt numpy's `_NoValue` sentinel
 
 Running `pytest --cov=anuga.structures.structure_operator` (or any sub-package
