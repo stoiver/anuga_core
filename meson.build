@@ -249,6 +249,14 @@ configure_file(
     install_mode: 'rwxr-xr-x'
 )
 
+configure_file(
+    input: 'scripts/anuga_run_isolated_tests.py',
+    output: 'anuga_run_isolated_tests',
+    configuration: conf,
+    install_dir: get_option('bindir'),
+    install_mode: 'rwxr-xr-x'
+)
+
 # If mpicc is not on meson's PATH (common in conda envs where the env bin
 # dir is in the user's PATH but not in the subprocess PATH seen by meson),
 # locate it via mpi4py config + shutil.which + sys.prefix/bin fallback, then

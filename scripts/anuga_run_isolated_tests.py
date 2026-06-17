@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """Run each collected test in its own fresh pytest process.
 
 Why
@@ -20,11 +20,12 @@ run); it is only *required* on a GPU build.
 
 Usage
 -----
-    python run_isolated_tests.py [TARGET ...] [options]
+    anuga_run_isolated_tests [TARGET ...] [options]      # installed command
+    python scripts/anuga_run_isolated_tests.py [TARGET ...] [options]  # source tree
 
-TARGET defaults to this directory's ``test_DE_gpu_omp.py``. It may be any pytest
-target: a file, a directory, a ``path::Class::test`` node id, or (with
-``--pyargs``) a dotted module like ``anuga.shallow_water``.
+TARGET defaults to the installed ``anuga.shallow_water.tests.test_DE_gpu_omp``
+file. It may be any pytest target: a file, a directory, a ``path::Class::test``
+node id, or (with ``--pyargs``) a dotted module like ``anuga.shallow_water``.
 
 Options
     --timeout SECONDS   per-test wall-clock limit (default 180; a test exceeding
@@ -39,9 +40,9 @@ Options
 Exit status is 0 only if every test passed or was skipped.
 
 Examples
-    python run_isolated_tests.py
-    python run_isolated_tests.py test_DE_gpu_omp.py --timeout 120
-    python run_isolated_tests.py --pyargs anuga.shallow_water -k riverwall
+    anuga_run_isolated_tests
+    anuga_run_isolated_tests --pyargs anuga.shallow_water -k riverwall
+    anuga_run_isolated_tests --pyargs anuga.shallow_water --timeout 120
 """
 
 import argparse
@@ -54,7 +55,28 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-DEFAULT_TARGET = str(HERE / "test_DE_gpu_omp.py")
+
+
+def _default_target():
+    """The GPU test file this harness exists for.
+
+    Resolve it from the *installed* anuga package so the command works after a
+    meson/pip install (when this script lives in bindir, far from the tests),
+    falling back to the in-repo path for an uninstalled source checkout.
+    """
+    try:
+        import importlib.util
+        spec = importlib.util.find_spec(
+            "anuga.shallow_water.tests.test_DE_gpu_omp")
+        if spec and spec.origin:
+            return spec.origin
+    except Exception:
+        pass
+    return str(HERE.parent / "anuga" / "shallow_water" / "tests"
+               / "test_DE_gpu_omp.py")
+
+
+DEFAULT_TARGET = _default_target()
 
 # Disable pytest-isolate in the spawned subprocesses if it is installed: it forks
 # (fork-unsafe with CUDA — that is exactly what this harness exists to avoid) and
@@ -86,11 +108,15 @@ def _find_rootdir(start):
     return p
 
 
-# Run every child pytest process from the project root and use absolute paths, so
+# Run every child pytest process from a stable rootdir and use absolute paths, so
 # the harness works no matter which directory it was launched from (e.g.
 # sandpit/). pytest emits node ids relative to the rootdir; running the children
-# anywhere else makes them "file or directory not found".
-ROOTDIR = _find_rootdir(HERE)
+# anywhere else makes them "file or directory not found". Seed the search from the
+# current working directory rather than this script's own location: now that the
+# script is installed to bindir (far from both the repo and the tests), the cwd is
+# the reliable anchor — inside a checkout it walks up to the repo root, and from an
+# installed command run anywhere it falls back to the cwd.
+ROOTDIR = _find_rootdir(Path.cwd())
 
 
 def _abs_target(tok):
@@ -104,11 +130,21 @@ def _abs_target(tok):
 
 
 def _abs_nodeid(nodeid):
-    """Resolve a (rootdir-relative) collected node id to an absolute one."""
+    """Resolve a (rootdir-relative) collected node id to an absolute one.
+
+    A node id collected for an installed package (e.g. via ``--pyargs``) is
+    already an absolute path under site-packages and is returned unchanged; only
+    rootdir-relative ids get the rootdir prefix, and only when that resolves to a
+    real file (so an unexpected layout falls back to the raw id rather than
+    fabricating a bad absolute path)."""
     path, sep, rest = nodeid.partition("::")
     p = Path(path)
     if not p.is_absolute():
-        p = ROOTDIR / path
+        cand = ROOTDIR / path
+        if cand.exists():
+            p = cand
+        else:
+            return nodeid
     return str(p) + sep + rest
 
 # Status -> short label used in the live log and summary

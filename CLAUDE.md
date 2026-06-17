@@ -85,10 +85,12 @@ OMP_NUM_THREADS=1 ANUGA_DEFAULT_COMPUTE_MODE=legacy \
 bash anuga/shallow_water/tests/run_gpu_tests_isolated.sh
 
 # 2b. Maximum isolation — one fresh process per TEST FUNCTION, with a per-test
-#     timeout so a genuine hang is reported (not stuck). Works on any target:
-python anuga/shallow_water/tests/run_isolated_tests.py            # the GPU file
-python anuga/shallow_water/tests/run_isolated_tests.py --timeout 120 -k riverwall
-python anuga/shallow_water/tests/run_isolated_tests.py --pyargs anuga.shallow_water
+#     timeout so a genuine hang is reported (not stuck). Works on any target.
+#     Installed as the `anuga_run_isolated_tests` command (scripts/, via meson);
+#     in a source checkout run scripts/anuga_run_isolated_tests.py directly:
+anuga_run_isolated_tests                                  # the GPU file
+anuga_run_isolated_tests --pyargs anuga.shallow_water -k riverwall --timeout 120
+anuga_run_isolated_tests --pyargs anuga.shallow_water
 ```
 
 Do **not** run `ANUGA_DEFAULT_COMPUTE_MODE=unified` over the full suite on a GPU

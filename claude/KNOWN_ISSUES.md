@@ -153,8 +153,10 @@ build the guard is inert and the file runs in-process as usual.
 # one fresh process per CLASS (fast):
 bash anuga/shallow_water/tests/run_gpu_tests_isolated.sh
 # one fresh process per TEST FUNCTION, with a per-test timeout (most robust;
-# turns a genuine hang into a reported TIMEOUT). Works on any pytest target:
-python anuga/shallow_water/tests/run_isolated_tests.py [TARGET] [--timeout S] [-k EXPR]
+# turns a genuine hang into a reported TIMEOUT). Works on any pytest target.
+# Installed as `anuga_run_isolated_tests` (scripts/, via meson); in a source
+# checkout run scripts/anuga_run_isolated_tests.py directly:
+anuga_run_isolated_tests [TARGET] [--timeout S] [-k EXPR]
 ```
 Both set `ANUGA_GPU_TESTS_ISOLATED=1` to bypass the auto-skip; all tests pass
 this way (verified 65/65 per-function on the nvc build). Then run the rest of the
@@ -183,7 +185,7 @@ set under the unified default on a GPU-offload build:
 
 ```bash
 ANUGA_DEFAULT_COMPUTE_MODE=unified \
-  python anuga/shallow_water/tests/run_isolated_tests.py --pyargs anuga.shallow_water
+  anuga_run_isolated_tests --pyargs anuga.shallow_water
 # 410 collected -> pass=408 skip=2 (2 skips are pre-existing legacy-default guards)
 ```
 
