@@ -24,7 +24,8 @@ Future work recommendations: `claude/FUTURE_WORK.md`
 | Benchmark suite | 2 | 2 | 0 |
 | Bug fixes | 7 | 7 | 0 |
 | Kinematic viscosity parallelisation | 4 | 4 | 0 |
-| **Total** | **205** | **197** | **8** |
+| Mode-2 test triage + isolated runner tooling | 4 | 4 | 0 |
+| **Total** | **209** | **201** | **8** |
 
 ---
 
