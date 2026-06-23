@@ -67,7 +67,7 @@ Copy it, adjust the file paths, and add extra sections as needed.
    output_base_directory     = "OUTPUT/"
    yieldstep                 = 120.0         # seconds between evolve yields
    finaltime                 = 21600.0       # total simulation duration [s]
-   projection_information    = -55           # UTM zone (negative = southern hemisphere)
+   projection_information    = "EPSG:32755"  # "EPSG:<code>", UTM zone int (e.g. -55), or proj4 string
    flow_algorithm            = "DE0"         # "DE0" (fast) or "DE1" (accurate)
    output_tif_cellsize       = 50.0          # cell size [m] for output GeoTiff rasters
 
@@ -183,10 +183,11 @@ Top-level simulation settings.
    # Omit to write SWW output at every yieldstep (the default).
    # outputstep = 600.0
 
-   # Coordinate reference system.
-   #   Integer: UTM zone (negative = southern hemisphere, e.g. -55)
-   #   String:  full proj4 string for non-UTM projections
-   projection_information = -55
+   # Coordinate reference system. One of:
+   #   Integer       — UTM zone (negative = southern hemisphere), e.g. -55
+   #   "EPSG:<code>" — an EPSG code, e.g. "EPSG:32755" (= UTM zone 55 south)
+   #   String        — a full proj4 string for other projections
+   projection_information = "EPSG:32755"
 
    # Numerical flow algorithm.
    #   "DE0" — first-order (faster)
