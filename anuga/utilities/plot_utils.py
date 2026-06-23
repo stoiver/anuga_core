@@ -1035,10 +1035,18 @@ def Make_Geotif(swwFile=None,
         raise ImportError(msg)
 
     # Check whether swwFile is an array, and if so, redefine various inputs to
-    # make the code work
-    if(type(swwFile) == numpy.ndarray):
+    # make the code work. Use isinstance (not type(...) == ...) so that ndarray
+    # subclasses are recognised too — in particular numpy.ma.MaskedArray, which
+    # is what NetCDF reads return (e.g. the elevation/friction point arrays built
+    # by raster_outputs.make_me_some_tifs). An exact-type check missed those and
+    # mis-routed the array down the "swwFile is a filename" path.
+    if isinstance(swwFile, numpy.ndarray):
         import copy
-        xyzPoints = copy.copy(swwFile)
+        if numpy.ma.isMaskedArray(swwFile):
+            # Fill masked cells with nan so they are skipped by the interpolation
+            xyzPoints = numpy.ma.filled(swwFile.astype(float), numpy.nan)
+        else:
+            xyzPoints = copy.copy(swwFile)
         swwFile = None
 
     if(((EPSG_CODE is None) & (proj4string is None) )|
