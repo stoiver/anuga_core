@@ -28,10 +28,11 @@ yieldstep = 120.0
 # Total simulation duration [seconds]
 finaltime = 21600.0
 
-# Coordinate reference system.
-# Integer: UTM zone (negative = southern hemisphere).
-# String: full proj4 string for non-UTM projections.
-projection_information = -55   # UTM zone 55 south
+# Coordinate reference system. One of:
+#   Integer       — UTM zone (negative = southern hemisphere), e.g. -55
+#   "EPSG:<code>" — an EPSG code, e.g. "EPSG:32755"
+#   String        — a full proj4 string for other projections
+projection_information = "EPSG:32755"   # UTM zone 55 south (= -55)
 
 # Numerical flow algorithm.
 # "DE0" = first-order (faster), "DE1" = second-order (more accurate)

@@ -238,12 +238,25 @@ class PrepareData(ProjectData):
                     + str(self.projection_information) \
                     + ' +datum=WGS84 +units=m +no_defs'
         elif isinstance(self.projection_information, str):
-            self.proj4string = self.projection_information
+            pi = self.projection_information.strip()
+            if pi.lower().startswith('epsg:'):
+                # An EPSG code, e.g. "EPSG:32755". Convert to a proj4 string so
+                # the downstream consumers (pyproj CRS.from_proj4 in Make_Geotif)
+                # accept it — they do not parse the bare "EPSG:NNNN" form.
+                import warnings
+                from pyproj import CRS
+                code = int(pi.split(':', 1)[1])
+                with warnings.catch_warnings():
+                    warnings.simplefilter('ignore')  # silence to_proj4 lossy note
+                    self.proj4string = CRS.from_epsg(code).to_proj4()
+            else:
+                # Assume a full proj4 string
+                self.proj4string = pi
         else:
             msg = 'Invalid projection information ' + \
-                ' --  must be a proj4string, or an integer' + \
-                ' defining a UTM zone [positive for northern hemisphere,' + \
-                ' negative for southern hemisphere]'
+                ' --  must be a proj4string, an "EPSG:<code>" string, or an' + \
+                ' integer defining a UTM zone [positive for northern' + \
+                ' hemisphere, negative for southern hemisphere]'
             raise Exception(msg)
 
         # Set up directories etc
