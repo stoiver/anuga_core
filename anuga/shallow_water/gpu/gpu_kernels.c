@@ -35,13 +35,14 @@ void gpu_extrapolate_second_order(struct gpu_domain *GD) {
     NVTX_POP();
 }
 
-double gpu_compute_fluxes(struct gpu_domain *GD) {
+double gpu_compute_fluxes(struct gpu_domain *GD, int substep_count, int timestep_fluxcalls) {
     NVTX_PUSH("gpu_compute_fluxes");
-    // Unified: calls core_compute_fluxes_central from core_kernels.c
-    // GPU mode always uses substep_count=0 (RK2 handled at higher level)
-    // timestep_fluxcalls=1 since boundary_flux_sum not used in GPU MPI mode
+    // Unified: calls core_compute_fluxes_central from core_kernels.c.
+    // substep_count / timestep_fluxcalls index D.boundary_flux_sum so the Python
+    // boundary_flux_integral_operator gets each RK substep's boundary flux
+    // (euler/ader2 -> (0,1); rk2 -> (0,2),(1,2); rk3 -> (0,3),(1,3),(2,3)).
 
-    double local_timestep = core_compute_fluxes_central(&GD->D, 0, 1);
+    double local_timestep = core_compute_fluxes_central(&GD->D, substep_count, timestep_fluxcalls);
 
     // Count FLOPs: 380 FLOPs per element (3 edges × flux function)
     if (GD->flops.enabled) {
@@ -180,8 +181,13 @@ double gpu_compute_water_volume(struct gpu_domain *GD) {
 
 void gpu_manning_friction(struct gpu_domain *GD) {
     NVTX_PUSH("gpu_manning_friction");
-    // Delegate to core kernel
-    core_manning_friction_flat_semi_implicit(&GD->D);
+    // Delegate to core kernel — sloped (edge-based) or flat, matching legacy's
+    // friction.py dispatch on domain.use_sloped_mannings.
+    if (GD->use_sloped_mannings) {
+        core_manning_friction_sloped_semi_implicit_edge_based(&GD->D);
+    } else {
+        core_manning_friction_flat_semi_implicit(&GD->D);
+    }
 
     // Count FLOPs: 15 FLOPs per element (sqrt, pow, semi-implicit)
     if (GD->flops.enabled) {
@@ -268,7 +274,7 @@ double gpu_evolve_one_ader2_step(struct gpu_domain *GD, double max_timestep, int
     // Step 3: single flux call from Q^{n+1/2} edges (or Q^n on bootstrap step)
     // ========================================
 
-    local_timestep = gpu_compute_fluxes(GD);
+    local_timestep = gpu_compute_fluxes(GD, 0, 1);
 
     if (apply_forcing) gpu_manning_friction(GD);
 
@@ -284,6 +290,7 @@ double gpu_evolve_one_ader2_step(struct gpu_domain *GD, double max_timestep, int
             fixed_ts_printed_ader2 = 1;
         }
         timestep = GD->fixed_flux_timestep;
+        GD->recorded_flux_timestep = GD->fixed_flux_timestep;
         if (timestep > max_timestep) timestep = max_timestep;
     } else {
         if (GD->nprocs > 1) {
@@ -292,6 +299,9 @@ double gpu_evolve_one_ader2_step(struct gpu_domain *GD, double max_timestep, int
             global_timestep = local_timestep;
         }
         timestep = GD->CFL * global_timestep;
+        // CFL constraint before the yieldstep/finaltime cap (for recorded stats)
+        GD->recorded_flux_timestep =
+            (timestep < GD->evolve_max_timestep) ? timestep : GD->evolve_max_timestep;
         if (timestep > max_timestep) timestep = max_timestep;
     }
 
@@ -329,7 +339,7 @@ double gpu_evolve_one_euler_step(struct gpu_domain *GD, double max_timestep, int
     gpu_evaluate_characteristic_wave_boundary(GD);
     gpu_evaluate_flather_boundary(GD);
 
-    local_timestep = gpu_compute_fluxes(GD);
+    local_timestep = gpu_compute_fluxes(GD, 0, 1);
 
     static int fixed_ts_printed_euler = 0;
     if (GD->fixed_flux_timestep > 0.0) {
@@ -339,6 +349,7 @@ double gpu_evolve_one_euler_step(struct gpu_domain *GD, double max_timestep, int
             fixed_ts_printed_euler = 1;
         }
         timestep = GD->fixed_flux_timestep;
+        GD->recorded_flux_timestep = GD->fixed_flux_timestep;
         if (timestep > max_timestep) timestep = max_timestep;
     } else {
         if (GD->nprocs > 1) {
@@ -347,6 +358,9 @@ double gpu_evolve_one_euler_step(struct gpu_domain *GD, double max_timestep, int
             global_timestep = local_timestep;
         }
         timestep = GD->CFL * global_timestep;
+        // CFL constraint before the yieldstep/finaltime cap (for recorded stats)
+        GD->recorded_flux_timestep =
+            (timestep < GD->evolve_max_timestep) ? timestep : GD->evolve_max_timestep;
         if (timestep > max_timestep) timestep = max_timestep;
     }
 
@@ -406,7 +420,7 @@ double gpu_evolve_one_rk2_step(struct gpu_domain *GD, double max_timestep, int a
     gpu_evaluate_flather_boundary(GD);
 
     // Compute fluxes - returns local minimum timestep
-    local_timestep = gpu_compute_fluxes(GD);
+    local_timestep = gpu_compute_fluxes(GD, 0, 2);
 
     // Compute global timestep
     static int fixed_ts_printed = 0;
@@ -418,6 +432,7 @@ double gpu_evolve_one_rk2_step(struct gpu_domain *GD, double max_timestep, int a
             fixed_ts_printed = 1;
         }
         timestep = GD->fixed_flux_timestep;
+        GD->recorded_flux_timestep = GD->fixed_flux_timestep;
         if (timestep > max_timestep) {
             timestep = max_timestep;
         }
@@ -431,6 +446,9 @@ double gpu_evolve_one_rk2_step(struct gpu_domain *GD, double max_timestep, int a
 
         // Apply CFL condition and respect max_timestep from Python
         timestep = GD->CFL * global_timestep;
+        // CFL constraint before the yieldstep/finaltime cap (for recorded stats)
+        GD->recorded_flux_timestep =
+            (timestep < GD->evolve_max_timestep) ? timestep : GD->evolve_max_timestep;
         if (timestep > max_timestep) {
             timestep = max_timestep;
         }
@@ -468,7 +486,7 @@ double gpu_evolve_one_rk2_step(struct gpu_domain *GD, double max_timestep, int a
     gpu_evaluate_flather_boundary(GD);
 
     // Compute fluxes (ignore timestep from second step)
-    gpu_compute_fluxes(GD);
+    gpu_compute_fluxes(GD, 1, 2);
 
     // Apply forcing terms (Manning friction on GPU)
     if (apply_forcing) {
@@ -524,7 +542,7 @@ double gpu_evolve_one_rk3_step(struct gpu_domain *GD, double max_timestep, int a
     gpu_evaluate_characteristic_wave_boundary(GD);
     gpu_evaluate_flather_boundary(GD);
 
-    local_timestep = gpu_compute_fluxes(GD);
+    local_timestep = gpu_compute_fluxes(GD, 0, 3);
 
     // Determine global timestep (same logic as RK2)
     static int fixed_ts_printed_rk3 = 0;
@@ -535,6 +553,7 @@ double gpu_evolve_one_rk3_step(struct gpu_domain *GD, double max_timestep, int a
             fixed_ts_printed_rk3 = 1;
         }
         timestep = GD->fixed_flux_timestep;
+        GD->recorded_flux_timestep = GD->fixed_flux_timestep;
         if (timestep > max_timestep) timestep = max_timestep;
     } else {
         if (GD->nprocs > 1) {
@@ -543,6 +562,9 @@ double gpu_evolve_one_rk3_step(struct gpu_domain *GD, double max_timestep, int a
             global_timestep = local_timestep;
         }
         timestep = GD->CFL * global_timestep;
+        // CFL constraint before the yieldstep/finaltime cap (for recorded stats)
+        GD->recorded_flux_timestep =
+            (timestep < GD->evolve_max_timestep) ? timestep : GD->evolve_max_timestep;
         if (timestep > max_timestep) timestep = max_timestep;
     }
 
@@ -568,7 +590,7 @@ double gpu_evolve_one_rk3_step(struct gpu_domain *GD, double max_timestep, int a
     gpu_evaluate_characteristic_wave_boundary(GD);
     gpu_evaluate_flather_boundary(GD);
 
-    gpu_compute_fluxes(GD);
+    gpu_compute_fluxes(GD, 1, 3);
     if (apply_forcing) gpu_manning_friction(GD);
     gpu_update_conserved_quantities(GD, timestep);
 
@@ -593,7 +615,7 @@ double gpu_evolve_one_rk3_step(struct gpu_domain *GD, double max_timestep, int a
     gpu_evaluate_characteristic_wave_boundary(GD);
     gpu_evaluate_flather_boundary(GD);
 
-    gpu_compute_fluxes(GD);
+    gpu_compute_fluxes(GD, 2, 3);
     if (apply_forcing) gpu_manning_friction(GD);
     gpu_update_conserved_quantities(GD, timestep);
 

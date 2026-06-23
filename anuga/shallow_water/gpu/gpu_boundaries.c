@@ -139,27 +139,31 @@ void gpu_evaluate_reflective_boundary(struct gpu_domain *GD) {
 
 int gpu_dirichlet_init(struct gpu_domain *GD, int num_edges,
                        int *boundary_indices, int *vol_ids, int *edge_ids,
-                       double stage_value, double xmom_value, double ymom_value) {
+                       double *stage_values, double *xmom_values, double *ymom_values) {
     struct dirichlet_boundary *D = &GD->dirichlet;
 
     D->num_edges = num_edges;
     D->mapped = 0;
-    D->stage_value = stage_value;
-    D->xmom_value = xmom_value;
-    D->ymom_value = ymom_value;
 
     if (num_edges == 0) {
         D->boundary_indices = NULL;
         D->vol_ids = NULL;
         D->edge_ids = NULL;
+        D->stage_values = NULL;
+        D->xmom_values = NULL;
+        D->ymom_values = NULL;
         return 0;
     }
 
     D->boundary_indices = (int*)malloc(num_edges * sizeof(int));
     D->vol_ids = (int*)malloc(num_edges * sizeof(int));
     D->edge_ids = (int*)malloc(num_edges * sizeof(int));
+    D->stage_values = (double*)malloc(num_edges * sizeof(double));
+    D->xmom_values = (double*)malloc(num_edges * sizeof(double));
+    D->ymom_values = (double*)malloc(num_edges * sizeof(double));
 
-    if (!D->boundary_indices || !D->vol_ids || !D->edge_ids) {
+    if (!D->boundary_indices || !D->vol_ids || !D->edge_ids ||
+        !D->stage_values || !D->xmom_values || !D->ymom_values) {
         fprintf(stderr, "Failed to allocate Dirichlet boundary arrays\n");
         return -1;
     }
@@ -167,6 +171,9 @@ int gpu_dirichlet_init(struct gpu_domain *GD, int num_edges,
     memcpy(D->boundary_indices, boundary_indices, num_edges * sizeof(int));
     memcpy(D->vol_ids, vol_ids, num_edges * sizeof(int));
     memcpy(D->edge_ids, edge_ids, num_edges * sizeof(int));
+    memcpy(D->stage_values, stage_values, num_edges * sizeof(double));
+    memcpy(D->xmom_values, xmom_values, num_edges * sizeof(double));
+    memcpy(D->ymom_values, ymom_values, num_edges * sizeof(double));
 
 
     return 0;
@@ -180,17 +187,27 @@ void gpu_dirichlet_finalize(struct gpu_domain *GD) {
         int *b_idx = D->boundary_indices;
         int *v_ids = D->vol_ids;
         int *e_ids = D->edge_ids;
-        #pragma omp target exit data map(delete: b_idx[0:ne], v_ids[0:ne], e_ids[0:ne])
+        double *s_val = D->stage_values;
+        double *x_val = D->xmom_values;
+        double *y_val = D->ymom_values;
+        #pragma omp target exit data map(delete: b_idx[0:ne], v_ids[0:ne], e_ids[0:ne], \
+                                                 s_val[0:ne], x_val[0:ne], y_val[0:ne])
     }
 
     if (D->boundary_indices) free(D->boundary_indices);
     if (D->vol_ids) free(D->vol_ids);
     if (D->edge_ids) free(D->edge_ids);
+    if (D->stage_values) free(D->stage_values);
+    if (D->xmom_values) free(D->xmom_values);
+    if (D->ymom_values) free(D->ymom_values);
 
     D->num_edges = 0;
     D->boundary_indices = NULL;
     D->vol_ids = NULL;
     D->edge_ids = NULL;
+    D->stage_values = NULL;
+    D->xmom_values = NULL;
+    D->ymom_values = NULL;
     D->mapped = 0;
 }
 
@@ -203,9 +220,9 @@ void gpu_evaluate_dirichlet_boundary(struct gpu_domain *GD) {
     int *boundary_indices = D->boundary_indices;
     int *vol_ids = D->vol_ids;
     int *edge_ids = D->edge_ids;
-    double stage_val = D->stage_value;
-    double xmom_val = D->xmom_value;
-    double ymom_val = D->ymom_value;
+    double *stage_values = D->stage_values;
+    double *xmom_values = D->xmom_values;
+    double *ymom_values = D->ymom_values;
 
     // Edge values (read for bed/height)
     double *bed_ev = GD->D.bed_edge_values;
@@ -224,10 +241,10 @@ void gpu_evaluate_dirichlet_boundary(struct gpu_domain *GD) {
         int vid = vol_ids[k];
         int eid = edge_ids[k];
 
-        // Set constant Dirichlet values
-        stage_bv[bid] = stage_val;
-        xmom_bv[bid] = xmom_val;
-        ymom_bv[bid] = ymom_val;
+        // Set per-edge Dirichlet values
+        stage_bv[bid] = stage_values[k];
+        xmom_bv[bid] = xmom_values[k];
+        ymom_bv[bid] = ymom_values[k];
 
         // Copy bed/height from interior edge
         bed_bv[bid] = bed_ev[3 * vid + eid];

@@ -299,3 +299,121 @@ always well-tested without requiring a wholesale coverage lift immediately.
 
 **Why:** Hydrata's fork must stay mergeable with upstream. Coordination on
 `pyproject.toml` dependency changes is especially important.
+
+## Compute model: per-domain mode + process-level offload/threads (2026-06-13)
+
+Reached while building the `multiprocessor_mode=2` migration (see
+`claude/PLAN_default_mode2_cpu.md`). The execution model has **two orthogonal knobs** —
+one per-domain, one process-global — because they have genuinely different scopes.
+
+### Per-domain: `set_compute_mode('legacy' | 'unified')`
+
+**Decision:** A domain picks its compute path. `'legacy'` = `multiprocessor_mode=1`
+(`sw_domain_openmp_ext` solver + serial-Python operators); `'unified'` =
+`multiprocessor_mode=2` (the unified `gpu_ext` C kernels: solver *and* operators).
+`set_multiprocessor_mode(1|2)` is kept as a thin int alias (1→legacy, 2→unified).
+
+**Why:** Which solver/extension a domain uses is genuinely per-domain — two domains can
+differ with no interaction. `'unified'` was chosen over `'cpu'`/`'gpu'` because those are
+*not* per-domain choices (see next).
+
+### Process-global: `set_gpu_offload(bool)`, `set_omp_num_threads(int)`
+
+**Decision:** GPU offload on/off and the OpenMP thread count are **module-level functions**
+(`anuga.set_gpu_offload`, `anuga.set_omp_num_threads`), not domain methods.
+`Domain.set_omp_num_threads` stays as a backward-compatible wrapper.
+
+**Why:** Both are process-level OpenMP ICVs. One process cannot run the same unified
+kernels on a GPU for domain A and on the CPU for domain B; and `omp_set_num_threads`
+covers the whole process. Encoding `cpu`/`gpu` as per-domain "modes" mixed the two scopes
+and produced a real cross-domain bug (a second domain couldn't re-enable offload). So
+`cpu` = `unified` + offload off and `gpu` = `unified` + offload on are *compositions* of
+the two knobs, not primitives.
+
+### Offload toggle mechanism
+
+**Decision:** `set_gpu_offload(False)` sets `OMP_TARGET_OFFLOAD=disabled` (the real lever
+that forces `omp target` regions onto the host) **and** a process-global C flag
+(`g_gpu_offload_enabled`) that makes `gpu_domain_init` choose the host device and the
+inlet/culvert operators route there (`gpu_compute_device(GD)`, never `device_id=-1`).
+Must be called **before the first `evolve()`/domain build** (OpenMP reads the env at its
+first target region; data is mapped at init).
+
+**Why:** The C flag / `omp_set_default_device(host)` alone does NOT stop nvc offloading —
+the solver kept running on the GPU (towradgi `-ngo` was 6.35s = GPU speed) until
+`OMP_TARGET_OFFLOAD=disabled` was added. The flag is still needed for device-id/data-map
+consistency and to fix operators calling `omp_set_default_device(-1)`.
+
+### Two builds, not one binary, for CPU vs GPU
+
+**Decision:** Ship CPU and GPU as **separate builds** selected by the `gpu_offload` meson
+option: gcc `-Dgpu_offload=false` (fast CPU multicore via `CPU_ONLY_MODE` → `omp parallel
+for`) and nvc `-Dgpu_offload=true` (fast GPU). The distribution default is
+`gpu_offload=false`. `set_gpu_offload(False)` / `-ngo` on a GPU build is for **correctness
+A/B only** (results are bit-identical to GPU), not performance.
+
+**Why:** A single nvc `-mp=gpu,multicore` binary cannot be fast on both — NVHPC's OpenMP
+target *host fallback runs single-threaded* (a confirmed, documented NVHPC limitation, not
+an ANUGA bug — see `claude/KNOWN_ISSUES.md` for the microbenchmark and citations). No
+runtime knob re-routes the host execution to the fast multicore variant.
+
+### CLI
+
+**Decision:** Standard arg parser (`anuga.get_args`) gains `-nt/--omp_num_threads`,
+`-go/--gpu_offload`, and `-ngo/--no-gpu_offload` (tri-state; unset = follow the build).
+Scripts apply them right after parsing, before building the domain.
+
+### Forcing-function classes → operators: confirm removal, add mode-2 safety (2026-06-14)
+
+**Context:** `forcing.py`'s `Wind_stress`, `Rainfall`, `Inflow`, `Barometric_pressure`
+were already **deprecated** in session 25 (`DeprecationWarning`, suppressed in tests via
+`pyproject.toml`). Operator equivalents exist: `Rate_operator.rainfall()`/`inflow()`,
+`Wind_stress_operator`, `Barometric_pressure_operator`. Manning friction
+(`manning_friction_semi_implicit`) stays a forcing term and is NOT deprecated.
+
+**Decision:** Mode 2 confirms the direction toward **removal** (the next phase after
+deprecation). Interim safety warning added now; remove after a release (see FUTURE_WORK).
+Also verify the `_fast` variants (`Wind_stress_fast`, `Barometric_pressure_fast`) carry
+the same deprecation.
+
+**Why:** Forcing terms are evaluated *inside* the timestep (`compute_forcing_terms`).
+The mode-2 C step loop does forcing in C and only handles Manning, so Python forcing
+terms are **silently skipped** in mode 2 (surfaced by
+`test_rainfall_forcing_with_evolve_1`). Honouring them would require a
+`sync_from_device → f() → sync_to_device` every step — the serial-Python-per-step cost
+the mode-2 work exists to eliminate. Operators run via `apply_fractional_steps`
+(fractional-step splitting), which mode 2 already supports — C kernels where they exist
+(rate/inlet/culvert) and a clean one-sync Python fallback where they don't
+(wind/barometric). So operators are the architecturally correct path for mode 2, and the
+forcing classes are redundant.
+
+### Mode-2 testing: pin white-box host-state tests to legacy (2026-06-17)
+
+**Context:** Running `anuga.shallow_water` under the unified default *on a GPU build*
+(via `anuga_run_isolated_tests -cm unified`) failed 11 tests that pass on the CPU build.
+On a CPU build mode-2 device memory *is* host memory (`CPU_ONLY_MODE` stubs), so the
+divergence only appears with real offload.
+
+**Decision:** Pin such tests to legacy with `domain.set_compute_mode('legacy')` rather
+than teaching mode-2 to sync or loosening tolerances. Two kinds qualify: (1) **white-box**
+tests that call `compute_forcing_terms()` / `compute_fluxes()` and assert on the host
+`semi_implicit_update` / `explicit_update` arrays (mode-2 computes those on-device and
+never syncs back → stale zeros); (2) **numerical reference/snapshot** tests recorded under
+legacy that diverge at ~1e-6 from mode-2's reduction/eval order. End-to-end evolve tests
+are NOT pinned — they pass in both modes. Documented as a convention in `CONVENTIONS.md`.
+
+**Why:** These probe mode-1 internals or a legacy-recorded baseline, not behaviour that
+mode 2 must reproduce bit-for-bit; mode-1-vs-mode-2 equivalence is covered separately by
+`test_DE_gpu_omp.py`. Adding per-step device syncs purely to satisfy a white-box assertion
+would reintroduce exactly the cost mode 2 exists to remove. The pin is a no-op for the
+distribution-default legacy path.
+
+**Caveats:** (1) Manning must stay in-step (semi-implicit, stability) — the
+`forcing_terms` mechanism is kept for it; only the optional classes are deprecated.
+(2) Forcing-as-forcing-term (in-step) vs operator (end-of-step fractional split) are NOT
+bit-identical; for slowly-varying rain/wind/barometric the difference is negligible and
+operators are the modern standard, but it is a documented numerics change.
+
+**Interim safety (done 2026-06-14):** until the classes are removed, mode 2 warns once
+(`Domain._warn_unsupported_mode2_forcing`) when `forcing_terms` contains anything other
+than Manning, turning the silent skip into a loud, actionable message.

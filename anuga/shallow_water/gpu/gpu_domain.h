@@ -72,9 +72,9 @@ struct dirichlet_boundary {
     int *boundary_indices;       // Where to write in boundary_values arrays [num_edges]
     int *vol_ids;                // Interior cell IDs [num_edges]
     int *edge_ids;               // Which edge (0, 1, or 2) [num_edges]
-    double stage_value;          // Constant stage value
-    double xmom_value;           // Constant xmom value
-    double ymom_value;           // Constant ymom value
+    double *stage_values;        // Per-edge constant stage value [num_edges]
+    double *xmom_values;         // Per-edge constant xmom value  [num_edges]
+    double *ymom_values;         // Per-edge constant ymom value  [num_edges]
     int mapped;                  // Whether arrays are mapped to GPU
 };
 
@@ -419,6 +419,15 @@ struct gpu_domain {
     double CFL;
     double evolve_max_timestep;
     double fixed_flux_timestep;  // <= 0 means disabled (use CFL-based timestep)
+    // CFL-constrained step from the most recent evolve_one_*_step, BEFORE the
+    // yieldstep/finaltime cap is applied. Mirrors the value legacy's
+    // update_timestep() feeds into recorded_min/max_timestep, so mode-2 reports
+    // the mathematical (CFL) constraint rather than the yield-limited step taken.
+    double recorded_flux_timestep;
+    // Manning friction variant: 1 => sloped (edge-based) like legacy when
+    // domain.use_sloped_mannings is set, 0 => flat. Set from the domain in
+    // get_domain_pointers(); selected in gpu_manning_friction().
+    int use_sloped_mannings;
 
     // RK2 backup arrays (allocated on GPU)
     // These may already exist in base domain, but we track GPU copies here
@@ -480,7 +489,7 @@ void gpu_evaluate_reflective_boundary(struct gpu_domain *GD);
 // Dirichlet boundary - constant values at boundary
 int gpu_dirichlet_init(struct gpu_domain *GD, int num_edges,
                        int *boundary_indices, int *vol_ids, int *edge_ids,
-                       double stage_value, double xmom_value, double ymom_value);
+                       double *stage_values, double *xmom_values, double *ymom_values);
 void gpu_dirichlet_finalize(struct gpu_domain *GD);
 void gpu_evaluate_dirichlet_boundary(struct gpu_domain *GD);
 
@@ -576,7 +585,7 @@ void gpu_exchange_ghosts(struct gpu_domain *GD);
 
 // GPU kernels (stubs - will be implemented in sw_domain_gpu.c)
 void gpu_extrapolate_second_order(struct gpu_domain *GD);
-double gpu_compute_fluxes(struct gpu_domain *GD);
+double gpu_compute_fluxes(struct gpu_domain *GD, int substep_count, int timestep_fluxcalls);
 void gpu_update_conserved_quantities(struct gpu_domain *GD, double timestep);
 void gpu_backup_conserved_quantities(struct gpu_domain *GD);
 void gpu_saxpy_conserved_quantities(struct gpu_domain *GD, double a, double b);
@@ -610,6 +619,12 @@ double gpu_evolve_one_ader2_step(struct gpu_domain *GD, double max_timestep, int
 int detect_gpu_aware_mpi(void);
 int gpu_is_available(void);
 int gpu_get_num_devices(void);
+int gpu_get_initial_device(void);
+int gpu_get_default_device(void);
+void gpu_set_default_device(int device_id);
+void gpu_set_offload_enabled(int enabled);
+int gpu_get_offload_enabled(void);
+int gpu_compute_device(struct gpu_domain *GD);
 void print_gpu_domain_info(struct gpu_domain *GD);
 
 // FLOP counter functions (Gordon Bell performance profiling)

@@ -2862,6 +2862,10 @@ friction  \n \
 
         domain = Domain(points, vertices, boundary)
         domain.set_name('Inflow_volume_test')              # Output name
+        # Inflow is a legacy forcing-function class; multiprocessor_mode=2
+        # ('unified') applies forcing in C (Manning only) and skips it. Pin
+        # legacy so this test exercises the machinery it is written for.
+        domain.set_compute_mode('legacy')
 
 
         #----------------------------------------------------------------------
@@ -2953,6 +2957,10 @@ friction  \n \
 
         domain = Domain(points, vertices, boundary)
         domain.set_name('Rain_volume_test')              # Output name
+        # Rainfall is a legacy forcing-function class; multiprocessor_mode=2
+        # ('unified') applies forcing in C (Manning only) and skips it. Pin
+        # legacy so this test exercises the machinery it is written for.
+        domain.set_compute_mode('legacy')
 
 
         #----------------------------------------------------------------------
@@ -3159,6 +3167,10 @@ friction  \n \
 
                 domain = Domain(points, vertices, boundary)
                 domain.set_name('inflow_flowline_test')     # Output name
+                # Inflow is a legacy forcing-function class; multiprocessor_mode=2
+                # ('unified') applies forcing in C (Manning only) and skips it.
+                # Pin legacy so this test exercises the machinery it is written for.
+                domain.set_compute_mode('legacy')
 
                 #--------------------------------------------------------------
                 # Setup initial conditions

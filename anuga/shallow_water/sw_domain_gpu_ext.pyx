@@ -89,6 +89,9 @@ cdef extern from "gpu_domain.h" nogil:
         double* max_speed
         double* centroid_coordinates
         double* edge_coordinates
+        # Boundary flux accumulator (written by core_compute_fluxes_central,
+        # read by the Python boundary_flux_integral_operator)
+        double* boundary_flux_sum
         # Work arrays for extrapolation
         double* x_centroid_work
         double* y_centroid_work
@@ -161,6 +164,8 @@ cdef extern from "gpu_domain.h" nogil:
         double CFL
         double evolve_max_timestep
         double fixed_flux_timestep
+        double recorded_flux_timestep
+        int use_sloped_mannings
 
     # Function declarations - initialization and cleanup
     int gpu_domain_init(gpu_domain *GD, MPI_Comm comm, int rank, int nprocs)
@@ -197,7 +202,7 @@ cdef extern from "gpu_domain.h" nogil:
     # Dirichlet boundary
     int gpu_dirichlet_init(gpu_domain *GD, int num_edges,
                            int *boundary_indices, int *vol_ids, int *edge_ids,
-                           double stage_value, double xmom_value, double ymom_value)
+                           double *stage_values, double *xmom_values, double *ymom_values)
     void gpu_dirichlet_finalize(gpu_domain *GD)
     void gpu_evaluate_dirichlet_boundary(gpu_domain *GD)
 
@@ -254,7 +259,7 @@ cdef extern from "gpu_domain.h" nogil:
 
     # GPU kernels
     void gpu_extrapolate_second_order(gpu_domain *GD)
-    double gpu_compute_fluxes(gpu_domain *GD)
+    double gpu_compute_fluxes(gpu_domain *GD, int substep_count, int timestep_fluxcalls)
     void gpu_update_conserved_quantities(gpu_domain *GD, double timestep)
     void gpu_backup_conserved_quantities(gpu_domain *GD)
     void gpu_saxpy_conserved_quantities(gpu_domain *GD, double a, double b)
@@ -285,6 +290,11 @@ cdef extern from "gpu_domain.h" nogil:
     int detect_gpu_aware_mpi()
     int gpu_is_available()
     int gpu_get_num_devices()
+    int gpu_get_initial_device()
+    int gpu_get_default_device()
+    void gpu_set_default_device(int device_id)
+    void gpu_set_offload_enabled(int enabled)
+    int gpu_get_offload_enabled()
 
     # Rate operators (rain, extraction, etc.)
     int gpu_rate_operator_init(gpu_domain *GD, int num_indices, int *indices,
@@ -436,6 +446,13 @@ cdef class GPUDomain:
     def num_neighbors(self):
         return self.GD.halo.num_neighbors
 
+    @property
+    def recorded_flux_timestep(self):
+        """CFL-constrained step of the most recent evolve_one_*_step, before the
+        yieldstep/finaltime cap. Mirrors what legacy update_timestep() records
+        into recorded_min/max_timestep."""
+        return self.GD.recorded_flux_timestep
+
 
 # ============================================================================
 # MPI Communicator Extraction
@@ -506,6 +523,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     cdef double[:,::1] centroid_coords, edge_coords
     cdef double[::1] x_centroid_work, y_centroid_work
     cdef int64_t[::1] tri_full_flag
+    cdef double[::1] boundary_flux_sum_arr
 
     # Get basic parameters
     D.number_of_elements = domain_object.number_of_elements
@@ -522,6 +540,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     GD.evolve_max_timestep = domain_object.evolve_max_timestep
     fft = getattr(domain_object, 'fixed_flux_timestep', None)
     GD.fixed_flux_timestep = fft if fft is not None else -1.0
+    GD.use_sloped_mannings = 1 if getattr(domain_object, 'use_sloped_mannings', False) else 0
     D.low_froude = domain_object.low_froude
     D.extrapolate_velocity_second_order = domain_object.extrapolate_velocity_second_order
 
@@ -622,6 +641,12 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
 
     max_speed = domain_object.max_speed
     D.max_speed = &max_speed[0]
+
+    # Boundary flux accumulator. core_compute_fluxes_central writes the per-substep
+    # boundary flux here (host-side, after the reduction), and the Python
+    # boundary_flux_integral_operator reads domain.boundary_flux_sum.
+    boundary_flux_sum_arr = domain_object.boundary_flux_sum
+    D.boundary_flux_sum = &boundary_flux_sum_arr[0]
 
     # tri_full_flag: 1 for owned (full) triangles, 0 for ghost triangles.
     # Required so compute_fluxes excludes ghosts from the local timestep minimum.
@@ -908,6 +933,51 @@ def get_num_gpu_devices():
     return gpu_get_num_devices()
 
 
+def get_initial_device():
+    """Return the OpenMP initial (host) device number.
+
+    Pass this to :func:`set_default_device` to route subsequent ``omp target``
+    regions back to the host (CPU). Returns 0 in CPU_ONLY_MODE.
+    """
+    return gpu_get_initial_device()
+
+
+def get_default_device():
+    """Return the current OpenMP default offload device number.
+
+    The unified kernels run on the default device (no ``device()`` clause), so
+    this is the device they will use. Returns 0 in CPU_ONLY_MODE.
+    """
+    return gpu_get_default_device()
+
+
+def set_default_device(int device_id):
+    """Route subsequent ``omp target`` regions to ``device_id`` (process-wide).
+
+    The unified kernels carry no ``device()`` clause, so changing the default
+    device is a robust, runtime way to move work between a GPU and the host —
+    unlike ``OMP_TARGET_OFFLOAD``, which the runtime only reads at init. Pass
+    :func:`get_initial_device` to force the host (CPU). No-op in CPU_ONLY_MODE.
+    """
+    gpu_set_default_device(device_id)
+
+
+def set_offload_enabled(enabled):
+    """Set the process-global offload flag honoured at GPU-domain init.
+
+    When False, domains built afterwards stay on the host (CPU) even on a GPU
+    build, keeping data mapping and kernel execution consistent. Decide before
+    building the first 'unified' domain — the device is chosen when arrays are
+    mapped. Use :func:`anuga.set_gpu_offload` rather than calling this directly.
+    """
+    gpu_set_offload_enabled(1 if enabled else 0)
+
+
+def get_offload_enabled():
+    """Return the process-global offload flag (see :func:`set_offload_enabled`)."""
+    return bool(gpu_get_offload_enabled())
+
+
 def gpu_has_mpi():
     """Return True if this extension was compiled with real C MPI support.
 
@@ -1185,26 +1255,34 @@ def init_dirichlet_boundary(GPUDomain gpu_dom, object domain_object):
     cdef np.ndarray[int, ndim=1, mode="c"] boundary_indices
     cdef np.ndarray[int, ndim=1, mode="c"] vol_ids_arr
     cdef np.ndarray[int, ndim=1, mode="c"] edge_ids_arr
-    cdef double stage_value = 0.0
-    cdef double xmom_value = 0.0
-    cdef double ymom_value = 0.0
+    cdef np.ndarray[double, ndim=1, mode="c"] stage_values_arr
+    cdef np.ndarray[double, ndim=1, mode="c"] xmom_values_arr
+    cdef np.ndarray[double, ndim=1, mode="c"] ymom_values_arr
 
     if domain_object.boundary_map is None:
         return
 
-    # Find Dirichlet boundaries - note: all Dirichlet boundaries must have same values
-    # for GPU evaluation (limitation - could be extended to per-tag values)
+    # Collect every Dirichlet boundary edge with that boundary's own values, so
+    # multiple Dirichlet boundaries with different values are handled per-edge.
     all_ids = []
+    all_stage = []
+    all_xmom = []
+    all_ymom = []
     for tag, boundary in domain_object.boundary_map.items():
         if boundary is not None and boundary.__class__.__name__ == 'Dirichlet_boundary':
             segment_edges = domain_object.tag_boundary_cells.get(tag, None)
             if segment_edges is not None and len(segment_edges) > 0:
-                all_ids.extend(segment_edges)
-                # Get Dirichlet values from first boundary found
                 if hasattr(boundary, 'dirichlet_values') and len(boundary.dirichlet_values) >= 3:
-                    stage_value = float(boundary.dirichlet_values[0])
-                    xmom_value = float(boundary.dirichlet_values[1])
-                    ymom_value = float(boundary.dirichlet_values[2])
+                    s = float(boundary.dirichlet_values[0])
+                    x = float(boundary.dirichlet_values[1])
+                    y = float(boundary.dirichlet_values[2])
+                else:
+                    s = x = y = 0.0
+                for e in segment_edges:
+                    all_ids.append(e)
+                    all_stage.append(s)
+                    all_xmom.append(x)
+                    all_ymom.append(y)
 
     if len(all_ids) == 0:
         return
@@ -1214,10 +1292,13 @@ def init_dirichlet_boundary(GPUDomain gpu_dom, object domain_object):
     boundary_indices = ids
     vol_ids_arr = np.ascontiguousarray(domain_object.boundary_cells[ids], dtype=np.intc)
     edge_ids_arr = np.ascontiguousarray(domain_object.boundary_edges[ids], dtype=np.intc)
+    stage_values_arr = np.ascontiguousarray(all_stage, dtype=np.float64)
+    xmom_values_arr = np.ascontiguousarray(all_xmom, dtype=np.float64)
+    ymom_values_arr = np.ascontiguousarray(all_ymom, dtype=np.float64)
 
     gpu_dirichlet_init(&gpu_dom.GD, num_edges,
                        &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0],
-                       stage_value, xmom_value, ymom_value)
+                       &stage_values_arr[0], &xmom_values_arr[0], &ymom_values_arr[0])
 
 
 def evaluate_dirichlet_boundary_gpu(GPUDomain gpu_dom):
@@ -1804,7 +1885,8 @@ def compute_fluxes_gpu(GPUDomain gpu_dom):
     float
         The local minimum timestep (caller should do MPI_Allreduce for global min)
     """
-    return gpu_compute_fluxes(&gpu_dom.GD)
+    # Standalone single flux call: substep 0 of 1 (euler-equivalent).
+    return gpu_compute_fluxes(&gpu_dom.GD, 0, 1)
 
 
 def update_conserved_quantities_gpu(GPUDomain gpu_dom, double timestep):

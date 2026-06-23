@@ -1196,6 +1196,12 @@ class Test_Forcing(unittest.TestCase):
             else:
                 return 3*t + 7
 
+        # Forcing-function classes (Rainfall/Wind_stress/...) are legacy-only;
+        # multiprocessor_mode=2 ('unified') applies forcing in C (Manning only)
+        # and deliberately skips them. Pin legacy so this test exercises the
+        # forcing-function machinery it is written for.
+        domain.set_compute_mode('legacy')
+
         domain.forcing_terms = []
         R = Rainfall(domain,
                      rate=main_rate,
@@ -1557,6 +1563,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         domain = Domain(points, vertices, boundary)
+        domain.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
         midpoints = domain.get_centroid_coordinates()
 
         # Flat surface with 1m of water
@@ -1604,6 +1611,7 @@ class Test_Forcing(unittest.TestCase):
 
 
         domain_II = Domain(points, vertices, boundary)
+        domain_II.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
 
         # Flat surface with 1m of water
         domain_II.set_quantity('elevation', 0)
@@ -1651,6 +1659,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         domain = Domain(points, vertices, boundary)
+        domain.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
         midpoints = domain.get_centroid_coordinates()
 
         # Flat surface with 1m of water
@@ -1698,6 +1707,7 @@ class Test_Forcing(unittest.TestCase):
 
 
         domain_II = Domain(points, vertices, boundary)
+        domain_II.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
 
         # Flat surface with 1m of water
         domain_II.set_quantity('elevation', 0)
@@ -1752,6 +1762,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         domain = Domain(points, vertices, boundary)
+        domain.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
         midpoints = domain.get_centroid_coordinates()
 
         # Flat surface with 1m of water
@@ -1798,6 +1809,7 @@ class Test_Forcing(unittest.TestCase):
 
 
         domain_II = Domain(points, vertices, boundary)
+        domain_II.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
 
         # Flat surface with 1m of water
         domain_II.set_quantity('elevation', 0)
@@ -1851,6 +1863,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         domain = Domain(points, vertices, boundary)
+        domain.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
         vertexpoints = domain.get_nodes()
 
         # Flat surface with 1m of water
@@ -1907,6 +1920,7 @@ class Test_Forcing(unittest.TestCase):
 
 
         domain_II = Domain(points, vertices, boundary)
+        domain_II.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
 
         # Flat surface with 1m of water
         domain_II.set_quantity('elevation', 0)
@@ -1957,6 +1971,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         domain = Domain(points, vertices, boundary)
+        domain.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
         vertexpoints = domain.get_nodes()
 
         # Flat surface with 1m of water
@@ -2003,6 +2018,7 @@ class Test_Forcing(unittest.TestCase):
 
 
         domain_II = Domain(points, vertices, boundary)
+        domain_II.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
 
         # Flat surface with 1m of water
         domain_II.set_quantity('elevation', 0)
@@ -2049,6 +2065,10 @@ class Test_Forcing(unittest.TestCase):
         vertices = [[1,0,2], [1,2,4], [4,2,5], [3,1,4]]
 
         domain = Domain(points, vertices)
+        # Mode-2 ('unified') computes fluxes/forcing on-device and never syncs the
+        # host explicit_update/semi_implicit_update arrays this white-box test reads.
+        # Pin legacy to exercise the in-Python machinery it is written for.
+        domain.set_compute_mode('legacy')
         domain.set_flow_algorithm('DE0')
 
         B = Reflective_boundary(domain)
@@ -2099,6 +2119,10 @@ class Test_Forcing(unittest.TestCase):
         vertices = [[1,0,2], [1,2,4], [4,2,5], [3,1,4]]
 
         domain = Domain(points, vertices)
+        # Mode-2 ('unified') computes friction on-device and never syncs the host
+        # semi_implicit_update array this white-box test reads. Pin legacy to
+        # exercise the in-Python forcing machinery it is written for.
+        domain.set_compute_mode('legacy')
 
         # Use the old function which doesn't take into account the extra
         # wetted area due to slope of bed
@@ -2184,6 +2208,10 @@ class Test_Forcing(unittest.TestCase):
         vertices = [[1,0,2], [1,2,4], [4,2,5], [3,1,4]]
 
         domain = Domain(points, vertices)
+        # Mode-2 ('unified') computes friction on-device and never syncs the host
+        # semi_implicit_update array this white-box test reads. Pin legacy to
+        # exercise the in-Python forcing machinery it is written for.
+        domain.set_compute_mode('legacy')
         B = Reflective_boundary(domain)
         domain.set_boundary( {'exterior': B})
 

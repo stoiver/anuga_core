@@ -59,13 +59,45 @@ pytest --pyargs anuga                    # full suite (~163s)
 pytest --pyargs anuga --run-fast         # skip slow tests (~41s)
 pytest --pyargs anuga -m slow            # only slow tests
 pytest anuga/shallow_water/tests/test_shallow_water_domain.py  # single file
+
+# Per-test process isolation (required on a GPU build; works on any build).
+# -cm legacy|unified sets the default compute mode for every child.
+anuga_run_isolated_tests --pyargs anuga.shallow_water -cm unified   # 408 pass, 2 skip
+anuga_run_isolated_tests                                            # the GPU file
 ```
+See `CLAUDE.md` → "Testing a GPU-offload (nvc) build" for the full GPU recipe.
 
 ### Build
 ```bash
 conda activate anuga_env_3.14
 pip install --no-build-isolation -e .
+
+# CPU multicore (distribution default — fast on CPU). gcc, host omp parallel for:
+CC=gcc pip install --no-build-isolation -e . -Csetup-args=-Dgpu_offload=false
+
+# GPU offload (fast on GPU). nvc from the NVIDIA HPC SDK:
+CC=nvc pip install --no-build-isolation -e . \
+    -Csetup-args=-Dgpu_offload=true -Csetup-args=-Dgpu_arch=cc120
 ```
+**CPU and GPU are separate builds** — one nvc binary can't be fast on both (NVHPC's OpenMP
+host fallback is single-threaded; see KNOWN_ISSUES). For CPU performance use the gcc
+`gpu_offload=false` build; the GPU build is for GPU runs (and correctness A/B on CPU only).
+
+### Compute model (v4.0) — two orthogonal knobs
+```python
+# Per-domain: which compute path (legacy mode 1 vs unified C kernels mode 2)
+domain.set_compute_mode('legacy')    # = set_multiprocessor_mode(1): openmp_ext + Python ops
+domain.set_compute_mode('unified')   # = set_multiprocessor_mode(2): unified gpu_ext C kernels
+
+# Process-global (call before the first evolve()):
+anuga.set_gpu_offload(True/False)    # offload unified kernels to GPU (GPU build only)
+anuga.set_omp_num_threads(16)        # OpenMP thread count for the whole process
+anuga.gpu_offload_enabled()          # resolved offload state
+domain.compute_capabilities()        # {gpu_offload, num_gpu_devices, mpi, modes}
+```
+`cpu` = unified + offload off; `gpu` = unified + offload on (compositions, not modes).
+CLI: `-mpm 1|2`, `-nt N`, `-go`/`-ngo` (gpu offload on/off), `-ro metis_rcm` (reorder).
+Rationale + the nvc finding: `claude/DECISIONS.md` and `claude/KNOWN_ISSUES.md`.
 
 ### Check code quality
 ```bash
@@ -107,6 +139,27 @@ Case: `run_small_towradgi.py -ft 200 -ys 50`, ~256k triangles, DE1 algorithm.
 
 **Best reorder by mode: OpenMP → `metis_rcm` (17.43 s, 5.5×); MPI → `rcm` (11.63 s); GPU → `hilbert` (5.62 s, 17.1×).**
 
+### Multi-GPU strong scaling — gadi (NVIDIA V100, GPU-aware MPI), 2026-06-17
+
+First multi-GPU run via the GPU-aware-MPI build (`-Dgpu_aware_mpi=true`, nvc,
+cc70). Times are the **evolve-loop** wall time for `run_small_towradgi.py -mpm 2
+-ro hilbert -ft 3600` (18× the laptop table's `-ft 200`). The absolute seconds
+are therefore NOT comparable to the 5.62 s reference above — only the V100
+scaling below is meaningful.
+
+| Config | Evolve (s) | Speedup vs 1×V100 | Parallel eff. |
+|--------|-----------:|-------------------|---------------|
+| RTX 5070 (1 GPU, local) | 200 | — | — |
+| V100 ×1 | 151 | 1.00× | — |
+| V100 ×2 | 105 | 1.44× | 72% |
+| V100 ×4 | 83 | 1.82× | 45% |
+
+- A single **V100 (151 s) beats the RTX 5070 (200 s)** — this solver is
+  memory-bandwidth-bound and V100 HBM2 (~900 GB/s) > 5070 GDDR7.
+- Strong scaling tails off (72% → 45%): "small" Towradgi (~257k tris) gives only
+  ~64k cells/rank at 4 GPUs, so halo-exchange/compute ratio rises and the GPUs
+  underutilise. A larger mesh should scale substantially better.
+
 ### CPU multicore via the unified gpu_ext C kernels (mode=2, gpu_offload=false)
 
 The operators (rainfall/culverts/inlet) run as **serial Python** in mode=1 — profiling showed
@@ -134,8 +187,26 @@ The two optimisations are **super-additive**: C operators alone save ~1.6 s, reo
 cache-sensitive (17.03→12.27 s with reorder) while the operators become parallel C.
 This closes the OpenMP→MPI gap to within ~11%.
 
+**Re-confirmed 2026-06-13** on the RTX 5070 laptop with a fresh gcc `gpu_offload=false`
+build (this session's compute-model work):
+
+| `-mpm 2` config | no reorder | `-ro metis_rcm` | reorder win |
+|-----------------|-----------:|----------------:|------------:|
+| `-nt 1`  (serial)   | 95.12 s | 46.22 s | **2.06×** |
+| `-nt 16` (16 cores) | 19.18 s | 11.27 s | **1.7×**  |
+
+11.27 s now *matches* MPI-16+rcm (11.08 s) with no MPI setup. Reorder helps more
+serially (cache locality dominates) than at 16 threads (closer to memory-bandwidth
+bound on this single-NUMA box). Thread scaling 1→16: ~5.0× (no reorder), ~4.1×
+(reorder). Validates a stock single-node `pip install` + `-mpm 2 -ro metis_rcm` as
+the CPU path the migration targets.
+
 **Note:** `gpu_offload=false` overwrites the GPU build. Rebuild with
 `-Dgpu_offload=true -Dgpu_arch=cc120` (and `CC=nvc`) to restore GPU mode.
+
+**Migration plan:** making `mode=2 + gpu_offload=false` the standard distribution
+default is tracked in `claude/PLAN_default_mode2_cpu.md`. Step 1 (deferred interface
+build) is in review as PR #144; step 2 (audit operator fall-back) is next.
 
 Optimal reorder differs by execution model: CPU sequential traversal benefits from RCM
 graph-bandwidth minimisation; GPU warp-parallel execution benefits from Hilbert's tight
@@ -193,7 +264,48 @@ Key findings:
 
 ---
 
-## Recent session summaries (sessions 21–38)
+## Recent session summaries (sessions 21–40)
+
+**Session 40 (2026-06-17):** Mode-2 ('unified') triage on the **GPU build** + the
+isolated runner became a first-class installed tool. Running
+`anuga_run_isolated_tests --pyargs anuga.shallow_water` under the unified default on
+a GPU-offload build surfaced 11 failures — all GPU-offload artifacts, not solver
+regressions (Session 39's all-green was the CPU build, where device memory == host
+memory). Two groups: (1) **9 white-box tests** call `compute_forcing_terms()` /
+`compute_fluxes()` and assert on the host `semi_implicit_update` / `explicit_update`
+arrays, which mode-2 GPU computes on-device and never syncs back (`test_forcing.py`,
+`test_friction.py`, `test_physics_sw.py` Manning cases, `test_data_manager.py::
+test_sww_extrema`); (2) **2 numerical tests** compare against legacy-recorded
+references and diverge at ~1e-6 from mode-2's reduction/eval order
+(`test_regression_snapshots.py::test_dam_break_DE1_stage_snapshot`,
+`test_sww_interrogate.py::test_get_maximum_inundation_de0`). Fix: pin each to legacy
+with `domain.set_compute_mode('legacy')` (snapshot helpers pinned so the whole file
+is deterministic); no-op for the legacy default. The shallow_water set is now
+**408 pass / 2 skip** under `-cm unified` on the GPU build (commit `0c50947d`).
+Then **moved** the harness `anuga/shallow_water/tests/run_isolated_tests.py` →
+`scripts/anuga_run_isolated_tests.py`, installed it to bindir via `meson.build`
+(`configure_file`, matching the other `anuga_*` scripts), and made it install-safe
+(importlib-resolved default target; cwd-seeded rootdir; `_abs_nodeid` passes through
+absolute/`--pyargs` ids) — commit `37eccc6d`. Added **`-cm`/`--compute-mode
+{legacy,unified}`** to set `ANUGA_DEFAULT_COMPUTE_MODE` for every child (omit to
+inherit; banner prints the resolved mode) — commit `34401cde`. Docs: `KNOWN_ISSUES.md`
+(green-run note + new command/flag), `CLAUDE.md` (testing section), new
+`CONVENTIONS.md` → "Compute mode in tests" (commit `f57d0532` + this session's docs).
+
+**Session 39 (2026-06-15):** Mode-2 ('unified') unit-suite triage — drove the fast suite
+to **zero failures** under `ANUGA_DEFAULT_COMPUTE_MODE=unified` (2657 passed; 2658 in
+legacy). Four genuine code fixes (commit `6bec9f8b`): (1) `recorded_min/max_timestep`
+now records the CFL step before the yield cap (new `GD.recorded_flux_timestep` exposed by
+the C evolve kernels, read by the Python step wrappers); (2) `gpu_manning_friction`
+dispatches sloped-vs-flat on `domain.use_sloped_mannings` (new GD flag); (3) Domain
+pickling restored — `__getstate__`/`__setstate__` drop the non-picklable cdef GPUDomain
+and rebuild lazily; (4) `set_boundary()` invalidates+rebuilds the mode-2 device interface
+so mid-run boundary changes (Reflective→Dirichlet) reach the device — fixed a progressive
+runup-inundation divergence. Test/doc adaptations (commit `ff9083b4`): pinned legacy on the
+deprecated forcing-function tests (Rainfall/Inflow are mode-1-only, skipped in mode 2),
+skipped `test_default_is_legacy` under the env override, and pinned
+`run_parallel_riverwall.py` to legacy. **Known gap:** mode-2 riverwall flux diverges from
+legacy (~0.095 m on the riverwall case) — root-cause/fix tracked as FUTURE_WORK P1.9.
 
 **Session 38 (2026-06-11):** Mesh reordering suite for OpenMP/MPI/GPU cache locality.
 Added `rcm_partition()` (scipy `reverse_cuthill_mckee` on triangle adjacency graph),
@@ -364,6 +476,8 @@ suite: 58.13% → 58.68%.
 | Add public API export | `anuga/__init__.py` (import + `__all__`) |
 | Add slow test marker | `@pytest.mark.slow` decorator or module-level `pytestmark` |
 | Configure pytest options | `conftest.py` (repo root), `pyproject.toml` `[tool.pytest.ini_options]` |
+| Per-test process isolation runner | `scripts/anuga_run_isolated_tests.py` (installed `anuga_run_isolated_tests`; `-cm legacy\|unified`) |
+| Default compute mode | `ANUGA_DEFAULT_COMPUTE_MODE` env var; `domain.set_compute_mode('legacy'\|'unified')` |
 | Memory reporting | `anuga/utilities/system_tools.py::memory_stats()` |
 | Timestepping output | `anuga/abstract_2d_finite_volumes/generic_domain.py::timestepping_statistics()` |
 | Triangle quiet/verbose | `anuga/pmesh/mesh.py::_generateMesh_impl()` |

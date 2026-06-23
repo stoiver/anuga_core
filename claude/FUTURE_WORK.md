@@ -8,6 +8,11 @@ Items marked ~~strikethrough~~ have been invalidated (see notes).
 > **See also:** `claude/C_EXTENSION_AUDIT_TODOS.md` (2026-06-09) — prioritised
 > TODOs from an audit of all 20 C/Cython extensions (correctness, GPU/CPU
 > kernel unification, performance, cleanup).
+>
+> **Active multi-step plan:** `claude/PLAN_default_mode2_cpu.md` (2026-06-12) —
+> migrate the standard distribution to `multiprocessor_mode=2` + `gpu_offload=false`
+> (CPU-multicore C operators by default). Step 1 in review as PR #144; **step 2
+> (audit operator fall-back) is the next action.**
 
 ---
 
@@ -33,9 +38,47 @@ C header, Cython wrapper, scenario system, and tests. Deleted
 
 ~~**P1.8 Clean up `file_function.py` FIXMEs**~~ — Done (session 24). FIXMEs already resolved; deleted dead commented-out blocks, replaced raw `fid.xllcorner`/`fid.yllcorner`/`fid.zone` reads with `Geo_reference(NetCDFObject=fid)`, cleaned up redundant `.csv` branch and trailing NOTE comment.
 
+**P1.10 Fix GPU-build `test_DE_gpu_omp.py` mid-file abort (NVHPC present-table)** — Running
+the whole file in one process aborts (~9th–11th test) on a GPU build; the NVHPC OpenMP-target
+runtime calls `exit()`. Pre-existing (reproduces on `d96ae357`). Not a simple leak: each class
+alone passes and 16–20 looped/live domains are fine; forcing finalization between tests makes it
+worse (assertion failures). Root cause is host-pointer-keyed, reference-counted OpenMP present-table
+management (`map(to:)`/`map(delete:)` in `gpu_domain_core.c`) corrupted by numpy host-address reuse
+across domains, plus two reference cycles deferring finalization. Fix options: per-test process
+isolation for the GPU test file (e.g. `pytest-forked`/subprocess), strict 1:1 map/unmap reference
+discipline per domain, or switch to `omp_target_alloc` + `is_device_ptr` device-pointer allocation.
+Production (single/few sequential GPU domains) is unaffected. **Interim workaround in place:**
+`anuga/shallow_water/tests/run_gpu_tests_isolated.sh` runs the file one fresh process per class
+(all classes pass); `--forked` does NOT work (CUDA is fork-unsafe). See `claude/KNOWN_ISSUES.md`
+("GPU build: `test_DE_gpu_omp.py` aborts mid-file").
+
+~~**P1.9 Root-cause and fix mode-2 ('unified') riverwall flux divergence**~~ — DONE
+(2026-06-15). Misdiagnosed: the riverwall flux is correct (bit-identical mode-1 vs mode-2
+with a GPU-supported boundary). The real cause was a DE0/Euler-specific boundary bug —
+`evolve_one_euler_step()` went straight to the C Euler loop and silently ignored non-GPU
+boundary types (`run_parallel_riverwall.py` uses `Transmissive_momentum_set_stage_boundary`),
+while rk2/rk3/ader2 already fell back to host evaluation. Fixed by adding
+`_evolve_one_euler_step_gpu()` and delegating to it from `_evolve_one_euler_step_c()` when
+`not self._gpu_all_on_gpu`. `run_parallel_riverwall.py` un-pinned; regression test
+`Test_GPU_NonGPUBoundaryFallback`. See `claude/KNOWN_ISSUES.md` ("RESOLVED … DE0 boundary bug").
+
 ---
 
 ## Priority 2 — Medium effort (1–2 weeks each)
+
+**P2.10 Remove the deprecated forcing-function classes** — `Wind_stress`, `Rainfall`,
+`Inflow`, `Barometric_pressure` (and `_fast` variants) in `shallow_water/forcing.py` were
+deprecated in session 25 (P1.5). Now driven by mode 2: the C step loop only applies
+Manning friction, so these are **silently skipped** in mode 2 (a one-time warning was
+added 2026-06-14 — `Domain._warn_unsupported_mode2_forcing`). Next phase = removal: (1)
+migrate any remaining `validation_tests/`, `examples/`, and unit tests off the forcing
+classes onto the operators (`Rate_operator.rainfall()`/`inflow()`, `Wind_stress_operator`,
+`Barometric_pressure_operator`); (2) the mode-2 unified-default suite has a handful of
+failures from forcing-as-forcing-term tests (`test_rainfall_forcing_with_evolve_1`,
+`test_volume_conservation_rain`) — migrate or scope to legacy; (3) delete the classes +
+their `pyproject.toml` `filterwarnings` entries after a release. Keep `manning_friction_
+semi_implicit` (in-step semi-implicit; not an operator). See `DECISIONS.md` → "Forcing-
+function classes → operators". Verify `_fast` variants carry the deprecation warning too.
 
 ~~**P2.1 Type hints on the public API**~~ — Done (session 33). Annotated ~130 public methods
 across four files using `from __future__ import annotations` (PEP 563, Python 3.10+ compatible).

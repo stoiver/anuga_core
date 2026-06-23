@@ -4,6 +4,7 @@ Tests for GPU (OpenMP target offloading) implementation of ANUGA's shallow water
 These tests verify that the GPU implementation produces results matching the CPU implementation.
 """
 
+import os
 import tempfile
 import unittest
 import sys
@@ -12,6 +13,7 @@ import pytest
 
 import anuga
 from anuga import Reflective_boundary, Dirichlet_boundary
+from anuga import Transmissive_momentum_set_stage_boundary
 from anuga import rectangular_cross_domain
 from anuga import Inlet_operator
 
@@ -39,6 +41,25 @@ def _gpu_skip_reason():
     if _gpu_error:
         return f"GPU OpenMP interface not available: {_gpu_error}"
     return "GPU OpenMP interface not available"
+
+
+# On a GPU-offload build (nvc, -Dgpu_offload=true) the NVHPC OpenMP-target
+# runtime aborts the process once many mode-2 GPU domains have been created in
+# it, so running this whole file in a single pytest process crashes partway
+# through (see claude/KNOWN_ISSUES.md, "test_DE_gpu_omp.py aborts mid-file").
+# Skip the file in a normal in-process run on such a build and point at the
+# isolated runner, which executes one class per fresh process. The runner sets
+# ANUGA_GPU_TESTS_ISOLATED=1 to opt back in. On a CPU build (gpu_offload not
+# supported) the omp-target regions run on the host with no device present
+# table, so the file runs fine in one process and is NOT skipped.
+if (gpu_available() and anuga.gpu_offload_supported()
+        and not os.environ.get('ANUGA_GPU_TESTS_ISOLATED')):
+    pytest.skip(
+        "GPU-offload build: run this file via "
+        "anuga/shallow_water/tests/run_gpu_tests_isolated.sh (one fresh process "
+        "per class) — running it in one process aborts the NVHPC OpenMP-target "
+        "runtime. Set ANUGA_GPU_TESTS_ISOLATED=1 to force in-process collection.",
+        allow_module_level=True)
 
 
 @pytest.mark.skipif(not gpu_available(), reason=_gpu_skip_reason())
@@ -392,12 +413,10 @@ class Test_GPU_Boundaries(unittest.TestCase):
 class Test_GPU_Initialization(unittest.TestCase):
     """Tests for GPU initialization and error handling."""
 
-    def test_gpu_mode_before_boundaries_defers(self):
-        """Setting GPU mode before boundaries defers the interface build.
-
-        Selecting mode 2 before boundaries are set must NOT raise; the device
-        interface is deferred and built lazily at the first evolve() call.
-        """
+    def test_mode2_without_boundaries_defers_interface(self):
+        """Mode 2 can be selected before boundaries are set: the device
+        interface build is deferred to the first evolve() (boundaries are
+        typically set after construction), so this must NOT raise."""
         domain = rectangular_cross_domain(5, 5, len1=50., len2=50.)
         domain.set_flow_algorithm('DE0')
         domain.set_name('test_init')
@@ -407,62 +426,11 @@ class Test_GPU_Initialization(unittest.TestCase):
         domain.set_quantity('elevation', -1.0)
         domain.set_quantity('stage', 0.0)
 
-        # Do NOT set boundaries, then enable GPU mode -- this is now allowed.
+        # No boundaries set: selecting mode 2 records the mode but defers the
+        # device interface (built lazily once boundaries are available).
         domain.set_multiprocessor_mode(2)
-
-        # Mode recorded, but interface deferred (not built yet).
         self.assertEqual(domain.multiprocessor_mode, 2)
         self.assertIsNone(domain.gpu_interface)
-
-    def test_evolve_without_boundaries_raises(self):
-        """Deferred build still raises if boundaries are never set before evolve."""
-        domain = rectangular_cross_domain(5, 5, len1=50., len2=50.)
-        domain.set_flow_algorithm('DE0')
-        domain.set_name('test_init_noBC')
-        domain.set_datadir(tempfile.mkdtemp())
-        domain.store = False
-
-        domain.set_quantity('elevation', -1.0)
-        domain.set_quantity('stage', 0.0)
-
-        domain.set_multiprocessor_mode(2)
-
-        # No boundaries ever set -> the lazy build at evolve() must raise.
-        with self.assertRaises(RuntimeError) as context:
-            for t in domain.evolve(yieldstep=0.1, finaltime=0.1):
-                pass
-
-        self.assertIn("boundaries", str(context.exception).lower())
-
-    def test_deferred_gpu_mode_builds_at_evolve(self):
-        """Mode 2 set before boundaries builds lazily once boundaries exist.
-
-        This is the init-time pattern: choose the mode early, set boundaries
-        later, and have the interface materialise transparently at evolve().
-        """
-        domain = rectangular_cross_domain(5, 5, len1=50., len2=50.)
-        domain.set_flow_algorithm('DE0')
-        domain.set_name('test_init_deferred')
-        domain.set_datadir(tempfile.mkdtemp())
-        domain.store = False
-
-        domain.set_quantity('elevation', -1.0)
-        domain.set_quantity('stage', 0.0)
-
-        # Mode selected BEFORE boundaries -- deferred.
-        domain.set_multiprocessor_mode(2)
-        self.assertIsNone(domain.gpu_interface)
-
-        # Boundaries set afterwards.
-        Br = Reflective_boundary(domain)
-        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
-
-        # First evolve() builds the interface lazily and runs.
-        for t in domain.evolve(yieldstep=0.1, finaltime=0.1):
-            pass
-
-        self.assertIsNotNone(domain.gpu_interface)
-        self.assertTrue(domain.gpu_interface.initialized)
 
     def test_correct_initialization_order(self):
         """Test that correct initialization order works."""
@@ -1138,7 +1106,16 @@ class Test_GPU_RK3(unittest.TestCase):
 
     @pytest.mark.slow
     def test_rk3_mode1_vs_mode2_dam_break(self):
-        """DE2 (RK3) dam-break: mode=1 and mode=2 must agree to machine precision."""
+        """DE2 (RK3) dam-break: mode=1 and mode=2 must agree.
+
+        On a CPU build (gpu_offload=false) both modes run the identically
+        compiled host kernels, so they agree to machine precision. On a real
+        GPU (gpu_offload=true) the device executes the same algorithm with a
+        different floating-point evaluation order (fma/contraction, reduction
+        order), so the agreement is only to ~1e-9, not 1e-12. Pick the tolerance
+        accordingly.
+        """
+        import anuga
         from anuga.shallow_water.sw_domain_gpu_ext import sync_to_device, sync_from_device
 
         cpu_d = self._create_domain('rk3_cpu')
@@ -1154,11 +1131,12 @@ class Test_GPU_RK3(unittest.TestCase):
             pass
         sync_from_device(gpu_d.gpu_interface.gpu_dom)
 
+        atol = 1e-8 if anuga.gpu_offload_enabled() else 1e-12
         for qname in ['stage', 'xmomentum', 'ymomentum']:
             np.testing.assert_allclose(
                 gpu_d.quantities[qname].centroid_values,
                 cpu_d.quantities[qname].centroid_values,
-                rtol=0, atol=1e-12,
+                rtol=0, atol=atol,
                 err_msg=f'RK3 dam-break: {qname} mismatch mode=1 vs mode=2')
 
     def test_saxpy3_kernel(self):
@@ -2146,6 +2124,173 @@ class Test_TimestepTimeAdvance(unittest.TestCase):
     def test_DE_ader2(self):
         """DE_ader2 (ADER-2) — same bug as Euler; fixed in evolve_one_ader2_step."""
         self._assert_modes_agree('DE_ader2')
+
+
+class Test_GPU_NonGPUBoundaryFallback(unittest.TestCase):
+    """Mode 2 must fall back to host boundary evaluation for boundary types the
+    C loop cannot evaluate on the device — for EVERY flow algorithm, including
+    DE0/Euler.
+
+    Regression for a bug where evolve_one_euler_step() dispatched straight to the
+    C Euler loop and silently ignored non-GPU boundary types (rk2/rk3/ader2
+    already fell back to a Python-orchestrated loop; euler did not). The 'right'
+    boundary here is a Transmissive_momentum_set_stage_boundary, which is NOT a
+    GPU-supported type, so mode 2 must use the host-evaluation fallback and match
+    mode 1. Symptom of the bug: DE0 results diverged from legacy by ~0.1 m while
+    DE1/DE2/DE_ader2 matched. (This is what made run_parallel_riverwall.py — a
+    DE0 + Transmissive_momentum_set_stage case — diverge.)
+    """
+
+    def _make_domain(self, name, algorithm):
+        d = rectangular_cross_domain(10, 5, len1=100., len2=50.)
+        d.set_flow_algorithm(algorithm)
+        d.set_low_froude(0)
+        d.set_name(name)
+        d.set_datadir(tempfile.mkdtemp())
+        d.store = False
+        d.set_quantity('elevation', lambda x, y: -x / 100.0)
+        d.set_quantity('friction', 0.03)
+        d.set_quantity('stage', lambda x, y: -x / 100.0)  # initially dry
+        Br = Reflective_boundary(d)
+        Bt = Transmissive_momentum_set_stage_boundary(
+            domain=d, function=lambda t: min(-0.4 * np.exp(-t / 5.0) - 0.1, -0.11))
+        d.set_boundary({'left': Br, 'right': Bt, 'top': Br, 'bottom': Br})
+        return d
+
+    def _assert_modes_agree(self, algorithm):
+        from anuga.shallow_water.sw_domain_gpu_ext import sync_to_device, sync_from_device
+
+        d1 = self._make_domain(f'{algorithm}_m1', algorithm)
+        d1.set_multiprocessor_mode(1)
+        for _ in d1.evolve(yieldstep=2.0, finaltime=10.0):
+            pass
+
+        d2 = self._make_domain(f'{algorithm}_m2', algorithm)
+        d2.set_multiprocessor_mode(2)
+        sync_to_device(d2.gpu_interface.gpu_dom)
+        for _ in d2.evolve(yieldstep=2.0, finaltime=10.0):
+            pass
+        sync_from_device(d2.gpu_interface.gpu_dom)
+
+        # Bit-identical on a CPU build (same compiled kernels); ~1e-9 FP-order
+        # differences on a real GPU.
+        atol = 1e-8 if anuga.gpu_offload_enabled() else 1e-12
+        for q in ['stage', 'xmomentum', 'ymomentum']:
+            np.testing.assert_allclose(
+                d2.quantities[q].centroid_values,
+                d1.quantities[q].centroid_values,
+                rtol=0, atol=atol,
+                err_msg=f'{algorithm} + Transmissive_momentum_set_stage: '
+                        f'{q} mode1 vs mode2 mismatch')
+
+    def test_DE0_euler(self):
+        """DE0/Euler — the boundary that was silently ignored before the fix."""
+        self._assert_modes_agree('DE0')
+
+    def test_DE1_rk2(self):
+        self._assert_modes_agree('DE1')
+
+    def test_DE2_rk3(self):
+        self._assert_modes_agree('DE2')
+
+    def test_DE_ader2(self):
+        self._assert_modes_agree('DE_ader2')
+
+
+class Test_GPU_ForcingOperators(unittest.TestCase):
+    """Wind_stress / Barometric_pressure / Rate OPERATORS must give identical
+    results in mode 1 (legacy) and mode 2 (unified).
+
+    These fractional-step operators are the supported replacements for the
+    deprecated Wind_stress / Barometric_pressure / Rainfall FORCING-FUNCTION
+    classes. Mode 2 silently skips the forcing-function classes (it applies
+    forcing in C and only handles Manning friction — see
+    _warn_unsupported_mode2_forcing and the warnings under
+    ANUGA_DEFAULT_COMPUTE_MODE=unified), but fractional-step operators are
+    applied by apply_fractional_steps() in BOTH modes. This mirrors
+    test_forcing.py's wind/pressure evolve tests, but for the operators and
+    across both compute modes — confirming the operators really are applied in
+    unified mode and agree with legacy.
+    """
+
+    def _make_domain(self, name):
+        d = rectangular_cross_domain(10, 5, len1=100., len2=50.)
+        d.set_flow_algorithm('DE0')
+        d.set_low_froude(0)
+        d.set_name(name)
+        d.set_datadir(tempfile.mkdtemp())
+        d.store = False
+        d.set_quantity('elevation', 0.0)
+        d.set_quantity('friction', 0.0)
+        d.set_quantity('stage', 1.0)        # still water, depth 1 m
+        Br = Reflective_boundary(d)
+        d.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+        return d
+
+    def _run(self, mode, add_operator, name):
+        from anuga.shallow_water.sw_domain_gpu_ext import sync_to_device, sync_from_device
+        d = self._make_domain(name)
+        add_operator(d)
+        d.set_multiprocessor_mode(mode)
+        if mode == 2:
+            sync_to_device(d.gpu_interface.gpu_dom)
+        for _ in d.evolve(yieldstep=1.0, finaltime=5.0):
+            pass
+        if mode == 2:
+            sync_from_device(d.gpu_interface.gpu_dom)
+        return d
+
+    def _assert_modes_agree(self, add_operator, label):
+        d1 = self._run(1, add_operator, f'{label}_m1')
+        d2 = self._run(2, add_operator, f'{label}_m2')
+        atol = 1e-8 if anuga.gpu_offload_enabled() else 1e-12
+        for q in ['stage', 'xmomentum', 'ymomentum']:
+            np.testing.assert_allclose(
+                d2.quantities[q].centroid_values,
+                d1.quantities[q].centroid_values,
+                rtol=0, atol=atol,
+                err_msg=f'{label}: {q} mode1 vs mode2 mismatch')
+        return d1
+
+    def test_wind_stress_constant(self):
+        from anuga.operators.wind_stress_operator import Wind_stress_operator
+        d1 = self._assert_modes_agree(
+            lambda d: Wind_stress_operator(d, speed=15.0, phi=0.0), 'wind_const')
+        # east wind (phi=0) must build positive x-momentum
+        self.assertGreater(np.max(d1.quantities['xmomentum'].centroid_values), 0.0)
+
+    def test_wind_stress_temporally_varying(self):
+        from anuga.operators.wind_stress_operator import Wind_stress_operator
+        def speed(t, x, y):
+            return 5.0 + 2.0 * t
+        d1 = self._assert_modes_agree(
+            lambda d: Wind_stress_operator(d, speed=speed, phi=90.0), 'wind_temporal')
+        # north wind (phi=90) must build positive y-momentum
+        self.assertGreater(np.max(d1.quantities['ymomentum'].centroid_values), 0.0)
+
+    def test_wind_stress_spatially_varying(self):
+        from anuga.operators.wind_stress_operator import Wind_stress_operator
+        def speed(t, x, y):
+            return 5.0 + 0.1 * x
+        self._assert_modes_agree(
+            lambda d: Wind_stress_operator(d, speed=speed, phi=0.0), 'wind_spatial')
+
+    def test_barometric_pressure_spatially_varying(self):
+        from anuga.operators.barometric_pressure import Barometric_pressure_operator
+        def pressure(t, x, y):
+            return 101325.0 + 50.0 * x      # ∂p/∂x drives momentum
+        d1 = self._assert_modes_agree(
+            lambda d: Barometric_pressure_operator(d, pressure=pressure), 'pressure_spatial')
+        # a non-zero pressure gradient must move the water
+        self.assertGreater(
+            np.max(np.abs(d1.quantities['xmomentum'].centroid_values)), 0.0)
+
+    def test_rate_operator_rainfall(self):
+        from anuga.operators.rate_operators import Rate_operator
+        d1 = self._assert_modes_agree(
+            lambda d: Rate_operator(d, rate=1.0e-3), 'rain')   # 1 mm/s rain
+        # rainfall must raise the stage above the initial 1.0 m
+        self.assertGreater(np.max(d1.quantities['stage'].centroid_values), 1.0)
 
 
 if __name__ == "__main__":

@@ -88,6 +88,131 @@ Tests in `anuga/parallel/tests/` spawn `mpiexec` subprocesses. They cannot be
 parallelised with `pytest-xdist` and must run serially. They are marked slow
 and skipped by `--run-fast`.
 
+### GPU build: `test_DE_gpu_omp.py` aborts mid-file (NVHPC target present-table) (2026-06-15)
+
+On a GPU build (`-Dgpu_offload=true`, nvc), running the whole
+`anuga/shallow_water/tests/test_DE_gpu_omp.py` file in one process **aborts
+silently** (exit 1, no traceback, not a SIGSEGV, GPU idle/no-OOM) partway
+through — around the 9th–11th test (`Test_GPU_InletOperator::test_inlet_operator_basic`).
+The NVHPC OpenMP-target runtime calls `exit()`.
+
+**Not caused by the mode-2 session changes** — reproduces identically on the
+pre-change commit (`d96ae357`) rebuilt with nvc.
+
+**It is NOT a simple cumulative-resource leak.** Diagnostics:
+- Each test class *alone*, and `test_inlet_operator_basic` alone, pass.
+- Creating 16–20 GPU domains in a loop — both dropped each iteration *and* kept
+  simultaneously live — works fine.
+- The crash only appears with the file's specific mix of low-level kernel tests,
+  `set_multiprocessor_mode(1)`↔`(2)` switching, `sync_to/from_device`, and
+  operator setup, accumulated across ≥9 tests.
+- Forcing finalization between tests (`gc.collect()`, or nulling
+  `domain.gpu_interface`) makes it **worse**: introduces assertion *failures*
+  before the abort.
+
+**Root cause (diagnosed, not yet fixed):** device arrays are bound with
+`#pragma omp target enter data map(to: host_ptr...)` keyed on the *host* pointer,
+and released with `map(delete:)` (`gpu_domain_unmap_arrays` /
+`gpu_domain_finalize`). The OpenMP present table is reference-counted and
+host-pointer-keyed, so repeated map/unmap of arrays whose host addresses numpy
+recycles across domains corrupts the table (stale entry reused, or a live
+entry deleted) — hence both the "leak then abort" and the "eager-unmap then
+assertion failure" signatures. Two reference cycles
+(`domain ↔ gpu_interface`, and `gpu_dom → python_domain → domain`) also defer
+`GPUDomain.__dealloc__`/`gpu_domain_finalize` to the cyclic GC, so finalization
+timing is non-deterministic — but breaking either cycle does not fix the
+underlying present-table issue (the other cycle still pins the domain, and eager
+finalize corrupts).
+
+It also crashes the *whole* `pytest --pyargs anuga.shallow_water` run (in either
+`ANUGA_DEFAULT_COMPUTE_MODE`) because `test_DE_gpu_omp.py` collects early and
+these GPU tests set mode 2 explicitly regardless of the env default — the abort
+at ~3% kills the run before the rest of the suite executes.
+
+**On a GPU build, `ANUGA_DEFAULT_COMPUTE_MODE=unified` over the full suite is not
+viable even with the GPU file excluded:** every default domain then offloads to
+the GPU, so the whole suite churns hundreds of mode-2 GPU domains in one process
+and aborts early (~20%). This is the same root cause. Validate the unified
+default over the full suite on the **gcc CPU build** (`-Dgpu_offload=false`),
+where it is the documented 2657-passed run; on a GPU build, drive the bulk suite
+with `ANUGA_DEFAULT_COMPUTE_MODE=legacy` and cover GPU paths via the per-class
+runner below.
+
+**Impact:** production use (a single, or a few sequential, mode-2 GPU domains)
+is unaffected — single-domain evolve and each test class pass. Only running many
+GPU-domain tests in *one* process trips it.
+
+**Auto-skip:** on a GPU-offload build, `test_DE_gpu_omp.py` skips itself at
+collection (module-level `pytest.skip`, gated on `anuga.gpu_offload_supported()`
+and `not ANUGA_GPU_TESTS_ISOLATED`), so a normal `pytest --pyargs anuga` no longer
+crashes — the file is reported as skipped with a message pointing here. On a CPU
+build the guard is inert and the file runs in-process as usual.
+
+**Workaround — run the GPU tests in isolated processes:**
+```bash
+# one fresh process per CLASS (fast):
+bash anuga/shallow_water/tests/run_gpu_tests_isolated.sh
+# one fresh process per TEST FUNCTION, with a per-test timeout (most robust;
+# turns a genuine hang into a reported TIMEOUT). Works on any pytest target.
+# Installed as `anuga_run_isolated_tests` (scripts/, via meson); in a source
+# checkout run scripts/anuga_run_isolated_tests.py directly:
+anuga_run_isolated_tests [TARGET] [--timeout S] [-k EXPR]
+```
+Both set `ANUGA_GPU_TESTS_ISOLATED=1` to bypass the auto-skip; all tests pass
+this way (verified 65/65 per-function on the nvc build). Then run the rest of the
+suite normally (it does not trip the issue) under the **legacy** default:
+```bash
+ANUGA_DEFAULT_COMPUTE_MODE=legacy \
+  pytest anuga/shallow_water/tests/ --ignore=anuga/shallow_water/tests/test_DE_gpu_omp.py
+```
+**Do NOT use `pytest --forked`** for these tests: CUDA contexts are fork-unsafe,
+so forking from a GPU-initialised parent poisons every child (it turns the abort
+into ~53 spurious failures). Isolation must be *fresh* processes (separate
+`python -m pytest` invocations), not `os.fork()`.
+
+A real fix (FUTURE_WORK P1.10) needs either per-test fresh-process isolation
+baked into the GPU test file, strict 1:1 map/unmap reference-count discipline per
+domain, or device-pointer allocation (`omp_target_alloc` + `is_device_ptr`)
+instead of host-pointer-keyed `map(to:)`. (`omp target enter/exit data` cleanup
+is reference-counted and host-pointer-keyed; forcing finalization between tests
+removes the abort but still yields ~7 aliasing failures, so clean teardown alone
+is not sufficient.)
+
+### GPU build: `anuga.shallow_water` is green under `unified` via the isolated runner (2026-06-17)
+
+The per-function isolated runner now passes the **entire** `anuga.shallow_water`
+set under the unified default on a GPU-offload build:
+
+```bash
+anuga_run_isolated_tests --pyargs anuga.shallow_water -cm unified
+# 410 collected -> pass=408 skip=2 (2 skips are pre-existing legacy-default guards)
+# (-cm/--compute-mode sets ANUGA_DEFAULT_COMPUTE_MODE for every child; omit to
+#  inherit the environment.)
+```
+
+This works because each test runs in its own fresh process (no mode-2 domain
+accumulation -> no NVHPC abort), **and** because 11 tests that probed mode-1-only
+host state are now pinned to `legacy` (`domain.set_compute_mode('legacy')`):
+
+- 9 white-box tests call `compute_forcing_terms()` / `compute_fluxes()` and assert
+  on the host `semi_implicit_update` / `explicit_update` arrays, which mode-2 GPU
+  computes on-device and never syncs back (so the host arrays read stale zeros) —
+  in `test_forcing.py`, `test_friction.py`, `test_physics_sw.py` (Manning friction
+  cases) and `test_data_manager.py::test_sww_extrema` (extrema monitoring).
+- 2 numerical tests compare against legacy-recorded references and diverge at the
+  ~1e-6 level under mode-2's different reduction/eval order
+  (`test_regression_snapshots.py::test_dam_break_DE1_stage_snapshot` and
+  `test_sww_interrogate.py::test_get_maximum_inundation_de0`). The two
+  regression-snapshot domain helpers are pinned so that whole file stays
+  deterministic under any `ANUGA_DEFAULT_COMPUTE_MODE`.
+
+These are test-harness artifacts, not solver bugs; the pins are no-ops for the
+distribution-default legacy path. Mode-2 numerical fidelity remains covered by the
+mode1-vs-mode2 comparison tests in `test_DE_gpu_omp.py`. Note this complements —
+does not replace — the guidance above: the *full* `pytest --pyargs anuga.shallow_water`
+(non-isolated) under `unified` on a GPU build still aborts; use the isolated runner.
+Commit `0c50947d`.
+
 ### Targeted `--cov=anuga.submodule` runs corrupt numpy's `_NoValue` sentinel
 
 Running `pytest --cov=anuga.structures.structure_operator` (or any sub-package
@@ -180,6 +305,39 @@ These are marked `@pytest.mark.slow` at module level.
 requires a domain with a mesh that has breaklines (specific mesh construction).
 Simple rectangular domains don't suffice.
 
+### RESOLVED (2026-06-15): "riverwall flux divergence" was really a DE0 boundary bug
+
+**Symptom (now fixed):** a riverwall simulation under `multiprocessor_mode=2`
+diverged from legacy — on `run_parallel_riverwall.py` (sequential), stage drifted
+from 0 at t=0 to ~0.095 m by t≈100 s.
+
+**Misdiagnosis → real cause.** It was *not* the riverwall flux. The riverwall
+kernel (`core_compute_fluxes_central` elevation override + Villemonte weir) is
+correct: with a GPU-supported boundary (e.g. `Dirichlet`), mode-1 vs mode-2
+riverwall results are **bit-identical (0.0)**. The actual bug was the **boundary**:
+`run_parallel_riverwall.py` uses `Transmissive_momentum_set_stage_boundary`
+(*not* in `GPU_BOUNDARY_TYPES`), and it was **euler-specific** —
+`evolve_one_euler_step()` dispatched straight to `_evolve_one_euler_step_c`, which
+handles only GPU boundary types in C and **skips `update_boundary()` entirely**,
+so the Transmissive boundary was silently never evaluated (stale edge values →
+drift). rk2/rk3/ader2 already fell back to a Python-orchestrated `_gpu` loop for
+non-GPU boundaries; **euler had no such fallback**. Confirmed by DE1/DE2/DE_ader2
+matching (0.0) while DE0 diverged.
+
+**Fix:** added `_evolve_one_euler_step_gpu()` (host evaluation of non-GPU
+boundaries via `evaluate_segment` + `sync_boundary_values`, mirroring rk2/rk3),
+and `_evolve_one_euler_step_c()` now delegates to it when
+`not self._gpu_all_on_gpu`. DE0 + `Transmissive_momentum_set_stage` + riverwall is
+now bit-identical to legacy; `run_parallel_riverwall.py` is **un-pinned** (passes
+under `ANUGA_DEFAULT_COMPUTE_MODE=unified` again). Regression test:
+`test_DE_gpu_omp.py::Test_GPU_NonGPUBoundaryFallback` (DE0/DE1/DE2/DE_ader2 with a
+Transmissive_momentum_set_stage boundary).
+
+**General lesson:** in mode 2, a boundary type not in `GPU_BOUNDARY_TYPES` is only
+correct if the active step path falls back to host evaluation. All four DE
+algorithms now do. If you add a new evolve path, replicate the
+`if not self._gpu_all_on_gpu: return self._evolve_one_*_step_gpu(...)` fallback.
+
 ---
 
 ## SWW GUI / animate.py
@@ -259,3 +417,47 @@ legacy artifact and should be removed once meson-only builds are confirmed in CI
 
 Zero pre-commit hooks, no ruff/flake8 config, 4,189 functions with no type annotations.
 Current approach is manual `pyflakes` / `autopep8` before commits.
+
+### GPU build forced to CPU (`set_gpu_offload(False)` / `-ngo`) is slow — nvc limitation
+
+A `gpu_offload=true` (nvc `-mp=gpu,multicore`) build forced onto the host runs the
+`omp target teams distribute` regions through nvc's host fallback, which **does not
+scale with threads** (it gets *slower* with more threads). Microbenchmark (40M-element
+memory-bound loop, 60 iters, RTX 5070 box, HPC SDK 26.3):
+
+| config | 1t | 8t | 16t |
+|--------|----|----|-----|
+| nvc `-mp=gpu,multicore` + `OMP_TARGET_OFFLOAD=disabled` | 0.91s | 4.48s | 3.00s (pathological) |
+| nvc `-mp=multicore` (multicore-only build) | 0.92s | 0.73s | 0.64s |
+| gcc `-fopenmp` (`#pragma omp parallel for`) | 0.92s | 0.76s | 0.61s |
+| nvc GPU offload | — | — | 0.12s |
+
+Neither `OMP_TARGET_OFFLOAD=disabled` nor `CUDA_VISIBLE_DEVICES=` engages the good
+multicore variant of the dual build — the host always gets the GPU variant's serial-ish
+fallback. towradgi small (256k tri, -ft 200 -ys 50) confirms it: GPU 6.35s, `-ngo`
+60–100s (1.7× scaling 1→16 threads), vs a gcc `gpu_offload=false` build at ~17s.
+
+**Implication:** a GPU build is not a substitute for a CPU build. `set_gpu_offload(False)` /
+`-ngo` is for **correctness A/B** (verify GPU and CPU give identical results — they are
+bit-identical) only, NOT timing. For CPU-multicore performance, build with
+`-Dgpu_offload=false` (gcc → host-optimised `omp parallel for` via the `CPU_ONLY_MODE`
+macros). `set_gpu_offload(False)` warns about this on a GPU build.
+
+**This is a confirmed, documented NVHPC limitation, not an ANUGA bug** (investigated
+2026-06-13). The NVHPC Reference Guide defines `-mp=gpu` as "compiled for GPU execution
+*as well as host fallback to the CPU*" — and that host fallback runs **single-threaded**.
+A peer-reviewed compiler comparison (IPDPSW 2023, Iowa State) measured NVHPC host fallback
+at "OMP 1" (1 CPU thread) and found "the GPU code version on CPU in host fallback mode
+performs worse than the CPU version with 1 thread". NVHPC is also documented to handle
+nested/inner parallel regions poorly (NVIDIA recommends the `loop` directive over
+`teams distribute parallel for` for this reason). The fast multicore variant only exists
+when `-mp=multicore` is the *sole* mode; `-mp=gpu,multicore` does not let the runtime pick
+it on the host (verified across `OMP_TARGET_OFFLOAD=disabled`, `CUDA_VISIBLE_DEVICES=`,
+argument order, and `ACC_DEVICE_TYPE` — the last hangs). So a single nvc binary cannot be
+fast on both GPU and CPU; the two-build split (gcc CPU / nvc GPU) is required.
+
+References:
+- NVHPC Compilers Reference Guide 26.3 — https://docs.nvidia.com/hpc-sdk/compilers/hpc-compilers-ref-guide/index.html
+- "OpenMP Offload Features and Strategies for High Performance across Architectures and
+  Compilers", IPDPSW 2023 — https://swapp.cs.iastate.edu/files/inline-files/OpenMP_Offload_Features_and_Strategies_for_High_Performance_across_Architectures_and_Compilers-ipdpsw-may-2023.pdf
+- OMP_TARGET_OFFLOAD, OpenMP 5.0 spec — https://www.openmp.org/spec-html/5.0/openmpse65.html

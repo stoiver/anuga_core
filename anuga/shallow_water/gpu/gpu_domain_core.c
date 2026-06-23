@@ -177,6 +177,61 @@ int gpu_get_num_devices(void) {
 #endif
 }
 
+// Default offload device control. The kernels use `#pragma omp target` with no
+// device() clause, so they run on the OpenMP default device — redirecting it is
+// a robust, runtime way to force a GPU build onto the host (CPU) and back.
+// All no-ops in CPU_ONLY_MODE (there is only the host device).
+
+int gpu_get_initial_device(void) {
+#ifdef CPU_ONLY_MODE
+    return 0;
+#else
+    return omp_get_initial_device();
+#endif
+}
+
+int gpu_get_default_device(void) {
+#ifdef CPU_ONLY_MODE
+    return 0;
+#else
+    return omp_get_default_device();
+#endif
+}
+
+// Route subsequent target regions to `device_id`. Pass gpu_get_initial_device()
+// to run on the host (CPU). No-op in CPU_ONLY_MODE.
+void gpu_set_default_device(int device_id) {
+#ifdef CPU_ONLY_MODE
+    (void)device_id;
+#else
+    omp_set_default_device(device_id);
+#endif
+}
+
+// Process-global offload enable flag (default on). When 0, gpu_domain_init keeps
+// domains on the host even on a GPU build, so mode 2 ('unified') runs
+// CPU-multicore with data mapping and kernel execution consistently on the host.
+// Set via anuga.set_gpu_offload(); decide before the first unified domain is
+// built (the device is chosen at init, when arrays are mapped).
+static int g_gpu_offload_enabled = 1;
+
+void gpu_set_offload_enabled(int enabled) { g_gpu_offload_enabled = enabled ? 1 : 0; }
+int gpu_get_offload_enabled(void) { return g_gpu_offload_enabled; }
+
+// The OpenMP device that target regions for this domain should run on. A real
+// GPU id when offloading; the host (initial) device when not (device_id < 0,
+// e.g. offload disabled on a GPU build). Use this for omp_set_default_device —
+// NEVER pass GD->device_id directly, since -1 is not a valid device number and
+// would silently re-route work to the default GPU.
+int gpu_compute_device(struct gpu_domain *GD) {
+#ifdef CPU_ONLY_MODE
+    (void)GD;
+    return 0;
+#else
+    return GD->device_id >= 0 ? GD->device_id : omp_get_initial_device();
+#endif
+}
+
 void print_gpu_domain_info(struct gpu_domain *GD) {
     if (!GD->verbose) return;
     printf("\n--- GPU Domain (rank %d/%d) ---\n", GD->rank, GD->nprocs);
@@ -207,13 +262,16 @@ int gpu_domain_init(struct gpu_domain *GD, MPI_Comm comm, int rank, int nprocs) 
     GD->gpu_initialized = 0;
     GD->backup_arrays_mapped = 0;
 
-    // Select GPU device (round-robin if more ranks than GPUs)
+    // Select GPU device (round-robin if more ranks than GPUs), unless offload
+    // has been disabled process-wide (anuga.set_gpu_offload(False)) — then run
+    // on the host so data mapping and kernel execution stay consistent on CPU.
     int num_devices = omp_get_num_devices();
-    if (num_devices > 0) {
+    if (num_devices > 0 && g_gpu_offload_enabled) {
         GD->device_id = rank % num_devices;
         omp_set_default_device(GD->device_id);
     } else {
         GD->device_id = -1;
+        omp_set_default_device(omp_get_initial_device());
     }
 
     // Detect GPU-aware MPI
@@ -246,9 +304,9 @@ int gpu_domain_init(struct gpu_domain *GD, MPI_Comm comm, int rank, int nprocs) 
     GD->dirichlet.boundary_indices = NULL;
     GD->dirichlet.vol_ids = NULL;
     GD->dirichlet.edge_ids = NULL;
-    GD->dirichlet.stage_value = 0.0;
-    GD->dirichlet.xmom_value = 0.0;
-    GD->dirichlet.ymom_value = 0.0;
+    GD->dirichlet.stage_values = NULL;
+    GD->dirichlet.xmom_values = NULL;
+    GD->dirichlet.ymom_values = NULL;
     GD->dirichlet.mapped = 0;
 
     // Initialize transmissive boundary to empty
@@ -516,8 +574,12 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
         int *b_idx = Dir->boundary_indices;
         int *v_ids = Dir->vol_ids;
         int *e_ids = Dir->edge_ids;
+        double *s_val = Dir->stage_values;
+        double *x_val = Dir->xmom_values;
+        double *y_val = Dir->ymom_values;
 
-        #pragma omp target enter data map(to: b_idx[0:ne], v_ids[0:ne], e_ids[0:ne])
+        #pragma omp target enter data map(to: b_idx[0:ne], v_ids[0:ne], e_ids[0:ne], \
+                                              s_val[0:ne], x_val[0:ne], y_val[0:ne])
         Dir->mapped = 1;
 
         if (GD->rank == 0 && GD->verbose) {

@@ -659,7 +659,7 @@ void gpu_culverts_map(struct gpu_domain *GD) {
     if (CO->num_culverts == 0) return;
     if (CO->mapped) return;
 
-    omp_set_default_device(GD->device_id);
+    omp_set_default_device(gpu_compute_device(GD));
 
     int nc = CO->num_culverts;
     int ne = 2 * nc;  // 2 enquiry points per culvert
@@ -1253,7 +1253,7 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
         return;
     }
 
-    omp_set_default_device(GD->device_id);
+    omp_set_default_device(gpu_compute_device(GD));
     int myrank = GD->rank;
 
     // Check if any parallel culverts exist

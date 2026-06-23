@@ -8,6 +8,39 @@ __date__ ="$10/07/2012 1:18:38 PM$"
 
 
 
+def arithmetic_float(expr):
+    """argparse ``type`` that evaluates a simple arithmetic expression to a float.
+
+    Lets numeric options be given as expressions, e.g. ``-ft 3600*8`` or
+    ``-ys 3600/4``. A plain number (``-ft 3600``) still works. Uses ``ast`` with
+    a small operator whitelist — NOT ``eval`` — so it cannot execute arbitrary
+    code. Supports ``+ - * / // % **`` and unary +/- on numeric literals.
+    """
+    import argparse
+    import ast
+    import operator
+
+    ops = {ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+           ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv,
+           ast.Mod: operator.mod, ast.Pow: operator.pow,
+           ast.USub: operator.neg, ast.UAdd: operator.pos}
+
+    def ev(node):
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+            return node.value
+        if isinstance(node, ast.BinOp) and type(node.op) in ops:
+            return ops[type(node.op)](ev(node.left), ev(node.right))
+        if isinstance(node, ast.UnaryOp) and type(node.op) in ops:
+            return ops[type(node.op)](ev(node.operand))
+        raise ValueError(node)
+
+    try:
+        return float(ev(ast.parse(expr, mode='eval').body))
+    except Exception:
+        raise argparse.ArgumentTypeError(
+            f"{expr!r} is not a number or simple arithmetic expression")
+
+
 def create_standard_parser():
     """ Creates a standard argument parser"""
 
@@ -21,14 +54,14 @@ def create_standard_parser():
     #parser.add_argument('-cfl', type=float, default=default_cfl,
     #                   help='cfl condition')
 
-    parser.add_argument('-ft', '--finaltime', type=float, default=argparse.SUPPRESS,
-                       help='finaltime')
+    parser.add_argument('-ft', '--finaltime', type=arithmetic_float, default=argparse.SUPPRESS,
+                       help='finaltime (accepts arithmetic, e.g. 3600*8)')
 
-    parser.add_argument('-ys', '--yieldstep', type=float, default=argparse.SUPPRESS,
-                       help='yieldstep')
+    parser.add_argument('-ys', '--yieldstep', type=arithmetic_float, default=argparse.SUPPRESS,
+                       help='yieldstep (accepts arithmetic, e.g. 3600/4)')
 
-    parser.add_argument('-os', '--outputstep', type=float, default=argparse.SUPPRESS,
-                       help='outputstep (defaults to yieldstep if not set)')
+    parser.add_argument('-os', '--outputstep', type=arithmetic_float, default=argparse.SUPPRESS,
+                       help='outputstep (defaults to yieldstep if not set; accepts arithmetic)')
 
     parser.add_argument('-alg', type=str, default = default_alg,
                        help='flow algorithm')
@@ -56,7 +89,22 @@ def create_standard_parser():
 
     parser.add_argument('-mpm', '--multiprocessor_mode', type=int, default=1,
                        choices=[1, 2],
-                       help='multiprocessor mode: 1=CPU OpenMP, 2=GPU OpenMP offload')
+                       help='multiprocessor mode: 1=legacy CPU OpenMP, 2=unified gpu_ext kernels')
+
+    parser.add_argument('-nt', '--omp_num_threads', type=int, default=argparse.SUPPRESS,
+                       help='number of OpenMP threads (process-wide). '
+                            'Defaults to the OMP_NUM_THREADS environment variable if unset')
+
+    # GPU offload for mode-2 (unified) domains, process-wide. Tri-state: leave
+    # unset to follow the build (offload on a GPU build), or force on/off.
+    parser.add_argument('-go', '--gpu_offload', dest='gpu_offload',
+                       action='store_const', const=True, default=None,
+                       help='enable GPU offload for mode-2 (unified) domains (process-wide)')
+    parser.add_argument('-ngo', '--no-gpu_offload', '--no_gpu_offload', dest='gpu_offload',
+                       action='store_const', const=False,
+                       help='force CPU multicore for mode-2 (unified) domains '
+                            '(process-wide); shortcut for the -go off case. '
+                            'Default: follow the build (offload on a GPU build)')
 
     parser.add_argument('-ps', '--partition_scheme', type=str, default='metis',
                        choices=['metis', 'hilbert', 'morton', 'rcm'],

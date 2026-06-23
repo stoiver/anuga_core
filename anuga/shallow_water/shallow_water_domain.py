@@ -154,6 +154,185 @@ except ImportError:
     pass
 
 
+#-----------------------------------------------------
+# Process-global GPU offload control
+#
+# Whether mode 2 ('unified') offloads to a GPU is a *process-level* OpenMP
+# setting (the target-offload runtime ICV), not a per-domain property: a single
+# process cannot run one domain on the GPU and another on the CPU with the same
+# unified kernels. These module functions own that process-wide decision; the
+# per-domain choice (legacy vs unified) lives on Domain.set_compute_mode().
+#-----------------------------------------------------
+
+def _gpu_ext_or_none():
+    try:
+        from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
+        return gpu_ext
+    except Exception:
+        return None
+
+
+def gpu_offload_supported() -> bool:
+    """True if this build/run can offload mode 2 to a GPU device.
+
+    Reflects build + hardware: False for a CPU-only build (``gpu_offload=false`` /
+    ``CPU_ONLY_MODE`` — the standard pip/conda install), when no device is
+    present, or when offload was disabled at launch via
+    ``OMP_TARGET_OFFLOAD=disabled`` (``gpu_available()`` covers all three). This
+    is a static capability and is *not* affected by :func:`set_gpu_offload`.
+    """
+    ge = _gpu_ext_or_none()
+    return bool(ge.gpu_available()) if ge is not None else False
+
+
+def gpu_offload_enabled() -> bool:
+    """Return the resolved process-global offload state for mode 2 ('unified').
+
+    True only when the build supports offload *and* it has not been switched off
+    via :func:`set_gpu_offload`. Always False on a CPU-only build.
+    """
+    if not gpu_offload_supported():
+        return False
+    ge = _gpu_ext_or_none()
+    return bool(ge.get_offload_enabled()) if ge is not None else False
+
+
+def set_gpu_offload(enable: bool = True, verbose: bool = True) -> bool:
+    """Enable or disable GPU offload for mode-2 ('unified') domains, process-wide.
+
+    This is a *process-level* switch, not per-domain: it affects every domain
+    that runs in 'unified' mode, because OpenMP target offload is a process-wide
+    runtime setting (one process cannot run the same unified kernels on a GPU for
+    one domain and on the CPU for another).
+
+    The setting is honoured at GPU-domain init, where arrays are mapped to the
+    chosen device. **Call it before building the first 'unified' domain** — once
+    a domain's data is mapped to a device, switching this domain's offload would
+    leave data and execution on different devices.
+
+    Implemented via the OpenMP default-device ICV (``omp_set_default_device`` /
+    a process-global flag in ``sw_domain_gpu_ext``) — robust and re-enableable,
+    unlike mutating ``OMP_TARGET_OFFLOAD`` after the runtime has initialised.
+
+    Parameters
+    ----------
+    enable : bool
+        True to offload 'unified' domains to a GPU (GPU build + device required);
+        False to force 'unified' to run CPU-multicore.
+    verbose : bool
+        Print a one-line confirmation.
+
+    Returns
+    -------
+    bool
+        The resolved offload state (:func:`gpu_offload_enabled`). Requesting
+        ``enable=True`` on a build without offload support warns and returns
+        False — never hard-fails.
+    """
+    import warnings
+
+    ge = _gpu_ext_or_none()
+    was_supported = gpu_offload_supported()
+
+    if enable:
+        # Clear any prior disable BEFORE checking capability, so re-enabling is
+        # not blocked by our own OMP_TARGET_OFFLOAD=disabled.
+        os.environ.pop('OMP_TARGET_OFFLOAD', None)
+        if not gpu_offload_supported():
+            warnings.warn(
+                "set_gpu_offload(True): this ANUGA build has no GPU offload support "
+                "(built with gpu_offload=false) or no device is present; 'unified' "
+                "domains will run on CPU multicore. Rebuild with -Dgpu_offload=true "
+                "and a GPU-capable compiler to enable offload.",
+                stacklevel=2)
+            enable = False
+    elif was_supported:
+        # Disabling offload on a GPU build. This forces the unified kernels onto
+        # the host, but a GPU build (nvc -mp=gpu,multicore) runs the `omp target`
+        # regions on the host through a slow fallback that does NOT scale with
+        # threads — so this is for correctness A/B (GPU vs CPU give the same
+        # results), NOT for performance. For fast CPU multicore, use a
+        # gpu_offload=false (gcc) build instead.
+        try:
+            from anuga import myid
+        except Exception:
+            myid = 0
+        if myid == 0:
+            warnings.warn(
+                "set_gpu_offload(False) on a GPU build: 'unified' will run on the "
+                "host, but the nvc GPU build's host fallback is slow and does not "
+                "scale with threads (use it for correctness checks, not timing). "
+                "For fast CPU multicore, build with -Dgpu_offload=false.",
+                stacklevel=2)
+
+    if not enable:
+        # OMP_TARGET_OFFLOAD=disabled is what actually keeps the `omp target`
+        # regions (solver AND operators) on the host. The default-device flag
+        # alone does NOT stop the solver offloading, so it must be set here.
+        # The OpenMP runtime reads this at its first target region, so call
+        # set_gpu_offload() before the first evolve()/domain build.
+        os.environ['OMP_TARGET_OFFLOAD'] = 'disabled'
+
+    # Keep the C-side flag consistent so gpu_domain_init picks the host device
+    # and the inlet/culvert operators route there too (gpu_compute_device).
+    if ge is not None:
+        ge.set_offload_enabled(bool(enable))
+
+    state = bool(enable)
+    if verbose:
+        print(f"GPU offload {'enabled' if state else 'disabled'} "
+              f"(process-wide; 'unified' domains run on {'GPU' if state else 'CPU multicore'})")
+    return state
+
+
+def set_omp_num_threads(omp_num_threads: int | None = None, verbose: bool = True) -> int:
+    """Set the OpenMP thread count for ANUGA kernels (process-wide).
+
+    ``OMP_NUM_THREADS`` / ``omp_set_num_threads`` controls the whole process, so
+    this is a module-level setting, not per-domain — it affects every domain's
+    OpenMP regions (both the legacy ``sw_domain_openmp_ext`` solver and the
+    unified ``gpu_ext`` kernels). ``Domain.set_omp_num_threads`` delegates here.
+
+    Parameters
+    ----------
+    omp_num_threads : int or None
+        Thread count. If None, use ``OMP_NUM_THREADS`` from the environment,
+        defaulting to 1 when unset.
+    verbose : bool
+        Print a one-line confirmation.
+
+    Returns
+    -------
+    int
+        The thread count applied.
+    """
+    if omp_num_threads is None:
+        omp_num_threads = os.environ.get('OMP_NUM_THREADS', None)
+        if verbose:
+            print(f'Using OMP_NUM_THREADS from environment: {omp_num_threads}')
+
+    if omp_num_threads is None:
+        omp_num_threads = 1  # Default to 1 if not set
+
+    try:
+        omp_num_threads = int(omp_num_threads)
+    except (ValueError, TypeError):
+        raise ValueError('OMP_NUM_THREADS must be an integer')
+
+    # omp_set_num_threads is process-global: one call covers every OpenMP region
+    # in the process, so routing through the legacy extension also sets the
+    # thread count for the unified gpu_ext kernels.
+    from .sw_domain_openmp_ext import set_omp_num_threads as set_omp_num_threads_ext
+    set_omp_num_threads_ext(omp_num_threads)
+    # Keep the env var consistent so banners / introspection / any subprocess
+    # report the same count (the runtime ICV is already set above).
+    os.environ['OMP_NUM_THREADS'] = str(omp_num_threads)
+
+    if verbose:
+        print(f'Setting omp_num_threads to {omp_num_threads}')
+    return omp_num_threads
+
+
 class Domain(Generic_Domain):
     """Object which encapulates the shallow water model
 
@@ -344,7 +523,23 @@ class Domain(Generic_Domain):
         #-------------------------------
         self.gpu_interface = None
         self.use_c_rk_loop = True  # Use C RK loop (faster) vs Python-orchestrated GPU loop
-        self.set_multiprocessor_mode(MULTIPROCESSOR_OPENMP)  # Default to OpenMP (use MULTIPROCESSOR_GPU for GPU)
+        # Default compute mode: 'legacy' (mode 1). Set ANUGA_DEFAULT_COMPUTE_MODE=unified
+        # to default new domains to mode 2 (the migration target); the device interface
+        # is then built lazily at first evolve() so construction needs no boundaries.
+        # SERIAL ONLY: under MPI (numprocs > 1) the env opt-in is ignored and domains
+        # stay 'legacy'. Mode-2 parallel is validated for purpose-built setups (it must
+        # be selected explicitly), but is not yet robust as a blanket default for every
+        # parallel test's evolve pattern — defaulting all parallel domains to mode 2
+        # deadlocks the MPI path. Parallel unified is a later migration step.
+        try:
+            from anuga import numprocs
+        except Exception:
+            numprocs = 1
+        if (numprocs == 1
+                and os.environ.get('ANUGA_DEFAULT_COMPUTE_MODE', 'legacy').lower() == 'unified'):
+            self.set_compute_mode('unified')
+        else:
+            self.set_compute_mode('legacy')
 
         #-------------------------------
         # C extension domain structure
@@ -481,12 +676,19 @@ class Domain(Generic_Domain):
         state = self.__dict__.copy()
         # Do not pickle the C wrapper; it can be recreated
         state.pop('_Domain_C_struct', None)
+        # The mode-2 ('unified') GPU interface wraps a cdef GPUDomain with a
+        # non-trivial __cinit__ (not picklable) and holds device handles. Drop
+        # it; _ensure_gpu_interface() rebuilds it lazily after unpickling.
+        state.pop('gpu_interface', None)
+        state.pop('_gpu_boundary_info_initialized', None)
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
         # Recreate C wrapper lazily when needed
         self._Domain_C_struct = None
+        # Force the mode-2 device interface to be rebuilt on demand.
+        self.gpu_interface = None
 
     def update_domain_c_struct(self):
         """Update the C domain structure from the Python Domain object.
@@ -2103,6 +2305,7 @@ class Domain(Generic_Domain):
         # procedure
 
         nvtxRangePush("compute_fluxes")
+        self._ensure_gpu_interface()
         # Choose the correct extension module
         if self.multiprocessor_mode == MULTIPROCESSOR_OPENMP:
             from .sw_domain_openmp_ext import compute_fluxes_ext_central
@@ -2285,10 +2488,14 @@ class Domain(Generic_Domain):
 
         nvtxRangePush('compute_forcing_terms')
 
+        self._ensure_gpu_interface()
+
         if self.multiprocessor_mode == MULTIPROCESSOR_GPU:
-            # GPU mode: use GPU Manning friction, fall back to CPU for others
+            # GPU mode: use GPU Manning friction, fall back to CPU for others.
+            # Forcing terms may be plain functions (with __name__) or callable
+            # operator objects (Rainfall, Wind_stress, ...) which have none.
             for f in self.forcing_terms:
-                if f.__name__ == 'manning_friction_semi_implicit':
+                if getattr(f, '__name__', None) == 'manning_friction_semi_implicit':
                     self.gpu_interface.manning_friction_kernel(self)
                 else:
                     # Other forcing terms (rain, etc.) run on CPU
@@ -2302,14 +2509,84 @@ class Domain(Generic_Domain):
 
         nvtxRangePop()
 
+    def _warn_unsupported_mode2_forcing(self):
+        """Warn (once) if forcing terms other than Manning friction are present
+        in mode 2.
+
+        The mode-2 C step loop applies forcing in C and only handles Manning
+        friction, so Python ``forcing_terms`` (e.g. the Rainfall / Wind_stress /
+        Barometric_pressure forcing-function classes) are NOT applied — they are
+        silently skipped. Use the equivalent operators instead. This converts
+        that silent correctness gap into a loud, actionable message.
+        """
+        if getattr(self, '_warned_mode2_forcing', False):
+            return
+        self._warned_mode2_forcing = True
+        ignored = [getattr(f, '__name__', None) or f.__class__.__name__
+                   for f in self.forcing_terms
+                   if getattr(f, '__name__', None) != 'manning_friction_semi_implicit']
+        if ignored:
+            import warnings
+            warnings.warn(
+                "multiprocessor_mode=2 ('unified') applies forcing in C and only "
+                "handles Manning friction; these Python forcing terms are NOT "
+                f"applied and are silently skipped: {ignored}. Use the equivalent "
+                "operators instead — Rate_operator.rainfall()/inflow(), "
+                "Wind_stress_operator, Barometric_pressure_operator.",
+                stacklevel=2)
+
+    def set_boundary(self, boundary_map):
+        """Associate boundary objects with tagged segments (see base class).
+
+        Mode-2 ('unified') captures a device-side boundary classification and
+        the per-edge Dirichlet/Time/File/... mappings when the GPU interface is
+        first built. A later set_boundary() — e.g. switching a tag from
+        Reflective to Dirichlet partway through a simulation — must invalidate
+        those caches, otherwise the stale boundary keeps being applied on the
+        device and the new condition is silently ignored.
+        """
+        super().set_boundary(boundary_map)
+
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+            # Preserve current conserved-quantity state before tearing the
+            # interface down. In CPU-no-offload mode host arrays alias the
+            # device; the sync makes this correct for the offload case too.
+            try:
+                self.gpu_interface.sync_from_device()
+            except Exception:
+                pass
+            self.gpu_interface = None
+            if hasattr(self, '_gpu_boundary_info_initialized'):
+                del self._gpu_boundary_info_initialized
+            # Rebuild immediately from the new boundary map so subsequent
+            # mode-2 steps see a valid interface.
+            self._ensure_gpu_interface()
+
     def distribute_to_vertices_and_edges(self, distribute_to_vertices=True):
         """ extrapolate centroid values to vertices and edges"""
 
         nvtxRangePush('distribute_to_vertices_and_edges')
 
-        # Sync from GPU if in GPU mode (needed before CPU reads data at yieldsteps)
+        # Build a deferred mode-2 device interface on demand (a default-'unified'
+        # domain may reach here, e.g. from a test, without going through evolve()).
+        self._ensure_gpu_interface()
+
         if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+            # Output path (yieldsteps / direct reads). This method is NOT on the
+            # mode-2 stepping path (the C RK loop extrapolates on the device
+            # itself); it exists to make vertex/edge values readable from Python
+            # (SWW writer, inundation queries, tests). The gpu edge kernel does
+            # NOT compute vertex values, so sync centroids from the device and
+            # run the host (openmp) protect + extrapolate, which produces edges
+            # AND vertices. The host protect does not affect the device
+            # trajectory — the next C step re-protects on the device.
             self.gpu_interface.sync_from_device()
+            from .sw_domain_openmp_ext import (protect_new,
+                                               extrapolate_second_order_edge_sw)
+            protect_new(self)
+            extrapolate_second_order_edge_sw(self, distribute_to_vertices=distribute_to_vertices)
+            nvtxRangePop()
+            return
 
         # Do protection step
         self.protect_against_infinitesimal_and_negative_heights()
@@ -2318,8 +2595,6 @@ class Domain(Generic_Domain):
         # Choose the correct extension module
         if self.multiprocessor_mode == MULTIPROCESSOR_OPENMP:
             from .sw_domain_openmp_ext import extrapolate_second_order_edge_sw
-        elif self.multiprocessor_mode == MULTIPROCESSOR_GPU:
-            extrapolate_second_order_edge_sw = self.gpu_interface.extrapolate_second_order_edge_sw_kernel
         else:
             raise Exception('Not implemented')
 
@@ -2739,12 +3014,11 @@ class Domain(Generic_Domain):
         msg = 'Attribute self.beta_w must be in the interval [0, 2]'
         assert 0 <= self.beta_w <= 2.0, msg
 
-        # Lazily build the GPU/offload interface if mode 2 was selected but the
-        # interface was deferred (e.g. mode set at construction, before
-        # boundaries / distribute() / reorder()).  By now the mesh, quantities
-        # and boundaries are finalised, so it is safe to map arrays to device.
-        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is None:
-            self.set_gpu_interface()
+        # Build the mode-2 device interface lazily if it was deferred (a
+        # default-'unified' domain constructed before boundaries were set). Must
+        # happen before distribute_to_vertices_and_edges(), which uses the
+        # interface in mode 2.
+        self._ensure_gpu_interface()
 
         # Initial update of vertex and edge values before any STORAGE
         # and or visualisation.
@@ -2756,7 +3030,13 @@ class Domain(Generic_Domain):
         if self.store is True and (self.get_relative_time() == 0.0 or self.evolved_called is False):
             self.initialise_storage()
 
-
+        # Eagerly run the mode-2 fractional-step setup (Boyd culvert registration
+        # and CPU-only-operator detection) so its log lines print before the first
+        # yielded step instead of after the t=0 yield. Cached, so the first
+        # apply_fractional_steps() does not repeat it.
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+            self._has_cpu_only_fractional_operators()
+            self._warn_unsupported_mode2_forcing()
 
         #nvtx marker
         nvtxRangePush('_evolve_base')
@@ -3192,8 +3472,11 @@ class Domain(Generic_Domain):
         update_conserved_quantities_gpu(gpu_dom, self.timestep)
 
         self.set_relative_time(self.get_relative_time() + self.timestep)
-        self.recorded_max_timestep = max(self.timestep, self.recorded_max_timestep)
-        self.recorded_min_timestep = min(self.timestep, self.recorded_min_timestep)
+        # Record the CFL-constrained step (pre yield/final cap), matching legacy
+        # update_timestep(), rather than the yield-limited step actually taken.
+        cfl_dt = min(self.CFL * self.flux_timestep, self.evolve_max_timestep)
+        self.recorded_max_timestep = max(cfl_dt, self.recorded_max_timestep)
+        self.recorded_min_timestep = min(cfl_dt, self.recorded_min_timestep)
 
         # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
         if self.ghost_layer_width < 4:
@@ -3296,7 +3579,16 @@ class Domain(Generic_Domain):
                 stage_val = float(value[0])
             set_flather_value(gpu_dom, stage_val)
 
-        remaining_yieldstep = yieldstep - (self.get_relative_time() % yieldstep)
+        # Time remaining to the next yield boundary. Use the explicitly tracked
+        # relative_yieldtime (set and incremented by the evolve loop), NOT
+        # (relative_time % yieldstep): the modulo is floating-point fragile, e.g.
+        # 0.3 % 0.1 == 0.0999... gives remaining ~1e-17 -> max_timestep ~0 ->
+        # the step never advances and evolve() spins. Mirrors update_timestep().
+        relative_yieldtime = getattr(self, 'relative_yieldtime', None)
+        if relative_yieldtime is not None:
+            remaining_yieldstep = relative_yieldtime - self.get_relative_time()
+        else:
+            remaining_yieldstep = yieldstep
         if finaltime is not None:
             remaining_finaltime = finaltime - self.get_time()
             max_timestep = min(self.evolve_max_timestep, remaining_yieldstep, remaining_finaltime)
@@ -3309,9 +3601,13 @@ class Domain(Generic_Domain):
         self.timestep = evolve_one_ader2_step_gpu(gpu_dom, max_timestep, 1, self._ader2_prev_dt)
         self._ader2_prev_dt = self.timestep
 
-        self.set_relative_time(self.get_relative_time() + self.timestep)
-        self.recorded_max_timestep = max(self.timestep, self.recorded_max_timestep)
-        self.recorded_min_timestep = min(self.timestep, self.recorded_min_timestep)
+        # Do NOT advance relative_time here — the evolve loop does it after
+        # apply_fractional_steps(); see _evolve_one_euler_step_c for why.
+        # Record the CFL-constrained step (pre yield/final cap), matching legacy
+        # update_timestep(), rather than the yield-limited step actually taken.
+        cfl_dt = gpu_dom.recorded_flux_timestep
+        self.recorded_max_timestep = max(cfl_dt, self.recorded_max_timestep)
+        self.recorded_min_timestep = min(cfl_dt, self.recorded_min_timestep)
 
         # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
         if self.ghost_layer_width < 4:
@@ -3552,6 +3848,150 @@ class Domain(Generic_Domain):
             exchange_ghosts(gpu_dom)
 
 
+    def _evolve_one_euler_step_gpu(self, yieldstep, finaltime):
+        """Python-orchestrated GPU Euler (DE0) step.
+
+        Fallback for _evolve_one_euler_step_c() when the boundary map contains a
+        type the C Euler loop cannot evaluate on the device (e.g.
+        Transmissive_momentum_set_stage_boundary). GPU-supported boundaries are
+        evaluated on the device; any others are evaluated on the host via
+        evaluate_segment() and synced back. This keeps DE0 results correct
+        (identical to legacy) for every boundary type — the same fallback that
+        rk2/rk3/ader2 already perform. Prefer _evolve_one_euler_step_c() (faster)
+        when all boundaries are GPU-supported.
+        """
+        from anuga.shallow_water.sw_domain_gpu_ext import (
+            extrapolate_second_order_gpu,
+            protect_gpu,
+            compute_fluxes_gpu,
+            update_conserved_quantities_gpu,
+            sync_boundary_values,
+            init_boundary_edge_sync,
+            boundary_edge_sync,
+            exchange_ghosts,
+            evaluate_reflective_boundary_gpu,
+            evaluate_dirichlet_boundary_gpu,
+            evaluate_transmissive_boundary_gpu,
+            set_transmissive_n_zero_t_stage,
+            evaluate_transmissive_n_zero_t_boundary_gpu,
+            set_time_boundary_values,
+            evaluate_time_boundary_gpu,
+            set_file_boundary_values_from_domain,
+            evaluate_file_boundary_gpu,
+            set_absorbing_wave_value,
+            evaluate_absorbing_wave_boundary_gpu,
+            set_characteristic_wave_value,
+            evaluate_characteristic_wave_boundary_gpu,
+        )
+        import numpy as np
+
+        gpu_dom = self.gpu_interface.gpu_dom
+
+        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
+                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
+                              'Time_boundary', 'File_boundary', 'Field_boundary',
+                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary'}
+
+        if not hasattr(self, '_gpu_boundary_info_initialized'):
+            self._gpu_cpu_tags = []
+            self._gpu_all_on_gpu = True
+            cpu_boundary_types = []
+            self._gpu_transmissive_n_zero_t_boundaries = []
+            self._gpu_time_boundaries = []
+            self._gpu_absorbing_wave_boundaries = []
+            self._gpu_characteristic_wave_boundaries = []
+
+            for tag, B in self.boundary_map.items():
+                if B is not None:
+                    btype = B.__class__.__name__
+                    if btype not in GPU_BOUNDARY_TYPES:
+                        self._gpu_cpu_tags.append(tag)
+                        self._gpu_all_on_gpu = False
+                        cpu_boundary_types.append((tag, btype))
+                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
+                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
+                    elif btype == 'Time_boundary':
+                        self._gpu_time_boundaries.append(B)
+                    elif btype == 'Absorbing_wave_boundary':
+                        self._gpu_absorbing_wave_boundaries.append(B)
+                    elif btype == 'Characteristic_wave_boundary':
+                        self._gpu_characteristic_wave_boundaries.append(B)
+
+            if not self._gpu_all_on_gpu:
+                boundary_cell_ids = np.unique(self.boundary_cells).astype(np.intc)
+                init_boundary_edge_sync(gpu_dom, boundary_cell_ids)
+
+            self._gpu_boundary_info_initialized = True
+
+        protect_gpu(gpu_dom)
+        extrapolate_second_order_gpu(gpu_dom)
+
+        if self._gpu_all_on_gpu:
+            evaluate_reflective_boundary_gpu(gpu_dom)
+            evaluate_dirichlet_boundary_gpu(gpu_dom)
+            evaluate_transmissive_boundary_gpu(gpu_dom)
+            for B in self._gpu_transmissive_n_zero_t_boundaries:
+                stage_val = B.get_boundary_values()
+                try:
+                    stage_val = float(stage_val)
+                except (TypeError, ValueError):
+                    stage_val = float(stage_val[0])
+                set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
+            evaluate_transmissive_n_zero_t_boundary_gpu(gpu_dom)
+            for B in self._gpu_time_boundaries:
+                q = B.get_boundary_values()
+                set_time_boundary_values(gpu_dom, float(q[0]), float(q[1]), float(q[2]))
+            evaluate_time_boundary_gpu(gpu_dom)
+            set_file_boundary_values_from_domain(gpu_dom, self)
+            evaluate_file_boundary_gpu(gpu_dom)
+            for B in self._gpu_absorbing_wave_boundaries:
+                value = B.get_boundary_values()
+                try:
+                    wave_val = float(value)
+                except (TypeError, ValueError):
+                    wave_val = float(value[0])
+                set_absorbing_wave_value(gpu_dom, wave_val)
+            evaluate_absorbing_wave_boundary_gpu(gpu_dom)
+            for B in self._gpu_characteristic_wave_boundaries:
+                value = B.get_boundary_values()
+                try:
+                    perturb = float(value)
+                except (TypeError, ValueError):
+                    perturb = float(value[0])
+                set_characteristic_wave_value(gpu_dom, perturb)
+            evaluate_characteristic_wave_boundary_gpu(gpu_dom)
+        else:
+            # Host evaluation of any non-GPU boundary type (e.g.
+            # Transmissive_momentum_set_stage_boundary), then sync edge values
+            # back to the device for the flux kernel.
+            boundary_edge_sync(gpu_dom)
+            for tag in self.tag_boundary_cells:
+                B = self.boundary_map[tag]
+                if B is not None:
+                    B.evaluate_segment(self, self.tag_boundary_cells[tag])
+            sync_boundary_values(gpu_dom)
+
+        # Compute fluxes (sets flux_timestep = CFL flux step)
+        self.flux_timestep = compute_fluxes_gpu(gpu_dom)
+
+        # Forcing terms (friction)
+        self.compute_forcing_terms()
+
+        # Update timestep to fit yieldstep/finaltime (also records
+        # recorded_min/max_timestep from the CFL constraint).
+        self.update_timestep(yieldstep, finaltime)
+
+        # Update conserved quantities
+        update_conserved_quantities_gpu(gpu_dom, self.timestep)
+
+        # Do NOT advance relative_time here — the evolve loop advances it after
+        # apply_fractional_steps(); see _evolve_one_euler_step_c for why.
+
+        # Post-step ghost exchange
+        if self.ghost_layer_width < 4:
+            exchange_ghosts(gpu_dom)
+
+
     def _evolve_one_euler_step_c(self, yieldstep, finaltime):
         """Euler step executed entirely in C - eliminates Python round-trip overhead.
 
@@ -3611,9 +4051,18 @@ class Domain(Generic_Domain):
 
             if not self._gpu_all_on_gpu:
                 print("WARNING: C Euler loop requires all GPU-supported boundary types")
+                print("  Falling back to Python-orchestrated GPU loop")
                 print("  Unsupported types: " + str(cpu_boundary_types))
 
             self._gpu_boundary_info_initialized = True
+
+        # Boundaries the C loop cannot evaluate on the device (e.g.
+        # Transmissive_momentum_set_stage_boundary) are handled by the
+        # Python-orchestrated fallback, which evaluates them on the host and
+        # syncs — matching rk2/rk3/ader2. Without this, those boundaries are
+        # silently ignored in DE0 and results diverge from legacy.
+        if not self._gpu_all_on_gpu:
+            return self._evolve_one_euler_step_gpu(yieldstep, finaltime)
 
         # Set time-dependent boundary values before calling C function
         for B in self._gpu_transmissive_n_zero_t_boundaries:
@@ -3655,7 +4104,16 @@ class Domain(Generic_Domain):
             set_flather_value(gpu_dom, stage_val)
 
         # Compute max allowed timestep (mirrors update_timestep() logic)
-        remaining_yieldstep = yieldstep - (self.get_relative_time() % yieldstep)
+        # Time remaining to the next yield boundary. Use the explicitly tracked
+        # relative_yieldtime (set and incremented by the evolve loop), NOT
+        # (relative_time % yieldstep): the modulo is floating-point fragile, e.g.
+        # 0.3 % 0.1 == 0.0999... gives remaining ~1e-17 -> max_timestep ~0 ->
+        # the step never advances and evolve() spins. Mirrors update_timestep().
+        relative_yieldtime = getattr(self, 'relative_yieldtime', None)
+        if relative_yieldtime is not None:
+            remaining_yieldstep = relative_yieldtime - self.get_relative_time()
+        else:
+            remaining_yieldstep = yieldstep
         if finaltime is not None:
             remaining_finaltime = finaltime - self.get_time()
             max_timestep = min(self.evolve_max_timestep, remaining_yieldstep, remaining_finaltime)
@@ -3665,12 +4123,17 @@ class Domain(Generic_Domain):
         # Execute full Euler step in C (includes MPI timestep reduction)
         self.timestep = evolve_one_euler_step_gpu(gpu_dom, max_timestep, 1)
 
-        # Update internal time tracking
-        self.set_relative_time(self.get_relative_time() + self.timestep)
+        # NOTE: do NOT advance relative_time here. The evolve loop advances it
+        # (relative_time = initial_relative_time + timestep) AFTER
+        # apply_fractional_steps(), so advancing it here makes time-dependent
+        # operators (variable-Q inlet, time-varying rate, ...) see the time one
+        # step too far — they would evaluate forcing at t+dt instead of t.
 
-        # Record timestep stats
-        self.recorded_max_timestep = max(self.timestep, self.recorded_max_timestep)
-        self.recorded_min_timestep = min(self.timestep, self.recorded_min_timestep)
+        # Record the CFL-constrained step (pre yield/final cap), matching legacy
+        # update_timestep(), rather than the yield-limited step actually taken.
+        cfl_dt = gpu_dom.recorded_flux_timestep
+        self.recorded_max_timestep = max(cfl_dt, self.recorded_max_timestep)
+        self.recorded_min_timestep = min(cfl_dt, self.recorded_min_timestep)
 
         # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
         if self.ghost_layer_width < 4:
@@ -3790,7 +4253,16 @@ class Domain(Generic_Domain):
 
         # Compute max allowed timestep (respecting yieldstep and finaltime)
         # This mirrors the logic in update_timestep()
-        remaining_yieldstep = yieldstep - (self.get_relative_time() % yieldstep)
+        # Time remaining to the next yield boundary. Use the explicitly tracked
+        # relative_yieldtime (set and incremented by the evolve loop), NOT
+        # (relative_time % yieldstep): the modulo is floating-point fragile, e.g.
+        # 0.3 % 0.1 == 0.0999... gives remaining ~1e-17 -> max_timestep ~0 ->
+        # the step never advances and evolve() spins. Mirrors update_timestep().
+        relative_yieldtime = getattr(self, 'relative_yieldtime', None)
+        if relative_yieldtime is not None:
+            remaining_yieldstep = relative_yieldtime - self.get_relative_time()
+        else:
+            remaining_yieldstep = yieldstep
         if finaltime is not None:
             remaining_finaltime = finaltime - self.get_time()
             max_timestep = min(self.evolve_max_timestep, remaining_yieldstep, remaining_finaltime)
@@ -3801,12 +4273,14 @@ class Domain(Generic_Domain):
         # apply_forcing=1 enables Manning friction on GPU
         self.timestep = evolve_one_rk2_step_gpu(gpu_dom, max_timestep, 1)
 
-        # Update internal time tracking
-        self.set_relative_time(self.get_relative_time() + self.timestep)
+        # Do NOT advance relative_time here — the evolve loop does it after
+        # apply_fractional_steps(); see _evolve_one_euler_step_c for why.
 
-        # Record timestep stats
-        self.recorded_max_timestep = max(self.timestep, self.recorded_max_timestep)
-        self.recorded_min_timestep = min(self.timestep, self.recorded_min_timestep)
+        # Record the CFL-constrained step (pre yield/final cap), matching legacy
+        # update_timestep(), rather than the yield-limited step actually taken.
+        cfl_dt = gpu_dom.recorded_flux_timestep
+        self.recorded_max_timestep = max(cfl_dt, self.recorded_max_timestep)
+        self.recorded_min_timestep = min(cfl_dt, self.recorded_min_timestep)
 
         # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
         if self.ghost_layer_width < 4:
@@ -4126,7 +4600,16 @@ class Domain(Generic_Domain):
             set_flather_value(gpu_dom, stage_val)
 
         # Compute max allowed timestep (respecting yieldstep and finaltime)
-        remaining_yieldstep = yieldstep - (self.get_relative_time() % yieldstep)
+        # Time remaining to the next yield boundary. Use the explicitly tracked
+        # relative_yieldtime (set and incremented by the evolve loop), NOT
+        # (relative_time % yieldstep): the modulo is floating-point fragile, e.g.
+        # 0.3 % 0.1 == 0.0999... gives remaining ~1e-17 -> max_timestep ~0 ->
+        # the step never advances and evolve() spins. Mirrors update_timestep().
+        relative_yieldtime = getattr(self, 'relative_yieldtime', None)
+        if relative_yieldtime is not None:
+            remaining_yieldstep = relative_yieldtime - self.get_relative_time()
+        else:
+            remaining_yieldstep = yieldstep
         if finaltime is not None:
             remaining_finaltime = finaltime - self.get_time()
             max_timestep = min(self.evolve_max_timestep, remaining_yieldstep, remaining_finaltime)
@@ -4140,9 +4623,11 @@ class Domain(Generic_Domain):
         # Update internal time tracking
         self.set_relative_time(self.get_relative_time() + self.timestep)
 
-        # Record timestep stats
-        self.recorded_max_timestep = max(self.timestep, self.recorded_max_timestep)
-        self.recorded_min_timestep = min(self.timestep, self.recorded_min_timestep)
+        # Record the CFL-constrained step (pre yield/final cap), matching legacy
+        # update_timestep(), rather than the yield-limited step actually taken.
+        cfl_dt = gpu_dom.recorded_flux_timestep
+        self.recorded_max_timestep = max(cfl_dt, self.recorded_max_timestep)
+        self.recorded_min_timestep = min(cfl_dt, self.recorded_min_timestep)
 
         # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
         if self.ghost_layer_width < 4:
@@ -4998,33 +5483,176 @@ class Domain(Generic_Domain):
 # Multiprocessor Mode (1=openmp, 2=cupy (in development))
 # ==============================================================================
 
+    # User-facing *per-domain* compute mode. This is the only genuinely
+    # per-domain choice — it selects the internal ``multiprocessor_mode``:
+    #   'legacy'  -> mode 1: sw_domain_openmp_ext solver + serial-Python operators
+    #   'unified' -> mode 2: the unified gpu_ext C kernels (solver + operators)
+    # Whether 'unified' runs on CPU or offloads to a GPU is NOT a per-domain
+    # property: it is a *process-global* OpenMP offload setting controlled by
+    # the module function ``set_gpu_offload()`` (and only possible on a GPU
+    # build). On a CPU-only build, 'unified' simply runs CPU-multicore.
+    COMPUTE_MODES = ('legacy', 'unified')
+
+    def _mode2_mpi_available(self) -> bool:
+        """True if ``sw_domain_gpu_ext`` was built with real C MPI support.
+
+        Mode 2 ('unified') performs its halo exchange at the C level
+        (``exchange_ghosts``). Without an MPI-enabled build that exchange is a
+        silent no-op, so a multi-rank 'unified' run would compute wrong results —
+        the selector falls back to 'legacy' (Python MPI exchange) in that case.
+        Serial (single-rank) 'unified' needs no MPI and is unaffected.
+        """
+        try:
+            from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
+            return bool(gpu_ext.gpu_has_mpi())
+        except Exception:
+            return False
+
+    def compute_capabilities(self) -> dict:
+        """Report which compute backends this build/run supports.
+
+        Returns a dict with:
+            'gpu_offload'     : bool — process can offload mode-2 to a GPU device
+                                       (build supports it, device present, offload
+                                       not disabled); see :func:`set_gpu_offload`
+            'num_gpu_devices' : int  — number of offload devices visible
+            'mpi'             : bool — gpu_ext built with C MPI ('unified' parallel ok)
+            'modes'           : list — per-domain modes available ('unified' only
+                                       when the gpu_ext extension is importable)
+        """
+        try:
+            from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext  # noqa: F401
+            unified = True
+            ndev = int(gpu_ext.get_num_gpu_devices())
+            mpi = bool(gpu_ext.gpu_has_mpi())
+        except Exception:
+            unified, ndev, mpi = False, 0, False
+        modes = ['legacy'] + (['unified'] if unified else [])
+        return {'gpu_offload': gpu_offload_enabled(), 'num_gpu_devices': ndev,
+                'mpi': mpi, 'modes': modes}
+
+    def set_compute_mode(self, mode: str = 'unified', verbose: bool = False) -> None:
+        """Select this domain's compute mode (per-domain).
+
+        Parameters
+        ----------
+        mode : {'legacy', 'unified'}
+            - ``'legacy'`` — mode 1: the ``sw_domain_openmp_ext`` solver with
+              serial-Python fractional-step operators.
+            - ``'unified'`` — mode 2: the unified ``sw_domain_gpu_ext`` C kernels
+              (solver and operators). Runs CPU-multicore by default; offloads to
+              a GPU only when GPU offload is enabled process-wide via
+              :func:`anuga.set_gpu_offload` on a GPU-capable build.
+
+        This is a per-domain setting — different domains in one script may use
+        different modes. Whether 'unified' uses a GPU is a separate, process-wide
+        decision (see :func:`set_gpu_offload`), because OpenMP target offload is
+        a process-level runtime setting, not a per-domain one.
+
+        Under MPI, 'unified' requires a gpu_ext built with MPI; otherwise this
+        falls back to 'legacy' (whose Python MPI exchange is correct in parallel)
+        with a rank-0 warning. The active mode is recorded in
+        ``self.compute_mode``; the original request in
+        ``self.requested_compute_mode``.
+        """
+        import warnings
+
+        if mode not in self.COMPUTE_MODES:
+            raise ValueError(
+                f"Invalid compute mode {mode!r}. Must be one of {self.COMPUTE_MODES}.")
+
+        requested = mode
+        if mode == 'unified':
+            # Parallel guard: 'unified' exchanges ghosts at the C level, a silent
+            # no-op without an MPI-enabled gpu_ext build. Under MPI that gives
+            # wrong results, so fall back to 'legacy' (Python MPI exchange).
+            try:
+                from anuga import numprocs
+            except Exception:
+                numprocs = 1
+            if numprocs > 1 and not self._mode2_mpi_available():
+                try:
+                    from anuga import myid
+                except Exception:
+                    myid = 0
+                if myid == 0:
+                    warnings.warn(
+                        f"compute mode 'unified' selected under MPI ({numprocs} ranks) but "
+                        "this ANUGA build's sw_domain_gpu_ext was compiled without MPI; the "
+                        "C-level ghost exchange would be a silent no-op and give wrong "
+                        "parallel results. Falling back to 'legacy' (mode 1, Python MPI "
+                        "exchange). Rebuild with MPI to run 'unified' in parallel.",
+                        stacklevel=2)
+                mode = 'legacy'
+
+        self.requested_compute_mode = requested
+        self.compute_mode = mode
+
+        if mode == 'legacy':
+            self.multiprocessor_mode = MULTIPROCESSOR_OPENMP
+            self.use_c_rk_loop = False
+        else:  # 'unified' -> mode 2 (unified gpu_ext kernels)
+            self.multiprocessor_mode = MULTIPROCESSOR_GPU
+            self.use_c_rk_loop = True
+            # Build the device interface now if boundaries are ready; otherwise
+            # defer to the first evolve(). Boundaries are typically set AFTER
+            # construction, so a default-'unified' domain must not require them
+            # at __init__ time.
+            if self._boundaries_ready():
+                self.set_gpu_interface()
+
+        if verbose:
+            print(f"Compute mode: requested {requested!r} -> active {self.compute_mode!r} "
+                  f"(multiprocessor_mode={self.multiprocessor_mode}, "
+                  f"gpu_offload={'on' if gpu_offload_enabled() else 'off'})")
+
+    def _boundaries_ready(self) -> bool:
+        """True if real boundary objects are set — required to build the gpu_ext
+        device interface. After distribute() boundary_map may be
+        ``{'exterior': None, 'ghost': None}`` (not None but no real boundaries).
+        """
+        bmap = getattr(self, 'boundary_map', None)
+        return bool(bmap) and any(b is not None for b in bmap.values())
+
+    def _ensure_gpu_interface(self) -> None:
+        """Build a deferred mode-2 device interface on demand.
+
+        For a default-'unified' domain the interface is built lazily (boundaries
+        are set after construction). Build it the first time a mode-2 path needs
+        it. If boundaries are still not set — e.g. a test that pokes the domain
+        without a full boundary setup — fall back to 'legacy' so the operation
+        can proceed rather than hit a None gpu_interface.
+        """
+        if self.multiprocessor_mode != MULTIPROCESSOR_GPU or self.gpu_interface is not None:
+            return
+        if self._boundaries_ready():
+            self.set_gpu_interface()
+        else:
+            self.set_compute_mode('legacy')
+
+    def get_compute_mode(self) -> str:
+        """Return the active per-domain compute mode: 'legacy' or 'unified'."""
+        return getattr(self, 'compute_mode', 'legacy')
+
     def set_multiprocessor_mode(self, multiprocessor_mode: int = 1) -> None:
         """
-        Set multiprocessor mode
-         1. openmp - Python RK loop (use_c_rk_loop=False)
-         2. gpu/mpi - C RK loop (use_c_rk_loop=True, keeps data on device)
+        Set multiprocessor mode (legacy integer API).
 
-        The choice of mode is recorded immediately, but the device/offload
-        interface (mode 2) is only built when the mesh and boundaries are
-        finalised.  If boundaries are already set, the interface is built
-        eagerly here (the historical behaviour).  Otherwise it is built
-        lazily at the start of the first ``evolve()`` call -- this allows the
-        mode to be selected at domain construction, before boundaries,
-        ``distribute()`` or ``reorder()`` have been applied.
+        1. openmp - Python RK loop (use_c_rk_loop=False)
+        2. gpu/mpi - C RK loop (use_c_rk_loop=True)
+
+        Thin wrapper over :meth:`set_compute_mode`: 1 maps to ``'legacy'``, 2 to
+        ``'unified'``. Whether 'unified' offloads to a GPU is a separate,
+        process-wide choice — see :func:`anuga.set_gpu_offload`. New code should
+        prefer :meth:`set_compute_mode`.
         """
-
         if multiprocessor_mode not in [MULTIPROCESSOR_OPENMP, MULTIPROCESSOR_GPU]:
             raise ValueError('Invalid multiprocessor mode. Must be one of [1,2] (openmp, gpu/mpi)')
 
-        self.multiprocessor_mode = multiprocessor_mode
-
-        # Mode 1: Python RK loop (more flexible, easier debugging)
-        # Mode 2: C RK loop (faster, data stays on GPU device)
-        self.use_c_rk_loop = (multiprocessor_mode == MULTIPROCESSOR_GPU)
-
-        # Eager build only when boundaries are ready; otherwise defer to evolve().
-        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self._boundaries_ready():
-            self.set_gpu_interface()
+        if multiprocessor_mode == MULTIPROCESSOR_OPENMP:
+            self.set_compute_mode('legacy')
+        else:
+            self.set_compute_mode('unified')
 
     @property
     def use_c_rk2_loop(self):
@@ -5053,35 +5681,14 @@ class Domain(Generic_Domain):
         return self.multiprocessor_mode
 
     def set_omp_num_threads(self, omp_num_threads: int | None = None, verbose: bool = True) -> None:
+        """Set the OpenMP thread count (process-wide).
+
+        OpenMP thread count is a process-level setting, not per-domain. This is a
+        thin wrapper that delegates to the module-level
+        :func:`anuga.set_omp_num_threads`; prefer that in new code. Kept for
+        backward compatibility, and records ``self.omp_num_threads``.
         """
-        Set the number of OpenMP threads to use for multithread processing.
-        If OMP_NUM_THREADS is not set, this will set it to the specified
-        omp_num_threads value.
-        By default omp_num_threads is set to 1, other, it will use the default setting.
-        """
-
-        if omp_num_threads is None:
-            # Use the environment setting
-            omp_num_threads = os.environ.get('OMP_NUM_THREADS', None)
-            if verbose:
-                print(f'Using OMP_NUM_THREADS from environment: {omp_num_threads}')
-
-
-        if omp_num_threads is None:
-            omp_num_threads = 1  # Default to 1 if not set
-
-        try:
-            omp_num_threads = int(omp_num_threads)
-        except ValueError:
-            raise ValueError('OMP_NUM_THREADS must be an integer')
-
-        # Set the number of OpenMP threads
-        self.omp_num_threads = omp_num_threads
-        from .sw_domain_openmp_ext import set_omp_num_threads as set_omp_num_threads_ext
-        set_omp_num_threads_ext(omp_num_threads)
-
-        if verbose:
-            print(f'Setting omp_num_threads to {omp_num_threads}')
+        self.omp_num_threads = set_omp_num_threads(omp_num_threads, verbose=verbose)
 
 
     @property
@@ -5098,20 +5705,6 @@ class Domain(Generic_Domain):
             )
         return self.gpu_interface
 
-    def _boundaries_ready(self) -> bool:
-        """Return True if boundaries are set well enough to build the GPU interface.
-
-        After ``distribute()`` the ``boundary_map`` may be
-        ``{'exterior': None, 'ghost': None}`` -- not None but with no actual
-        boundary objects -- which is not enough to initialise the device
-        boundaries.  Used to decide whether the GPU interface can be built
-        eagerly in ``set_multiprocessor_mode`` or must be deferred to
-        ``evolve()``.
-        """
-        if self.boundary_map is None:
-            return False
-        return any(b is not None for b in self.boundary_map.values())
-
     def set_gpu_interface(self):
 
         if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is None:
@@ -5119,14 +5712,18 @@ class Domain(Generic_Domain):
             # Check that boundaries are properly set before GPU initialization
             # After distribute(), boundary_map may be {'exterior': None, 'ghost': None}
             # which is not None but has no actual boundary objects - this causes silent failures
-            if not self._boundaries_ready():
+            if self.boundary_map is None:
                 raise RuntimeError(
-                    "GPU mode requires boundaries to be set before evolving.\n"
-                    "Please call domain.set_boundary({...}) before the first evolve() call "
-                    "(or before calling set_multiprocessor_mode(2) if you rely on the "
-                    "interface being built immediately).\n"
-                    f"Current boundary_map: "
-                    f"{None if self.boundary_map is None else list(self.boundary_map.keys())}"
+                    "GPU mode requires boundaries to be set before calling set_multiprocessor_mode(2).\n"
+                    "Please call domain.set_boundary({...}) BEFORE domain.set_multiprocessor_mode(2)."
+                )
+
+            has_real_boundary = any(b is not None for b in self.boundary_map.values())
+            if not has_real_boundary:
+                raise RuntimeError(
+                    "GPU mode requires boundaries to be set before calling set_multiprocessor_mode(2).\n"
+                    "Please call domain.set_boundary({...}) BEFORE domain.set_multiprocessor_mode(2).\n"
+                    f"Current boundary_map has no boundary objects: {list(self.boundary_map.keys())}"
                 )
 
             # Try OpenMP target offloading interface first
@@ -5136,16 +5733,17 @@ class Domain(Generic_Domain):
                 self.gpu_interface.setup()
                 # Only print from rank 0
                 from anuga import myid, numprocs
-                omp_target_offload = os.environ.get('OMP_TARGET_OFFLOAD', '').lower()
                 omp_num_threads = os.environ.get('OMP_NUM_THREADS', '1')
-                # Track whether GPU offload is actually active (not disabled by env var)
-                self.gpu_offload_active = (omp_target_offload != 'disabled')
+                # Offload is a process-wide decision (set_gpu_offload), resolved
+                # against the build. False on a CPU-only build: 'unified' is CPU
+                # multicore, not GPU.
+                self.gpu_offload_active = gpu_offload_enabled()
                 if myid == 0:
                     device_id = self.gpu_interface.gpu_dom.device_id
                     print('+==============================================================================+')
                     if not self.gpu_offload_active:
-                        print('| WARNING: GPU mode enabled but OMP_TARGET_OFFLOAD=disabled                   |')
-                        print(f'| Running on CPUs with OMP_NUM_THREADS={omp_num_threads}')
+                        print("| ANUGA compute mode: 'unified' CPU multicore (gpu_ext kernels, no offload)   |")
+                        print(f'| OMP_NUM_THREADS={omp_num_threads}')
                     elif device_id < 0:
                         print('| WARNING: No GPU devices found, running on CPU via OpenMP target offloading  |')
                     else:

@@ -95,6 +95,25 @@ endif
 message('Effective compiler ID: ' + effective_compiler_id)
 
 #========================================================
+# Quieten nvc (NVHPC) Cython-boilerplate warning noise
+#========================================================
+# nvc's EDG frontend surfaces warnings that gcc hides with -Wno-unused-function:
+# ~1200+ "declared but never referenced" for the __pyx_*/__Pyx_* helpers Cython
+# emits into every generated .c, plus the no_sanitize attribute Cython adds that
+# nvc doesn't recognise. These are pure boilerplate and bury any real diagnostic.
+# get_supported_arguments() silently drops any name this nvc version rejects.
+if effective_compiler_id == 'nvidia_hpc'
+  add_project_arguments(
+    cc.get_supported_arguments([
+      '--diag_suppress=declared_but_not_referenced',
+      '--diag_suppress=set_but_not_used',
+      '--diag_suppress=unrecognized_attribute',
+      '--diag_suppress=white_space_inside_splice',
+    ]),
+    language: 'c')
+endif
+
+#========================================================
 # Intel MKL Detection
 #========================================================
 # When using Intel compilers, MKL provides optimised BLAS/LAPACK for numpy/scipy.
@@ -225,6 +244,14 @@ configure_file(
 configure_file(
     input: 'scripts/anuga_sww_gui.py',
     output: 'anuga_sww_gui',
+    configuration: conf,
+    install_dir: get_option('bindir'),
+    install_mode: 'rwxr-xr-x'
+)
+
+configure_file(
+    input: 'scripts/anuga_run_isolated_tests.py',
+    output: 'anuga_run_isolated_tests',
     configuration: conf,
     install_dir: get_option('bindir'),
     install_mode: 'rwxr-xr-x'
