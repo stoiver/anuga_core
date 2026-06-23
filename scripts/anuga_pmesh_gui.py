@@ -68,8 +68,20 @@ class Draw(AppShell.AppShell):
     frameWidth     = 840
     frameHeight    = 600
 
-
-
+    def appInit(self):
+        # Called by AppShell after the root exists but before widgets are built.
+        # Scale the UI up on HiDPI displays (Xft.dpi); no-op at normal 96 DPI.
+        # ui_scale is read by ToolBarButton to size its icons to match the fonts.
+        self.ui_scale = 1.0
+        try:
+            from anuga.utilities.tk_scaling import apply_hidpi_scaling
+            self.ui_scale = apply_hidpi_scaling(self.root)
+        except Exception:
+            pass
+        # AppShell sized the window at the (unscaled) frameWidth/Height; grow it.
+        if self.ui_scale > 1.0:
+            self.root.geometry('%dx%d' % (int(self.frameWidth * self.ui_scale),
+                                          int(self.frameHeight * self.ui_scale)))
 
     def createButtons(self):
         """

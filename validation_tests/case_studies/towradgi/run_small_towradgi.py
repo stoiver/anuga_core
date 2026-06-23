@@ -979,9 +979,14 @@ Creating domain from scratch.
     Bw = anuga.Time_boundary(domain=domain, function=lambda t: [
                              func(t)[0], 0.0, 0.0])
     Br = anuga.Reflective_boundary(domain)
-    
+    # Transmissive normal momentum, zero tangential momentum, stage held at 0 on
+    # the east. GPU-native variant (in mode-2 GPU_BOUNDARY_TYPES) so it evaluates
+    # on the device rather than via a per-step host fallback.
+    Bts = anuga.Transmissive_n_momentum_zero_t_momentum_set_stage_boundary(
+        domain=domain, function=lambda t: 0.0)
+
     #domain.set_boundary({'west': Bd, 'south': Bd, 'north': Bd, 'east': Bw})
-    domain.set_boundary({'west': Br, 'south': Br, 'north': Br, 'east': Br})
+    domain.set_boundary({'west': Br, 'south': Br, 'north': Br, 'east': Bts})
     
     if myid == 0:
         print('Start Evolve')

@@ -215,7 +215,9 @@ class SWWAnimationGUI:
                  initial_basemap_provider=None, initial_alpha=None):
         self.root = root
         self.root.title('ANUGA SWW Animator')
-        self.root.minsize(860, 640)
+        # Scale the minimum window size to the UI scale (set in main on HiDPI).
+        ui_scale = getattr(root, 'ui_scale', 1.0) or 1.0
+        self.root.minsize(int(860 * ui_scale), int(640 * ui_scale))
         self.root.protocol('WM_DELETE_WINDOW', self._on_close)
 
         # animation state
@@ -3552,6 +3554,13 @@ def main():
         return bool(cfg.get(key, default))
 
     root = tk.Tk()
+    # Scale the UI up on HiDPI displays (Xft.dpi); no-op at normal 96 DPI.
+    # Stash the factor so the GUI can scale its minsize to match.
+    try:
+        from anuga.utilities.tk_scaling import apply_hidpi_scaling
+        root.ui_scale = apply_hidpi_scaling(root)
+    except Exception:
+        root.ui_scale = 1.0
     SWWAnimationGUI(
         root,
         initial_sww=             _r(args.sww,              'sww'),
