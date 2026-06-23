@@ -88,8 +88,8 @@ extra output.
   up the plain.
 - Add a structure: a `[[culverts]]`, `[[weirs]]`, `[[bridges]]`, or
   `[[pumping_stations]]` block — see
-  [`../../cairns_toml_excel/cairns_example.toml`](../../cairns_toml_excel/cairns_example.toml)
+  [`../cairns/cairns_example.toml`](../cairns/cairns_example.toml)
   for fully documented examples of each.
 
-See [`../README.md`](../README.md) for the file-format reference and the link to
-the full real-world Cairns dataset.
+See [`../README.md`](../README.md) for the file-format reference and
+[`../cairns/`](../cairns/) for the full real-world Cairns dataset.

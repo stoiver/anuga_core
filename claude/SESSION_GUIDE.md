@@ -481,7 +481,7 @@ suite: 58.13% → 58.68%.
 | Memory reporting | `anuga/utilities/system_tools.py::memory_stats()` |
 | Timestepping output | `anuga/abstract_2d_finite_volumes/generic_domain.py::timestepping_statistics()` |
 | Triangle quiet/verbose | `anuga/pmesh/mesh.py::_generateMesh_impl()` |
-| TOML scenario config | `anuga/utilities/model_tools.py`, `examples/cairns_toml_excel/` |
+| TOML scenario config | `anuga/scenario/`, `scripts/anuga_run_toml.py`, `examples/run_toml/` (simple/complex/cairns; shared DEM in `examples/data/cairns/`); legacy Excel front-end in `examples/cairns_toml_excel/` |
 | Single-process benchmark | `benchmarks/run_benchmarks.py` + `benchmarks/compare_benchmarks.py` |
 | MPI distribution benchmark | `benchmarks/distribute_benchmarks.py` + `benchmarks/run_benchmark_grid.py` |
 

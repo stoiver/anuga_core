@@ -232,7 +232,7 @@ type = "Reflective"
 # elevation_spatial_average = 100.0  # uncomment to smooth at 100 m scale
 [[initial_conditions.elevation]]
 polygon  = "Extent"
-value    = "../data/cairns/cairns.asc"
+value    = "../../data/cairns/cairns.asc"
 clip_min = -inf
 clip_max = inf
 

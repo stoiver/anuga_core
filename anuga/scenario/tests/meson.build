@@ -5,6 +5,7 @@ python_sources = [
     'test_setup_boundary_conditions.py',
     'test_setup_rainfall.py',
     'test_scenario_integration.py',
+    'test_run_toml_end_to_end.py',
 ]
 
 py3.install_sources(

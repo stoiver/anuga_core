@@ -6,20 +6,23 @@ You describe the mesh, initial conditions, boundaries, rainfall, inlets and
 hydraulic structures declaratively, and the runner builds the domain, evolves
 it, and writes the SWW output (plus GeoTIFFs of the peak quantities).
 
-This directory has two self-contained scenarios, smallest first:
+This directory has three scenarios, smallest first:
 
 | Folder | Scenario | What it shows |
 |--------|----------|---------------|
 | [`simple/`](simple/) | Dam break in a flat box | The minimum viable TOML: mesh from a CSV polygon, constant initial conditions, reflective walls. |
 | [`complex/`](complex/) | Sloping floodplain with inflow + rain | A "Cairns-like" run: sloped bed from an x,y,z file, a refined interior region, an inlet hydrograph, rainfall, a prescribed-stage outlet, and evolve-loop reporting hooks. |
+| [`cairns/`](cairns/) | Real Cairns DEM tsunami | The full real-world dataset: elevation from a DEM raster, a shapefile bounding polygon, a tsunami wave boundary, and one each of a bridge, culvert, pipe culvert, weir, and pumping station. |
 
-Both run out of the box — every input is a small CSV committed alongside the
-TOML, so no external datasets are needed.
+`simple/` and `complex/` run out of the box — every input is a small CSV
+committed alongside the TOML, so no external datasets are needed. `cairns/`
+references a real DEM that is shared (once) under
+[`../data/cairns/`](../data/cairns/); its `cairns_example.toml` is heavily
+commented and documents every available TOML section.
 
-For a **full real-world dataset** (DEM raster, boundary shapefile, bridges,
-culverts, pumping stations, the Excel front-end), see the sibling example
-[`../cairns_toml_excel/`](../cairns_toml_excel/) and its richly commented
-`cairns_example.toml` — it documents every available TOML section.
+A legacy **Excel front-end** to the same Cairns scenario is kept under
+[`../cairns_toml_excel/`](../cairns_toml_excel/) for users of the older `.xlsx`
+interface; new scenarios should use the TOML runner shown here.
 
 ## How to run
 
@@ -64,6 +67,13 @@ complex/
   rain.csv              # time,rain_mm_hr timeseries (header row)
   downstream_stage.csv  # time,stage timeseries for the outlet boundary
   user_functions.py     # optional evolve-loop reporting hooks
+
+cairns/
+  cairns_example.toml   # the scenario definition (documents every section)
+  cairns_mesh/          # shapefile outline (+ sidecars) and structure lines
+  cairns_boundarycond/  # tsunami wave + mean-sea-level time,stage CSVs
+  user_functions.py     # optional evolve-loop reporting hooks
+  # the DEM raster is shared, at ../data/cairns/cairns.asc
 ```
 
 ## File-format quick reference

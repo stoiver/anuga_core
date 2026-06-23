@@ -41,16 +41,20 @@ Working example — Cairns tsunami scenario
 ------------------------------------------
 
 A complete, ready-to-run example is provided in
-``examples/cairns_toml_excel/`` of the repository.  It models a synthetic
+``examples/run_toml/cairns/`` of the repository.  It models a synthetic
 tsunami entering Cairns Harbour (Queensland, Australia) and exercises most
 TOML features: a shapefile boundary, a DEM elevation raster, Flather open-
-ocean boundaries, and stubs for bridges, pumping stations, culverts, and weirs.
+ocean boundaries, and one each of a bridge, pumping station, culvert, and weir.
+The (≈9 MB) DEM is shared under ``examples/data/cairns/``.
 
 .. code-block:: bash
 
-   cd examples/cairns_toml_excel
+   cd examples/run_toml/cairns
    anuga_run_toml cairns_example.toml          # serial
    mpirun -np 4 anuga_run_toml cairns_example.toml   # parallel
+
+The same scenario is also available through a legacy Excel front-end under
+``examples/cairns_toml_excel/`` (see *Excel Compatibility* below).
 
 
 Minimal annotated TOML
