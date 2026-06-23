@@ -100,6 +100,23 @@ project = PrepareData(config_basename, output_log='Simulation_logfile.log')
 progress('Building mesh')
 domain = setup_mesh.setup_mesh(project)
 
+# Propagate the scenario's coordinate reference system to the domain so it is
+# written into the SWW file (zone / hemisphere / EPSG). Without this the SWW
+# defaults to zone -1 / no EPSG, losing the georeferencing. project.proj4string
+# is derived from projection_information (UTM zone int, "EPSG:<code>", or a
+# proj4 string), so pyproj gives a single EPSG code covering all three forms.
+try:
+    from pyproj import CRS
+    _epsg = CRS.from_proj4(project.proj4string).to_epsg()
+    if _epsg is not None:
+        domain.set_epsg(_epsg)
+        progress('Domain CRS set to EPSG:%d' % _epsg)
+    else:
+        progress('Could not resolve an EPSG code from projection %r; '
+                 'SWW CRS metadata may be incomplete' % project.proj4string)
+except Exception as _e:
+    progress('Could not set domain CRS: %s' % _e)
+
 progress('Setting initial conditions')
 setup_initial_conditions.setup_initial_conditions(domain, project)
 
