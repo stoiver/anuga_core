@@ -87,6 +87,11 @@ class PrepareData(ProjectData):
 
             print('OUTPUT_DIRECTORY: ' + str(self.output_dir))
 
+        # Wait until rank 0 has created output_dir before any rank opens the log
+        # file inside it (otherwise non-zero ranks race ahead and crash with
+        # FileNotFoundError, deadlocking the run at the next barrier).
+        barrier()
+
         # Tee stdout to a file inside the output directory
         if output_log is not None:
             if make_directories:
