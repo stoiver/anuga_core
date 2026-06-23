@@ -374,8 +374,12 @@ class Parallel_Inlet_operator(Inlet_operator):
         else:
             Q = self.Q
 
-        # Handle file_function returning arrays - extract scalar value
-        if hasattr(Q, '__len__'):
+        # Handle file_function / scipy interp1d returning arrays - extract a
+        # scalar. A 0-d numpy array (what interp1d returns for scalar t) has
+        # __len__ but raises on len(), so test ndim first.
+        if hasattr(Q, 'ndim') and getattr(Q, 'ndim', None) == 0:
+            Q = float(Q)
+        elif hasattr(Q, '__len__'):
             Q = float(Q[0]) if len(Q) > 0 else 0.0
 
         return Q
