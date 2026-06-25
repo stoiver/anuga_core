@@ -59,6 +59,44 @@ environment rather than fetching isolated build dependencies.
 `.gitignore` but still show up as untracked. This is expected — they are
 build artifacts.
 
+### A reused meson build dir does NOT re-detect MPI (2026-06-25)
+
+`sw_domain_gpu_ext` is built with real C MPI (`HAVE_MPI4PY=True`, multi-rank
+GPU halo exchange) only when meson finds MPI **at configure time**. Detection is
+two-stage: `dependency('mpi', language: 'c')` first, then — because meson's
+`mpi` dependency does **not** match conda's `mpich` pkg-config name — an
+**mpi4py fallback** that parses `mpicc -show` to locate `mpi.h`
+(`anuga/shallow_water/meson.build`). The fallback runs via `run_command`, which
+is evaluated only on a **fresh configure**.
+
+Gotcha: if you `pip install -e .` *before* MPI/mpi4py is in the env, the gpu
+extension is compiled against the single-process stubs (`gpu_mpi_stubs.h`),
+`gpu_has_mpi()` returns False, and the four
+`anuga/parallel/tests/test_parallel_sw_flow_gpu_*` tests **skip**
+("GPU extension built without C MPI"). Installing MPI afterwards and re-running
+plain `pip install -e .` does **not** fix it — meson-python reuses the cached
+build dir and just relinks the no-MPI `.so` (it never re-runs the fallback).
+This is independent of `gpu_offload`: it bites the standard gcc CPU-only build,
+where these tests otherwise run mode-2 on the host.
+
+Fix — force a fresh configure by pointing at a new build dir (or deleting the
+cached one):
+
+```bash
+CC=gcc pip install --no-build-isolation -e . \
+  -Csetup-args=-Dgpu_offload=false \
+  -Cbuild-dir=build/cp314-mpi -v
+```
+
+Verify (any one is sufficient):
+- meson logs `GPU extension will be built WITH MPI support (multi-GPU enabled)`
+  (visible with `-v`);
+- `readelf -d <sw_domain_gpu_ext...so> | grep NEEDED` lists `libmpi.so.*`;
+- `python -c "from anuga.shallow_water import sw_domain_gpu_ext as e; print(e.gpu_has_mpi())"` → `True`.
+
+Then the `test_parallel_sw_flow_gpu_*` files run (`real_gpu_available()` stays
+False on a CPU build, so the per-test "needs N GPUs" guards do not fire either).
+
 ---
 
 ## Testing
