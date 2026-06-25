@@ -42,16 +42,34 @@ except ImportError as _e:  # pragma: no cover - import guard
 # ---------------------------------------------------------------------------
 
 def _find_source_tree():
-    """Walk up from this file looking for a checkout containing both the
-    runner script and the simple example.  Returns (runner, example_dir) or
-    (None, None) when not found (installed-only environment)."""
+    """Locate a checkout containing both the runner script and the simple
+    example.  Returns (runner, example_dir), or (None, None) when not found
+    (a genuinely installed-only environment).
+
+    We search upward from several starting points because an editable
+    (meson-python) install imports ``anuga`` from site-packages, not from the
+    source tree — so ``__file__`` alone never reaches ``scripts/``/``examples/``.
+    The current working directory is the reliable anchor: CI runs the suite as
+    ``cd sandpit && pytest --pyargs anuga``, whose cwd sits inside the checkout.
+    ``ANUGA_SOURCE_ROOT`` can pin it explicitly."""
     runner_rel = os.path.join('scripts', 'anuga_run_toml.py')
     example_rel = os.path.join('examples', 'run_toml', 'simple', 'dam_break.toml')
-    for parent in Path(__file__).resolve().parents:
-        runner = parent / runner_rel
-        example = parent / example_rel
-        if runner.is_file() and example.is_file():
-            return str(runner), str(example.parent)
+
+    starts = [Path(__file__).resolve(), Path.cwd().resolve()]
+    env_root = os.environ.get('ANUGA_SOURCE_ROOT')
+    if env_root:
+        starts.insert(0, Path(env_root).resolve() / '_')  # '_' so its parents include env_root
+
+    seen = set()
+    for start in starts:
+        for parent in start.parents:
+            if parent in seen:
+                continue
+            seen.add(parent)
+            runner = parent / runner_rel
+            example = parent / example_rel
+            if runner.is_file() and example.is_file():
+                return str(runner), str(example.parent)
     return None, None
 
 
