@@ -116,6 +116,16 @@ echo " "
 
 cd "${ANUGA_CORE_PATH}"
 
+# meson-python reuses the build/cp<ver> directory and only honours CC on the
+# FIRST configure of a dir — a subsequent build just runs `meson setup
+# --reconfigure`, which keeps the originally detected compiler. A leftover dir
+# configured with gcc (e.g. a prior CPU build) therefore stays on gcc and the
+# gpu_offload=true guard in meson.build rejects it ("not supported with gcc").
+# Remove any stale build dir so CC=nvc takes effect on a clean configure.
+echo "# Removing any stale meson build directory (build/cp*) for a clean nvc configure"
+rm -rf "${ANUGA_CORE_PATH}"/build/cp*
+echo " "
+
 "$CONDA_BIN/conda" run -n "${ENV_NAME}" bash -c \
     "CC='$NVC' pip install --no-build-isolation -v -e . \
      -Csetup-args=-Dgpu_offload=true \
