@@ -97,6 +97,35 @@ Verify (any one is sufficient):
 Then the `test_parallel_sw_flow_gpu_*` files run (`real_gpu_available()` stays
 False on a CPU build, so the per-test "needs N GPUs" guards do not fire either).
 
+### A reused meson build dir keeps the old compiler — switching gcc↔nvc needs `rm -rf build/cp*` (2026-07-01)
+
+Same root cause as the MPI note above, but for the **compiler**. meson-python
+reuses `build/cp<ver>` and only reads `CC` on the **first** configure of a dir;
+a later build just runs `meson setup --reconfigure`, which keeps the originally
+detected compiler. So building for GPU (`CC=nvc pip install -e . -Dgpu_offload=true`)
+in a tree that already has a gcc-configured `build/cp314` **stays on gcc**, and
+`anuga/shallow_water/meson.build`'s guard aborts:
+
+```
+C compiler for the host machine: cc (gcc 15.2.0)
+ERROR: gpu_offload=true is not supported with gcc ... rm -rf build/cp314 required when switching compiler
+```
+
+The reverse bites too (an nvc-configured dir stays on nvc for a later gcc CPU
+build). **Fix: remove the build dir before switching compiler** so `CC` is read
+on a clean configure:
+
+```bash
+rm -rf build/cp*                     # force a fresh meson configure
+CC=$(which nvc) pip install --no-build-isolation -e . \
+    -Csetup-args=-Dgpu_offload=true -Csetup-args=-Dgpu_arch=cc120
+```
+
+`tools/install_gpu_anuga.sh` now does this `rm -rf build/cp*` automatically
+before the nvc build. Verified end to end: fresh nvc build succeeds and the
+isolated GPU runner reports 65/65 passed. See also `SESSION_GUIDE.md` → "CPU and
+GPU are separate builds".
+
 ---
 
 ## Testing
