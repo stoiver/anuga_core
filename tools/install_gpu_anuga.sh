@@ -123,12 +123,20 @@ cd "${ANUGA_CORE_PATH}"
 
 echo " "
 echo "#============================================================"
-echo "# Running GPU test suite"
+echo "# Running GPU test suite (isolated runner)"
+echo "#   One fresh process per test.  A plain 'pytest' on this file"
+echo "#   auto-skips on a GPU build: the NVHPC OpenMP-target runtime"
+echo "#   aborts once many mode-2 GPU domains are created in a single"
+echo "#   process, so the tests must each run in their own process."
+echo "#   scripts/anuga_run_isolated_tests.py defaults to test_DE_gpu_omp.py"
+echo "#   and opts in via ANUGA_GPU_TESTS_ISOLATED=1.  Run the script"
+echo "#   directly (not the installed console command, which an editable"
+echo "#   'pip install -e .' does not place on PATH)."
 echo "#============================================================"
 echo " "
 
 "$CONDA_BIN/conda" run -n "${ENV_NAME}" \
-    pytest anuga/shallow_water/tests/test_DE_gpu_omp.py -v
+    python "${ANUGA_CORE_PATH}/scripts/anuga_run_isolated_tests.py"
 
 echo " "
 echo "#=================================================================="
