@@ -315,7 +315,36 @@ Findings:
 
 ---
 
-## Recent session summaries (sessions 21–43)
+## Recent session summaries (sessions 21–44)
+
+**Session 44 (2026-06-29 – 07-01):** SWW writer crash fix, laptop-guide
+reconciliation, and GPU install-script fixes.
+- **SWW crash on `main`.** `Write_sww.store_quantities()` raised `IndexError:
+  index 0 is out of bounds for axis 0 with size 0` deep into a long run
+  (t≈6960 s). The checkpoint/overwrite path locates the existing time slot with
+  an *absolute* `1e-14` tolerance — below the float64 ULP (~9e-13) for any t
+  beyond a few tens of seconds — so `numpy.where` returns empty and `check[0][0]`
+  throws, killing the run at the write. Scaled the tolerance to the time
+  magnitude (`1e-9*max(1,|t|)`) and append-with-warning when nothing matches;
+  reproduced at t≈6960 and verified (commit `d04fa3ef`). Cherry-picked to `main`
+  as **PR #149**.
+- **Laptop guide.** Reconciled `cdac_script/ANUGA_Laptop_Guide.docx`
+  benchmarking claims against this file and fixed the docx: the "dual-CCD NUMA
+  limits OpenMP" claim contradicted the measured **single-NUMA-node** finding
+  (the OpenMP-vs-MPI gap is false sharing in the flux arrays + serial operators);
+  corrected "~3x"→"~4–5x" on 16 cores; added GPU/MPI speedup figures; repaired a
+  garbled `<12 GB VRAM` bullet (commit `4fc2f134`).
+- **GPU install script (`tools/install_gpu_anuga.sh`).** (1) Run
+  `scripts/anuga_run_isolated_tests.py` instead of `pytest test_DE_gpu_omp.py`,
+  which auto-skips on a GPU build so the test step ran nothing (commit
+  `99bbc29f`). (2) `rm -rf build/cp*` before the nvc build — meson-python reads
+  `CC` only on the *first* configure of a build dir, so a leftover
+  gcc-configured `build/cp314` kept gcc and failed the `gpu_offload=true` guard
+  (commit `ec079cd7`). Verified end to end: fresh nvc build succeeds, isolated
+  runner reports **65/65 GPU tests pass**. Documented the compiler-switch gotcha
+  in `KNOWN_ISSUES.md` (commit `89624513`).
+- Gitignored the generated `validation_tests/case_studies/towradgi/MODEL_OUTPUTS/`
+  artifacts (commit `6cfb4e62`).
 
 **Session 43 (2026-06-26):** GPU test skip visibility + weak-scaling benchmark.
 `test_DE_gpu_omp.py`'s module-level skip (on a GPU-offload build, to dodge the
