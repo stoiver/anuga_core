@@ -2588,19 +2588,24 @@ class Generic_Domain:
         A small roundoff overshoot can make ``target - relative_time`` negative
         even though the evolve loop is about to yield.  Clamp those stale
         deadlines to zero instead of returning a negative timestep.
+
+        Use the explicitly tracked ``relative_yieldtime`` when available.
+        Computing the next yield boundary with ``relative_time % yieldstep`` is
+        floating-point fragile and can leave a tiny remainder that drives the
+        maximum timestep toward zero.
         """
 
         remaining_finaltime = self._time_remaining_until(self.relative_finaltime)
         if remaining_finaltime is None and finaltime is not None:
             remaining_finaltime = max(finaltime - self.get_time(), 0.0)
         if remaining_finaltime is not None and timestep > remaining_finaltime:
-            timestep = min(timestep, remaining_finaltime)
+            timestep = remaining_finaltime
 
         remaining_yieldstep = self._time_remaining_until(getattr(self, 'relative_yieldtime', None))
         if remaining_yieldstep is None and yieldstep is not None:
             remaining_yieldstep = max(float(yieldstep), 0.0)
         if remaining_yieldstep is not None and timestep > remaining_yieldstep:
-            timestep = min(timestep, remaining_yieldstep)
+            timestep = remaining_yieldstep
 
         return timestep
 
