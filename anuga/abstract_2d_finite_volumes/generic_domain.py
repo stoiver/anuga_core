@@ -1808,14 +1808,14 @@ class Generic_Domain:
         n = int(len(fx) // 3)  # FIXME (Ole): No need to cast as int()
 
         triang = num.array(list(range(0, 3 * n)))
-        triang.shape = (n, 3)
+        triang = triang.reshape(n, 3)
         plt.triplot(fx, fy, triang, 'g-')
 
         # Plot ghost triangles
         n = int(len(gx) // 3)  # FIXME (Ole): No need to cast as int()
         if n > 0:
             triang = num.array(list(range(0, 3 * n)))
-            triang.shape = (n, 3)
+            triang = triang.reshape(n, 3)
             plt.triplot(gx, gy, triang, 'b--')
 
         # Save triangulation to location pointed by filename
