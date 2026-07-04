@@ -42,6 +42,19 @@ except ImportError as _e:  # pragma: no cover - import guard
     HAS_MODULE = False
     SKIP_REASON = str(_e)
 
+# The anuga_run_toml runner imports the scenario boundary/mesh setup, which pulls
+# in the geodata interface (fiona/rasterio/shapely) via spatialInputUtil. When
+# that stack is unavailable (e.g. a broken conda geodata install in CI) the
+# runner subprocess fails; skip rather than report a spurious failure, matching
+# the other geodata-dependent tests.
+try:
+    import fiona  # noqa: F401
+    import rasterio  # noqa: F401
+    import shapely  # noqa: F401
+    HAS_GEODATA = True
+except ImportError:
+    HAS_GEODATA = False
+
 
 # ---------------------------------------------------------------------------
 # Inline copy of examples/run_toml/simple/ (used when no checkout is found)
@@ -183,6 +196,8 @@ def _stage_inputs(work):
 
 @unittest.skipUnless(HAS_MODULE, SKIP_REASON)
 @unittest.skipUnless(RUNNER is not None, 'anuga_run_toml runner not found')
+@unittest.skipUnless(HAS_GEODATA,
+                     'requires geodata interface (fiona, rasterio, shapely)')
 class TestRunTomlEndToEnd(unittest.TestCase):
 
     @pytest.mark.slow
