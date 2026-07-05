@@ -47,15 +47,10 @@ takes effect. Env vars: `PY` (default 3.14), `GPU_ARCH` (default `cc120`),
 
 ### Legacy / unreferenced (candidates for removal)
 
-Kept for now but referenced by nothing in CI or docs; several predate the move
-to GitHub Actions and conda `environment_*.yml` files:
+Kept for now but referenced by nothing in CI or docs — older conda/apt install
+variants superseded by `install_miniforge*` + `environments/*.yml`:
 
-- `install_conda.sh`, `install_conda_macos.sh` — Travis-era (invoked by the old
-  `.travis.yml`).
 - `install_conda_ubuntu.sh`, `install_conda_ubuntu_22_04.sh`, `install_ubuntu.sh`
-  — older conda/apt install variants superseded by `install_miniforge*` +
-  `environments/*.yml`.
-- `find_repeated_old_div.sh` — a Python-2→3 (`old_div`) migration helper, obsolete.
 
 ## Notes
 
