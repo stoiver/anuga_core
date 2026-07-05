@@ -41,7 +41,7 @@ takes effect. Env vars: `PY` (default 3.14), `GPU_ARCH` (default `cc120`),
 |--------|---------|
 | `install_miniforge.sh` / `install_miniforge_windows.bat` | **Recommended** — install Miniforge and create the conda env. Referenced by the docs. |
 | `install_anuga_nvc.sh` | GPU-offload build via the NVIDIA HPC SDK (nvc). |
-| `install_ubuntu_22_04.sh`, `install_ubuntu_24_04.sh` | Install OS-level build dependencies on current Ubuntu LTS. |
+| `install_ubuntu.sh` | Install ANUGA into a Python venv on Ubuntu (22.04 / 24.04 / 26.04) via apt + pip. Detects the release and picks numpy/gdal pins. The conda path (`install_miniforge.sh`) is more robust. |
 | `count_lines.py` | Report total lines of code in ANUGA (dev utility). |
 | `clear_for_master.sh` | Remove generated `*.c`/`*.so` build artifacts (dev utility). |
 
@@ -50,7 +50,7 @@ takes effect. Env vars: `PY` (default 3.14), `GPU_ARCH` (default `cc120`),
 Kept for now but referenced by nothing in CI or docs — older conda/apt install
 variants superseded by `install_miniforge*` + `environments/*.yml`:
 
-- `install_conda_ubuntu.sh`, `install_conda_ubuntu_22_04.sh`, `install_ubuntu.sh`
+- `install_conda_ubuntu.sh`, `install_conda_ubuntu_22_04.sh`
 
 ## Notes
 
