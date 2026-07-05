@@ -4,7 +4,7 @@
 #
 # Run this script as follows:
 #
-#   bash /path/to/anuga_core/tools/install_gpu_anuga.sh
+#   bash /path/to/anuga_core/tools/install_anuga_nvc.sh
 #
 # The script locates nvc in the NVIDIA HPC SDK, activates the conda
 # environment, and builds the GPU-enabled anuga package.
@@ -19,7 +19,7 @@
 #
 # Example — build for an A100 with Python 3.13:
 #
-#   PY=3.13 GPU_ARCH=cc80 bash /path/to/anuga_core/tools/install_gpu_anuga.sh
+#   PY=3.13 GPU_ARCH=cc80 bash /path/to/anuga_core/tools/install_anuga_nvc.sh
 #
 # Prerequisites:
 #   - NVIDIA HPC SDK installed (see KNOWN_ISSUES.md for apt install recipe)
@@ -37,7 +37,7 @@ SCRIPTPATH=$(dirname "$SCRIPT")
 ANUGA_CORE_PATH=$(realpath "$SCRIPTPATH/..")
 
 echo "#============================================================"
-echo "# ANUGA GPU build  (PY=${PY}  GPU_ARCH=${GPU_ARCH})"
+echo "# ANUGA NVC GPU build  (PY=${PY}  GPU_ARCH=${GPU_ARCH})"
 echo "#============================================================"
 echo " "
 

@@ -334,7 +334,7 @@ reconciliation, and GPU install-script fixes.
   (the OpenMP-vs-MPI gap is false sharing in the flux arrays + serial operators);
   corrected "~3x"→"~4–5x" on 16 cores; added GPU/MPI speedup figures; repaired a
   garbled `<12 GB VRAM` bullet (commit `4fc2f134`).
-- **GPU install script (`tools/install_gpu_anuga.sh`).** (1) Run
+- **GPU install script (`tools/install_anuga_nvc.sh`).** (1) Run
   `scripts/anuga_run_isolated_tests.py` instead of `pytest test_DE_gpu_omp.py`,
   which auto-skips on a GPU build so the test step ran nothing (commit
   `99bbc29f`). (2) `rm -rf build/cp*` before the nvc build — meson-python reads
@@ -486,7 +486,7 @@ segfault in `core_extrapolate_second_order_edge`) — unfixable at source level.
 Solution: NVIDIA HPC SDK 26.3 (`nvc`) installed via apt; `meson` auto-detects it
 as `nvidia_hpc`; build command: `CC=nvc pip install --no-build-isolation -e .
 -Csetup-args=-Dgpu_offload=true -Csetup-args=-Dgpu_arch=cc120`. All 56 GPU tests
-pass. New `tools/install_gpu_anuga.sh`: auto-detects nvc under
+pass. New `tools/install_anuga_nvc.sh`: auto-detects nvc under
 `/opt/nvidia/hpc_sdk/Linux_x86_64/`, configurable via `PY`/`GPU_ARCH`/`NVHPC_ROOT`.
 Fixed: `pytest-regressions` missing from all 5 intel conda environment YMLs (already
 present in non-intel variants; pip-installed in existing env). `KNOWN_ISSUES.md`

@@ -121,7 +121,7 @@ CC=$(which nvc) pip install --no-build-isolation -e . \
     -Csetup-args=-Dgpu_offload=true -Csetup-args=-Dgpu_arch=cc120
 ```
 
-`tools/install_gpu_anuga.sh` now does this `rm -rf build/cp*` automatically
+`tools/install_anuga_nvc.sh` now does this `rm -rf build/cp*` automatically
 before the nvc build. Verified end to end: fresh nvc build succeeds and the
 isolated GPU runner reports 65/65 passed. See also `SESSION_GUIDE.md` → "CPU and
 GPU are separate builds".
