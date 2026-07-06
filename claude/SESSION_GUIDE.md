@@ -105,6 +105,29 @@ pyflakes anuga/path/to/module.py
 autopep8 anuga/path/to/module.py
 ```
 
+### Transmissive riverwalls (`Cd_through`) — issue #32
+
+Riverwalls can leak *through* the wall body (below the crest), not just overtop —
+via a per-riverwall `Cd_through` discharge coefficient in the hydraulic-parameter
+dict (alongside `Qfactor, s1, s2, h1, h2`):
+
+```python
+riverWall_Par = {'fence': {'Cd_through': 0.5}}   # 0.0 (default) = impermeable
+domain.riverwallData.create_riverwalls(riverWall, riverWall_Par)
+```
+
+- Physics: submerged orifice `Q = Cd_through · h_eff · √(2g·|Δstage|) · sign(Δstage)`,
+  `h_eff` = upstream (driving-side) submerged depth below the crest (so it flows
+  even when the downstream side is dry). Momentum contribution is zero (conservative).
+- Applied **on top of** the weir/overtopping discharge, so a transmissive wall does
+  seepage *and* overtopping. `Cd_through=0` reproduces the old impermeable behaviour.
+- Lives in the **shared** flux kernel `anuga/shallow_water/gpu/core_kernels.c`
+  (`gpu_adjust_edgeflux_with_throughflow`, hydraulic-properties **column 5**), which
+  the legacy `_openmp_compute_fluxes_central` (mode 1) *and* the unified path (mode 2)
+  both call — so it works in **both compute modes with bit-identical results**. Do
+  NOT look for it in a `sw_domain_openmp_ext.c` (that's a build artifact and doesn't
+  exist). Added in commit `6ebb4453`; documented on issue #32.
+
 ---
 
 ## Benchmark timings — Towradgi small (MSI laptop, RTX 5070, AMD Ryzen 9, 2026-06-11)
@@ -315,7 +338,36 @@ Findings:
 
 ---
 
-## Recent session summaries (sessions 21–45)
+## Recent session summaries (sessions 21–46)
+
+**Session 46 (2026-07-06):** Issue #33 (memory) documentation + measurement,
+plus follow-ups.
+- **Issue #33 "Reduce Memory usage".** Documented on the issue everything already
+  implemented for v4.0.0: the **Quantity per-type allocation** (QM1–QM7 — each
+  quantity allocates only the arrays its `qty_type` needs instead of the blanket
+  9; lazy `vertex_values`; centroid-primary elevation; lazy gradients/`phi`;
+  shared gradient workspace `22559a5b`; ~54–58% off quantity memory) and the
+  **domain C work-array reduction** (DM1: 9 dead arrays removed + deferred to
+  first evolve; DM2: riverwall arrays lazy; ~740 MB at 2.25M tris), plus the
+  exported `memory_stats`/`quantity_memory_stats`/`domain_memory_stats`/
+  `domain_struct_stats` instrumentation. Then **re-ran the issue's exact
+  benchmark** (`run_parallel_rectangular.py`, `mpiexec -np 2`, proc-0 Max RSS):
+  **710→511 MB (−28%), 2.5 GB→1.37 GB (−45%), 5.1 GB→2.74 GB (−46%)** — RSS
+  roughly **halved at 2.25M triangles**, the saving growing with N. Recorded the
+  numbers in `PROGRESS_ARCHIVE.md` (PR #155) and posted them to the issue. The
+  `print_domain_memory_stats` breakdown shows `river wall 0.00 MB` (DM2 lazy) and
+  the trimmed work arrays (DM1). Remaining lever: rank-0's peak building the full
+  domain before `distribute`.
+- **`tools/install_ubuntu.sh`.** Combined the ~90%-identical `install_ubuntu_2X_04.sh`
+  scripts into one version-aware `install_ubuntu.sh` (22.04/24.04/26.04 `case`,
+  auto-derived python version); fixed the earlier cleanup's broken 20.04 dispatch
+  and README mislabel (PR #154).
+- **PR triage.** Reviewed **#148** (multi-compiler flag tuning, GCC 15/NVHPC/ICX)
+  — recommended gating the FP-semantics flags (`-ffinite-math-only`,
+  `-fassociative-math`, `-Mfprelaxed`) behind an opt-in `-Dfast_math` option so
+  the default `pip install` keeps strict IEEE, while keeping the safe flags +
+  `pow→cbrt` rewrite as default; asked @samcom12 to make that change.
+- **Synced `develop` → `anuga-community`** (PRs #153/#154/#155); upstream CI green.
 
 **Session 45 (2026-07-02 – 07-05):** Geodata CI breakage (libjxl), NumPy-2.5
 warnings, PR triage, and a `tools/` cleanup.
