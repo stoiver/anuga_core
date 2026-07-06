@@ -105,6 +105,29 @@ pyflakes anuga/path/to/module.py
 autopep8 anuga/path/to/module.py
 ```
 
+### Transmissive riverwalls (`Cd_through`) — issue #32
+
+Riverwalls can leak *through* the wall body (below the crest), not just overtop —
+via a per-riverwall `Cd_through` discharge coefficient in the hydraulic-parameter
+dict (alongside `Qfactor, s1, s2, h1, h2`):
+
+```python
+riverWall_Par = {'fence': {'Cd_through': 0.5}}   # 0.0 (default) = impermeable
+domain.riverwallData.create_riverwalls(riverWall, riverWall_Par)
+```
+
+- Physics: submerged orifice `Q = Cd_through · h_eff · √(2g·|Δstage|) · sign(Δstage)`,
+  `h_eff` = upstream (driving-side) submerged depth below the crest (so it flows
+  even when the downstream side is dry). Momentum contribution is zero (conservative).
+- Applied **on top of** the weir/overtopping discharge, so a transmissive wall does
+  seepage *and* overtopping. `Cd_through=0` reproduces the old impermeable behaviour.
+- Lives in the **shared** flux kernel `anuga/shallow_water/gpu/core_kernels.c`
+  (`gpu_adjust_edgeflux_with_throughflow`, hydraulic-properties **column 5**), which
+  the legacy `_openmp_compute_fluxes_central` (mode 1) *and* the unified path (mode 2)
+  both call — so it works in **both compute modes with bit-identical results**. Do
+  NOT look for it in a `sw_domain_openmp_ext.c` (that's a build artifact and doesn't
+  exist). Added in commit `6ebb4453`; documented on issue #32.
+
 ---
 
 ## Benchmark timings — Towradgi small (MSI laptop, RTX 5070, AMD Ryzen 9, 2026-06-11)
