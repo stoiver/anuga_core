@@ -32,8 +32,8 @@ It is now developed and maintained by a community of volunteers.
 
    background
    installation/index
-   setup_anuga_script/index
    examples/index
+   setup_anuga_script/index
    visualisation/index
    reference/index
    troubleshooting
