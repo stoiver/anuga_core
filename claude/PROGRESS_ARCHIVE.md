@@ -255,6 +255,27 @@ Target achieved: ~54% memory reduction (800 MB → ~368 MB for 10-quantity 1M-tr
 - [x] **DM2** `edge_flux_type`/`edge_river_wall_counter` lazy for non-riverwall simulations *(2026-04-15)*
 - [x] **DM3** `domain_memory_stats`, `print_domain_memory_stats`, `domain_struct_stats`, `print_domain_struct_stats` added to `system_tools.py` *(2026-04-15)*
 
+### Measured end-to-end result (issue #33 benchmark, re-run 2026-07-06)
+
+`mpiexec -np 2 /usr/bin/time -f "…%M…" python -u examples/parallel/run_parallel_rectangular.py --sqrtN N`,
+`OMP_NUM_THREADS=1`, process-0 Max RSS. "Before" = the original figures in issue #33.
+
+| sqrtN | triangles | RSS before | RSS now | reduction |
+|------:|----------:|-----------:|--------:|:---------:|
+| 250 | 250,000 | 710 MB | 511 MB | −28% |
+| 500 | 1,000,000 | 2.5 GB | 1.37 GB | −45% |
+| 750 | 2,250,000 | 5.1 GB | 2.74 GB | **−46%** |
+
+The saving grows with N (fixed interpreter/import overhead dominates at small N; domain
+arrays dominate at large N), so RSS is roughly halved at 2.25M triangles.
+
+Hardware-independent per-rank domain arrays (`print_domain_memory_stats`, rank 0 after
+`distribute`): quantities 55.7 / 222.0 / 499.0 MB and total numpy 102.7 / 409.6 / 920.5 MB
+for local N = 125,706 / 501,465 / 1,127,216. At sqrtN=750 the breakdown is geometry 224,
+connectivity 146, quantities 499, work arrays 26, **river wall 0.00** (DM2 lazy), other ~26,
+total 920.5 MB. Remaining lever: rank 0's peak building the *full* domain before `distribute`.
+Posted to issue #33.
+
 ---
 
 ## Benchmark Suite ✅ Complete
