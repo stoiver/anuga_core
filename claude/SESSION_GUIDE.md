@@ -315,7 +315,36 @@ Findings:
 
 ---
 
-## Recent session summaries (sessions 21–45)
+## Recent session summaries (sessions 21–46)
+
+**Session 46 (2026-07-06):** Issue #33 (memory) documentation + measurement,
+plus follow-ups.
+- **Issue #33 "Reduce Memory usage".** Documented on the issue everything already
+  implemented for v4.0.0: the **Quantity per-type allocation** (QM1–QM7 — each
+  quantity allocates only the arrays its `qty_type` needs instead of the blanket
+  9; lazy `vertex_values`; centroid-primary elevation; lazy gradients/`phi`;
+  shared gradient workspace `22559a5b`; ~54–58% off quantity memory) and the
+  **domain C work-array reduction** (DM1: 9 dead arrays removed + deferred to
+  first evolve; DM2: riverwall arrays lazy; ~740 MB at 2.25M tris), plus the
+  exported `memory_stats`/`quantity_memory_stats`/`domain_memory_stats`/
+  `domain_struct_stats` instrumentation. Then **re-ran the issue's exact
+  benchmark** (`run_parallel_rectangular.py`, `mpiexec -np 2`, proc-0 Max RSS):
+  **710→511 MB (−28%), 2.5 GB→1.37 GB (−45%), 5.1 GB→2.74 GB (−46%)** — RSS
+  roughly **halved at 2.25M triangles**, the saving growing with N. Recorded the
+  numbers in `PROGRESS_ARCHIVE.md` (PR #155) and posted them to the issue. The
+  `print_domain_memory_stats` breakdown shows `river wall 0.00 MB` (DM2 lazy) and
+  the trimmed work arrays (DM1). Remaining lever: rank-0's peak building the full
+  domain before `distribute`.
+- **`tools/install_ubuntu.sh`.** Combined the ~90%-identical `install_ubuntu_2X_04.sh`
+  scripts into one version-aware `install_ubuntu.sh` (22.04/24.04/26.04 `case`,
+  auto-derived python version); fixed the earlier cleanup's broken 20.04 dispatch
+  and README mislabel (PR #154).
+- **PR triage.** Reviewed **#148** (multi-compiler flag tuning, GCC 15/NVHPC/ICX)
+  — recommended gating the FP-semantics flags (`-ffinite-math-only`,
+  `-fassociative-math`, `-Mfprelaxed`) behind an opt-in `-Dfast_math` option so
+  the default `pip install` keeps strict IEEE, while keeping the safe flags +
+  `pow→cbrt` rewrite as default; asked @samcom12 to make that change.
+- **Synced `develop` → `anuga-community`** (PRs #153/#154/#155); upstream CI green.
 
 **Session 45 (2026-07-02 – 07-05):** Geodata CI breakage (libjxl), NumPy-2.5
 warnings, PR triage, and a `tools/` cleanup.
