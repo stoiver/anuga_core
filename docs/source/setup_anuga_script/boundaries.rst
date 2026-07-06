@@ -77,7 +77,6 @@ Standard Boundary Types
        face always sees exactly ``wave(t)`` regardless of what is propagating
        back from the interior.  Suitable for tsunami or storm-wave inflow on
        open-ocean boundaries where reflections must not re-enter the domain.
-       Fully supported in GPU mode (``multiprocessor_mode=2``).
    * - :class:`Characteristic_wave_boundary`
      - Nonlinear characteristic open boundary that prescribes the incoming
        Riemann invariant from a stage *perturbation* above a specified
@@ -85,8 +84,6 @@ Standard Boundary Types
        from the interior without linearisation.  Preferred over
        :class:`Absorbing_wave_boundary` when wave amplitudes are comparable
        to the water depth (η ~ h) and linearisation error would be significant.
-       Fully supported in GPU mode (``multiprocessor_mode=2``).
-
 
 Usage examples
 --------------

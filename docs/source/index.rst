@@ -17,6 +17,14 @@ ANUGA was created in a collaboration by Geoscience Australia
 and Mathematical Sciences Institute at the Australian National University. 
 It is now developed and maintained by a community of volunteers.
 
+.. note::
+
+   The main documentation (**Contents**) covers the standard, single-process
+   workflow that most users need: install ANUGA, write a script, run it, and
+   view the results. Advanced topics live in the **Appendices** — parallel
+   simulation (OpenMP / MPI ``distribute``), compute modes and GPU offloading,
+   checkpointing, the developer install, and the TOML scenario interface.
+
 
 .. toctree::
    :maxdepth: 2
@@ -27,7 +35,6 @@ It is now developed and maintained by a community of volunteers.
    setup_anuga_script/index
    examples/index
    visualisation/index
-   parallel/index
    reference/index
    troubleshooting
    genindex
@@ -36,12 +43,14 @@ It is now developed and maintained by a community of volunteers.
    :maxdepth: 2
    :caption: Appendices:
 
-   mathematical_background
-   appendices/advanced_script
-   appendices/advanced_visualisation
+   parallel/index
+   parallel/advanced
+   appendices/compute_modes
    installation/install_anuga_developers
    toml_scenario/index
-   parallel/advanced
+   appendices/advanced_script
+   appendices/advanced_visualisation
+   mathematical_background
 
 
    
