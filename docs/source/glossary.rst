@@ -41,6 +41,20 @@ Glossary
       the Python loop (and, by default, writes output). The internal
       :term:`CFL`-limited timestep is usually much smaller.
 
+   finaltime
+      The simulation time (s) at which :meth:`~anuga.Domain.evolve` stops. Give
+      either ``finaltime`` or :term:`duration`, not both.
+
+   duration
+      The length of time (s) to evolve for, measured from the current simulation
+      time — an alternative to :term:`finaltime`.
+
+   outputstep
+      An optional coarser interval (s) at which the state is written to the
+      :term:`SWW file`, while :meth:`~anuga.Domain.evolve` still yields every
+      :term:`yieldstep`. Use it to interact frequently while keeping the ``.sww``
+      file small; it should be a whole multiple of the yieldstep.
+
    CFL
       The Courant–Friedrichs–Lewy stability condition, which bounds the explicit
       timestep by the mesh size and wave speed. ANUGA chooses the inner timestep
