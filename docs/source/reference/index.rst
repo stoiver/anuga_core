@@ -68,11 +68,6 @@ Domain creation functions and the domain methods used throughout this guide:
 
    rectangular_cross_domain
    create_domain_from_regions
-   Domain.set_quantity
-   Domain.set_boundary
-   Domain.set_flow_algorithm
-   Domain.get_flow_algorithm
-   Domain.set_low_froude
 
 
 Quantity

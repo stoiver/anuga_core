@@ -179,10 +179,7 @@ See :ref:`use_gpu_offloading` for hardware requirements, supported operators,
 slot limits, and troubleshooting.
 
 
-See Also
----------
+.. seealso::
 
-.. autosummary::
-   :toctree:
-
-   Domain.set_omp_num_threads
+   :ref:`api_domain` — full API of ``Domain.set_omp_num_threads`` and the other
+   ``Domain`` methods.
