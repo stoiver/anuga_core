@@ -18,6 +18,11 @@ No CUDA or Python GPU libraries are required.
    releases.  For production runs where result reproducibility matters,
    validate GPU output against ``mode=1`` before switching.
 
+.. seealso::
+
+   :ref:`install_gpu` — how to build ANUGA with GPU support (NVIDIA HPC SDK /
+   ``nvc``). This page covers *using* the backend once it is built.
+
 
 Hardware and compiler requirements
 ------------------------------------
