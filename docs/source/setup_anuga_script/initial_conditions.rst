@@ -40,10 +40,6 @@ stored in the domain.
    averaging, expressions involving other quantities, and fitting point clouds
    onto the mesh.
 
-Reference
----------
+.. seealso::
 
-.. autosummary::
-   :toctree: generated
-
-   Domain.set_quantity
+   :ref:`api_domain` — full API of ``Domain.set_quantity``.

@@ -172,10 +172,6 @@ The geo-reference metadata can be read directly from a SWW file:
 
 ---
 
-Reference
----------
+.. seealso::
 
-.. autosummary::
-   :toctree: generated
-
-   Geo_reference
+   :ref:`Geo_reference API <api_geo_reference>` in the API Reference.

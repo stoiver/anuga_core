@@ -90,11 +90,8 @@ and check the :doc:`../../examples/notebook_create_domain_from_regions` for an e
       polygon regions, geo-referencing, flow algorithm choices, and domain
       attributes.
 
-Reference
----------
+.. seealso::
 
-.. autosummary::
-   :toctree: generated
-
-   rectangular_cross_domain
-   create_domain_from_regions
+   :ref:`api_domain` — full API of the domain-creation functions
+   (``rectangular_cross_domain``, ``create_domain_from_regions``) and the
+   ``Domain`` methods.

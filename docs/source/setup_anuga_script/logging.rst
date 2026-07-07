@@ -139,17 +139,7 @@ Levels in order of decreasing severity:
      - ``log.DEBUG``    (10) — detail (default file threshold)
 
 
-API reference
--------------
+.. seealso::
 
-.. autosummary::
-   :toctree: generated
-
-   set_logfile
-   utilities.log.TeeStream
-   utilities.log.file_only
-   utilities.log.verbose
-   utilities.log.info
-   utilities.log.warning
-   utilities.log.debug
-   utilities.log.critical
+   :ref:`api_logging` — full API of ``set_logfile`` and the
+   ``anuga.utilities.log`` helpers.

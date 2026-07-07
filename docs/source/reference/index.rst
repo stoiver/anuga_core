@@ -32,6 +32,8 @@ The three classes below form the foundation of every ANUGA simulation:
        area of the domain.
 
 
+.. _api_domain:
+
 Domain
 ------
 
@@ -57,6 +59,20 @@ The ``Domain`` class is the top-level simulation object.  A typical script:
    Domain
 
 :doc:`Full Domain API <anuga.Domain>`
+
+Domain creation functions and the domain methods used throughout this guide:
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   rectangular_cross_domain
+   create_domain_from_regions
+   Domain.set_quantity
+   Domain.set_boundary
+   Domain.set_flow_algorithm
+   Domain.get_flow_algorithm
+   Domain.set_low_froude
 
 
 Quantity
@@ -108,17 +124,11 @@ that fall inside the polygon.  Operators use regions to apply forcing
    region = anuga.Region(domain, polygon=polygon)
    print(region.get_indices())    # triangle IDs inside the polygon
 
-.. toctree::
-   :hidden:
-
-   anuga.Region
-
 .. autosummary::
+   :toctree: generated
    :nosignatures:
 
    Region
-
-:doc:`Full Region API <anuga.Region>`
 
 
 Geo_reference
@@ -144,12 +154,13 @@ national grids such as RD New (EPSG:28992) or British National Grid
 
 See :doc:`../setup_anuga_script/coordinate_reference` for full usage guidance.
 
-.. toctree::
-   :hidden:
+.. _api_geo_reference:
 
-   anuga.Geo_reference
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
 
-:doc:`Full Geo_reference API <anuga.Geo_reference>`
+   Geo_reference
 
 
 .. _api_boundaries:
@@ -205,6 +216,30 @@ each is below.
    Weir_orifice_trapezoid_operator
    Internal_boundary_operator
    Kinematic_viscosity_operator
+
+
+.. _api_logging:
+
+Logging
+-------
+
+Configuring ANUGA's log output. See
+:doc:`../setup_anuga_script/logging` for usage.
+
+.. currentmodule:: anuga
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   set_logfile
+   utilities.log.TeeStream
+   utilities.log.file_only
+   utilities.log.verbose
+   utilities.log.info
+   utilities.log.warning
+   utilities.log.debug
+   utilities.log.critical
 
 
 File format reference

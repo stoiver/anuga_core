@@ -229,12 +229,7 @@ of DE0, DE1, DE_ader2, or DE2:
     domain.set_low_froude(2)
 
 
-Reference
----------
+.. seealso::
 
-.. autosummary::
-   :toctree: generated
-
-   Domain.set_flow_algorithm
-   Domain.get_flow_algorithm
-   Domain.set_low_froude
+   :ref:`api_domain` — full API of ``set_flow_algorithm``,
+   ``get_flow_algorithm`` and ``set_low_froude``.
