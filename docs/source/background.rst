@@ -41,10 +41,11 @@ lifetime.  Computationally intensive components are written for
 efficiency in :code:`C` routines working directly with Python :code:`numpy`
 structures.
 
-ANUGA results are stored as ``.sww`` (NetCDF) files and can be explored with the
-built-in tools — the ``anuga_sww_gui`` viewer, the ``SWW_plotter`` and
-``Domain_plotter`` Python plotters, or by exporting to GIS such as QGIS.  A
-legacy OpenSceneGraph-based viewer (``anuga_viewer``) is also available.  See
+ANUGA results are stored as ``.sww`` (NetCDF) files.  For fast, interactive
+viewing of large ``.sww`` files the recommended tool is the OpenSceneGraph-based
+`ANUGA Viewer <https://anuga-viewer.readthedocs.io/en/latest/>`_.  Results can
+also be explored with the built-in ``anuga_sww_gui`` viewer, the ``SWW_plotter``
+and ``Domain_plotter`` Python plotters, or by exporting to GIS such as QGIS.  See
 :doc:`visualisation/index` for the visualisation options.
 
 See :doc:`mathematical_background` for a full derivation of the governing
