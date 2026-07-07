@@ -81,27 +81,40 @@ echo "# nvc found: $NVC"
 echo " "
 
 # ------------------------------------------------------------------
-# Verify conda environment exists
+# Select the conda environment
+#   Prefer an already-activated environment (this is what the user is working
+#   in — likely with anuga already installed). Otherwise fall back to a
+#   miniforge install in $HOME with env anuga_env_$PY.
 # ------------------------------------------------------------------
-CONDA_BIN="$HOME/miniforge3/bin"
-if [ ! -f "$CONDA_BIN/conda" ]; then
-    echo "#=====================================================";
-    echo "# ERROR: miniforge3 not found at $HOME/miniforge3"
-    echo "# Run install_miniforge.sh first."
-    echo "#=====================================================";
-    exit 1
+if [ -n "$CONDA_PREFIX" ] && [ -n "$CONDA_DEFAULT_ENV" ] \
+        && [ "$CONDA_DEFAULT_ENV" != "base" ]; then
+    ENV_NAME="$CONDA_DEFAULT_ENV"
+    CONDA_RUN=""   # build/test run in the current, already-activated shell
+    echo "# Using the active conda environment: ${ENV_NAME}  (${CONDA_PREFIX})"
+else
+    CONDA_BIN="$HOME/miniforge3/bin"
+    if [ ! -f "$CONDA_BIN/conda" ]; then
+        echo "#=====================================================";
+        echo "# ERROR: no conda environment is active and miniforge3 was not"
+        echo "#        found at $HOME/miniforge3."
+        echo "#"
+        echo "# Either activate your anuga environment first"
+        echo "#   (e.g. conda activate anuga_env_${PY}), or run"
+        echo "#   install_miniforge.sh to create one."
+        echo "#=====================================================";
+        exit 1
+    fi
+    ENV_NAME="anuga_env_${PY}"
+    if ! "$CONDA_BIN/conda" env list | grep -q "${ENV_NAME}"; then
+        echo "#=====================================================";
+        echo "# ERROR: conda environment '${ENV_NAME}' not found."
+        echo "# Run install_miniforge.sh first (PY=${PY}), or activate your env."
+        echo "#=====================================================";
+        exit 1
+    fi
+    CONDA_RUN="$CONDA_BIN/conda run -n ${ENV_NAME}"
+    echo "# conda environment: ${ENV_NAME}  (via $HOME/miniforge3)"
 fi
-
-ENV_NAME="anuga_env_${PY}"
-if ! "$CONDA_BIN/conda" env list | grep -q "^${ENV_NAME}"; then
-    echo "#=====================================================";
-    echo "# ERROR: conda environment '${ENV_NAME}' not found."
-    echo "# Run install_miniforge.sh first (PY=${PY})."
-    echo "#=====================================================";
-    exit 1
-fi
-
-echo "# conda environment: ${ENV_NAME}"
 echo " "
 
 # ------------------------------------------------------------------
@@ -126,7 +139,7 @@ echo "# Removing any stale meson build directory (build/cp*) for a clean nvc con
 rm -rf "${ANUGA_CORE_PATH}"/build/cp*
 echo " "
 
-"$CONDA_BIN/conda" run -n "${ENV_NAME}" bash -c \
+$CONDA_RUN bash -c \
     "CC='$NVC' pip install --no-build-isolation -v -e . \
      -Csetup-args=-Dgpu_offload=true \
      -Csetup-args=-Dgpu_arch=${GPU_ARCH}"
@@ -145,7 +158,7 @@ echo "#   'pip install -e .' does not place on PATH)."
 echo "#============================================================"
 echo " "
 
-"$CONDA_BIN/conda" run -n "${ENV_NAME}" \
+$CONDA_RUN \
     python "${ANUGA_CORE_PATH}/scripts/anuga_run_isolated_tests.py"
 
 echo " "
@@ -154,7 +167,7 @@ echo "# Congratulations! ANUGA GPU build succeeded."
 echo "#"
 echo "# To use GPU mode activate the environment and set multiprocessor_mode=2:"
 echo "#"
-echo "#   source ~/miniforge3/bin/activate ${ENV_NAME}"
+echo "#   conda activate ${ENV_NAME}"
 echo "#   python -c \\"
 echo "#     \"import anuga; d = anuga.rectangular_cross_domain(100,100); \\"
 echo "#      d.set_boundary({b: anuga.Reflective_boundary(d) for b in d.get_boundary_tags()}); \\"
