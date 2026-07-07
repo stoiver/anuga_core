@@ -232,6 +232,9 @@ of DE0, DE1, DE_ader2, or DE2:
 Reference
 ---------
 
-.. automethod:: Domain.set_flow_algorithm
-.. automethod:: Domain.get_flow_algorithm
-.. automethod:: Domain.set_low_froude
+.. autosummary::
+   :toctree: generated
+
+   Domain.set_flow_algorithm
+   Domain.get_flow_algorithm
+   Domain.set_low_froude

@@ -43,4 +43,7 @@ stored in the domain.
 Reference
 ---------
 
-.. automethod:: Domain.set_quantity
+.. autosummary::
+   :toctree: generated
+
+   Domain.set_quantity

@@ -93,5 +93,8 @@ and check the :doc:`../../examples/notebook_create_domain_from_regions` for an e
 Reference
 ---------
 
-.. autofunction:: rectangular_cross_domain
-.. autofunction:: create_domain_from_regions
+.. autosummary::
+   :toctree: generated
+
+   rectangular_cross_domain
+   create_domain_from_regions

@@ -142,15 +142,14 @@ Levels in order of decreasing severity:
 API reference
 -------------
 
-.. autofunction:: anuga.set_logfile
+.. autosummary::
+   :toctree: generated
 
-.. autoclass:: anuga.utilities.log.TeeStream
-   :members: write, flush, close
-
-.. autofunction:: anuga.utilities.log.file_only
-
-.. autofunction:: anuga.utilities.log.verbose
-.. autofunction:: anuga.utilities.log.info
-.. autofunction:: anuga.utilities.log.warning
-.. autofunction:: anuga.utilities.log.debug
-.. autofunction:: anuga.utilities.log.critical
+   set_logfile
+   utilities.log.TeeStream
+   utilities.log.file_only
+   utilities.log.verbose
+   utilities.log.info
+   utilities.log.warning
+   utilities.log.debug
+   utilities.log.critical

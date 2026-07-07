@@ -198,12 +198,17 @@ Usage examples
 Reference
 ---------
 
-.. autoclass:: Reflective_boundary
-.. autoclass:: Dirichlet_boundary
-.. autoclass:: Time_boundary
-.. autoclass:: Transmissive_n_momentum_zero_t_momentum_set_stage_boundary
-.. autoclass:: Flather_external_stage_zero_velocity_boundary
-.. autoclass:: File_boundary
-.. autoclass:: Field_boundary
-.. autoclass:: Absorbing_wave_boundary
-.. autoclass:: Characteristic_wave_boundary
+Follow a link for the full API of each boundary class.
+
+.. autosummary::
+   :toctree: generated
+
+   Reflective_boundary
+   Dirichlet_boundary
+   Time_boundary
+   Transmissive_n_momentum_zero_t_momentum_set_stage_boundary
+   Flather_external_stage_zero_velocity_boundary
+   File_boundary
+   Field_boundary
+   Absorbing_wave_boundary
+   Characteristic_wave_boundary
