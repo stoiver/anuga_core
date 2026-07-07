@@ -42,6 +42,7 @@ extensions = [
     'sphinx.ext.duration',
     'sphinx.ext.doctest',
     'sphinx.ext.autodoc',
+    'sphinx.ext.napoleon',
     'sphinx.ext.autosummary',
     'sphinx.ext.mathjax',
     'sphinx.ext.coverage',
@@ -62,7 +63,14 @@ def linkcode_resolve(domain, info):
 
 #autodoc_mock_imports = ["anuga"]
 
-autodoc_default_flags = ['members']
+# Document class members by default so the method/attribute summary tables on
+# each class page link through to the individual method signatures + docstrings.
+# (autodoc_default_flags is deprecated and ignored by modern Sphinx — use
+# autodoc_default_options.)
+autodoc_default_options = {
+    'members': True,
+    'show-inheritance': True,
+}
 autosummary_generate = True
 autosectionlabel_prefix_document = True
 
