@@ -189,26 +189,11 @@ Usage examples
 
 .. seealso::
 
+   :ref:`api_boundaries`
+      Full API of every boundary class in the API Reference.
+
    `ANUGA User Manual — Chapter 9: Boundary Conditions and set_boundary
    <https://github.com/anuga-community/anuga_user_manual>`_
    gives extended examples of each boundary type, discusses time-varying
    stage specifications in detail, and explains how to diagnose common
    boundary-tag errors.
-
-Reference
----------
-
-Follow a link for the full API of each boundary class.
-
-.. autosummary::
-   :toctree: generated
-
-   Reflective_boundary
-   Dirichlet_boundary
-   Time_boundary
-   Transmissive_n_momentum_zero_t_momentum_set_stage_boundary
-   Flather_external_stage_zero_velocity_boundary
-   File_boundary
-   Field_boundary
-   Absorbing_wave_boundary
-   Characteristic_wave_boundary

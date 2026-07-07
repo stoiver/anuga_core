@@ -152,6 +152,61 @@ See :doc:`../setup_anuga_script/coordinate_reference` for full usage guidance.
 :doc:`Full Geo_reference API <anuga.Geo_reference>`
 
 
+.. _api_boundaries:
+
+Boundary conditions
+-------------------
+
+The boundary classes assigned to named domain edges via
+``domain.set_boundary()``. See
+:doc:`../setup_anuga_script/boundaries` for a description of each and when to
+use it; the full API of each class is below.
+
+.. currentmodule:: anuga
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   Reflective_boundary
+   Dirichlet_boundary
+   Time_boundary
+   Transmissive_n_momentum_zero_t_momentum_set_stage_boundary
+   Flather_external_stage_zero_velocity_boundary
+   File_boundary
+   Field_boundary
+   Absorbing_wave_boundary
+   Characteristic_wave_boundary
+
+
+.. _api_operators:
+
+Operators
+---------
+
+Operators modify domain quantities each timestep (rainfall/extraction, inlets,
+culverts, setting quantities, viscosity). See
+:doc:`../setup_anuga_script/operators` for categories and usage; the full API of
+each is below.
+
+.. currentmodule:: anuga
+
+.. autosummary::
+   :toctree: generated
+   :nosignatures:
+
+   Rate_operator
+   Inlet_operator
+   Set_quantity_operator
+   Set_stage_operator
+   Set_elevation_operator
+   Boyd_box_operator
+   Boyd_pipe_operator
+   Weir_orifice_trapezoid_operator
+   Internal_boundary_operator
+   Kinematic_viscosity_operator
+
+
 File format reference
 ---------------------
 
