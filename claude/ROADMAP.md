@@ -1,6 +1,12 @@
 # ANUGA Release Roadmap
 
-Last updated: 2026-03-26
+Last updated: 2026-07-07
+
+> **Branch policy (decided 2026-07-07):** `develop` will **not** be merged into
+> `main` until the team explicitly decides to cut **v4.0.0**. Until then, all
+> work and upstream syncs stay on `develop` (PR from the `stoiver` fork →
+> `anuga-community/anuga_core:develop`, admin-merged by PR number). `main` is
+> held at the current released line — do not open or merge develop→main PRs.
 
 ---
 
@@ -60,7 +66,9 @@ The `sp26` branch is a **research project** forming the basis of a paper submitt
    - **Phase 3** — deduplicate quantity kernels, consolidate parallel operators (coordinate with sp26 merge)
    - **Phase 2** — ruff linting, pre-commit hooks
    - **Phase 4** — lift coverage to 65%, automate validation tests
-4. Stabilise, then merge `develop` → `main`, tag `v4.0.0`
+4. **Only once the team decides to release 4.0.0:** stabilise, merge `develop` →
+   `main`, and tag `v4.0.0`. Until that decision `main` stays put and `develop`
+   is not merged into it (see the branch policy at the top of this file).
 
 ### Coordination notes
 
