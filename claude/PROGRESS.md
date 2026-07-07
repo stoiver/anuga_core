@@ -1,6 +1,6 @@
 # ANUGA Code & Documentation Improvement Progress
 
-Last updated: 2026-05-01 (session 28)
+Last updated: 2026-07-07 (session 47)
 Branch: `develop` (all feature branches merged)
 
 Full history of completed work: `claude/PROGRESS_ARCHIVE.md`
@@ -25,7 +25,8 @@ Future work recommendations: `claude/FUTURE_WORK.md`
 | Bug fixes | 7 | 7 | 0 |
 | Kinematic viscosity parallelisation | 4 | 4 | 0 |
 | Mode-2 test triage + isolated runner tooling | 4 | 4 | 0 |
-| **Total** | **209** | **201** | **8** |
+| Documentation overhaul (session 47) | 15 | 15 | 0 |
+| **Total** | **224** | **216** | **8** |
 
 ---
 
