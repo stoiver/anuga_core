@@ -17,13 +17,9 @@ or explored programmatically via ``anuga.SWW_plotter``.
    use_sww_gui
    use_domain_plotter
    use_sww_plotter
+   use_anuga_viewer
+   use_qgis
 
-.. seealso::
-
-   :ref:`advanced_visualisation`
-      The legacy ``anuga_viewer`` and QGIS integration.
-   
-   
 .. only:: html
 
 

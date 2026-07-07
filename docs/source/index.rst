@@ -20,10 +20,11 @@ It is now developed and maintained by a community of volunteers.
 .. note::
 
    The main documentation (**Contents**) covers the standard, single-process
-   workflow that most users need: install ANUGA, write a script, run it, and
-   view the results. Advanced topics live in the **Appendices** — parallel
+   workflow that most users need: install ANUGA, try an example, write a script
+   (or use the TOML scenario interface), run it, and view the results. Advanced
+   topics live in the **Appendices** — the developer and GPU installs, parallel
    simulation (OpenMP / MPI ``distribute``), compute modes and GPU offloading,
-   checkpointing, the developer install, and the TOML scenario interface.
+   and checkpointing.
 
 
 .. toctree::
@@ -34,6 +35,7 @@ It is now developed and maintained by a community of volunteers.
    installation/index
    examples/index
    setup_anuga_script/index
+   toml_scenario/index
    visualisation/index
    reference/index
    troubleshooting
@@ -43,13 +45,12 @@ It is now developed and maintained by a community of volunteers.
    :maxdepth: 2
    :caption: Appendices:
 
+   installation/install_anuga_developers
+   appendices/install_gpu
    parallel/index
    parallel/advanced
    appendices/compute_modes
-   installation/install_anuga_developers
-   toml_scenario/index
    appendices/advanced_script
-   appendices/advanced_visualisation
    mathematical_background
 
 
