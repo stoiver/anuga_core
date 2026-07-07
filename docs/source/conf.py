@@ -78,10 +78,6 @@ autosummary_generate = True
 # Geo_reference.epsg) is not documented twice (avoids a duplicate-object warning).
 napoleon_use_ivar = True
 
-# Notebook code cells declare the 'ipython3' Pygments lexer, which is only
-# available when IPython is installed (it is not on the RTD docs env). Highlight
-# code cells with the always-available 'python3' lexer instead.
-nbsphinx_codecell_lexer = 'python3'
 autosectionlabel_prefix_document = True
 
 # Suppress duplicate-label warnings from autosectionlabel on autodoc-generated
