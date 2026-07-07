@@ -941,9 +941,8 @@ class Quantity:
 
 
 
-        Exactly one of the arguments
-          numeric, quantity, function, filename
-        must be present.
+        Exactly one of the arguments ``numeric``, ``quantity``, ``function`` or
+        ``filename`` must be present.
         """
 
         from anuga.geospatial_data.geospatial_data import Geospatial_data
@@ -1249,15 +1248,16 @@ class Quantity:
                                  indices=None,
                                  use_cache=False,
                                  verbose=False):
-        """Set values for quantity using specified function
+        """Set values for quantity using specified function.
 
-        Input
-        f: x, y -> z Function where x, y and z are arrays
-        location: Where values are to be stored.
-                  Permissible options are: vertices, centroid,
-                  unique vertices
-                  Default is "vertices"
-        indices:
+        Input::
+
+            f: x, y -> z Function where x, y and z are arrays
+            location: Where values are to be stored.
+                      Permissible options are: vertices, centroid,
+                      unique vertices
+                      Default is "vertices"
+            indices:
         """
 
         # FIXME: Should check that function returns something sensible and
@@ -2287,11 +2287,12 @@ class Quantity:
         vertices 2.  This corresponds to the node coordinates obtained from the
         method general_mesh.get_vertex_coordinates()
 
-        Calling convention
-        if xy is True:
-           X, Y, A, V = get_vertex_values
-        else:
-           A, V = get_vertex_values
+        Calling convention::
+
+            if xy is True:
+                X, Y, A, V = get_vertex_values()
+            else:
+                A, V = get_vertex_values()
         """
 
         if smooth is None:
