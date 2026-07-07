@@ -5,13 +5,12 @@
 Setting up the Evolve loop
 ==========================
 
-Running a ANUGA model involves six basic steps:
+Running an ANUGA model involves five basic steps:
 
 * Creating a domain
 * Setting up the initial conditions
-* Settting up the boundary condition
-* Setting up any necessary stuctures (culverts etc)
-* Setting up any necessary operators (rainfall etc)
+* Setting up the boundary conditions
+* Setting up any operators and structures (rainfall, culverts, etc.)
 * Evolving the model
 
 Here we describe the last step, how to run (evolve) the model for a specified amount of time. 
@@ -19,7 +18,7 @@ Here we describe the last step, how to run (evolve) the model for a specified am
 Evolving the Model
 ------------------
 
-In addition to evolving the model, it would good to be able to interact with the evolving model. This 
+In addition to evolving the model, it would be good to be able to interact with the evolving model. This 
 is all provided by the :meth:`evolve <Domain.evolve>` method 
 of the :doc:`Domain <../setup_anuga_script/domain>` object. 
 
