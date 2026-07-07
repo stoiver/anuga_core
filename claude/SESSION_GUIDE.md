@@ -338,7 +338,49 @@ Findings:
 
 ---
 
-## Recent session summaries (sessions 21–46)
+## Recent session summaries (sessions 21–47)
+
+**Session 47 (2026-07-07):** Documentation overhaul — restructure, API
+cross-linking, meta-pages, and a warning-free Read the Docs build.
+- **Issue #32 "Make riverwalls transmissive."** Verified the `Cd_through`
+  submerged-orifice throughflow is already active in **both** compute modes:
+  legacy mode-1's `_openmp_compute_fluxes_central` delegates to the shared
+  `core_compute_fluxes_central` in `core_kernels.c` (no mode gating), so the
+  earlier "not in legacy" reading was wrong. Confirmed empirically (mode-1 and
+  mode-2 give bit-identical throughflow). Documented on the issue and here.
+- **Docs overhaul (PR #157).** Split into a standard-user **Contents** vs
+  advanced **Appendices** structure; added a landing quick-start, a
+  **Conventions & units** primer, and an evolve **Stability/blow-ups** section;
+  moved Parallelisation into Contents and TOML/ANUGA-Viewer/QGIS into the
+  standard sections; led the appendices with the developer + new **GPU install**
+  pages. Converted the narrative "Reference" blocks to compact autosummary tables
+  linking into the **API Reference** (expanded API consolidated there), and made
+  every class page's method summary link to per-method signatures
+  (`autodoc_default_options={'members':True}` + `sphinx.ext.napoleon`). Reframed
+  the **ANUGA Viewer** as the recommended fast viewer for large `.sww` (dropped
+  "legacy"). Content-review fixes (typos, heading levels, missing pip path,
+  smoke-test, quantity units). New **Citing**, **Contributing**, **Glossary**
+  meta-pages (surfacing `CITATION.cff`, `CONTRIBUTING.rst`, Apache-2.0).
+- **Docstring + tooling fixes.** Reformatted malformed-RST docstrings surfaced by
+  autodoc `members` (`Quantity`/`Domain` ×6 in #158, `internal_boundary_operator`
+  ×2 in #160). `install_anuga_nvc.sh` now builds into an already-activated conda
+  env if present (#158).
+- **Warning-free build (PRs #159, #161).** Fixed the local warnings —
+  `html_static_path` (`_static` dir) and the `Geo_reference.epsg` duplicate
+  (napoleon renders a class-docstring *Attribute* **and** the real property →
+  `napoleon_use_ivar = True`). Then **watched Read the Docs** (it builds
+  `develop`): it had surfaced 62 warnings the local build hid — 56 `ipython3`
+  Pygments-lexer (RTD lacks IPython → add `ipython` to `docs/requirements.txt`)
+  plus the operator docstrings. RTD `develop` now builds **clean** (only the
+  harmless MPI-less `Could not import mpi4py`). Added a Contributing "Building
+  the documentation" note on reproducing RTD locally (#162). **Lesson:** a
+  locally-installed IPython and `-D nbsphinx_execute=never` hid warnings RTD
+  shows — build docs from a clean `docs/requirements.txt` env.
+- **Branch policy (PR #163 + memory).** Recorded in `ROADMAP.md`: **do not merge
+  `develop` → `main` until the team cuts v4.0.0**; all work/syncs stay on
+  `develop`.
+- All merged to `anuga-community/develop` (PRs **#157–#163**, admin-merged by
+  number); RTD confirmed green.
 
 **Session 46 (2026-07-06):** Issue #33 (memory) documentation + measurement,
 plus follow-ups.
