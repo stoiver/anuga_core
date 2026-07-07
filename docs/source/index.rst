@@ -63,7 +63,9 @@ The sections below build this up step by step; new to ANUGA? Start with
    visualisation/index
    parallel/index
    reference/index
+   glossary
    troubleshooting
+   citing
    genindex
 
 .. toctree::
@@ -72,6 +74,7 @@ The sections below build this up step by step; new to ANUGA? Start with
 
    installation/install_anuga_developers
    appendices/install_gpu
+   appendices/contributing
    parallel/advanced
    appendices/compute_modes
    appendices/advanced_script
