@@ -198,8 +198,33 @@ DateTime: 1970-01-01 00:00:04+0000, delta t in [0.00863985, 0.00963487] (s), ste
 DateTime: 1970-01-01 00:00:05+0000, delta t in [0.00887345, 0.00990731] (s), steps=106 (0s)
 
 
-Note that the date is 1st Jan 1970, starting at time 0:00, incrementing by 1 sec and 
-the UTC offset is +0000 (ie the timezone is UTC). 
+Note that the date is 1st Jan 1970, starting at time 0:00, incrementing by 1 sec and
+the UTC offset is +0000 (ie the timezone is UTC).
+
+
+Stability and blow-ups
+----------------------
+
+ANUGA chooses the inner timestep automatically to satisfy the CFL stability
+condition, so a healthy run shows a roughly steady ``delta t`` and a similar
+number of ``steps`` per yieldstep (as in the examples above). Watch for these
+warning signs:
+
+* **``delta t`` collapsing** toward zero (with ``steps`` per yieldstep climbing) —
+  the solver is being forced into ever-smaller steps, usually by a very shallow
+  fast flow, a steep or rough bed, or a bad initial condition.
+* **``nan`` or ``inf`` appearing** in the output, or the run stalling — a blow-up.
+
+Common causes are an initial ``stage`` set below ``elevation`` over part of the
+domain, an over-steep boundary forcing, too little friction, or a mesh too
+coarse for the flow. To localise *where and when* trouble starts, call
+:meth:`~Domain.diagnose_timestep` from inside the evolve loop — it reports the
+cells driving the smallest timestep and scans for ``nan``/``inf``:
+
+>>> for t in domain.evolve(yieldstep=1.0, finaltime=10.0):
+>>>     domain.diagnose_timestep(threshold_dt=1.0e-4)
+
+See :doc:`../troubleshooting` for the full list of symptoms and fixes.
 
 
 

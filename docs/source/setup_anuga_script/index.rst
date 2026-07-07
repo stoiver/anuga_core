@@ -12,6 +12,7 @@ Writing an ANUGA script
    :maxdepth: 1
 
    domain
+   conventions
    flow_algorithms
    coordinate_reference
    initial_conditions

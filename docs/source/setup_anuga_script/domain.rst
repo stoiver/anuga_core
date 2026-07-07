@@ -21,9 +21,9 @@ a 10 by 10 mesh, with the bottom left corner at (0,0).
 
     domain = anuga.rectangular_cross_domain(10, 10)
 
-Check here for full documentation of the :func:`rectangular_cross_domain` function 
-and check the :doc:`../examples/script_simple_example`
-or :doc:`../examples/notebook_simple_example` for examples of how to use it.
+See the :func:`rectangular_cross_domain` API for the full argument list, and the
+:doc:`../examples/script_simple_example` or
+:doc:`../examples/notebook_simple_example` for worked examples.
 
 `create_domain_from_regions`
 ----------------------------
@@ -71,8 +71,8 @@ area of 0.2 m^2.
 
 
 
-Check here for full documentation of the :func:`create_domain_from_regions` function 
-and check the :doc:`../examples/notebook_create_domain_from_regions` for an example of how to use it.
+See the :func:`create_domain_from_regions` API for the full argument list, and the
+:doc:`../examples/notebook_create_domain_from_regions` for a worked example.
 
 
 .. seealso::

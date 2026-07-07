@@ -23,15 +23,13 @@ method to accommodate discontinuities in the solution and the bed.
 
 To set up a particular scenario the user specifies the geometry
 (bathymetry and topography), the initial water level (stage),
-boundary conditions such as tide, and any operators  that may
-drive the system such as rainfall, abstraction of water,  erosion, culverts
-See section :doc:`setup_anuga_script/operators` for details of operators and structures
+boundary conditions such as tide, and any operators that may
+drive the system such as rainfall, abstraction of water, erosion or culverts.
+See :doc:`setup_anuga_script/operators` for the operators and structures
 available in ANUGA.
 
-The built-in mesh generator, called :code:`anuga_pmesh_gui`, or 
-the procedure :code:`anuga.create_domain_from_regions`
-allows the user to set up the geometry
-of the problem and to identify boundary segments and
+The procedure :code:`anuga.create_domain_from_regions` lets the user set up the
+geometry of the problem from polygon regions and identify boundary segments and
 regions using symbolic tags.  These tags may then be used to set the
 actual boundary conditions and attributes for different regions
 (e.g. the Manning friction coefficient) for each simulation.
@@ -43,9 +41,12 @@ lifetime.  Computationally intensive components are written for
 efficiency in :code:`C` routines working directly with Python :code:`numpy`
 structures.
 
-The visualisation tool developed for ANUGA is based on
-OpenSceneGraph, an Open Source Software (OSS) component allowing high
-level interaction with sophisticated graphics primitives.
+ANUGA results are stored as ``.sww`` (NetCDF) files and can be explored with the
+built-in tools — the ``anuga_sww_gui`` viewer, the ``SWW_plotter`` and
+``Domain_plotter`` Python plotters, or by exporting to GIS such as QGIS.  A
+legacy OpenSceneGraph-based viewer (``anuga_viewer``) is also available.  See
+:doc:`visualisation/index` for the visualisation options.
+
 See :doc:`mathematical_background` for a full derivation of the governing
 equations, the finite volume discretisation, and the flux and slope limiting
 schemes used by ANUGA.
