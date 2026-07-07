@@ -5251,7 +5251,8 @@ class Domain(Generic_Domain):
         Returns
         -------
         dict
-            Keys:
+            Keys::
+
               time              relative simulation time
               current_timestep  self.timestep (last accepted global dt)
               cfl               self.CFL setting
@@ -5445,13 +5446,14 @@ class Domain(Generic_Domain):
     def compute_capabilities(self) -> dict:
         """Report which compute backends this build/run supports.
 
-        Returns a dict with:
-            'gpu_offload'     : bool — process can offload mode-2 to a GPU device
+        Returns a dict with::
+
+            'gpu_offload'     : bool - process can offload mode-2 to a GPU device
                                        (build supports it, device present, offload
-                                       not disabled); see :func:`set_gpu_offload`
-            'num_gpu_devices' : int  — number of offload devices visible
-            'mpi'             : bool — gpu_ext built with C MPI ('unified' parallel ok)
-            'modes'           : list — per-domain modes available ('unified' only
+                                       not disabled); see set_gpu_offload()
+            'num_gpu_devices' : int  - number of offload devices visible
+            'mpi'             : bool - gpu_ext built with C MPI ('unified' parallel ok)
+            'modes'           : list - per-domain modes available ('unified' only
                                        when the gpu_ext extension is importable)
         """
         try:
@@ -5468,16 +5470,6 @@ class Domain(Generic_Domain):
     def set_compute_mode(self, mode: str = 'unified', verbose: bool = False) -> None:
         """Select this domain's compute mode (per-domain).
 
-        Parameters
-        ----------
-        mode : {'legacy', 'unified'}
-            - ``'legacy'`` — mode 1: the ``sw_domain_openmp_ext`` solver with
-              serial-Python fractional-step operators.
-            - ``'unified'`` — mode 2: the unified ``sw_domain_gpu_ext`` C kernels
-              (solver and operators). Runs CPU-multicore by default; offloads to
-              a GPU only when GPU offload is enabled process-wide via
-              :func:`anuga.set_gpu_offload` on a GPU-capable build.
-
         This is a per-domain setting — different domains in one script may use
         different modes. Whether 'unified' uses a GPU is a separate, process-wide
         decision (see :func:`set_gpu_offload`), because OpenMP target offload is
@@ -5488,6 +5480,16 @@ class Domain(Generic_Domain):
         with a rank-0 warning. The active mode is recorded in
         ``self.compute_mode``; the original request in
         ``self.requested_compute_mode``.
+
+        Parameters
+        ----------
+        mode : {'legacy', 'unified'}
+            - ``'legacy'`` — mode 1: the ``sw_domain_openmp_ext`` solver with
+              serial-Python fractional-step operators.
+            - ``'unified'`` — mode 2: the unified ``sw_domain_gpu_ext`` C kernels
+              (solver and operators). Runs CPU-multicore by default; offloads to
+              a GPU only when GPU offload is enabled process-wide via
+              :func:`anuga.set_gpu_offload` on a GPU-capable build.
         """
         import warnings
 
