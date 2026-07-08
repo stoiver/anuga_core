@@ -2131,6 +2131,85 @@ class Test_TimestepTimeAdvance(unittest.TestCase):
         self._assert_modes_agree('DE_ader2')
 
 
+@pytest.mark.skipif(not gpu_available(), reason=_gpu_skip_reason())
+class Test_GPU_TimeBoundarySubstep(unittest.TestCase):
+    """Mode-2 with a time-varying boundary must match mode-1 for multi-substep
+    algorithms (DE1/DE2).
+
+    The single-call C RK loop (_evolve_one_rk*_step_c) sets Python-evaluated
+    boundaries (Time/File/wave/Flather) on the device once per step, so it would
+    reuse that step-start value across every RK substep — whereas mode-1 calls
+    update_boundary() before each substep. For a time-varying boundary that is an
+    O(dt) boundary-forcing error on RK2/RK3 (~4e-3 m in a rising-tide test).
+
+    Fix (option B): a domain with any Python-evaluated boundary is routed to the
+    Python-orchestrated GPU loop, which refreshes the boundary per substep and so
+    bit-matches mode-1. This test guards that routing; reverting it makes DE1/DE2
+    disagree by O(1e-3).
+    """
+
+    def _make_domain(self, name, algorithm):
+        import math
+        d = rectangular_cross_domain(12, 8, len1=150., len2=100.)
+        d.set_flow_algorithm(algorithm)
+        d.set_low_froude(0)
+        d.set_name(name)
+        d.set_datadir(tempfile.mkdtemp())
+        d.store = False
+        d.set_quantity('elevation', lambda x, y: (x / 150.0) * 2.0 - 1.0)
+        d.set_quantity('friction', 0.03)
+        d.set_quantity('stage', 1.5)                       # fully wet (isolates the boundary)
+
+        def tide(t):
+            return [0.4 * math.sin(0.3 * t), 0.0, 0.0]     # time-varying stage
+
+        Br = Reflective_boundary(d)
+        d.set_boundary({'left': anuga.Time_boundary(domain=d, function=tide),
+                        'right': Br, 'top': Br, 'bottom': Br})
+        return d
+
+    def _run(self, algorithm, mode):
+        d = self._make_domain(f'{algorithm}_m{mode}', algorithm)
+        d.set_multiprocessor_mode(mode)
+        for t in d.evolve(yieldstep=1.0, finaltime=6.0):
+            pass
+        return d.quantities['stage'].centroid_values.copy()
+
+    def _assert_agree(self, algorithm):
+        s1 = self._run(algorithm, 1)
+        s2 = self._run(algorithm, 2)
+        np.testing.assert_allclose(
+            s2, s1, atol=1e-6, rtol=0.0,
+            err_msg=f'{algorithm}: mode-2 Time_boundary diverges from mode-1 '
+                    f'(max diff {np.abs(s2 - s1).max():.3e})')
+
+    def test_DE1_rk2_time_boundary(self):
+        self._assert_agree('DE1')
+
+    def test_DE2_rk3_time_boundary(self):
+        self._assert_agree('DE2')
+
+    def test_routing_time_boundary_off_c_loop(self):
+        """A Time_boundary must be flagged so the multi-substep dispatch avoids
+        the single-call C RK loop."""
+        d = self._make_domain('route_time', 'DE1')
+        d.set_multiprocessor_mode(2)
+        self.assertTrue(d._has_python_evaluated_gpu_boundaries())
+
+    def test_routing_reflective_keeps_c_loop(self):
+        """Reflective-only domains keep the fast C RK loop."""
+        d = rectangular_cross_domain(8, 8, len1=100., len2=100.)
+        d.set_flow_algorithm('DE1')
+        d.set_name('route_refl')
+        d.set_datadir(tempfile.mkdtemp())
+        d.store = False
+        d.set_quantity('elevation', 0.0)
+        d.set_quantity('stage', 1.0)
+        d.set_boundary({b: Reflective_boundary(d) for b in d.get_boundary_tags()})
+        d.set_multiprocessor_mode(2)
+        self.assertFalse(d._has_python_evaluated_gpu_boundaries())
+
+
 class Test_GPU_NonGPUBoundaryFallback(unittest.TestCase):
     """Mode 2 must fall back to host boundary evaluation for boundary types the
     C loop cannot evaluate on the device — for EVERY flow algorithm, including
