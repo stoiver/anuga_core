@@ -3126,6 +3126,38 @@ class Domain(Generic_Domain):
         pass
 
 
+    # Boundary types whose values are produced by a Python callback each step
+    # (Time/File/Field, transmissive-set-stage, and the wave/Flather boundaries).
+    # The single-call C RK loop (_evolve_one_rk*_step_c) sets these on the device
+    # once per step, so with a multi-substep method (RK2/RK3) they are NOT
+    # refreshed between substeps — unlike the legacy (mode-1) solver, which calls
+    # update_boundary() before every substep. For time-varying boundaries this
+    # gives an O(dt) boundary-forcing error (see issue #170). Until the
+    # C RK loop evaluates them per substep, domains using such boundaries are
+    # routed through the Python-orchestrated GPU loop, which refreshes them each
+    # substep and so bit-matches mode-1 (at negligible GPU cost, ~<=4%).
+    _PYTHON_EVALUATED_GPU_BOUNDARY_TYPES = frozenset((
+        'Time_boundary', 'File_boundary', 'Field_boundary',
+        'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
+        'Absorbing_wave_boundary', 'Characteristic_wave_boundary',
+        'Flather_external_stage_zero_velocity_boundary',
+    ))
+
+    def _has_python_evaluated_gpu_boundaries(self):
+        """True if any boundary's value is set from a Python callback each step.
+
+        Single-substep methods (Euler, ADER2) are unaffected — they impose the
+        boundary once per step in both paths — so this is only consulted by the
+        multi-substep RK2/RK3 dispatch.
+        """
+        bmap = getattr(self, 'boundary_map', None) or {}
+        return any(
+            B is not None
+            and B.__class__.__name__ in self._PYTHON_EVALUATED_GPU_BOUNDARY_TYPES
+            for B in bmap.values()
+        )
+
+
     def evolve_one_euler_step(self, yieldstep, finaltime):
         """One Euler Time Step
         Q^{n+1} = E(h) Q^n
@@ -3167,9 +3199,12 @@ class Domain(Generic_Domain):
         vertices and edges
         """
 
-        # GPU mode: use C RK loop (faster) or Python-orchestrated GPU loop
+        # GPU mode: use C RK loop (faster) or Python-orchestrated GPU loop.
+        # Fall back to the Python-orchestrated loop when a Python-evaluated
+        # (possibly time-varying) boundary is present, so it is refreshed every
+        # substep and matches mode-1 (the C RK loop only sets it once per step).
         if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
-            if self.use_c_rk_loop:
+            if self.use_c_rk_loop and not self._has_python_evaluated_gpu_boundaries():
                 self._evolve_one_rk2_step_c(yieldstep, finaltime)
             else:
                 self._evolve_one_rk2_step_gpu(yieldstep, finaltime)
@@ -4578,9 +4613,12 @@ class Domain(Generic_Domain):
         vertices and edges
         """
 
-        # GPU mode: use C RK loop (faster) or Python-orchestrated GPU loop
+        # GPU mode: use C RK loop (faster) or Python-orchestrated GPU loop.
+        # Fall back to the Python-orchestrated loop when a Python-evaluated
+        # (possibly time-varying) boundary is present, so it is refreshed every
+        # substep and matches mode-1 (the C RK loop only sets it once per step).
         if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
-            if self.use_c_rk_loop:
+            if self.use_c_rk_loop and not self._has_python_evaluated_gpu_boundaries():
                 self._evolve_one_rk3_step_c(yieldstep, finaltime)
             else:
                 self._evolve_one_rk3_step_gpu(yieldstep, finaltime)
