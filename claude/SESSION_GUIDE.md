@@ -340,7 +340,7 @@ Findings:
 
 ## Recent session summaries (sessions 21–47)
 
-**Session 47 (2026-07-07):** Documentation overhaul — restructure, API
+**Session 47 (2026-07-07/08):** Documentation overhaul — restructure, API
 cross-linking, meta-pages, and a warning-free Read the Docs build.
 - **Issue #32 "Make riverwalls transmissive."** Verified the `Cd_through`
   submerged-orifice throughflow is already active in **both** compute modes:
@@ -379,8 +379,30 @@ cross-linking, meta-pages, and a warning-free Read the Docs build.
 - **Branch policy (PR #163 + memory).** Recorded in `ROADMAP.md`: **do not merge
   `develop` → `main` until the team cuts v4.0.0**; all work/syncs stay on
   `develop`.
-- All merged to `anuga-community/develop` (PRs **#157–#163**, admin-merged by
-  number); RTD confirmed green.
+- **PDF structure + Conventions polish.** Noted the Unix-epoch time origin
+  (seconds from 00:00:00 UTC 1 Jan 1970; `set_starttime` via `datetime`/
+  `zoneinfo`) in the Conventions page (#166). Fixed the PDF putting every
+  section under a single "Quick start" chapter — the `.. toctree::` sat *inside*
+  the Quick-start section on the landing page, so moved Quick start to its own
+  `quickstart.rst` (first in the toctree); verified against the live RTD PDF that
+  Quick start and the other sections are now sibling chapters (#167).
+- **Versioning diagnosis + wheel-repair cherry-pick (2026-07-08).**
+  `git describe` on `develop` showed `1.3.1-4093-g…`, but the package version is
+  correct — `anuga.__version__ = 3.3.6.dev767+g…` (`_git_version.py` uses
+  `git describe --tags`). Two causes: the `3.x` tags are **lightweight**, so a
+  plain `git describe` skips them and falls back to the old **annotated** `1.3.1`
+  (`git describe --tags` → `3.3.6-…`); and `3.3.7` is a release tagged on `main`
+  **not reachable from `develop`**. That 3.3.7 release had exactly one commit
+  `develop` lacked — `e4700a7b` *"Repair wheels on all platforms so they are
+  self-contained"* (delocate/delvewheel/auditwheel so mac/win/linux wheels are
+  self-contained) — **cherry-picked into `develop`** (`014451da`; pushed **direct
+  to `anuga-community/develop`** as an authorised one-off, no PR). Recorded a
+  **tagging convention** in `ROADMAP.md` (PR #168): future release tags must be
+  **annotated**, bare version, no `v` prefix (`git tag -a 3.3.8 -m "ANUGA 3.3.8"`)
+  so plain `git describe` is correct.
+- All merged to `anuga-community/develop` (PRs **#157–#168**, admin-merged by
+  number, except the one-off direct cherry-pick `014451da`); RTD `develop` HTML
+  **and PDF** confirmed clean.
 
 **Session 46 (2026-07-06):** Issue #33 (memory) documentation + measurement,
 plus follow-ups.
