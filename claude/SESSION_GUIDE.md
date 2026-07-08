@@ -400,7 +400,24 @@ cross-linking, meta-pages, and a warning-free Read the Docs build.
   **tagging convention** in `ROADMAP.md` (PR #168): future release tags must be
   **annotated**, bare version, no `v` prefix (`git tag -a 3.3.8 -m "ANUGA 3.3.8"`)
   so plain `git describe` is correct.
-- All merged to `anuga-community/develop` (PRs **#157–#168**, admin-merged by
+- **nvc GPU rebuild + GPU sanity check.** Rebuilt via `tools/install_anuga_nvc.sh`
+  (active-env path from #158) → `3.3.6.dev772+g08d4c10b`, 65/65 isolated GPU
+  tests, and a dam-break sanity sim (GPU offload engaged, mass conserved to ~1e-13,
+  GPU vs CPU-legacy ~4e-7).
+- **GPU `Time_boundary` mode-1/mode-2 divergence — root-caused and fixed
+  (PR #171, issue #170).** A rising-tide flood diverged ~4e-3 between mode-1 and
+  mode-2. Isolated it: **single-substep** algorithms (DE0, DE_ader2) agree to
+  machine precision, **multi-substep** (DE1/DE2) diverge — and only with
+  **Python-evaluated boundaries** (Time/File/wave/Flather); reflective/steady are
+  exact. Cause: the single-call **C RK loop** (`_evolve_one_rk*_step_c`) sets
+  time-varying boundaries on the device **once per step**, reusing that value for
+  every RK substep, whereas mode-1 calls `update_boundary()` **per substep**
+  (an O(dt) boundary-forcing error). Fix (**option B**): route domains with any
+  Python-evaluated boundary to the Python-orchestrated GPU loop (refreshes per
+  substep → bit-matches mode-1; benchmarked GPU cost ≤~4%, within noise). Added
+  `Test_GPU_TimeBoundarySubstep`; 69/69 GPU tests green. Filed **issue #170** for
+  the proper per-substep C-loop fix (option A).
+- All merged to `anuga-community/develop` (PRs **#157–#171**, admin-merged by
   number, except the one-off direct cherry-pick `014451da`); RTD `develop` HTML
   **and PDF** confirmed clean.
 
