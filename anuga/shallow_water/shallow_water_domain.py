@@ -4481,7 +4481,10 @@ class Domain(Generic_Domain):
         # Final: Q^{n+1} = (2*Q^(3) + Q^n) / 3
         saxpy3_conserved_quantities_gpu(gpu_dom, 2.0, 1.0, 3.0)
 
-        self.set_relative_time(initial_relative_time + self.timestep)
+        # Restore the pre-step time so fractional-step operators evaluate forcing
+        # at t (not t+dt); see evolve_one_rk3_step. The evolve loop advances
+        # relative_time to t+dt after apply_fractional_steps().
+        self.set_relative_time(initial_relative_time)
 
         # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
         if self.ghost_layer_width < 4:
@@ -4604,8 +4607,9 @@ class Domain(Generic_Domain):
         # apply_forcing=1 enables Manning friction on GPU
         self.timestep = evolve_one_rk3_step_gpu(gpu_dom, max_timestep, 1)
 
-        # Update internal time tracking
-        self.set_relative_time(self.get_relative_time() + self.timestep)
+        # Do NOT advance relative_time here — the evolve loop advances it to t+dt
+        # after apply_fractional_steps(), so fractional-step operators evaluate
+        # forcing at the pre-step time t (matching the rk2 C loop, DE0, DE_ader2).
 
         # Record the CFL-constrained step (pre yield/final cap), matching legacy
         # update_timestep(), rather than the yield-limited step actually taken.
@@ -4749,8 +4753,13 @@ class Domain(Generic_Domain):
         # So do this instead!
         self.saxpy_conserved_quantities(2.0, 1.0, 3.0)
 
-        # Set new time
-        self.set_relative_time(initial_relative_time + self.timestep)
+        # Restore the pre-step time so fractional-step operators (applied by the
+        # evolve loop before it advances relative_time to t+dt) evaluate forcing
+        # at t, not t+dt — consistent with rk2 (DE1), DE0 and DE_ader2. The
+        # mid-step set_relative_time() calls above advance time for the substep
+        # boundary evaluations; the evolve loop sets the final t+dt after
+        # apply_fractional_steps().
+        self.set_relative_time(initial_relative_time)
 
 
     def backup_conserved_quantities(self):
