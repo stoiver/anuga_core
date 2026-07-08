@@ -2210,6 +2210,61 @@ class Test_GPU_TimeBoundarySubstep(unittest.TestCase):
         self.assertFalse(d._has_python_evaluated_gpu_boundaries())
 
 
+@pytest.mark.skipif(not gpu_available(), reason=_gpu_skip_reason())
+class Test_GPU_OperatorTimeAlignment(unittest.TestCase):
+    """A time-varying fractional-step operator must be evaluated at the same
+    time in mode-1 and mode-2, for every flow algorithm.
+
+    Fractional-step operators run in the evolve loop *before* it advances
+    relative_time to t+dt, so they should see the pre-step time t. DE0, DE2 and
+    DE_ader2 (and the mode-2 GPU loops) do; legacy mode-1 **rk2 (DE1)** advanced
+    relative_time mid-step (for the substep-2 boundary) and never restored it, so
+    its operators evaluated forcing at t+dt — "one step too far" — diverging from
+    mode-2 by ~4e-4 for a time-varying rate. The mode-1 rk2 body now restores the
+    pre-step time; this test asserts mode-1 == mode-2 for all algorithms (revert
+    the fix and DE1 fails). Note: no prior test exercised a time-varying operator.
+    """
+
+    def _run(self, algorithm, mode):
+        import math
+        d = rectangular_cross_domain(24, 16, len1=100., len2=100.)
+        d.set_flow_algorithm(algorithm)
+        d.set_low_froude(0)
+        d.set_name(f'op_{algorithm}_m{mode}')
+        d.set_datadir(tempfile.mkdtemp())
+        d.store = False
+        d.set_quantity('elevation', 0.0)
+        d.set_quantity('friction', 0.03)
+        d.set_quantity('stage', 0.2)
+        anuga.Rate_operator(d, rate=lambda t: 0.001 * (1.0 + 0.9 * math.sin(0.6 * t)))
+        Br = Reflective_boundary(d)
+        d.set_boundary({b: Br for b in d.get_boundary_tags()})
+        d.set_multiprocessor_mode(mode)
+        for t in d.evolve(yieldstep=0.5, finaltime=3.0):
+            pass
+        return d.quantities['stage'].centroid_values.copy()
+
+    def _assert_agree(self, algorithm):
+        s1 = self._run(algorithm, 1)
+        s2 = self._run(algorithm, 2)
+        np.testing.assert_allclose(
+            s2, s1, atol=1e-8, rtol=0.0,
+            err_msg=f'{algorithm}: time-varying operator mode-1/mode-2 mismatch '
+                    f'(max {np.abs(s2 - s1).max():.3e})')
+
+    def test_DE0(self):
+        self._assert_agree('DE0')
+
+    def test_DE1(self):
+        self._assert_agree('DE1')
+
+    def test_DE2(self):
+        self._assert_agree('DE2')
+
+    def test_DE_ader2(self):
+        self._assert_agree('DE_ader2')
+
+
 class Test_GPU_NonGPUBoundaryFallback(unittest.TestCase):
     """Mode 2 must fall back to host boundary evaluation for boundary types the
     C loop cannot evaluate on the device — for EVERY flow algorithm, including
