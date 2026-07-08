@@ -417,7 +417,23 @@ cross-linking, meta-pages, and a warning-free Read the Docs build.
   substep → bit-matches mode-1; benchmarked GPU cost ≤~4%, within noise). Added
   `Test_GPU_TimeBoundarySubstep`; 69/69 GPU tests green. Filed **issue #170** for
   the proper per-substep C-loop fix (option A).
-- All merged to `anuga-community/develop` (PRs **#157–#171**, admin-merged by
+- **Fractional-step operator/structure timing (PRs #174, #175, #177; issue #176).**
+  Checked operators/structures for the yieldstep-vs-inner-step concern — they are
+  fine (applied **every inner timestep** in both modes: 13/13 and 46/46 evals ≫
+  yieldsteps). But found a related **operator-evaluation-time** bug: fractional-step
+  operators (applied by the evolve loop *before* it advances time to t+dt) should
+  see the pre-step time **t**, and DE0/DE_ader2 do — but **DE1 (rk2)** and **DE2
+  (rk3)** left `relative_time` advanced, so operators evaluated forcing at t+dt
+  ("one step too far"), ~4e-4 for a time-varying rate. For **DE1** only mode-1 was
+  affected (diverged from mode-2), fixed by restoring the pre-step time in the
+  mode-1 rk2 body (**PR #174**). For **DE2** *both* modes advanced (mode-1 body +
+  mode-2 C **and** GPU loops), so it stayed self-consistent and the cross-mode
+  check missed it — fixed all three rk3 paths (**PR #177**, closes #176). Now all
+  four algorithms evaluate operators at t in both modes. Guards: `test_operator_timing.py`
+  (CPU, mode-1 — runs on any build) + `Test_GPU_OperatorTimeAlignment` (cross-mode);
+  the GPU-only guard was split out to a CPU test in **PR #175**. No prior test used
+  a time-varying operator (coverage gap). CPU suite 2610 pass, GPU 73/73.
+- All merged to `anuga-community/develop` (PRs **#157–#177**, admin-merged by
   number, except the one-off direct cherry-pick `014451da`); RTD `develop` HTML
   **and PDF** confirmed clean.
 
