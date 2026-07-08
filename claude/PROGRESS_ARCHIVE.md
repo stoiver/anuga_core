@@ -361,3 +361,30 @@ Merged to `anuga-community/develop` as PRs **#157–#164** (admin-merged by numb
 - [x] **D47.13** Read the Docs `develop` build made **clean**: it had surfaced 62 warnings the local build hid — 56 `ipython3` Pygments-lexer (RTD lacks IPython → added `ipython` to `docs/requirements.txt`, PR #161) + the operator docstrings. Verified via RTD build 33476518 (only the harmless MPI-less `Could not import mpi4py` remains).
 - [x] **D47.14** Added a Contributing **"Building the documentation"** note: reproduce the RTD build from a clean `docs/requirements.txt` env; a stray IPython or `nbsphinx_execute=never` can hide warnings RTD shows (PR #162).
 - [x] **D47.15** Recorded the **branch policy** in `ROADMAP.md` (and memory): do not merge `develop` → `main` until the team cuts v4.0.0 (PR #163). Session 47 summary added to `SESSION_GUIDE.md` (PR #164).
+
+## GPU mode-2 Time_boundary substep fix ✅ Complete (option B; session 47, 2026-07-08)
+
+- [x] **GB.1** Root-caused a mode-1 vs mode-2 divergence with time-varying
+  boundaries. A rising-tide (`Time_boundary`) flood diverged **~4.3e-3 m** (GPU
+  vs CPU-legacy); reflective/steady boundaries agree to ~1e-12–1e-15. Isolated
+  it by RK substep count: **DE0 / DE_ader2** (single substep) match to machine
+  precision; **DE1 (rk2) / DE2 (rk3)** diverge — and only with **Python-evaluated
+  boundaries** (Time/File/Field, wave, Flather, transmissive-set-stage). Cause:
+  the single-call **C RK loop** (`_evolve_one_rk*_step_c`) sets those boundaries
+  on the device **once per timestep**, reusing that value for every RK substep,
+  whereas mode-1 calls `update_boundary()` **before each substep** — an O(dt)
+  boundary-forcing error. Verified by call-time instrumentation (mode-1 evaluates
+  the boundary 2× per rk2 step, mode-2 1×) and by `use_c_rk_loop=False`
+  (Python-orchestrated loop) → 1e-15.
+- [x] **GB.2** Fix (**option B**, PR #171): `_has_python_evaluated_gpu_boundaries()`
+  gates the mode-2 RK2/RK3 dispatch — domains with any Python-evaluated boundary
+  route to the Python-orchestrated GPU loop (refreshes the boundary per substep →
+  bit-matches mode-1, ~4e-3 → ~1e-15). Reflective/steady keep the fast C loop;
+  single-substep DE0/DE_ader2 untouched. Benchmarked GPU cost **≤ ~4%** (within
+  noise, 14k–640k triangles).
+- [x] **GB.3** Regression test `Test_GPU_TimeBoundarySubstep` in
+  `test_DE_gpu_omp.py` (DE1/DE2 mode-1==mode-2 to atol 1e-6 + routing checks);
+  full GPU file green (69/69) via the isolated runner. No rebuild needed
+  (pure-Python change).
+- [ ] **Option A** — proper per-substep evaluation inside the C RK loop: tracked
+  as **issue #170** (see Remaining / Deferred in `PROGRESS.md`).

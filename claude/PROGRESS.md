@@ -1,6 +1,6 @@
 # ANUGA Code & Documentation Improvement Progress
 
-Last updated: 2026-07-07 (session 47)
+Last updated: 2026-07-08 (session 47)
 Branch: `develop` (all feature branches merged)
 
 Full history of completed work: `claude/PROGRESS_ARCHIVE.md`
@@ -26,7 +26,8 @@ Future work recommendations: `claude/FUTURE_WORK.md`
 | Kinematic viscosity parallelisation | 4 | 4 | 0 |
 | Mode-2 test triage + isolated runner tooling | 4 | 4 | 0 |
 | Documentation overhaul (session 47) | 15 | 15 | 0 |
-| **Total** | **224** | **216** | **8** |
+| GPU mode-2 Time_boundary fix | 2 | 1 | 1 |
+| **Total** | **226** | **217** | **9** |
 
 ---
 
@@ -45,6 +46,14 @@ Future work recommendations: `claude/FUTURE_WORK.md`
 - [ ] **G4.1** Gordon Bell metrics — per-kernel timing (not just totals), roofline model comparison, peak theoretical FLOP/s
 - [ ] **G4.2** Physical benchmark validation — Thacker paraboloid, dam break (Ritter), tide gauge comparison in GPU mode
 - [ ] **G4.3** Multi-node strong scaling — 20 M triangles, 1→64 GPUs; demonstrate ~50× runtime reduction
+
+### GPU correctness
+
+- [ ] **Time_boundary substep — option A** (issue #170): evaluate time-varying
+  boundaries per RK substep *inside* the single-call C RK loop (pass per-substep
+  values to `evolve_one_rk*_step_gpu`), so the fast C loop is correct for
+  time-varying boundaries and the option-B routing can be removed. Option B
+  (route such domains to the Python-orchestrated loop) is done (PR #171).
 
 ---
 
