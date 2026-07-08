@@ -7,12 +7,13 @@ extension required) — unlike the mode-1-vs-mode-2 checks in
 
 Background: fractional-step operators are applied by the evolve loop *before* it
 advances ``relative_time`` from t to t+dt, so they should evaluate forcing at the
-pre-step time ``t``. A latent bug left the mode-1 rk2 (DE1) body with
-``relative_time`` advanced to t+dt, so DE1's operators evaluated forcing "one step
-too far" (t+dt) — unlike DE0/DE_ader2 (and the mode-2 GPU loops), and diverging
-from mode-2 by ~4e-4 for a time-varying rate. No prior test used a time-varying
-operator, so the bug was invisible. Reverting the mode-1 rk2 fix makes
-``test_rk2_operator_evaluated_at_pre_step_time`` fail.
+pre-step time ``t``. Latent bugs left the rk2 (DE1) and rk3 (DE2) paths with
+``relative_time`` advanced to t+dt, so their operators evaluated forcing "one step
+too far" (t+dt) — unlike DE0/DE_ader2. For DE1 only mode-1 was affected (it
+diverged from mode-2 by ~4e-4); for DE2 *both* modes advanced (mode-1 body,
+mode-2 C and GPU loops), so it stayed self-consistent and the cross-mode check
+never caught it. No prior test used a time-varying operator. Reverting either fix
+makes the corresponding test below fail.
 """
 
 import tempfile
@@ -56,6 +57,20 @@ def test_rk2_operator_evaluated_at_pre_step_time():
     mx, ft = _max_operator_eval_time('DE1')
     assert mx < ft, (
         'DE1 evaluated a time-varying operator at t=%r (>= finaltime=%r); '
+        'expected the pre-step time t (< finaltime).' % (mx, ft))
+
+
+def test_rk3_operator_evaluated_at_pre_step_time():
+    """DE2 (rk3) must evaluate a time-varying operator at the pre-step time t.
+
+    All three rk3 paths (mode-1 body, mode-2 C loop, mode-2 GPU loop) previously
+    left relative_time advanced to t+dt, so operators evaluated forcing one step
+    too far in *both* modes (self-consistent, so uncaught). Reverting the rk3
+    restore-time fix makes this fail (max eval lands on finaltime).
+    """
+    mx, ft = _max_operator_eval_time('DE2')
+    assert mx < ft, (
+        'DE2 evaluated a time-varying operator at t=%r (>= finaltime=%r); '
         'expected the pre-step time t (< finaltime).' % (mx, ft))
 
 
