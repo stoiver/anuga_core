@@ -96,8 +96,15 @@ Defined in :mod:`anuga.config` and used unless you override them:
 Time
 ----
 
-Simulation time is in **seconds**. A run starts at ``t = 0`` by default (set a
-real-world start with :meth:`~Domain.set_starttime`), and ``finaltime`` /
-``duration`` in :meth:`~Domain.evolve` are likewise in seconds. The internal
-timestep is chosen automatically to satisfy the CFL stability condition and is
-generally much smaller than the ``yieldstep`` — see :doc:`evolve`.
+Simulation time is in **seconds**, measured from the Unix epoch —
+**00:00:00 UTC on 1 January 1970** — so the default start of ``t = 0``
+corresponds to that instant. Set a real-world start with
+:meth:`~Domain.set_starttime`, which accepts either a number of seconds or a
+Python ``datetime`` object; use the standard library ``datetime`` and
+``zoneinfo`` modules to build a timezone-aware start time (and
+:meth:`~Domain.set_timezone` to control how times are reported).
+
+``finaltime`` / ``duration`` in :meth:`~Domain.evolve` are likewise in seconds.
+The internal timestep is chosen automatically to satisfy the CFL stability
+condition and is generally much smaller than the ``yieldstep`` — see
+:doc:`evolve`.
