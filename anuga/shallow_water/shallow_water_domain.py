@@ -3210,6 +3210,14 @@ class Domain(Generic_Domain):
                 self._evolve_one_rk2_step_gpu(yieldstep, finaltime)
             return
 
+        # Fractional-step operators (applied by the evolve loop *after* this step,
+        # before it advances relative_time to t+dt) must see the pre-step time t —
+        # consistent with DE0/DE2/DE_ader2 and the mode-2 GPU loops. The mid-step
+        # set_relative_time() below advances time to t+dt for the substep-2
+        # boundary evaluation, so capture t here and restore it at the end;
+        # otherwise time-varying operators evaluate forcing "one step too far".
+        initial_relative_time = self.get_relative_time()
+
         # Save initial initial conserved quantities values
         self.backup_conserved_quantities() # has C, ported to GPU
 
@@ -3277,6 +3285,13 @@ class Domain(Generic_Domain):
 
         # Combine steps
         self.saxpy_conserved_quantities(0.5, 0.5) # has C, not ported
+
+        # Restore the pre-step time so fractional-step operators evaluate forcing
+        # at t (not t+dt); the evolve loop advances relative_time to t+dt after
+        # apply_fractional_steps(). Fixes an operator-timing mismatch where DE1
+        # evaluated time-varying operators one step too far, unlike DE0/DE2 and
+        # the mode-2 GPU loops.
+        self.set_relative_time(initial_relative_time)
 
     def evolve_one_ader2_step(self, yieldstep, finaltime):
         """One ADER-2 timestep using the local Cauchy-Kovalewski predictor.
