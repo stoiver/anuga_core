@@ -27,7 +27,8 @@ Future work recommendations: `claude/FUTURE_WORK.md`
 | Mode-2 test triage + isolated runner tooling | 4 | 4 | 0 |
 | Documentation overhaul (session 47) | 15 | 15 | 0 |
 | GPU mode-2 Time_boundary fix | 2 | 1 | 1 |
-| **Total** | **226** | **217** | **9** |
+| Operator-timing fixes (DE1 rk2, DE2 rk3) | 2 | 2 | 0 |
+| **Total** | **228** | **219** | **9** |
 
 ---
 

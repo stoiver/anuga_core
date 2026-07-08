@@ -388,3 +388,35 @@ Merged to `anuga-community/develop` as PRs **#157–#164** (admin-merged by numb
   (pure-Python change).
 - [ ] **Option A** — proper per-substep evaluation inside the C RK loop: tracked
   as **issue #170** (see Remaining / Deferred in `PROGRESS.md`).
+
+## Fractional-step operator evaluation timing ✅ Complete (session 47, 2026-07-08)
+
+Fractional-step operators are applied by the evolve loop *before* it advances
+`relative_time` from t to t+dt, so they should evaluate forcing at the pre-step
+time **t** (the mode-2 code documents that t+dt is "one step too far"). First
+confirmed operators/structures are applied **every inner timestep** in both modes
+(13/13 and 46/46 evals ≫ yieldsteps — not a yieldstep-only issue). Then found and
+fixed an operator-*time* bug in the RK schemes:
+
+- [x] **OT.1 — DE1 (rk2), PR #174.** The mode-1 rk2 body advanced `relative_time`
+  mid-step (for the substep-2 boundary) and never restored it, so its operators
+  evaluated forcing at **t+dt**, diverging from mode-2 (which uses t) by ~4e-4 for
+  a time-varying `Rate_operator`/`Inlet`. Restore the pre-step time at the end of
+  the mode-1 rk2 body → DE1 matches DE0/DE2/DE_ader2 and mode-2 (0.0). Added
+  `Test_GPU_OperatorTimeAlignment` (cross-mode, all algorithms).
+- [x] **OT.2 — CPU regression test, PR #175.** The cross-mode guard is GPU-only
+  (skips on standard builds), so added `test_operator_timing.py` — a mode-1-only
+  test that runs anywhere: a time-varying operator must be evaluated at t
+  (last inner step's eval < finaltime). Reverting a fix fails it. Registered in
+  `tests/meson.build`.
+- [x] **OT.3 — DE2 (rk3), PR #177 (closes #176).** Subtler than DE1: **all three**
+  rk3 paths left time advanced (mode-1 body, mode-2 C loop, mode-2 GPU loop), so
+  DE2 was post-step in *both* modes — self-consistent (mode-1 == mode-2), so the
+  cross-mode check missed it. Restore the pre-step time in the mode-1 body and
+  mode-2 GPU loop; drop the advance in the mode-2 C loop (matching the rk2 C loop).
+  DE2 now evaluates operators at t in both modes. Added
+  `test_rk3_operator_evaluated_at_pre_step_time`.
+
+Result: all four flow algorithms evaluate fractional-step operators at the
+pre-step time t, mode-1 == mode-2. No prior test used a time-varying operator, so
+the bug was invisible (coverage gap now closed). CPU suite 2610 pass, GPU 73/73.
