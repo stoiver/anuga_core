@@ -406,16 +406,22 @@ int gpu_domain_init(struct gpu_domain *GD, MPI_Comm comm, int rank, int nprocs) 
     GD->culvert_ops.initialized = 0;
     GD->culvert_ops.mapped = 0;
     GD->culvert_ops.total_inlet_triangles = 0;
+    GD->culvert_ops.scratch_enquiry_indices = NULL;
     GD->culvert_ops.scratch_stage = NULL;
     GD->culvert_ops.scratch_xmom = NULL;
     GD->culvert_ops.scratch_ymom = NULL;
     GD->culvert_ops.scratch_elev = NULL;
     GD->culvert_ops.scratch_inlet_indices = NULL;
     GD->culvert_ops.scratch_inlet_areas = NULL;
-    GD->culvert_ops.scratch_inlet_stage = NULL;
-    GD->culvert_ops.scratch_inlet_xmom = NULL;
-    GD->culvert_ops.scratch_inlet_ymom = NULL;
-    GD->culvert_ops.scratch_inlet_elev = NULL;
+    GD->culvert_ops.scratch_slot_start = NULL;
+    GD->culvert_ops.scratch_slot_count = NULL;
+    GD->culvert_ops.scratch_avg_stage = NULL;
+    GD->culvert_ops.scratch_avg_depth = NULL;
+    GD->culvert_ops.scratch_avg_xmom = NULL;
+    GD->culvert_ops.scratch_avg_ymom = NULL;
+    GD->culvert_ops.scratch_slot_depth = NULL;
+    GD->culvert_ops.scratch_slot_xmom = NULL;
+    GD->culvert_ops.scratch_slot_ymom = NULL;
 
     // Initialize FLOP counters (Gordon Bell profiling)
     gpu_flop_counters_init(GD);
