@@ -53,6 +53,7 @@ It is now developed and maintained by a community of volunteers.
    appendices/contributing
    parallel/advanced
    appendices/compute_modes
+   appendices/profiling_gpu
    appendices/advanced_script
    mathematical_background
 
