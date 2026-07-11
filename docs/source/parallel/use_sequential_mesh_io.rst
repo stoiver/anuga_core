@@ -148,6 +148,26 @@ NETCDF4 file.  It can be inspected with ``ncdump -h``.
      - Ghost-receive communication pattern.
 
 
+Parallel writing for large partition counts
+-------------------------------------------
+
+Like ``sequential_distribute_dump``, the per-rank NetCDF files are written in a
+serial loop by default, which dominates the preprocessing time at very large
+partition counts.  Pass ``num_workers > 1`` (on a POSIX/fork platform) to write
+the files in parallel with a pool of worker processes that share the
+partitioned mesh copy-on-write:
+
+.. code-block:: python
+
+   anuga.sequential_mesh_dump(domain, numprocs=18400,
+                              partition_dir='Partitions', num_workers=32)
+
+The serial default (``num_workers=1``) releases each rank's memory as it goes;
+the parallel path keeps the whole partitioned mesh resident for the pool's
+duration.  Choose ``num_workers`` to match the preprocessing node's write
+bandwidth and RAM.
+
+
 Preprocessing example
 ---------------------
 
