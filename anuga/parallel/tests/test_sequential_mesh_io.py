@@ -201,6 +201,70 @@ class TestSequentialMeshDump(unittest.TestCase):
         domain.set_boundary(boundary_map)
         return domain
 
+    @pytest.mark.skipif(not hasattr(os, 'fork'),
+                        reason='parallel dump uses a fork process pool (POSIX only)')
+    def test_parallel_dump_matches_serial(self):
+        """num_workers>1 (fork pool) produces the same NetCDF files as serial."""
+        import netCDF4
+
+        def dump(nw):
+            d = tempfile.mkdtemp()
+            anuga.sequential_mesh_dump(_make_domain(8, 6), numprocs=5,
+                                       partition_dir=d, num_workers=nw)
+            return d
+
+        serial_dir = dump(1)
+        parallel_dir = dump(4)
+
+        ncs = sorted(f for f in os.listdir(serial_dir) if f.endswith('.nc'))
+        self.assertEqual(ncs, sorted(f for f in os.listdir(parallel_dir)
+                                     if f.endswith('.nc')))
+        self.assertEqual(len(ncs), 5)
+        for f in ncs:
+            with netCDF4.Dataset(os.path.join(serial_dir, f)) as a, \
+                 netCDF4.Dataset(os.path.join(parallel_dir, f)) as b:
+                self.assertEqual(set(a.variables), set(b.variables))
+                for v in a.variables:
+                    num.testing.assert_array_equal(
+                        num.asarray(a.variables[v][:]),
+                        num.asarray(b.variables[v][:]),
+                        err_msg=f'{f}:{v} differs between serial and parallel dump')
+
+    @pytest.mark.skipif(not hasattr(os, 'fork'),
+                        reason='parallel dump uses a fork process pool (POSIX only)')
+    def test_parallel_dump_domain_matches_serial(self):
+        """sequential_distribute_dump: num_workers>1 writes the same partition
+        data (.npy) as the serial path, and the pickles unpickle cleanly."""
+        import filecmp
+        import pickle
+        from anuga.parallel.sequential_distribute import sequential_distribute_dump
+
+        def dump(nw):
+            d = tempfile.mkdtemp()
+            sequential_distribute_dump(_make_domain(8, 6), numprocs=5,
+                                       partition_dir=d, num_workers=nw)
+            return d
+
+        s = dump(1)
+        p = dump(4)
+
+        # .npy files (points, triangles, every quantity) embed no paths -> the
+        # numerical partition data must be byte-identical.
+        npys = sorted(f for f in os.listdir(s) if f.endswith('.npy'))
+        self.assertEqual(npys, sorted(f for f in os.listdir(p) if f.endswith('.npy')))
+        self.assertTrue(npys, 'expected per-quantity .npy files')
+        match, mismatch, errors = filecmp.cmpfiles(s, p, npys, shallow=False)
+        self.assertEqual((mismatch, errors), ([], []),
+                         f'.npy differ serial vs parallel: {mismatch} {errors}')
+
+        # Same set of pickles, and each unpickles.
+        pks = sorted(f for f in os.listdir(s) if f.endswith('.pickle'))
+        self.assertEqual(pks, sorted(f for f in os.listdir(p) if f.endswith('.pickle')))
+        self.assertEqual(len(pks), 5)
+        for f in pks:
+            with open(os.path.join(p, f), 'rb') as fh:
+                pickle.load(fh)
+
     def test_roundtrip_node_count(self):
         """Loaded domain has correct full-triangle and full-node counts."""
         import netCDF4

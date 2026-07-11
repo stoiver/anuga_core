@@ -217,13 +217,122 @@ class Sequential_distribute:
 
 
 
-def sequential_distribute_dump(domain, numprocs=1, verbose=False, partition_dir='.', debug=False, parameters = None):
+# --------------------------------------------------------------------------
+# Opt-in parallel partition dump
+#
+# The per-partition write loops in sequential_distribute_dump /
+# sequential_mesh_dump are embarrassingly parallel: extract_submesh only *reads*
+# the shared submesh (indexing submesh[key][p]), and each partition writes its
+# own files.  When num_workers > 1 (POSIX only) we fork a ProcessPoolExecutor;
+# the large submesh is shared copy-on-write via the child processes rather than
+# pickled, so peak memory stays close to the serial path's post-build peak
+# (the serial path additionally releases each rank as it goes — the parallel
+# path keeps the whole submesh live for the pool's duration, the one trade-off).
+# --------------------------------------------------------------------------
+
+# Set by the parent immediately before the worker pool is forked; inherited
+# copy-on-write by each worker (never pickled).  Cleared afterwards.
+_DUMP_DOMAIN_STATE = None
+_DUMP_MESH_STATE = None
+
+
+def _run_partition_dump_pool(worker, numprocs, num_workers, verbose, label):
+    """Fork a ProcessPoolExecutor and map ``worker`` over ``range(numprocs)``.
+
+    The caller must set the module-global state the worker reads *before*
+    calling this, so the forked workers inherit it.  gc is frozen across the
+    pool so the large inherited structures are neither rescanned nor
+    copy-on-write dirtied by generational collections in the workers.
+    """
+    import concurrent.futures
+    import multiprocessing
+    import warnings
+    import gc
+
+    actual_workers = max(1, min(num_workers, numprocs))
+    # Heavy tasks (~seconds each); a small oversubscribed chunk keeps dispatch
+    # overhead low while still load-balancing across workers.
+    chunksize = max(1, numprocs // (actual_workers * 8))
+    # fork so the submesh is shared copy-on-write (POSIX only; the caller only
+    # selects this path when os.fork exists).  Workers do no MPI.
+    mp_ctx = multiprocessing.get_context('fork')
+
+    if verbose:
+        print('%s: writing %d partitions with %d workers' % (label, numprocs, actual_workers))
+
+    gc.freeze()  # move the big inherited objects out of gc's scan set
+    try:
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                'ignore',
+                message=r'.*use of fork\(\) may lead to deadlocks.*',
+                category=DeprecationWarning)
+            with concurrent.futures.ProcessPoolExecutor(
+                    max_workers=actual_workers, mp_context=mp_ctx) as executor:
+                for _ in executor.map(worker, range(numprocs), chunksize=chunksize):
+                    pass
+    finally:
+        gc.unfreeze()
+
+
+def _use_parallel_dump(num_workers, numprocs):
+    """True if the parallel (fork) dump path should be used."""
+    import os
+    return (num_workers is not None and num_workers > 1
+            and numprocs > 1 and hasattr(os, 'fork'))
+
+
+def _dump_domain_partition(partition, p, numprocs, partition_dir):
+    """Extract and write partition ``p`` of a distributed domain.
+
+    Reads only ``partition`` (no mutation), so it is safe to call concurrently
+    from fork-inherited worker processes.
+    """
+    import pickle
+    from os.path import join
+
+    tostore = partition.extract_submesh(p)
+
+    pickle_name = join(partition_dir,
+                       partition.domain_name + '_P%g_%g.pickle' % (numprocs, p))
+    lst = list(tostore)
+
+    # Write points and triangles to their own files
+    num.save(pickle_name + ".np1", tostore[1])  # num.save appends .npy
+    lst[1] = pickle_name + ".np1.npy"
+    num.save(pickle_name + ".np2", tostore[2])
+    lst[2] = pickle_name + ".np2.npy"
+
+    # Write each quantity to its own file
+    for k in tostore[4]:
+        num.save(pickle_name + ".np4." + k, num.asarray(tostore[4][k]))
+        lst[4][k] = pickle_name + ".np4." + k + ".npy"
+
+    with open(pickle_name, 'wb') as f:
+        pickle.dump(tuple(lst), f, protocol=pickle.HIGHEST_PROTOCOL)
+
+
+def _dump_domain_worker(p):
+    partition, numprocs, partition_dir = _DUMP_DOMAIN_STATE
+    _dump_domain_partition(partition, p, numprocs, partition_dir)
+    return p
+
+
+def sequential_distribute_dump(domain, numprocs=1, verbose=False, partition_dir='.',
+                               debug=False, parameters=None, num_workers=1):
     """ Distribute the domain, create parallel domain and pickle result
+
+    num_workers : int, optional
+        If > 1 (and > 1 partition, on a POSIX/fork platform), write the
+        partition files in parallel using a fork-based process pool that shares
+        the partitioned mesh copy-on-write.  Default 1 (serial, memory-frugal:
+        each rank is released as it is written).  On very large partition counts
+        the serial write dominates end-to-end time; this parallelises it at the
+        cost of keeping the whole submesh live for the dump's duration.
     """
 
     import gc
-    import pickle
-    from os.path import join
+    import os
 
     partition = Sequential_distribute(domain, verbose, debug, parameters)
 
@@ -232,48 +341,30 @@ def sequential_distribute_dump(domain, numprocs=1, verbose=False, partition_dir=
 
     # Make sure the partition_dir exists
     if partition_dir != '.':
-        import os
-        import errno
-        try:
-            os.makedirs(partition_dir, exist_ok=True)
-        except OSError as exception:
-            if exception.errno != errno.EEXIST:
-                raise
+        os.makedirs(partition_dir, exist_ok=True)
 
     if verbose: print('sequential_distribute_dump: Dumping partitions to %s'%partition_dir)
 
-    for p in range(0, numprocs):
+    if _use_parallel_dump(num_workers, numprocs):
+        global _DUMP_DOMAIN_STATE
+        _DUMP_DOMAIN_STATE = (partition, numprocs, partition_dir)
+        try:
+            _run_partition_dump_pool(_dump_domain_worker, numprocs, num_workers,
+                                     verbose, 'sequential_distribute_dump')
+        finally:
+            _DUMP_DOMAIN_STATE = None
+    else:
+        for p in range(0, numprocs):
+            _dump_domain_partition(partition, p, numprocs, partition_dir)
 
-        tostore = partition.extract_submesh(p)
+            # Release this rank's submesh data so memory can be reclaimed before
+            # processing the next rank.  Without this, all P subdomains' arrays
+            # remain live throughout the entire dump loop.
+            partition._release_submesh_rank(p)
 
-        pickle_name = partition.domain_name + '_P%g_%g.pickle'% (numprocs,p)
-        pickle_name = join(partition_dir,pickle_name)
-
-        lst = list(tostore)
-
-        # Write points and triangles to their own files
-        num.save(pickle_name+".np1",tostore[1]) # num.save appends .npy to filename
-        lst[1] = pickle_name+".np1.npy"
-        num.save(pickle_name+".np2",tostore[2])
-        lst[2] = pickle_name+".np2.npy"
-
-        # Write each quantity to its own file
-        for k in tostore[4]:
-            num.save(pickle_name+".np4."+k, num.asarray(tostore[4][k]))
-            lst[4][k] = pickle_name+".np4."+k+".npy"
-
-        with open(pickle_name, 'wb') as f:
-            pickle.dump(tuple(lst), f, protocol=pickle.HIGHEST_PROTOCOL)
-
-        # Release this rank's submesh data so memory can be reclaimed before
-        # processing the next rank.  Without this, all P subdomains' arrays
-        # remain live throughout the entire dump loop.
-        partition._release_submesh_rank(p)
-        del tostore, lst
-
-        # Run GC every rank — cyclic references inside submesh dicts are not
-        # freed by refcounting alone and must be collected explicitly.
-        gc.collect()
+            # Run GC every rank — cyclic references inside submesh dicts are not
+            # freed by refcounting alone and must be collected explicitly.
+            gc.collect()
 
     gc.collect()
     return
@@ -463,8 +554,45 @@ def _release_mesh_submesh_rank(submesh, p):
             lst[p] = None
 
 
+def _dump_mesh_partition(submesh, triangles_per_proc, p2s_map, p, numprocs, name,
+                         partition_dir, geo_ref, n_global_tri, n_global_nodes):
+    """Extract and write partition ``p`` of a mesh (one NetCDF file).
+
+    Reads only ``submesh`` (no mutation), so it is safe to call concurrently
+    from fork-inherited worker processes.
+    """
+    import os
+
+    points, vertices, boundary, _quantities, ghost_recv_dict, \
+        full_send_dict, _tri_map, _node_map, tri_l2g, node_l2g, \
+        ghost_layer_width = \
+        extract_submesh(submesh, triangles_per_proc, p2s_map, p)
+
+    number_of_full_triangles = len(submesh['full_triangles'][p])
+    number_of_full_nodes     = len(submesh['full_nodes'][p])
+
+    fname = os.path.join(partition_dir, f'{name}_mesh_P{numprocs}_{p}.nc')
+
+    _write_mesh_partition(
+        fname, p, numprocs,
+        points, vertices, boundary,
+        ghost_recv_dict, full_send_dict,
+        tri_l2g, node_l2g,
+        number_of_full_triangles, number_of_full_nodes,
+        n_global_tri, n_global_nodes,
+        ghost_layer_width, geo_ref)
+
+
+def _dump_mesh_worker(p):
+    (submesh, triangles_per_proc, p2s_map, numprocs, name, partition_dir,
+     geo_ref, n_global_tri, n_global_nodes) = _DUMP_MESH_STATE
+    _dump_mesh_partition(submesh, triangles_per_proc, p2s_map, p, numprocs, name,
+                         partition_dir, geo_ref, n_global_tri, n_global_nodes)
+    return p
+
+
 def sequential_mesh_dump(domain, numprocs, partition_dir='.', name=None,
-                         verbose=False, parameters=None):
+                         verbose=False, parameters=None, num_workers=1):
     """Partition a domain mesh and write one NetCDF4 file per rank.
 
     Saves mesh topology and halo structure only — no quantities.
@@ -493,6 +621,13 @@ def sequential_mesh_dump(domain, numprocs, partition_dir='.', name=None,
         Recognised keys include ``'partition_scheme'`` (``'metis'``,
         ``'morton'``, or ``'hilbert'``), ``'ghost_layer_width'``, and
         ``'cache_dir'``.
+    num_workers : int, optional
+        If > 1 (and > 1 partition, on a POSIX/fork platform), write the per-rank
+        NetCDF files in parallel using a fork-based process pool that shares the
+        partitioned mesh copy-on-write.  Default 1 (serial; each rank released as
+        it is written).  Parallelising the write is the main end-to-end speed-up
+        for very large partition counts, at the cost of keeping the whole submesh
+        live for the dump's duration.
     """
     import gc
     import os
@@ -529,33 +664,28 @@ def sequential_mesh_dump(domain, numprocs, partition_dir='.', name=None,
                   f'{len(submesh["full_triangles"][p])} full triangles, '
                   f'{M} ghost triangles, {N} ghost nodes')
 
-    for p in range(numprocs):
-        points, vertices, boundary, _quantities, ghost_recv_dict, \
-            full_send_dict, _tri_map, _node_map, tri_l2g, node_l2g, \
-            ghost_layer_width = \
-            extract_submesh(submesh, triangles_per_proc, p2s_map, p)
+    if _use_parallel_dump(num_workers, numprocs):
+        global _DUMP_MESH_STATE
+        _DUMP_MESH_STATE = (submesh, triangles_per_proc, p2s_map, numprocs, name,
+                            partition_dir, geo_ref, number_of_global_triangles,
+                            number_of_global_nodes)
+        try:
+            _run_partition_dump_pool(_dump_mesh_worker, numprocs, num_workers,
+                                     verbose, 'sequential_mesh_dump')
+        finally:
+            _DUMP_MESH_STATE = None
+    else:
+        for p in range(numprocs):
+            if verbose:
+                print(f'sequential_mesh_dump: writing '
+                      f'{os.path.join(partition_dir, f"{name}_mesh_P{numprocs}_{p}.nc")}')
 
-        number_of_full_triangles = len(submesh['full_triangles'][p])
-        number_of_full_nodes     = len(submesh['full_nodes'][p])
+            _dump_mesh_partition(submesh, triangles_per_proc, p2s_map, p, numprocs,
+                                 name, partition_dir, geo_ref,
+                                 number_of_global_triangles, number_of_global_nodes)
 
-        fname = os.path.join(partition_dir,
-                             f'{name}_mesh_P{numprocs}_{p}.nc')
-        if verbose:
-            print(f'sequential_mesh_dump: writing {fname}')
-
-        _write_mesh_partition(
-            fname, p, numprocs,
-            points, vertices, boundary,
-            ghost_recv_dict, full_send_dict,
-            tri_l2g, node_l2g,
-            number_of_full_triangles, number_of_full_nodes,
-            number_of_global_triangles, number_of_global_nodes,
-            ghost_layer_width, geo_ref)
-
-        _release_mesh_submesh_rank(submesh, p)
-        del points, vertices, boundary, tri_l2g, node_l2g
-        del ghost_recv_dict, full_send_dict
-        gc.collect()
+            _release_mesh_submesh_rank(submesh, p)
+            gc.collect()
 
     gc.collect()
 
