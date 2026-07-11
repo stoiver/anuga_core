@@ -338,7 +338,45 @@ Findings:
 
 ---
 
-## Recent session summaries (sessions 21–47)
+## Recent session summaries (sessions 21–48)
+
+**Session 48 (2026-07-11):** Culvert/weir mode-1 vs mode-2 reporting parity, two
+real physics bugs, and the **3.3.8 patch release**. A user reported the parallel
+(MPI) culvert/trap logs differed from sequential. Root-caused and fixed on
+`develop` (branch `fix/culvert-parallel-mode2-reporting`, PRs pushed direct to
+both develops, four commits `d55e1984`→`467255f0`):
+- **Parallel structure logging** — parallel `.log` files were missing the
+  `accumulated_flow` column (computed on master, never written) and mis-numbered
+  operators (counter advanced only on the master proc, so a culvert and trap with
+  different masters collided). Fixed: write the column + header, advance the
+  counter on every rank in lockstep (participants in the ctor, non-participants
+  in the factory `return None` branch), and drop the `_P<rank>` filename suffix so
+  names match sequential. Verified np=4 and np=16 bit-identical to serial.
+- **Mode-2 (GPU) stats write-back** — in mode 2 the batched `GPUCulvertManager`
+  runs the Boyd/weir physics in C and skips the Python `__call__`, so the logs
+  were **all zeros**. Added per-culvert report fields to `culvert_state`
+  (C `gpu_culvert_operator.c`), a `gpu_culverts_get_report` getter, and a
+  write-back in `apply_all` mirroring mode-1's accumulation.
+- **boyd_pipe critical-depth bug** (real): the GPU C translation **divided** by
+  `(bf·d)^2.5` where the Python reference **multiplies** → flow_area/velocity ~8%
+  off (discharge matched only because it was inlet-controlled; outlet-controlled
+  flow would corrupt discharge too). Fixed both dcrit pairs; added a boyd-pipe
+  cross-mode regression test (the existing one only used boyd_box).
+- **weir critical-depth gravity** (real, issue #181, closed): the Python
+  `weir_orifice_trapezoid_function` hardcoded **9.81** in the trapezoid
+  critical-depth Newton solve, vs the C using `domain.g` (9.8) → ~0.034% velocity
+  offset in partly-full flow. Fixed to derive `g` from `domain.g` on both sides
+  (Python grows a `g` arg, discharge routines pass `self.domain.g`); note this
+  shifts mode-1 weir results ~0.034%. Guard test added.
+- **3.3.8 release.** Cherry-picked the two **legacy** (non-GPU) fixes — parallel
+  logging + weir gravity — to `main` via **PR #182** (GPU-only pipe/mode-2 fixes
+  omitted; that machinery isn't on 3.3.x). Also in 3.3.8 since 3.3.7: SWW
+  large-t store crash (#149), osx-64 wheels (#142), checkout 6→7 (#146). Tagged
+  **annotated `3.3.8`** on the merge commit (bare version, no `v`, per the
+  convention), published the GitHub Release → PyPI (21 files, trusted OIDC);
+  conda-forge follows via feedstock bot.
+- **Gotcha (memory):** MPI parallel + mode-2 needs `#ranks == #GPUs` or it hangs/
+  garbles — validate GPU mode-2 in serial on a 1-GPU box.
 
 **Session 47 (2026-07-07/08):** Documentation overhaul — restructure, API
 cross-linking, meta-pages, and a warning-free Read the Docs build.
