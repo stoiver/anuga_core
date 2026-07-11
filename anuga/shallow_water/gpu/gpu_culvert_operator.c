@@ -1297,6 +1297,15 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
         struct culvert_state *st = &CO->state[c];
         struct culvert_result *r = &results[c];
 
+        // Reset per-step reporting stats; they stay zero on ranks / states that
+        // don't compute a discharge (non-master, closed, dry). Filled in below
+        // and in Phase 3, then read back by the Python logger.
+        st->report_gain = 0.0;
+        st->report_discharge = 0.0;
+        st->report_velocity = 0.0;
+        st->report_driving_energy = 0.0;
+        st->report_delta_total_energy = 0.0;
+
         // Non-master ranks skip computation for cross-boundary culverts
         if (!ci->is_local && myrank != ci->master_proc) {
             r->Q = 0.0;
@@ -1351,6 +1360,10 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
             delta_total_energy = -st->smooth_delta_total_energy;
         }
 
+        // Report the (absolute) smoothed delta total energy, matching mode-1's
+        // self.delta_total_energy.
+        st->report_delta_total_energy = delta_total_energy;
+
         // Only calculate if there's water at inflow
         double inflow_depth, inflow_vh, inflow_te, inflow_se;
         compute_enquiry_values(inflow_data, p, r->inflow_idx,
@@ -1397,6 +1410,11 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
                 r->barrel_velocity = p->max_velocity;
                 r->Q = r->flow_area * r->barrel_velocity;
             }
+
+            // Report instantaneous driving energy and barrel velocity
+            // (matching mode-1's self.driving_energy / self.velocity).
+            st->report_driving_energy = driving_energy;
+            st->report_velocity = r->barrel_velocity;
         } else {
             r->Q = 0.0;
             r->barrel_velocity = 0.0;
@@ -1413,6 +1431,7 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
         struct culvert_indices *ci = &CO->indices[c];
         struct culvert_params *p = &CO->params[c];
         struct culvert_result *r = &results[c];
+        struct culvert_state *st = &CO->state[c];
         struct culvert_transfer *t = &transfers[c];
 
         // Non-master ranks: will receive transfer data via MPI
@@ -1453,6 +1472,11 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
             new_inflow_depth = old_inflow_depth - timestep * r->Q / inflow_area;
             timestep_star = timestep;
         }
+
+        // Report instantaneous discharge and the volume gained this step,
+        // matching mode-1: gain = Q*timestep_star, discharge = gain/timestep.
+        st->report_gain = r->Q * timestep_star;
+        st->report_discharge = (timestep > 0.0) ? (r->Q * timestep_star / timestep) : 0.0;
 
         double new_inflow_xmom, new_inflow_ymom;
         if (p->use_old_momentum_method) {
@@ -1532,4 +1556,19 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
     // ----------------------------------------------------------------
     gpu_culvert_scatter(GD, transfers);
     NVTX_POP();
+}
+
+// Read back a culvert's per-step reporting stats. See gpu_domain.h.
+int gpu_culverts_get_report(struct gpu_domain *GD, int culvert_id, double *out) {
+    struct culvert_operators *CO = &GD->culvert_ops;
+    if (culvert_id < 0 || culvert_id >= CO->num_culverts) {
+        return -1;
+    }
+    struct culvert_state *st = &CO->state[culvert_id];
+    out[0] = st->report_gain;
+    out[1] = st->report_discharge;
+    out[2] = st->report_velocity;
+    out[3] = st->report_driving_energy;
+    out[4] = st->report_delta_total_energy;
+    return 0;
 }

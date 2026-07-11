@@ -366,6 +366,7 @@ cdef extern from "gpu_domain.h" nogil:
     void gpu_culverts_finalize_all(gpu_domain *GD)
     void gpu_culverts_map(gpu_domain *GD)
     void gpu_culverts_apply_all(gpu_domain *GD, double timestep)
+    int gpu_culverts_get_report(gpu_domain *GD, int culvert_id, double *out)
 
     # Max-quantities operator
     int  gpu_max_quantities_init(gpu_domain *GD, int n, double velocity_zero_height)
@@ -2383,6 +2384,22 @@ def apply_all_culvert_operators(GPUDomain gpu_dom, double timestep):
     Only 2 GPU sync points regardless of number of culverts.
     """
     gpu_culverts_apply_all(&gpu_dom.GD, timestep)
+
+
+def get_culvert_report_stats(GPUDomain gpu_dom, int culvert_id):
+    """Read back a culvert's per-step reporting stats as a tuple
+    ``(gain, discharge, velocity, driving_energy, delta_total_energy)``.
+
+    Values are non-zero only on the proc that computed the discharge (the
+    culvert's master proc); other procs get zeros. Used by GPUCulvertManager to
+    mirror the C-computed stats onto the Python operator objects so mode-2
+    structure ``.log`` files match mode-1.
+    """
+    cdef double out[5]
+    cdef int rc = gpu_culverts_get_report(&gpu_dom.GD, culvert_id, out)
+    if rc != 0:
+        return (0.0, 0.0, 0.0, 0.0, 0.0)
+    return (out[0], out[1], out[2], out[3], out[4])
 
 
 # ============================================================================

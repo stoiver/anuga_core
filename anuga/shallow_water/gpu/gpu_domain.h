@@ -293,6 +293,17 @@ struct culvert_indices {
 struct culvert_state {
     double smooth_delta_total_energy;
     double smooth_Q;
+
+    // Reporting stats (host-side), refreshed every apply_all on the proc that
+    // computes the discharge (the master proc; zero on non-master / dry /
+    // closed). Read back by the Python structure logger so mode-2 (unified /
+    // GPU) .log files carry the same columns as mode-1. See
+    // gpu_culverts_get_report().
+    double report_gain;               // Q * timestep_star this step   [m^3]
+    double report_discharge;          // instantaneous discharge       [m^3/s]
+    double report_velocity;           // barrel velocity               [m/s]
+    double report_driving_energy;     // inflow driving energy         [m]
+    double report_delta_total_energy; // |smoothed delta total energy| [m]
 };
 
 // Culvert manager (lives inside gpu_domain)
@@ -694,5 +705,10 @@ void gpu_culvert_finalize(struct gpu_domain *GD, int culvert_id);
 void gpu_culverts_finalize_all(struct gpu_domain *GD);
 void gpu_culverts_map(struct gpu_domain *GD);
 void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep);
+// Read back a culvert's per-step reporting stats into out[5] =
+// {gain, discharge, velocity, driving_energy, delta_total_energy}. Returns 0 on
+// success, -1 if culvert_id is out of range. Values are non-zero only on the
+// proc that computed the discharge (the master proc).
+int gpu_culverts_get_report(struct gpu_domain *GD, int culvert_id, double *out);
 
 #endif // GPU_DOMAIN_H
