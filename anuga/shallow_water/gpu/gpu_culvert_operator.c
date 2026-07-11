@@ -263,6 +263,9 @@ static double trapezoid_critical_depth(double Q, double bf_barrels_w,
         double Tc = bf_barrels_w + z12 * dcrit;
         double Ac = 0.5 * dcrit * (bf_barrels_w + Tc);
         if (Tc < 1.0e-12 || Ac < 1.0e-12) break;
+        // Uses the domain gravity g (culvert_params.g <- domain.g). The Python
+        // reference weir_orifice_trapezoid_function now derives g the same way
+        // (from domain.g), so the two match for any g (e.g. non-Earth).
         double fc  = pow(Ac, 1.5) / sqrt(Tc) - Q / sqrt(g);
         double ffc = -0.5 * pow(Ac, 1.5) * z12 / pow(Tc, 1.5)
                      + 1.5 * sqrt(Ac) * sqrt(Tc);

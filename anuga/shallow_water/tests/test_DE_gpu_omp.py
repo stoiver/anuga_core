@@ -1368,11 +1368,13 @@ class Test_GPU_Culvert(unittest.TestCase):
 class Test_GPU_WeirTrapezoid(unittest.TestCase):
     """Tests for Weir_orifice_trapezoid_operator in GPU mode."""
 
-    def _create_weir_domain(self, name, z1=0.0, z2=0.0):
+    def _create_weir_domain(self, name, z1=0.0, z2=0.0, height=0.8):
         """Two-compartment domain connected by a trapezoidal weir/orifice culvert.
 
-        Water starts on the left (x < 100 m). The culvert (1.0 m wide × 0.8 m high,
-        side slopes z1/z2) provides the only flow path.
+        Water starts on the left (x < 100 m). The culvert (1.0 m wide, `height`
+        high, side slopes z1/z2) provides the only flow path. A tall `height`
+        keeps the culvert flowing partly full (open-channel critical depth) so
+        the flow_area is set by the critical-depth solve.
         """
         from anuga.structures.weir_orifice_trapezoid_operator import Weir_orifice_trapezoid_operator
         domain = rectangular_cross_domain(20, 10, len1=200., len2=100.)
@@ -1391,7 +1393,7 @@ class Test_GPU_WeirTrapezoid(unittest.TestCase):
 
         Weir_orifice_trapezoid_operator(domain,
                                         end_points=[[90., 50.], [110., 50.]],
-                                        height=0.8, width=1.0,
+                                        height=height, width=1.0,
                                         z1=z1, z2=z2,
                                         apron=5., manning=0.013,
                                         enquiry_gap=5., verbose=False)
@@ -1421,6 +1423,53 @@ class Test_GPU_WeirTrapezoid(unittest.TestCase):
         np.testing.assert_allclose(
             gpu_stage, cpu_stage, rtol=0, atol=0.02,
             err_msg='Weir trapezoid 5s: stage mismatch between mode=1 and mode=2')
+
+    def test_weir_trapezoid_cpu_gpu_velocity_match(self):
+        """Weir/orifice trapezoid: reported barrel velocity agrees between
+        mode=1 and mode=2.
+
+        Regression guard for a gravity-constant mismatch in the trapezoid
+        critical-depth Newton solve: the Python reference used to hardcode 9.81
+        there (inconsistent with the domain g of 9.8 used by the mode-2 C
+        kernel), leaving the mode-2 flow_area ~0.034% high and the reported
+        velocity ~0.034% low -- a small constant offset the coarse stage check
+        (test_weir_trapezoid_cpu_gpu_match) does not catch. Both paths now derive
+        g from domain.g. A trapezoidal section (z1=z2=1) exercises the Newton
+        solve.
+        """
+        from anuga.structures.weir_orifice_trapezoid_operator import Weir_orifice_trapezoid_operator
+
+        def weir_op(domain):
+            return next(o for o in domain.fractional_step_operators
+                        if isinstance(o, Weir_orifice_trapezoid_operator))
+
+        # Tall culvert (height=3.0) so it flows partly full: the flow_area is
+        # then set by the critical-depth solve, which is where the g mismatch
+        # bites. A short/full culvert would use the full section and hide it.
+        cpu_domain = self._create_weir_domain('wtv_cpu', z1=1.0, z2=1.0, height=3.0)
+        cpu_domain.set_multiprocessor_mode(1)
+        for _ in cpu_domain.evolve(yieldstep=1.0, finaltime=3.0):
+            pass
+        cpu_op = weir_op(cpu_domain)
+
+        gpu_domain = self._create_weir_domain('wtv_gpu', z1=1.0, z2=1.0, height=3.0)
+        gpu_domain.set_multiprocessor_mode(2)
+        for _ in gpu_domain.evolve(yieldstep=1.0, finaltime=3.0):
+            pass
+        gpu_op = weir_op(gpu_domain)
+
+        self.assertGreater(cpu_op.velocity, 0.05,
+                           'weir should be flowing in the test window')
+        # The g-mismatch bug is a ~0.034% constant velocity offset; keep the
+        # tolerance well below that yet far above the ~1e-5 fixed residual.
+        self.assertAlmostEqual(
+            gpu_op.velocity, cpu_op.velocity,
+            delta=1e-4 * cpu_op.velocity,
+            msg='weir barrel velocity: mode=1 vs mode=2')
+        self.assertAlmostEqual(
+            gpu_op.discharge, cpu_op.discharge,
+            delta=1e-4 * abs(cpu_op.discharge) + 1e-9,
+            msg='weir discharge: mode=1 vs mode=2')
 
     def test_weir_trapezoid_volume_conservation(self):
         """Weir trapezoid: total water volume is conserved in GPU mode."""
