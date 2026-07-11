@@ -341,8 +341,35 @@ def _dump_domain_worker(p):
 def sequential_distribute_dump(domain, numprocs=1, verbose=False, partition_dir='.',
                                debug=False, parameters=None, num_workers=1,
                                single_file=True):
-    """ Distribute the domain, create parallel domain and pickle result
+    """Partition a domain and write one **pickle** file per rank.
 
+    Rank 0 builds the complete domain (mesh + all quantities), partitions it
+    into ``numprocs`` subdomains, and pickles each subdomain to
+    ``partition_dir`` for later parallel loading with
+    :func:`sequential_distribute_load`.  Unlike :func:`sequential_mesh_dump`
+    (mesh topology only, stored as NetCDF), this stores the full domain
+    including every quantity.
+
+    Files are written as
+    ``<partition_dir>/<domain_name>_P<numprocs>_<rank>.pickle`` (plus per-array
+    ``.npy`` files when ``single_file=False``).
+
+    Parameters
+    ----------
+    domain : Domain
+        The complete domain (mesh + quantities) to partition.
+    numprocs : int, optional
+        Number of partitions (MPI ranks) to create.  Default 1.
+    verbose : bool, optional
+        Print progress messages.  Default False.
+    partition_dir : str, optional
+        Output directory for the partition files (created if needed).
+        Default ``'.'``.
+    debug : bool, optional
+        Print extra debugging information.  Default False.
+    parameters : dict, optional
+        Passed to the partitioner — e.g. ``'partition_scheme'``
+        (``'metis'`` / ``'morton'`` / ``'hilbert'``) and reorder options.
     num_workers : int, optional
         If > 1 (and > 1 partition, on a POSIX/fork platform), write the
         partition files in parallel using a fork-based process pool that shares
@@ -351,11 +378,17 @@ def sequential_distribute_dump(domain, numprocs=1, verbose=False, partition_dir=
         the serial write dominates end-to-end time; this parallelises it at the
         cost of keeping the whole submesh live for the dump's duration.
     single_file : bool, optional
-        When True (default) each partition is a single pickle file.  When False
-        the legacy layout is used (points/triangles/quantities in separate
-        ``.npy`` files: ``3 + N_quantities`` files per partition).  Single-file
-        greatly reduces the file count — the dominant cost on metadata-bound
-        parallel filesystems — and the load path reads both layouts.
+        On-disk layout.  When True (default) each partition is a single pickle
+        file with points, triangles and all quantities stored inline.  When
+        False the legacy layout is used: the pickle plus separate ``.npy`` files
+        (``3 + N_quantities`` files per partition).  Single-file greatly reduces
+        the file count — the dominant cost on metadata-bound parallel
+        filesystems — and :func:`sequential_distribute_load` reads both layouts.
+
+    See Also
+    --------
+    sequential_distribute_load : Load a partition written by this function.
+    sequential_mesh_dump : Mesh-only (NetCDF) offline partitioning.
     """
 
     import gc
@@ -398,7 +431,35 @@ def sequential_distribute_dump(domain, numprocs=1, verbose=False, partition_dir=
 
 
 def sequential_distribute_load(filename = 'domain', partition_dir = '.', verbose = False):
+    """Load this MPI rank's domain partition written by
+    :func:`sequential_distribute_dump`.
 
+    Reads ``<partition_dir>/<filename>_P<numprocs>_<myid>.pickle`` for the
+    calling rank and reconstructs a
+    :class:`~anuga.parallel.parallel_shallow_water.Parallel_domain` with all
+    quantities already set.  Both the single-file and legacy multi-file layouts
+    are read transparently.
+
+    Parameters
+    ----------
+    filename : str, optional
+        Base domain name used when dumping (``domain.get_name()``).
+        Default ``'domain'``.
+    partition_dir : str, optional
+        Directory containing the partition files.  Default ``'.'``.
+    verbose : bool, optional
+        Print progress messages.  Default False.
+
+    Returns
+    -------
+    Parallel_domain
+        This rank's subdomain, ready to ``evolve()`` once boundary conditions
+        are set.
+
+    See Also
+    --------
+    sequential_distribute_dump : Write the partition files this loads.
+    """
 
     from anuga import myid, numprocs
 
@@ -667,6 +728,12 @@ def sequential_mesh_dump(domain, numprocs, partition_dir='.', name=None,
         it is written).  Parallelising the write is the main end-to-end speed-up
         for very large partition counts, at the cost of keeping the whole submesh
         live for the dump's duration.
+
+    See Also
+    --------
+    sequential_mesh_load : Load a mesh partition written by this function.
+    sequential_distribute_dump : Full-domain (pickle) offline partitioning,
+        including quantities.
     """
     import gc
     import os
@@ -753,6 +820,11 @@ def sequential_mesh_load(name, partition_dir='.', verbose=False):
     Parallel_domain
         Domain with mesh topology and halo structure initialised.
         All quantities are zero; boundary conditions are unset (``None``).
+
+    See Also
+    --------
+    sequential_mesh_dump : Write the mesh partition files this loads.
+    sequential_distribute_load : Load a full-domain (pickle) partition.
     """
     import os
     import netCDF4
