@@ -233,10 +233,13 @@ class TestSequentialMeshDump(unittest.TestCase):
     @pytest.mark.skipif(not hasattr(os, 'fork'),
                         reason='parallel dump uses a fork process pool (POSIX only)')
     def test_parallel_dump_domain_matches_serial(self):
-        """sequential_distribute_dump: num_workers>1 writes the same partition
-        data (.npy) as the serial path, and the pickles unpickle cleanly."""
+        """sequential_distribute_dump: num_workers>1 reproduces the serial dump.
+
+        Single-file (default) partitions embed no paths, so the pickle files are
+        byte-identical between the serial and parallel writers -- and there are
+        no separate .npy files.
+        """
         import filecmp
-        import pickle
         from anuga.parallel.sequential_distribute import sequential_distribute_dump
 
         def dump(nw):
@@ -248,22 +251,44 @@ class TestSequentialMeshDump(unittest.TestCase):
         s = dump(1)
         p = dump(4)
 
-        # .npy files (points, triangles, every quantity) embed no paths -> the
-        # numerical partition data must be byte-identical.
-        npys = sorted(f for f in os.listdir(s) if f.endswith('.npy'))
-        self.assertEqual(npys, sorted(f for f in os.listdir(p) if f.endswith('.npy')))
-        self.assertTrue(npys, 'expected per-quantity .npy files')
-        match, mismatch, errors = filecmp.cmpfiles(s, p, npys, shallow=False)
+        files = sorted(os.listdir(s))
+        self.assertEqual(files, sorted(os.listdir(p)))
+        self.assertEqual(len([f for f in files if f.endswith('.pickle')]), 5)
+        self.assertFalse([f for f in files if f.endswith('.npy')],
+                         'single-file dump should not write .npy files')
+        match, mismatch, errors = filecmp.cmpfiles(s, p, files, shallow=False)
         self.assertEqual((mismatch, errors), ([], []),
-                         f'.npy differ serial vs parallel: {mismatch} {errors}')
+                         f'serial vs parallel differ: {mismatch} {errors}')
 
-        # Same set of pickles, and each unpickles.
-        pks = sorted(f for f in os.listdir(s) if f.endswith('.pickle'))
-        self.assertEqual(pks, sorted(f for f in os.listdir(p) if f.endswith('.pickle')))
-        self.assertEqual(len(pks), 5)
-        for f in pks:
-            with open(os.path.join(p, f), 'rb') as fh:
-                pickle.load(fh)
+    def test_domain_dump_single_file_equals_legacy(self):
+        """single_file=True stores the same partition data as the legacy
+        multi-file layout (and the parallel writer works for both)."""
+        import pickle
+        from anuga.parallel.sequential_distribute import sequential_distribute_dump
+
+        sa = tempfile.mkdtemp()  # single-file (default), parallel writer
+        sb = tempfile.mkdtemp()  # legacy multi-file, serial writer
+        sequential_distribute_dump(_make_domain(8, 6), numprocs=4,
+                                   partition_dir=sa, num_workers=3)
+        sequential_distribute_dump(_make_domain(8, 6), numprocs=4,
+                                   partition_dir=sb, single_file=False)
+
+        # single-file: one pickle, no .npy;  legacy: 3 + N_quant .npy per rank
+        self.assertFalse([f for f in os.listdir(sa) if f.endswith('.npy')])
+        self.assertEqual(len([f for f in os.listdir(sa) if f.endswith('.pickle')]), 4)
+        self.assertTrue([f for f in os.listdir(sb) if f.endswith('.npy')])
+
+        for p in range(4):
+            fn = f'test_mesh_P4_{p}.pickle'
+            with open(os.path.join(sa, fn), 'rb') as f:
+                A = list(pickle.load(f))          # arrays inline
+            with open(os.path.join(sb, fn), 'rb') as f:
+                B = list(pickle.load(f))          # points/vertices/quantities are paths
+            num.testing.assert_array_equal(A[1], num.load(B[1]))   # points
+            num.testing.assert_array_equal(A[2], num.load(B[2]))   # vertices
+            self.assertEqual(set(A[4]), set(B[4]))                 # quantity names
+            for k in A[4]:
+                num.testing.assert_array_equal(A[4][k], num.load(B[4][k]))
 
     def test_roundtrip_node_count(self):
         """Loaded domain has correct full-triangle and full-node counts."""

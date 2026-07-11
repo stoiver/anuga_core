@@ -282,11 +282,29 @@ def _use_parallel_dump(num_workers, numprocs):
             and numprocs > 1 and hasattr(os, 'fork'))
 
 
-def _dump_domain_partition(partition, p, numprocs, partition_dir):
+# Serial dump: collect cyclic garbage every this-many ranks rather than every
+# rank.  The big arrays for a released rank are freed immediately by refcounting
+# (_release_submesh_rank nulls them); only the small cyclic submesh-dict garbage
+# waits for gc, so batching a modest number of ranks keeps peak memory ~flat
+# while cutting the number of full graph traversals ~this-many-fold.
+_SERIAL_GC_BATCH = 64
+
+
+def _dump_domain_partition(partition, p, numprocs, partition_dir, single_file=True):
     """Extract and write partition ``p`` of a distributed domain.
 
     Reads only ``partition`` (no mutation), so it is safe to call concurrently
     from fork-inherited worker processes.
+
+    single_file : bool
+        When True (default) the whole partition — including points, triangles
+        and every quantity — is written as a *single* pickle (protocol 5 stores
+        the numpy buffers efficiently).  When False the legacy layout is used:
+        points/triangles/quantities go to their own ``.npy`` files and the
+        pickle stores their paths.  Single-file cuts the file count from
+        ``3 + N_quantities`` to 1 per partition, which dominates the dump time
+        on metadata-bound (Lustre/GPFS) filesystems at large partition counts.
+        The load path reads both layouts.
     """
     import pickle
     from os.path import join
@@ -297,29 +315,32 @@ def _dump_domain_partition(partition, p, numprocs, partition_dir):
                        partition.domain_name + '_P%g_%g.pickle' % (numprocs, p))
     lst = list(tostore)
 
-    # Write points and triangles to their own files
-    num.save(pickle_name + ".np1", tostore[1])  # num.save appends .npy
-    lst[1] = pickle_name + ".np1.npy"
-    num.save(pickle_name + ".np2", tostore[2])
-    lst[2] = pickle_name + ".np2.npy"
-
-    # Write each quantity to its own file
-    for k in tostore[4]:
-        num.save(pickle_name + ".np4." + k, num.asarray(tostore[4][k]))
-        lst[4][k] = pickle_name + ".np4." + k + ".npy"
+    if not single_file:
+        # Legacy layout: points/triangles/quantities to their own .npy files;
+        # the pickle stores the filenames.
+        num.save(pickle_name + ".np1", tostore[1])  # num.save appends .npy
+        lst[1] = pickle_name + ".np1.npy"
+        num.save(pickle_name + ".np2", tostore[2])
+        lst[2] = pickle_name + ".np2.npy"
+        for k in tostore[4]:
+            num.save(pickle_name + ".np4." + k, num.asarray(tostore[4][k]))
+            lst[4][k] = pickle_name + ".np4." + k + ".npy"
+    # else: leave lst[1] (points), lst[2] (vertices) and lst[4] (quantities
+    # dict) as the arrays themselves — pickled inline below into one file.
 
     with open(pickle_name, 'wb') as f:
         pickle.dump(tuple(lst), f, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 def _dump_domain_worker(p):
-    partition, numprocs, partition_dir = _DUMP_DOMAIN_STATE
-    _dump_domain_partition(partition, p, numprocs, partition_dir)
+    partition, numprocs, partition_dir, single_file = _DUMP_DOMAIN_STATE
+    _dump_domain_partition(partition, p, numprocs, partition_dir, single_file)
     return p
 
 
 def sequential_distribute_dump(domain, numprocs=1, verbose=False, partition_dir='.',
-                               debug=False, parameters=None, num_workers=1):
+                               debug=False, parameters=None, num_workers=1,
+                               single_file=True):
     """ Distribute the domain, create parallel domain and pickle result
 
     num_workers : int, optional
@@ -329,6 +350,12 @@ def sequential_distribute_dump(domain, numprocs=1, verbose=False, partition_dir=
         each rank is released as it is written).  On very large partition counts
         the serial write dominates end-to-end time; this parallelises it at the
         cost of keeping the whole submesh live for the dump's duration.
+    single_file : bool, optional
+        When True (default) each partition is a single pickle file.  When False
+        the legacy layout is used (points/triangles/quantities in separate
+        ``.npy`` files: ``3 + N_quantities`` files per partition).  Single-file
+        greatly reduces the file count — the dominant cost on metadata-bound
+        parallel filesystems — and the load path reads both layouts.
     """
 
     import gc
@@ -347,7 +374,7 @@ def sequential_distribute_dump(domain, numprocs=1, verbose=False, partition_dir=
 
     if _use_parallel_dump(num_workers, numprocs):
         global _DUMP_DOMAIN_STATE
-        _DUMP_DOMAIN_STATE = (partition, numprocs, partition_dir)
+        _DUMP_DOMAIN_STATE = (partition, numprocs, partition_dir, single_file)
         try:
             _run_partition_dump_pool(_dump_domain_worker, numprocs, num_workers,
                                      verbose, 'sequential_distribute_dump')
@@ -355,16 +382,16 @@ def sequential_distribute_dump(domain, numprocs=1, verbose=False, partition_dir=
             _DUMP_DOMAIN_STATE = None
     else:
         for p in range(0, numprocs):
-            _dump_domain_partition(partition, p, numprocs, partition_dir)
+            _dump_domain_partition(partition, p, numprocs, partition_dir, single_file)
 
             # Release this rank's submesh data so memory can be reclaimed before
             # processing the next rank.  Without this, all P subdomains' arrays
-            # remain live throughout the entire dump loop.
+            # remain live throughout the entire dump loop.  The big arrays are
+            # freed immediately by refcounting; only cyclic submesh-dict garbage
+            # needs gc, so collect in batches rather than every rank.
             partition._release_submesh_rank(p)
-
-            # Run GC every rank — cyclic references inside submesh dicts are not
-            # freed by refcounting alone and must be collected explicitly.
-            gc.collect()
+            if (p + 1) % _SERIAL_GC_BATCH == 0:
+                gc.collect()
 
     gc.collect()
     return
@@ -399,12 +426,16 @@ def sequential_distribute_load_pickle_file(pickle_name, np=1, verbose = False):
                    domain_low_froude = pickle.load(f)
     f.close()
 
-    # Note that quantities is a dictionary with quantity name keys and filenames of numpy arrays.
-    # points and vertices are filenames of numpy arrays. These need to be loaded.
+    # points, vertices and each quantity are stored either inline as arrays
+    # (single_file dump, the default) or as filenames of separate .npy files
+    # (legacy multi-file dump).  Load the filenames; use the arrays as-is.
     for k in quantities:
-        quantities[k] = num.load(quantities[k])
-    points = num.load(points)
-    vertices = num.load(vertices)
+        if isinstance(quantities[k], str):
+            quantities[k] = num.load(quantities[k])
+    if isinstance(points, str):
+        points = num.load(points)
+    if isinstance(vertices, str):
+        vertices = num.load(vertices)
 
     #---------------------------------------------------------------------------
     # Create domain (parallel if np>1)
@@ -684,8 +715,11 @@ def sequential_mesh_dump(domain, numprocs, partition_dir='.', name=None,
                                  name, partition_dir, geo_ref,
                                  number_of_global_triangles, number_of_global_nodes)
 
+            # Release this rank's submesh data; collect cyclic garbage in batches
+            # rather than every rank (the big arrays are freed by refcounting).
             _release_mesh_submesh_rank(submesh, p)
-            gc.collect()
+            if (p + 1) % _SERIAL_GC_BATCH == 0:
+                gc.collect()
 
     gc.collect()
 
