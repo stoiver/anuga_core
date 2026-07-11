@@ -175,8 +175,8 @@ void boyd_pipe_discharge(const struct culvert_params *p,
     double Q = (Q_inlet_unsubmerged < Q_inlet_submerged) ? Q_inlet_unsubmerged : Q_inlet_submerged;
 
     // Critical depth estimation (two formulas)
-    double dcrit1 = (bf * diameter) / 1.26 * pow(Q / sqrt(p->g) / pow(bf * diameter, 2.5), 1.0 / 3.75);
-    double dcrit2 = (bf * diameter) / 0.95 * pow(Q / sqrt(p->g) / pow(bf * diameter, 2.5), 1.0 / 1.95);
+    double dcrit1 = (bf * diameter) / 1.26 * pow(Q / sqrt(p->g) * pow(bf * diameter, 2.5), 1.0 / 3.75);
+    double dcrit2 = (bf * diameter) / 0.95 * pow(Q / sqrt(p->g) * pow(bf * diameter, 2.5), 1.0 / 1.95);
 
     double outlet_culvert_depth;
     if (dcrit1 / (bf * diameter) > 0.85) {
@@ -210,8 +210,8 @@ void boyd_pipe_discharge(const struct culvert_params *p,
             perimeter = barrels * bd * M_PI;
         } else {
             // Partial flow - recalculate critical depth
-            dcrit1 = bd / 1.26 * pow(Q / sqrt(p->g) / pow(bd, 2.5), 1.0 / 3.75);
-            dcrit2 = bd / 0.95 * pow(Q / sqrt(p->g) / pow(bd, 2.5), 1.0 / 1.95);
+            dcrit1 = bd / 1.26 * pow(Q / sqrt(p->g) * pow(bd, 2.5), 1.0 / 3.75);
+            dcrit2 = bd / 0.95 * pow(Q / sqrt(p->g) * pow(bd, 2.5), 1.0 / 1.95);
 
             if (dcrit1 / bd > 0.85)
                 outlet_culvert_depth = dcrit2;

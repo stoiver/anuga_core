@@ -1299,6 +1299,70 @@ class Test_GPU_Culvert(unittest.TestCase):
             stage[right_mask].mean(), -1.0,
             'Right side should have gained water through the culvert')
 
+    def _create_pipe_domain(self, name):
+        """Two-compartment domain connected by a Boyd *pipe* culvert.
+
+        Same layout as _create_culvert_domain but with a circular pipe, which
+        exercises boyd_pipe_discharge (a different critical-depth / flow-area
+        path than the box). Returns (domain, operator).
+        """
+        from anuga.structures.boyd_pipe_operator import Boyd_pipe_operator
+        domain = rectangular_cross_domain(20, 10, len1=200., len2=100.)
+        domain.set_flow_algorithm('DE0')
+        domain.set_low_froude(0)
+        domain.set_name(name)
+        domain.set_datadir(tempfile.mkdtemp())
+        domain.store = False
+
+        domain.set_quantity('elevation', -1.0)
+        domain.set_quantity('friction', 0.013)
+        domain.set_quantity('stage', lambda x, y: np.where(x < 100., 0.5, -1.0))
+
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+
+        op = Boyd_pipe_operator(domain,
+                                end_points=[[90., 50.], [110., 50.]],
+                                diameter=0.5,
+                                apron=5., manning=0.013,
+                                enquiry_gap=5., verbose=False)
+        return domain, op
+
+    def test_pipe_culvert_cpu_gpu_velocity_match(self):
+        """Boyd *pipe* culvert: reported discharge and barrel velocity agree
+        between mode=1 and mode=2.
+
+        Regression guard for a critical-depth translation bug in
+        boyd_pipe_discharge: it divided by ``(bf*diameter)**2.5`` where the
+        Python reference multiplies, leaving the GPU flow_area — and hence the
+        reported barrel velocity — ~8% off mode=1, while the (inlet-controlled)
+        discharge still matched. Comparing the operator velocity catches it; a
+        stage-only comparison (test_culvert_cpu_gpu_match, box only) does not.
+        Also covers the GPUCulvertManager stats write-back onto the Python op.
+        """
+        cpu_domain, cpu_op = self._create_pipe_domain('pipe_cpu')
+        cpu_domain.set_multiprocessor_mode(1)
+        for _ in cpu_domain.evolve(yieldstep=1.0, finaltime=3.0):
+            pass
+
+        gpu_domain, gpu_op = self._create_pipe_domain('pipe_gpu')
+        gpu_domain.set_multiprocessor_mode(2)
+        for _ in gpu_domain.evolve(yieldstep=1.0, finaltime=3.0):
+            pass
+
+        # Culvert must actually be flowing for the comparison to mean anything
+        self.assertGreater(cpu_op.velocity, 0.05,
+                           'pipe culvert should be flowing in the test window')
+        # Barrel velocity was the ~8%-off quantity; discharge stayed matched.
+        self.assertAlmostEqual(
+            gpu_op.velocity, cpu_op.velocity,
+            delta=0.02 * cpu_op.velocity,
+            msg='pipe barrel velocity: mode=1 vs mode=2')
+        self.assertAlmostEqual(
+            gpu_op.discharge, cpu_op.discharge,
+            delta=0.02 * abs(cpu_op.discharge) + 1e-6,
+            msg='pipe discharge: mode=1 vs mode=2')
+
 
 @pytest.mark.skipif(not gpu_available(), reason=_gpu_skip_reason())
 class Test_GPU_WeirTrapezoid(unittest.TestCase):
