@@ -148,24 +148,34 @@ NETCDF4 file.  It can be inspected with ``ncdump -h``.
      - Ghost-receive communication pattern.
 
 
-Parallel writing for large partition counts
--------------------------------------------
+Performance for large partition counts
+--------------------------------------
 
-Like ``sequential_distribute_dump``, the per-rank NetCDF files are written in a
-serial loop by default, which dominates the preprocessing time at very large
-partition counts.  Pass ``num_workers > 1`` (on a POSIX/fork platform) to write
-the files in parallel with a pool of worker processes that share the
-partitioned mesh copy-on-write:
+For very large meshes split into many partitions, **writing the partition
+files dominates** the preprocessing time.  The mesh dump always writes one
+self-describing NetCDF file per rank (topology only, no quantities), so — unlike
+the domain dump, which also has a single-file layout knob — the lever here is
+parallel writing:
+
+``num_workers`` (default ``1``)
+   With ``num_workers > 1`` (on a POSIX/fork platform) the per-rank NetCDF files
+   are written in parallel by a pool of worker processes that share the
+   partitioned mesh copy-on-write, so the write scales toward the filesystem's
+   I/O and metadata throughput.  Match ``num_workers`` to the machine doing the
+   preprocessing (often a large-memory login/preprocessing node).
 
 .. code-block:: python
 
    anuga.sequential_mesh_dump(domain, numprocs=18400,
                               partition_dir='Partitions', num_workers=32)
 
-The serial default (``num_workers=1``) releases each rank's memory as it goes;
-the parallel path keeps the whole partitioned mesh resident for the pool's
-duration.  Choose ``num_workers`` to match the preprocessing node's write
-bandwidth and RAM.
+.. note::
+
+   The serial default (``num_workers=1``) releases each rank's memory as it is
+   written, keeping rank-0 peak RAM low.  The parallel path keeps the whole
+   partitioned mesh resident for the duration of the worker pool — the
+   memory-for-speed trade-off — so choose ``num_workers`` with the preprocessing
+   node's RAM in mind.
 
 
 Preprocessing example
