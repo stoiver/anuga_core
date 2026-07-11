@@ -315,19 +315,43 @@ struct culvert_operators {
     struct culvert_state *state;     // heap-allocated, capacity entries
     int initialized;
 
-    // Scratch buffers for batched gather/scatter
-    double *scratch_stage;
+    // ------------------------------------------------------------------
+    // Device-resident scratch. Everything here is mapped ONCE in
+    // gpu_culverts_map() and torn down in gpu_culverts_finalize_all().
+    // Constant buffers use map(to:); per-step buffers use map(alloc:) and
+    // are refreshed on-device each timestep (no per-step map/alloc/free).
+    // ------------------------------------------------------------------
+
+    // Enquiry points (2 per culvert). Indices are constant → map(to:) once.
+    int *scratch_enquiry_indices;   // [2*nc] centroid index of each enquiry pt
+    double *scratch_stage;          // [2*nc] gathered enquiry values (D2H each step)
     double *scratch_xmom;
     double *scratch_ymom;
     double *scratch_elev;
 
-    int total_inlet_triangles;
-    int *scratch_inlet_indices;
-    double *scratch_inlet_areas;
-    double *scratch_inlet_stage;
-    double *scratch_inlet_xmom;
-    double *scratch_inlet_ymom;
-    double *scratch_inlet_elev;
+    // Inlet triangles, flattened across all culverts. Constant metadata is
+    // mapped map(to:) once; per-triangle values are read straight from the
+    // domain centroid arrays on-device, so no per-triangle value buffers.
+    int total_inlet_triangles;      // nt
+    int *scratch_inlet_indices;     // [nt] centroid index of each triangle
+    double *scratch_inlet_areas;    // [nt] triangle area (reduction weight)
+    // Per-inlet contiguous range into the flattened triangle arrays. Slot
+    // 2*c is inlet 0, 2*c+1 is inlet 1. Lets gather/scatter parallelise over
+    // inlets (ne teams) with a sequential inner sum — no atomics, and the
+    // summation order matches the old host code exactly.
+    int *scratch_slot_start;        // [2*nc] first flattened triangle of the inlet
+    int *scratch_slot_count;        // [2*nc] triangle count for the inlet
+
+    // Per-inlet area-weighted sums, accumulated on-device (D2H each step).
+    double *scratch_avg_stage;      // [2*nc]
+    double *scratch_avg_depth;
+    double *scratch_avg_xmom;
+    double *scratch_avg_ymom;
+
+    // Per-inlet scatter values, pushed H2D each step then written on-device.
+    double *scratch_slot_depth;     // [2*nc] new water depth per inlet
+    double *scratch_slot_xmom;      // [2*nc]
+    double *scratch_slot_ymom;      // [2*nc]
 
     int mapped;
 };

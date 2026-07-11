@@ -610,38 +610,52 @@ void gpu_culverts_finalize_all(struct gpu_domain *GD) {
         int ne = 2 * CO->num_culverts;
         int nt = CO->total_inlet_triangles;
 
+        int *eid = CO->scratch_enquiry_indices;
         double *ss = CO->scratch_stage;
         double *sx = CO->scratch_xmom;
         double *sy = CO->scratch_ymom;
         double *se = CO->scratch_elev;
+        double *as = CO->scratch_avg_stage;
+        double *ad = CO->scratch_avg_depth;
+        double *ax = CO->scratch_avg_xmom;
+        double *ay = CO->scratch_avg_ymom;
+        double *nd = CO->scratch_slot_depth;
+        double *nx = CO->scratch_slot_xmom;
+        double *ny = CO->scratch_slot_ymom;
+        int *sst = CO->scratch_slot_start;
+        int *scn = CO->scratch_slot_count;
 
         if (ne > 0) {
-            #pragma omp target exit data map(delete: ss[0:ne], sx[0:ne], sy[0:ne], se[0:ne])
+            #pragma omp target exit data map(delete: eid[0:ne], sst[0:ne], scn[0:ne], \
+                ss[0:ne], sx[0:ne], sy[0:ne], se[0:ne], \
+                as[0:ne], ad[0:ne], ax[0:ne], ay[0:ne], \
+                nd[0:ne], nx[0:ne], ny[0:ne])
         }
 
         if (nt > 0) {
             int *si = CO->scratch_inlet_indices;
             double *sa = CO->scratch_inlet_areas;
-            double *sis = CO->scratch_inlet_stage;
-            double *six = CO->scratch_inlet_xmom;
-            double *siy = CO->scratch_inlet_ymom;
-            double *sie = CO->scratch_inlet_elev;
-            #pragma omp target exit data map(delete: si[0:nt], sa[0:nt], \
-                sis[0:nt], six[0:nt], siy[0:nt], sie[0:nt])
+            #pragma omp target exit data map(delete: si[0:nt], sa[0:nt])
         }
         CO->mapped = 0;
     }
 
+    if (CO->scratch_enquiry_indices) { free(CO->scratch_enquiry_indices); CO->scratch_enquiry_indices = NULL; }
     if (CO->scratch_stage) { free(CO->scratch_stage); CO->scratch_stage = NULL; }
     if (CO->scratch_xmom) { free(CO->scratch_xmom); CO->scratch_xmom = NULL; }
     if (CO->scratch_ymom) { free(CO->scratch_ymom); CO->scratch_ymom = NULL; }
     if (CO->scratch_elev) { free(CO->scratch_elev); CO->scratch_elev = NULL; }
+    if (CO->scratch_avg_stage) { free(CO->scratch_avg_stage); CO->scratch_avg_stage = NULL; }
+    if (CO->scratch_avg_depth) { free(CO->scratch_avg_depth); CO->scratch_avg_depth = NULL; }
+    if (CO->scratch_avg_xmom) { free(CO->scratch_avg_xmom); CO->scratch_avg_xmom = NULL; }
+    if (CO->scratch_avg_ymom) { free(CO->scratch_avg_ymom); CO->scratch_avg_ymom = NULL; }
+    if (CO->scratch_slot_depth) { free(CO->scratch_slot_depth); CO->scratch_slot_depth = NULL; }
+    if (CO->scratch_slot_xmom) { free(CO->scratch_slot_xmom); CO->scratch_slot_xmom = NULL; }
+    if (CO->scratch_slot_ymom) { free(CO->scratch_slot_ymom); CO->scratch_slot_ymom = NULL; }
     if (CO->scratch_inlet_indices) { free(CO->scratch_inlet_indices); CO->scratch_inlet_indices = NULL; }
     if (CO->scratch_inlet_areas) { free(CO->scratch_inlet_areas); CO->scratch_inlet_areas = NULL; }
-    if (CO->scratch_inlet_stage) { free(CO->scratch_inlet_stage); CO->scratch_inlet_stage = NULL; }
-    if (CO->scratch_inlet_xmom) { free(CO->scratch_inlet_xmom); CO->scratch_inlet_xmom = NULL; }
-    if (CO->scratch_inlet_ymom) { free(CO->scratch_inlet_ymom); CO->scratch_inlet_ymom = NULL; }
-    if (CO->scratch_inlet_elev) { free(CO->scratch_inlet_elev); CO->scratch_inlet_elev = NULL; }
+    if (CO->scratch_slot_start) { free(CO->scratch_slot_start); CO->scratch_slot_start = NULL; }
+    if (CO->scratch_slot_count) { free(CO->scratch_slot_count); CO->scratch_slot_count = NULL; }
 
     if (CO->params)  { free(CO->params);  CO->params  = NULL; }
     if (CO->indices) { free(CO->indices); CO->indices = NULL; }
@@ -665,15 +679,35 @@ void gpu_culverts_map(struct gpu_domain *GD) {
     omp_set_default_device(gpu_compute_device(GD));
 
     int nc = CO->num_culverts;
-    int ne = 2 * nc;  // 2 enquiry points per culvert
+    int ne = 2 * nc;  // 2 enquiry/inlet slots per culvert
 
-    // Allocate enquiry scratch buffers
+    // --- Enquiry scratch: constant indices + per-step gathered values ---
+    CO->scratch_enquiry_indices = (int*)calloc(ne, sizeof(int));
     CO->scratch_stage = (double*)calloc(ne, sizeof(double));
     CO->scratch_xmom = (double*)calloc(ne, sizeof(double));
     CO->scratch_ymom = (double*)calloc(ne, sizeof(double));
     CO->scratch_elev = (double*)calloc(ne, sizeof(double));
 
-    // Count total inlet triangles and build flattened index array
+    // Enquiry indices are constant for the life of the domain. Remote enquiry
+    // points (index < 0) are parked at 0; their gathered values are overwritten
+    // by MPI later. Filled once here, mapped map(to:) once below.
+    for (int c = 0; c < nc; c++) {
+        int ei0 = CO->indices[c].enquiry_index_0;
+        int ei1 = CO->indices[c].enquiry_index_1;
+        CO->scratch_enquiry_indices[2 * c]     = (ei0 >= 0) ? ei0 : 0;
+        CO->scratch_enquiry_indices[2 * c + 1] = (ei1 >= 0) ? ei1 : 0;
+    }
+
+    // --- Per-inlet reduction / scatter accumulators (2 per culvert) ---
+    CO->scratch_avg_stage = (double*)calloc(ne, sizeof(double));
+    CO->scratch_avg_depth = (double*)calloc(ne, sizeof(double));
+    CO->scratch_avg_xmom  = (double*)calloc(ne, sizeof(double));
+    CO->scratch_avg_ymom  = (double*)calloc(ne, sizeof(double));
+    CO->scratch_slot_depth = (double*)calloc(ne, sizeof(double));
+    CO->scratch_slot_xmom  = (double*)calloc(ne, sizeof(double));
+    CO->scratch_slot_ymom  = (double*)calloc(ne, sizeof(double));
+
+    // --- Flattened inlet-triangle metadata (constant) ---
     CO->total_inlet_triangles = 0;
     for (int c = 0; c < nc; c++) {
         CO->total_inlet_triangles += CO->indices[c].inlet0_num + CO->indices[c].inlet1_num;
@@ -682,20 +716,24 @@ void gpu_culverts_map(struct gpu_domain *GD) {
     int nt = CO->total_inlet_triangles;
     CO->scratch_inlet_indices = (int*)calloc(nt, sizeof(int));
     CO->scratch_inlet_areas = (double*)calloc(nt, sizeof(double));
-    CO->scratch_inlet_stage = (double*)calloc(nt, sizeof(double));
-    CO->scratch_inlet_xmom = (double*)calloc(nt, sizeof(double));
-    CO->scratch_inlet_ymom = (double*)calloc(nt, sizeof(double));
-    CO->scratch_inlet_elev = (double*)calloc(nt, sizeof(double));
+    CO->scratch_slot_start = (int*)calloc(ne, sizeof(int));
+    CO->scratch_slot_count = (int*)calloc(ne, sizeof(int));
 
-    // Flatten inlet indices and areas
+    // Flatten inlet indices/areas and record each inlet's contiguous range.
     int offset = 0;
     for (int c = 0; c < nc; c++) {
         struct culvert_indices *ci = &CO->indices[c];
+
+        CO->scratch_slot_start[2 * c] = offset;
+        CO->scratch_slot_count[2 * c] = ci->inlet0_num;
         for (int k = 0; k < ci->inlet0_num; k++) {
             CO->scratch_inlet_indices[offset] = ci->inlet0_indices[k];
             CO->scratch_inlet_areas[offset] = ci->inlet0_areas[k];
             offset++;
         }
+
+        CO->scratch_slot_start[2 * c + 1] = offset;
+        CO->scratch_slot_count[2 * c + 1] = ci->inlet1_num;
         for (int k = 0; k < ci->inlet1_num; k++) {
             CO->scratch_inlet_indices[offset] = ci->inlet1_indices[k];
             CO->scratch_inlet_areas[offset] = ci->inlet1_areas[k];
@@ -703,22 +741,30 @@ void gpu_culverts_map(struct gpu_domain *GD) {
         }
     }
 
-    // Map to GPU
+    // --- Map everything to the device ONCE ---
+    int *eid = CO->scratch_enquiry_indices;
     double *ss = CO->scratch_stage;
     double *sx = CO->scratch_xmom;
     double *sy = CO->scratch_ymom;
     double *se = CO->scratch_elev;
-    #pragma omp target enter data map(alloc: ss[0:ne], sx[0:ne], sy[0:ne], se[0:ne])
+    double *as = CO->scratch_avg_stage;
+    double *ad = CO->scratch_avg_depth;
+    double *ax = CO->scratch_avg_xmom;
+    double *ay = CO->scratch_avg_ymom;
+    double *nd = CO->scratch_slot_depth;
+    double *nx = CO->scratch_slot_xmom;
+    double *ny = CO->scratch_slot_ymom;
+    int *sst = CO->scratch_slot_start;
+    int *scn = CO->scratch_slot_count;
+    #pragma omp target enter data map(to: eid[0:ne], sst[0:ne], scn[0:ne]) \
+        map(alloc: ss[0:ne], sx[0:ne], sy[0:ne], se[0:ne], \
+                   as[0:ne], ad[0:ne], ax[0:ne], ay[0:ne], \
+                   nd[0:ne], nx[0:ne], ny[0:ne])
 
     if (nt > 0) {
         int *si = CO->scratch_inlet_indices;
         double *sa = CO->scratch_inlet_areas;
-        double *sis = CO->scratch_inlet_stage;
-        double *six = CO->scratch_inlet_xmom;
-        double *siy = CO->scratch_inlet_ymom;
-        double *sie = CO->scratch_inlet_elev;
-        #pragma omp target enter data map(to: si[0:nt], sa[0:nt]) \
-            map(alloc: sis[0:nt], six[0:nt], siy[0:nt], sie[0:nt])
+        #pragma omp target enter data map(to: si[0:nt], sa[0:nt])
     }
 
     CO->mapped = 1;
@@ -746,36 +792,12 @@ static void gpu_culvert_gather_enquiry(struct gpu_domain *GD,
     double *sy = CO->scratch_ymom;
     double *se = CO->scratch_elev;
 
-    // Build index list on host and upload to scratch_stage temporarily
-    // (We reuse the scratch buffers for the index transfer, then overwrite with values)
-    // Since ne ≤ 128, we just use the flattened inlet indices approach:
-    // Store enquiry indices at the start of the inlet index array during map.
-    // Instead, we do individual reads -- ne is tiny (≤128), the overhead is negligible
-    // compared to kernel launch latency.
-
-    // For small ne, gather on host via scratch_inlet_indices trick:
-    // Actually simplest: use a pre-built enquiry index array stored in scratch.
-    // We'll store it during map. For now, use a host-side loop with target update.
-
-    // Host-side: read enquiry indices, build gather list
-    // Use index 0 as placeholder for remote enquiry points (-1)
-    int *enquiry_ids = (int*)malloc(ne * sizeof(int));
-    if (!enquiry_ids) {
-        fprintf(stderr, "ERROR: Failed to allocate enquiry_ids (%d ints)\n", ne);
-        return;
-    }
-    for (int c = 0; c < nc; c++) {
-        int ei0 = CO->indices[c].enquiry_index_0;
-        int ei1 = CO->indices[c].enquiry_index_1;
-        enquiry_ids[2 * c] = (ei0 >= 0) ? ei0 : 0;
-        enquiry_ids[2 * c + 1] = (ei1 >= 0) ? ei1 : 0;
-    }
-
-    // Upload enquiry IDs to scratch_stage (reinterpreted as int, ne is tiny)
-    // Then do a GPU gather kernel. But ints-in-doubles is fragile.
-    // Simpler: use target map for the small stack array.
-    int *eid = enquiry_ids;
-    #pragma omp target teams loop map(to: eid[0:ne])
+    // Enquiry indices are persistently mapped (map(to:) in gpu_culverts_map);
+    // remote enquiry points were parked at index 0 there and are overwritten by
+    // MPI later. Gather straight from the device-resident index buffer — no
+    // per-step host allocation, no per-step map.
+    int *eid = CO->scratch_enquiry_indices;
+    OMP_PARALLEL_LOOP
     for (int k = 0; k < ne; k++) {
         int i = eid[k];
         ss[k] = stage_c[i];
@@ -786,7 +808,6 @@ static void gpu_culvert_gather_enquiry(struct gpu_domain *GD,
 
     // Single D2H transfer (~1KB for 20 culverts)
     #pragma omp target update from(ss[0:ne], sx[0:ne], sy[0:ne], se[0:ne])
-    free(enquiry_ids);
 
     // Unpack into per-culvert inlet_data structs
     for (int c = 0; c < nc; c++) {
@@ -816,68 +837,76 @@ static void gpu_culvert_gather_inlets(struct gpu_domain *GD,
     double * restrict ymom_c = GD->D.ymom_centroid_values;
     double * restrict bed_c = GD->D.bed_centroid_values;
 
+    int ne = 2 * nc;
     int *si = CO->scratch_inlet_indices;
-    double *sis = CO->scratch_inlet_stage;
-    double *six = CO->scratch_inlet_xmom;
-    double *siy = CO->scratch_inlet_ymom;
-    double *sie = CO->scratch_inlet_elev;
+    double *sa = CO->scratch_inlet_areas;
+    int *sst = CO->scratch_slot_start;
+    int *scn = CO->scratch_slot_count;
+    double *as = CO->scratch_avg_stage;
+    double *ad = CO->scratch_avg_depth;
+    double *ax = CO->scratch_avg_xmom;
+    double *ay = CO->scratch_avg_ymom;
 
-    // GPU gather: read all inlet triangle values
-    OMP_PARALLEL_LOOP
-    for (int k = 0; k < nt; k++) {
-        int i = si[k];
-        sis[k] = stage_c[i];
-        six[k] = xmom_c[i];
-        siy[k] = ymom_c[i];
-        sie[k] = bed_c[i];
+    // On-device area-weighted reduction: one team per inlet (ne total), each
+    // summing its contiguous triangle range sequentially. No atomics, and the
+    // summation order matches the old host loop exactly. Only the per-inlet
+    // sums (2*nc doubles ×4 ≈ a few KB) travel back to the host — not every
+    // triangle value.
+    #pragma omp target teams distribute parallel for
+    for (int s = 0; s < ne; s++) {
+        double sum_stage = 0.0, sum_depth = 0.0, sum_xmom = 0.0, sum_ymom = 0.0;
+        int start = sst[s];
+        int cnt = scn[s];
+        for (int j = 0; j < cnt; j++) {
+            int k = start + j;
+            int i = si[k];
+            double area = sa[k];
+            double depth = stage_c[i] - bed_c[i];
+            if (depth < 0.0) depth = 0.0;
+            sum_stage += stage_c[i] * area;
+            sum_depth += depth * area;
+            sum_xmom += xmom_c[i] * area;
+            sum_ymom += ymom_c[i] * area;
+        }
+        as[s] = sum_stage;
+        ad[s] = sum_depth;
+        ax[s] = sum_xmom;
+        ay[s] = sum_ymom;
     }
 
-    // Single D2H transfer (~2KB for 20 culverts × ~6 triangles each)
-    #pragma omp target update from(sis[0:nt], six[0:nt], siy[0:nt], sie[0:nt])
+    // Single D2H transfer of the per-inlet sums.
+    #pragma omp target update from(as[0:ne], ad[0:ne], ax[0:ne], ay[0:ne])
 
-    // CPU: compute area-weighted averages per inlet
-    double *sa = CO->scratch_inlet_areas;
-    int offset = 0;
+    // Divide by (constant, host-side) inlet area to get averages. An inlet
+    // with zero local area (e.g. a cross-boundary inlet this rank doesn't own)
+    // yields zeros here and is overwritten by the MPI exchange.
     for (int c = 0; c < nc; c++) {
         struct culvert_indices *ci = &CO->indices[c];
+        double a0 = ci->inlet0_total_area;
+        double a1 = ci->inlet1_total_area;
+        int s0 = 2 * c, s1 = 2 * c + 1;
 
-        // Inlet 0 averages
-        double sum_stage = 0, sum_depth = 0, sum_xmom = 0, sum_ymom = 0;
-        for (int k = 0; k < ci->inlet0_num; k++) {
-            int idx = offset + k;
-            double area = sa[idx];
-            double depth = sis[idx] - sie[idx];
-            if (depth < 0.0) depth = 0.0;
-            sum_stage += sis[idx] * area;
-            sum_depth += depth * area;
-            sum_xmom += six[idx] * area;
-            sum_ymom += siy[idx] * area;
+        if (a0 > 0.0) {
+            data0[c].avg_stage = as[s0] / a0;
+            data0[c].avg_depth = ad[s0] / a0;
+            data0[c].avg_xmom  = ax[s0] / a0;
+            data0[c].avg_ymom  = ay[s0] / a0;
+        } else {
+            data0[c].avg_stage = 0.0; data0[c].avg_depth = 0.0;
+            data0[c].avg_xmom  = 0.0; data0[c].avg_ymom  = 0.0;
         }
-        data0[c].avg_stage = sum_stage / ci->inlet0_total_area;
-        data0[c].avg_depth = sum_depth / ci->inlet0_total_area;
-        data0[c].avg_xmom = sum_xmom / ci->inlet0_total_area;
-        data0[c].avg_ymom = sum_ymom / ci->inlet0_total_area;
-        data0[c].total_area = ci->inlet0_total_area;
-        offset += ci->inlet0_num;
+        data0[c].total_area = a0;
 
-        // Inlet 1 averages
-        sum_stage = sum_depth = sum_xmom = sum_ymom = 0;
-        for (int k = 0; k < ci->inlet1_num; k++) {
-            int idx = offset + k;
-            double area = sa[idx];
-            double depth = sis[idx] - sie[idx];
-            if (depth < 0.0) depth = 0.0;
-            sum_stage += sis[idx] * area;
-            sum_depth += depth * area;
-            sum_xmom += six[idx] * area;
-            sum_ymom += siy[idx] * area;
+        if (a1 > 0.0) {
+            data1[c].avg_stage = as[s1] / a1;
+            data1[c].avg_depth = ad[s1] / a1;
+            data1[c].avg_xmom  = ax[s1] / a1;
+            data1[c].avg_ymom  = ay[s1] / a1;
+        } else {
+            data1[c].avg_stage = 0.0; data1[c].avg_depth = 0.0;
+            data1[c].avg_xmom  = 0.0; data1[c].avg_ymom  = 0.0;
         }
-        data1[c].avg_stage = sum_stage / ci->inlet1_total_area;
-        data1[c].avg_depth = sum_depth / ci->inlet1_total_area;
-        data1[c].avg_xmom = sum_xmom / ci->inlet1_total_area;
-        data1[c].avg_ymom = sum_ymom / ci->inlet1_total_area;
-        data1[c].total_area = ci->inlet1_total_area;
-        offset += ci->inlet1_num;
+        data1[c].total_area = a1;
     }
 }
 
@@ -890,68 +919,59 @@ static void gpu_culvert_scatter(struct gpu_domain *GD,
     struct culvert_operators *CO = &GD->culvert_ops;
     int nc = CO->num_culverts;
     int nt = CO->total_inlet_triangles;
+    int ne = 2 * nc;
 
     if (nt == 0) return;
 
-    // Build scatter values on host (using the same flattened layout as gather)
-    double *sis = CO->scratch_inlet_stage;
-    double *six = CO->scratch_inlet_xmom;
-    double *siy = CO->scratch_inlet_ymom;
-    double *sie = CO->scratch_inlet_elev;  // bed elevations (already gathered)
-
-    int offset = 0;
+    // Build ONE (depth, xmom, ymom) triple per inlet on the host — the physics
+    // already produced these as a single value per inlet region. Inlet
+    // inlet_local is the inflow when inlet_local == inflow_idx, else the outflow.
+    double *nd = CO->scratch_slot_depth;
+    double *nx = CO->scratch_slot_xmom;
+    double *ny = CO->scratch_slot_ymom;
     for (int c = 0; c < nc; c++) {
-        struct culvert_indices *ci = &CO->indices[c];
         struct culvert_transfer *t = &transfers[c];
-
-        // Determine which flat offset corresponds to inflow vs outflow
-        int inflow_offset, outflow_offset, inflow_num, outflow_num;
-        if (t->inflow_idx == 0) {
-            inflow_offset = offset;
-            inflow_num = ci->inlet0_num;
-            outflow_offset = offset + ci->inlet0_num;
-            outflow_num = ci->inlet1_num;
-        } else {
-            inflow_offset = offset + ci->inlet0_num;
-            inflow_num = ci->inlet1_num;
-            outflow_offset = offset;
-            outflow_num = ci->inlet0_num;
+        for (int inlet = 0; inlet < 2; inlet++) {
+            int s = 2 * c + inlet;
+            if (inlet == t->inflow_idx) {
+                nd[s] = t->new_inflow_depth;
+                nx[s] = t->new_inflow_xmom;
+                ny[s] = t->new_inflow_ymom;
+            } else {
+                nd[s] = t->new_outflow_depth;
+                nx[s] = t->new_outflow_xmom;
+                ny[s] = t->new_outflow_ymom;
+            }
         }
-
-        // Set inflow region: stage = bed + new_depth, uniform xmom/ymom
-        for (int k = 0; k < inflow_num; k++) {
-            int idx = inflow_offset + k;
-            sis[idx] = sie[idx] + t->new_inflow_depth;  // stage = bed + depth
-            six[idx] = t->new_inflow_xmom;
-            siy[idx] = t->new_inflow_ymom;
-        }
-
-        // Set outflow region
-        for (int k = 0; k < outflow_num; k++) {
-            int idx = outflow_offset + k;
-            sis[idx] = sie[idx] + t->new_outflow_depth;
-            six[idx] = t->new_outflow_xmom;
-            siy[idx] = t->new_outflow_ymom;
-        }
-
-        offset += ci->inlet0_num + ci->inlet1_num;
     }
 
-    // Single H2D transfer
-    #pragma omp target update to(sis[0:nt], six[0:nt], siy[0:nt])
+    // Single H2D transfer of the per-inlet values (2*nc doubles ×3).
+    #pragma omp target update to(nd[0:ne], nx[0:ne], ny[0:ne])
 
-    // GPU scatter: write from scratch to domain arrays
+    // On-device scatter: one team per inlet writes its contiguous triangle
+    // range, reading bed elevation straight from the domain array so stage =
+    // bed + depth is computed on-device (no gathered bed buffer needed).
     int *si = CO->scratch_inlet_indices;
+    int *sst = CO->scratch_slot_start;
+    int *scn = CO->scratch_slot_count;
     double * restrict stage_c = GD->D.stage_centroid_values;
     double * restrict xmom_c = GD->D.xmom_centroid_values;
     double * restrict ymom_c = GD->D.ymom_centroid_values;
+    double * restrict bed_c = GD->D.bed_centroid_values;
 
-    OMP_PARALLEL_LOOP
-    for (int k = 0; k < nt; k++) {
-        int i = si[k];
-        stage_c[i] = sis[k];
-        xmom_c[i] = six[k];
-        ymom_c[i] = siy[k];
+    #pragma omp target teams distribute parallel for
+    for (int s = 0; s < ne; s++) {
+        double depth = nd[s];
+        double new_xmom = nx[s];
+        double new_ymom = ny[s];
+        int start = sst[s];
+        int cnt = scn[s];
+        for (int j = 0; j < cnt; j++) {
+            int i = si[start + j];
+            stage_c[i] = bed_c[i] + depth;
+            xmom_c[i] = new_xmom;
+            ymom_c[i] = new_ymom;
+        }
     }
 }
 
@@ -1195,7 +1215,9 @@ static void mpi_exchange_results(struct gpu_domain *GD,
 // ============================================================================
 // Per-culvert GPU scatter for cross-boundary culverts on non-master ranks
 // These ranks only have triangles for one or both inlets (not all data).
-// Uses small stack arrays with target map instead of the batched scratch.
+// The triangle indices here are per-culvert (not part of the persistently
+// mapped flattened array), so this rare MPI path maps the tiny index list
+// per call; stage = bed + depth is computed entirely on-device.
 // ============================================================================
 
 static void scatter_single_inlet(struct gpu_domain *GD,
@@ -1208,35 +1230,15 @@ static void scatter_single_inlet(struct gpu_domain *GD,
     double * restrict ymom_c = GD->D.ymom_centroid_values;
     double * restrict bed_c = GD->D.bed_centroid_values;
 
-    // Stack-allocate small arrays for GPU scatter
-    double stages[MAX_INLET_TRIANGLES];
-    double xmoms[MAX_INLET_TRIANGLES];
-    double ymoms[MAX_INLET_TRIANGLES];
-
-    // Build new stage values: stage = bed + depth
-    // First, read bed elevations from GPU
+    // Single fused device kernel: read bed, write stage/xmom/ymom. No host
+    // loop, no stack staging arrays.
     int *idx = tri_indices;
-    double beds[MAX_INLET_TRIANGLES];
-    double *b = beds;
-    #pragma omp target teams loop map(to: idx[0:ntri]) map(from: b[0:ntri])
-    for (int k = 0; k < ntri; k++) {
-        b[k] = bed_c[idx[k]];
-    }
-
-    for (int k = 0; k < ntri; k++) {
-        stages[k] = beds[k] + new_depth;
-        xmoms[k] = new_xmom;
-        ymoms[k] = new_ymom;
-    }
-
-    // Write to GPU
-    double *s = stages, *x = xmoms, *y = ymoms;
-    #pragma omp target teams loop map(to: idx[0:ntri], s[0:ntri], x[0:ntri], y[0:ntri])
+    #pragma omp target teams distribute parallel for map(to: idx[0:ntri])
     for (int k = 0; k < ntri; k++) {
         int i = idx[k];
-        stage_c[i] = s[k];
-        xmom_c[i] = x[k];
-        ymom_c[i] = y[k];
+        stage_c[i] = bed_c[i] + new_depth;
+        xmom_c[i] = new_xmom;
+        ymom_c[i] = new_ymom;
     }
 }
 
