@@ -536,9 +536,17 @@ def _write_mesh_partition(fname, rank, numprocs,
         v = nc.createVariable('boundary_edge', 'i4', ('bnd',))
         v[:] = bnd_edges
         tag_var = nc.createVariable('boundary_tag', 'S1', ('bnd', 'tag_len'))
-        for i, tag in enumerate(bnd_tags):
-            padded = tag.ljust(max_tag_len, '\x00')
-            tag_var[i, :] = num.frombuffer(padded.encode('ascii'), dtype='S1')
+        if Nbnd:
+            # Assemble the whole (Nbnd, tag_len) char array and write it in one
+            # call.  A per-row ``tag_var[i, :] = ...`` loop is one HDF5 write per
+            # boundary edge and dominates the mesh-partition write time (each
+            # assignment drags netCDF4's full per-call Python machinery).  Null
+            # padding matches the loader's ``rstrip('\x00')``.
+            tag_arr = num.zeros((Nbnd, max_tag_len), dtype='S1')
+            for i, tag in enumerate(bnd_tags):
+                b = tag.encode('ascii')
+                tag_arr[i, :len(b)] = num.frombuffer(b, dtype='S1')
+            tag_var[:] = tag_arr
 
         # --- send/recv communication: CSR encoding ---
         # full_send_dict / ghost_recv_dict: {rank: [local_indices, global_indices]}
