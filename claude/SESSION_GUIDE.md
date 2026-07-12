@@ -444,6 +444,22 @@ partitions** — ~88% of the job; the dump routines wrote files in a serial loop
   OpenMP offloading** — the kernels are standard OpenMP `target`, not CUDA, so
   nvc is simply the best option *at the moment* (GCC's nvptx backend ICEs on the
   ANUGA kernels; LLVM/Clang offload, AMD AOMP, Intel icx untested but feasible).
+- **`tools/install_anuga_nvc.sh` preflight (user report).** A user ran the script
+  in a conda env **not** created from `environments/environment_<PY>.yml` and it
+  died with `BackendUnavailable: Cannot import 'mesonpy'` — *after* nvc was found,
+  so it read like a GPU/compiler failure when it was just a missing build dep.
+  Cause: the build uses `pip install --no-build-isolation`, so pip does **not**
+  create a temp build env — the **meson-python** backend and the rest of
+  pyproject's `build-system.requires` must already be in the env. Added a
+  **preflight** that checks `mesonpy`/`cython`/`pybind11`/`numpy` are importable
+  and `meson`/`ninja` are on PATH, and on failure names the missing packages and
+  gives the fix (`conda install -c conda-forge …`, or recreate from the matching
+  `environments/environment_<ver>.yml`). It also prints the env's **actual**
+  Python version — the script prefers an *already-activated* env and ignores `$PY`,
+  so the banner could say `PY=3.14` while building into a 3.12 env (confusing in
+  the user's log).
+  **Triage tip:** `Cannot import 'mesonpy'` from this script is never an nvc
+  problem — it is a missing build backend in the target env.
 
 **Session 47 (2026-07-07/08):** Documentation overhaul — restructure, API
 cross-linking, meta-pages, and a warning-free Read the Docs build.
