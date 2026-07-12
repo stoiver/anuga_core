@@ -49,13 +49,13 @@ It is now developed and maintained by a community of volunteers.
    :caption: Appendices:
 
    installation/install_anuga_developers
-   appendices/install_gpu
-   appendices/contributing
-   parallel/advanced
-   appendices/compute_modes
-   appendices/profiling_gpu
+   Installing for GPU <appendices/install_gpu>
    appendices/advanced_script
+   parallel/advanced
+   Compute modes: legacy vs unified <appendices/compute_modes>
+   appendices/profiling_gpu
    mathematical_background
+   appendices/contributing
 
 
    
