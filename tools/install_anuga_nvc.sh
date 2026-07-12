@@ -118,6 +118,77 @@ fi
 echo " "
 
 # ------------------------------------------------------------------
+# Preflight: build backend + build requirements
+#
+# The build below uses `pip install --no-build-isolation`, so pip does NOT
+# create a temporary build environment — the meson-python backend (module
+# `mesonpy`) and the rest of pyproject's build-system.requires must already be
+# installed in the target environment.  If they are missing, pip dies with an
+# opaque "BackendUnavailable: Cannot import 'mesonpy'" traceback that never
+# mentions meson-python.  Check up front and say exactly what to install.
+#
+# This also reports the environment's *actual* Python version: when an env is
+# already activated we use it and ignore $PY, so the banner's PY can differ.
+# ------------------------------------------------------------------
+echo "# Preflight: checking build backend and build requirements"
+
+PREFLIGHT_PY='
+import importlib.util, shutil, sys
+missing = []
+for mod, pkg in (("mesonpy", "meson-python"), ("Cython", "cython"),
+                 ("pybind11", "pybind11"), ("numpy", "numpy")):
+    if importlib.util.find_spec(mod) is None:
+        missing.append(pkg)
+for exe in ("meson", "ninja"):
+    if shutil.which(exe) is None:
+        missing.append(exe)
+print("PREFLIGHT|%d.%d|%s" % (sys.version_info[0], sys.version_info[1],
+                              " ".join(missing)))
+'
+PREFLIGHT_OUT=$($CONDA_RUN python -c "$PREFLIGHT_PY" 2>/dev/null || true)
+PREFLIGHT_LINE=$(printf '%s\n' "$PREFLIGHT_OUT" | grep '^PREFLIGHT|' | tail -1 || true)
+
+if [ -z "$PREFLIGHT_LINE" ]; then
+    echo "#====================================================="
+    echo "# ERROR: could not run python in environment '${ENV_NAME}'."
+    echo "#        Is the environment usable?  Try:  ${CONDA_RUN} python -V"
+    echo "#====================================================="
+    exit 1
+fi
+
+ENV_PY_VER=$(printf '%s' "$PREFLIGHT_LINE" | cut -d'|' -f2)
+MISSING=$(printf '%s' "$PREFLIGHT_LINE" | cut -d'|' -f3)
+
+echo "#   environment '${ENV_NAME}' is Python ${ENV_PY_VER}"
+
+if [ -n "$MISSING" ]; then
+    echo "#====================================================="
+    echo "# ERROR: environment '${ENV_NAME}' is missing build requirements:"
+    echo "#"
+    echo "#     ${MISSING}"
+    echo "#"
+    echo "# This build uses 'pip install --no-build-isolation', so the"
+    echo "# meson-python backend and its build requirements must already be"
+    echo "# installed in the environment.  Without them pip fails with an"
+    echo "# opaque \"BackendUnavailable: Cannot import 'mesonpy'\"."
+    echo "#"
+    echo "# Fix - install them into this environment:"
+    echo "#"
+    echo "#   conda install -c conda-forge ${MISSING}"
+    echo "#"
+    echo "# Or recreate the environment with everything already in it:"
+    echo "#"
+    echo "#   conda env create -n anuga_env_${ENV_PY_VER} \\"
+    echo "#       -f environments/environment_${ENV_PY_VER}.yml"
+    echo "#   conda activate anuga_env_${ENV_PY_VER}"
+    echo "#====================================================="
+    exit 1
+fi
+
+echo "#   ok - meson-python, meson, ninja, cython, pybind11, numpy all present"
+echo " "
+
+# ------------------------------------------------------------------
 # Build ANUGA with GPU offloading
 # ------------------------------------------------------------------
 echo "#============================================================"
