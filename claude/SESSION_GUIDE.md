@@ -25,11 +25,22 @@ Key files to read first:
 | Milestone | Branch | Status |
 |-----------|--------|--------|
 | **v3.3.2** | `develop` → `main` | **SHIPPED 2026-04-05** — tagged, PyPI + conda-forge published; propagated to GA remote |
+| **v3.3.8** | cherry-picks → `main` | **SHIPPED 2026-07-11** — latest 3.3.x patch; tagged + PyPI (see session 48) |
 | **v4.0.0** | `feat/sc26` → `develop` → `main` | In progress — feat/sc26 merged into develop |
 
 **v3.3.2:** Shipped. Includes EPSG/CRS support, utm→pyproj replacement, sww_merge fixes,
 sww2vtu converter, pyproj DeprecationWarning fixes, ruff linting, riverwall throughflow,
 NPY002 fixes, GDAL removal, regression snapshot tests.
+
+**v3.3.8:** Shipped (2026-07-11). Patch release on the 3.3.x line: parallel
+structure-operator logging (accumulated_flow column, unique operator numbering,
+sequential-matching filenames) and the weir critical-depth gravity fix
+(hardcoded 9.81 → `domain.g`) — both cherry-picked to `main` via PR #182 — plus
+the SWW large-t store crash (#149), osx-64 wheels (#142) and checkout 6→7 (#146).
+**Release procedure:** the publish workflow uploads to PyPI on a *published
+GitHub Release*, **not** on a bare tag push — so create the annotated tag
+(`git tag -a 3.3.8 -m "ANUGA 3.3.8"`, bare version, no `v`), push it, then
+`gh release create 3.3.8 --verify-tag`. conda-forge follows via its feedstock bot.
 
 **v4.0.0:** `feat/sc26` has been merged into `develop` (2026-04-01). `develop` is now
 the active working branch. feat/sc26 contains GPU/OpenMP-offloading work
@@ -340,8 +351,9 @@ Findings:
 
 ## Recent session summaries (sessions 21–48)
 
-**Session 48 (2026-07-11):** Culvert/weir mode-1 vs mode-2 reporting parity, two
-real physics bugs, and the **3.3.8 patch release**. A user reported the parallel
+**Session 48 (2026-07-11/12):** Culvert/weir mode-1 vs mode-2 reporting parity,
+two real physics bugs, the **3.3.8 patch release**, then **partition-save
+performance** (parallel dump, single-file layout) and docs. A user reported the parallel
 (MPI) culvert/trap logs differed from sequential. Root-caused and fixed on
 `develop` (branch `fix/culvert-parallel-mode2-reporting`, PRs pushed direct to
 both develops, four commits `d55e1984`→`467255f0`):
@@ -377,6 +389,61 @@ both develops, four commits `d55e1984`→`467255f0`):
   conda-forge follows via feedstock bot.
 - **Gotcha (memory):** MPI parallel + mode-2 needs `#ranks == #GPUs` or it hangs/
   garbles — validate GPU mode-2 in serial on a 1-GPU box.
+
+Then, **partition-save performance** (a 173M-triangle / 18,400-partition run
+measured ~1,000 s load + ~4,000 s partition + **~37,000 s to save the
+partitions** — ~88% of the job; the dump routines wrote files in a serial loop):
+- **Four stacking speedups (PR #183).**
+  - **Opt-in parallel dump** (`num_workers`) for `sequential_distribute_dump`
+    (domain) and `sequential_mesh_dump` (mesh). `extract_submesh` only *reads*
+    the shared submesh, so a **fork** `ProcessPoolExecutor` shares the
+    partitioned mesh **copy-on-write** (never pickled), and `gc.freeze()` keeps
+    the big inherited structure out of the workers' GC scans (avoids both the
+    rescan cost and COW page-dirtying). Default 1 = today's serial, memory-frugal
+    path (it releases each rank as it writes; the parallel path keeps the whole
+    submesh live — the memory-for-speed trade-off).
+  - **Single-file domain dump** (`single_file=True`, new default): inline
+    points/triangles/quantities into the one per-partition pickle instead of
+    separate `.npy` files → **8 files/partition → 1** (~147k → 18.4k files at
+    18,400 ranks), the dominant cost on metadata-bound Lustre/GPFS. The loader
+    reads **both** layouts (filename-string vs inline array), so old dumps still
+    load; `single_file=False` restores the legacy layout.
+  - **Batched serial gc** — was collecting every rank (18,400 full graph
+    traversals); now every 64 (big arrays are freed by refcounting anyway).
+  - **Vectorized mesh `boundary_tag` write** — `_write_mesh_partition` wrote the
+    NetCDF string variable **one row per boundary edge** (one HDF5 write each).
+    cProfile showed this loop dominating; assembling the char array and writing
+    it once took the mesh write **9.45 → 2.57 ms/file (~3.7×)**, byte-identical.
+- **Partition file format — pickle vs NetCDF (decision).** Benchmarked on real
+  partitions. **Domain → keep pickle**: writes ~6–8× faster than NetCDF at ~equal
+  size, and it carries arbitrary Python state (boundary map, geo_reference) that
+  NetCDF cannot hold without a blob. **Mesh → keep NetCDF**: its content is 100%
+  arrays, it is **1.6× smaller** than pickle *and* portable/inspectable
+  (`ncdump -h`), safe to load, and write-once/read-many. Prototyped a **hybrid**
+  (bulk arrays as NetCDF variables + a small pickled config blob, one file) — it
+  round-trips exactly but writes ~6× slower, so **not adopted**. Two formats for
+  two genuinely different jobs; the mesh's apparent 34× gap was mostly the
+  boundary_tag bug above, not NetCDF itself.
+- **Docs (PRs #184, #185).** Documented `num_workers` / `single_file` and added
+  "Performance for large partition counts" sections. Then **harmonized** the
+  domain/mesh offline-partitioning pages: `sequential_distribute_dump` had a
+  **stub docstring** (no `Parameters` block) and `sequential_distribute_load` had
+  **none**, so the domain page's autodoc API rendered sparse next to the mesh
+  page — both now have full numpydoc + `See Also`, and each dump states its
+  on-disk format (domain → pickle, mesh → NetCDF). Also reordered the
+  **Appendices** (builds → advanced usage → GPU internals → theory → Contributing)
+  and shortened two long nav labels.
+  **Gotcha:** #183's final commit landed on the branch *after* the merge captured
+  it, so it silently missed `develop` — recovered via #184. Check the merge picked
+  up the head you expect.
+- **`pymetis` → core dependency** (was a `parallel` extra). `partition_mesh` needs
+  it, and the *sequential* offline-partitioning preprocessing uses that without
+  mpi4py — so gating it behind `parallel` meant a plain install could not
+  partition a mesh.
+- **GPU install docs.** Stated the real requirement is **a compiler with working
+  OpenMP offloading** — the kernels are standard OpenMP `target`, not CUDA, so
+  nvc is simply the best option *at the moment* (GCC's nvptx backend ICEs on the
+  ANUGA kernels; LLVM/Clang offload, AMD AOMP, Intel icx untested but feasible).
 
 **Session 47 (2026-07-07/08):** Documentation overhaul — restructure, API
 cross-linking, meta-pages, and a warning-free Read the Docs build.
