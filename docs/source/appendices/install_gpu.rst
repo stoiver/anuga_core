@@ -11,16 +11,44 @@ Installing for GPU (NVIDIA HPC SDK / nvc)
    ANUGA on the CPU (including the unified ``mode=2`` kernels as multicore
    OpenMP). See :ref:`compute_modes` for how to *use* GPU offload once built.
 
-ANUGA's GPU extension (``sw_domain_gpu_ext``) is built with OpenMP target
-offloading and requires **``nvc`` from the NVIDIA HPC SDK** — GCC's ``nvptx``
-backend currently ICEs on the ANUGA kernels, so a stock conda/pip install does
-**not** include the GPU extension.
+What you actually need
+----------------------
+
+ANUGA's GPU extension (``sw_domain_gpu_ext``) is written in **standard OpenMP
+target offloading** — it is not CUDA code and is not tied to any one vendor.
+The real requirement is therefore just:
+
+   **a C compiler with working OpenMP offloading support for your GPU.**
+
+In practice, **``nvc`` from the NVIDIA HPC SDK is the best option at the
+moment**, and is the toolchain ANUGA is routinely built and tested with:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 30 70
+
+   * - Compiler
+     - Status
+   * - **``nvc``** (NVIDIA HPC SDK)
+     - **Recommended.** Mature OpenMP target offloading for NVIDIA GPUs; what
+       the rest of this page uses.
+   * - GCC (``nvptx`` offload backend)
+     - **Does not currently work** — it hits an internal compiler error (ICE)
+       on the ANUGA kernels. This is why a stock conda/pip install does **not**
+       include the GPU extension.
+   * - Others (LLVM/Clang offload, AMD ``AOMP``/ROCm, Intel ``icx``)
+     - **Untested** with ANUGA. Because the kernels are plain OpenMP ``target``
+       code these are feasible in principle, but expect some porting work.
+
+The rest of this page covers the recommended ``nvc`` route.
 
 Requirements
 ------------
 
-- An NVIDIA GPU and a matching CUDA driver.
-- The **NVIDIA HPC SDK** (provides ``nvc``).
+- A GPU and a matching driver (for the ``nvc`` route: an NVIDIA GPU and a
+  matching CUDA driver).
+- **A compiler with OpenMP offloading support** — in practice the
+  **NVIDIA HPC SDK** (which provides ``nvc``).
 - A conda environment created via ``tools/install_miniforge.sh`` (see the
   :doc:`developer install </installation/install_anuga_developers>`).
 
