@@ -2508,6 +2508,40 @@ class Test_GPU_SetQuantityReachesDevice(unittest.TestCase):
         np.testing.assert_allclose(gpu, cpu, rtol=0, atol=1e-8)
         self.assertAlmostEqual(float(gpu.min()), 2.0, places=6)
 
+    def _run_direct(self, mode):
+        """As _run(), but write the quantity through the Quantity object itself."""
+        domain = rectangular_cross_domain(10, 10)
+        domain.set_flow_algorithm('DE0')
+        domain.set_name('setq_direct')
+        domain.set_datadir(tempfile.mkdtemp())
+        domain.store = False
+        domain.set_multiprocessor_mode(mode)
+
+        domain.set_quantity('elevation', -10.0)
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+        domain.distribute_to_vertices_and_edges()   # builds the device interface
+
+        # Bypass Domain.set_quantity() entirely — the sync must hang off the
+        # Quantity, not off the Domain wrapper.
+        domain.quantities['stage'].set_values(2.0)
+
+        for _ in domain.evolve(yieldstep=0.5, finaltime=1.0):
+            pass
+        return domain.quantities['stage'].centroid_values.copy()
+
+    def test_direct_quantity_set_values_reaches_device(self):
+        """Quantity.set_values() bypassing Domain.set_quantity() must still sync."""
+        cpu = self._run_direct(1)
+        gpu = self._run_direct(2)
+
+        np.testing.assert_allclose(
+            gpu, cpu, rtol=0, atol=1e-8,
+            err_msg='mode-2 ignored a direct Quantity.set_values() made after the '
+                    'GPU interface was built (device kept the stale values)')
+        self.assertAlmostEqual(float(gpu.min()), 2.0, places=6)
+        self.assertAlmostEqual(float(gpu.max()), 2.0, places=6)
+
 
 class Test_GPU_ForcingOperators(unittest.TestCase):
     """Wind_stress / Barometric_pressure / Rate OPERATORS must give identical
