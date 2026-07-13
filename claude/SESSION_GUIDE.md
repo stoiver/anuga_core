@@ -549,6 +549,56 @@ partitions** — ~88% of the job; the dump routines wrote files in a serial loop
     run as proof. With the sync disabled on the GPU build, the direct-Quantity test
     and the `set_quantity` guard both fail while the "interface not yet built"
     control still passes — the right signature.
+- **PR #188 (JorgeG94) — OpenACC offload back end: reviewed and numerically
+  validated.** Adds `gpu_backend=openmp|openacc` (meson), routing every kernel
+  through `gpu/gpu_omp_macros.h` so the same source compiles for OpenMP-target,
+  OpenACC (`nvc -acc=gpu`) or CPU multicore. Verified the load-bearing claim rather
+  than trusting it: **no raw `#pragma omp target`/`omp parallel` and no `reduction(`
+  survives** in `gpu/*.c` — important, because under `-acc=gpu -mp=multicore` a
+  leftover `omp target` would silently run on the **host** while the data sat on the
+  GPU. Every host↔device transfer also genuinely routes through a draining macro.
+  - **Numerical validation (the gate the PR left open).** Ran `run_small_towradgi.py`
+    (`-mpm 2 -go`, 256k tri, ft=3600) on both back ends **built from the same branch**,
+    so the back end was the only variable. Result: **OpenACC validates.**
+
+    | comparison | max ΔStage | RMS | >1mm |
+    |---|---|---|---|
+    | OpenACC run1 vs run2 (determinism) | **0.000e+00** | 0 | 0 |
+    | OpenACC vs OpenMP-target | 7.29e-02 | 1.26e-04 | 500 |
+    | OpenMP-target vs legacy CPU (*already shipped*) | 8.15e-02 | 3.70e-04 | 1650 |
+
+    **The yardstick row is the third** — that is the divergence we already ship and
+    accept between the current GPU back end and the CPU solver. ACC-vs-OMP is *smaller*
+    on every measure. Divergence starts at **exactly zero at t=0** (so the
+    `acc enter data copyin` mapping is right), is **5.96e-08 = 2⁻²⁴ (one ULP of the
+    `.sww`'s float32 storage) at t=120**, and only then amplifies — textbook chaotic
+    sensitivity in a wetting/drying model seeded by a different FP reduction order.
+    **Reusable method:** a *bitwise* run-to-run repeat is what separates "chaotic but
+    correct" from "data race" — both produce the same growth curve, but only a race
+    breaks reproducibility. Worth reaching for on any future GPU-backend change.
+  - **Perf: the kernel win is real but does not reach wall clock.** Steve spotted that
+    the PR's "fluxes-central 2.0s → 1.62s" had to be a short run; re-measured with
+    **nsys at `-ft 240`** and it reproduces — 2.304 s → 1.843 s (**−20%**, same 4736
+    instances); total GPU kernel time 5.40 → 4.92 s. Yet wall clock is a dead heat at
+    ft=240 (17.59 s vs 17.58 s) and ~1% *slower* at ft=3600 (206.2 s vs 208.3 s). The
+    CUDA API breakdown locates it: **the async queue issues 2.5× MORE
+    `cuStreamSynchronize` than OpenMP-target** (554,260 calls / 5.46 s vs 225,038 /
+    3.00 s) — the opposite of its stated motivation — masked only because OpenACC also
+    does far less D2H (3.61 s → 0.93 s), leaving total host API time a wash (7.13 vs
+    7.15 s). That wash is what eats the 20%. **Headroom, not a defect.**
+    **Lesson:** "kernel is faster" and "run is faster" are different claims; always ask
+    which was measured before agreeing *or* disagreeing.
+  - **Real bug found: `set_gpu_offload(False)` / `-ngo` silently no-ops on OpenACC.**
+    The host-fallback routes target regions to the initial device
+    (`omp_set_default_device(omp_get_initial_device())`); the ACC shim turns that into
+    `acc_set_device_num(-1, ...)`, and a negative devicenum in OpenACC is not "run on
+    the host" — the runtime just reverts to implementation-defined default. OpenACC has
+    no equivalent of OpenMP's initial-device semantics. So the run stays on the GPU with
+    no error. Flagged as a merge blocker (fix, or hard-error on the OpenACC build).
+  - Also flagged: the PR silently changes the **default** build's flags
+    (`-mp=gpu,multicore` → `-mp=gpu`), which bears on the known nvc host-fallback
+    pathology; and `acc_free` at `gpu_halo.c:121` frees device buffers without draining
+    the queue, inconsistent with the header's own `exit data` reasoning.
 
 **Session 47 (2026-07-07/08):** Documentation overhaul — restructure, API
 cross-linking, meta-pages, and a warning-free Read the Docs build.
