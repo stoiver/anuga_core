@@ -515,6 +515,40 @@ partitions** — ~88% of the job; the dump routines wrote files in a serial loop
   to legacy, check whether the *physics* still agrees — if it doesn't, you are
   hiding a real bug. PR #187 proposed pinning these tests, which would have masked
   the `set_quantity` corruption above.
+- **Audit of the other host-mutating paths, and the choke-point fix** (`c6a6f503`).
+  Followed the lesson above. `set_quantity_vertices_dict()` routes through
+  `set_quantity()` ⇒ covered; `set_boundary()` ⇒ session 39; fractional-step
+  operators ⇒ covered (non-GPU-safe ops are classified CPU-only and
+  `apply_fractional_steps()` brackets them with a sync pair); no direct
+  `centroid_values[:] =` on conserved quantities exists; checkpoint restore drops
+  the interface and rebuilds lazily. **Two residuals**, both actioned:
+  - Direct `Quantity.set_values()` still bypassed the sync. Fixed by moving the
+    round-trip **down from `Domain.set_quantity()` into `Quantity.set_values()`** —
+    the single choke point for host-side quantity writes, so both routes are
+    covered by one mechanism and neither double-syncs. Two guards keep it off the
+    hot paths: `GPU_SYNCED_QUANTITIES` limits the sync to the four centroid arrays
+    the C actually round-trips (`stage`, `xmomentum`, `ymomentum`, `height` — see
+    `gpu_domain_sync_to_device()`), so elevation/friction/user tracers pay nothing;
+    and `apply_fractional_steps()` sets `_gpu_host_writes_suppressed` inside its
+    already-bracketed region, without which an operator that sets a quantity would
+    cost a full host↔device transfer pair *per operator per timestep*.
+    **Rejected:** the deferred-push ("dirty flag, flush at next step") variant — it
+    races with the yieldstep's `sync_from_device()`, which would silently drop the
+    pending host write and reintroduce this exact bug class.
+  - **Issue #189** — `apply_protection_against_isolated_degenerate_timesteps()`
+    never runs in mode 2. It hangs off `update_timestep()` (line 2718), but all
+    three mode-2 step functions return early into their C counterparts *before*
+    reaching it. Default-off (`config.py:151`) so nothing is silently wrong today;
+    the sharp edge is that enabling it under GPU gives no protection *and no
+    warning*. Suggested fix: warn, as mode 2 already does for unsupported forcing.
+  - **Verification gotcha worth remembering:** these sync guards only mean anything
+    on a **GPU-offload build** (`gpu_offload=True`, nvc). On a CPU build the
+    `omp target update` pragmas are no-ops and the host arrays *are* the "device"
+    arrays, so the tests pass whether or not the fix exists. Always confirm the
+    build (`build/*/meson-info/intro-buildoptions.json`) before trusting a green
+    run as proof. With the sync disabled on the GPU build, the direct-Quantity test
+    and the `set_quantity` guard both fail while the "interface not yet built"
+    control still passes — the right signature.
 
 **Session 47 (2026-07-07/08):** Documentation overhaul — restructure, API
 cross-linking, meta-pages, and a warning-free Read the Docs build.
