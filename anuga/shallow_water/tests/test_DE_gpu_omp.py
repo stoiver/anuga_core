@@ -2449,6 +2449,66 @@ class Test_GPU_NonGPUBoundaryFallback(unittest.TestCase):
         self._assert_modes_agree('DE_ader2')
 
 
+@pytest.mark.skipif(not gpu_available(), reason=_gpu_skip_reason())
+class Test_GPU_SetQuantityReachesDevice(unittest.TestCase):
+    """set_quantity() after the GPU interface exists must reach the device.
+
+    Regression guard. In mode 2 ('unified') the *device* holds the authoritative
+    centroid state once the GPU interface is built. set_quantity() used to update
+    only the host arrays, so any set_quantity() made *after* something built the
+    interface was silently ignored: the device kept evolving the stale/default
+    values, and the results — and the stored SWW — were wrong.
+
+    The interface gets built early by anything that calls _ensure_gpu_interface(),
+    notably distribute_to_vertices_and_edges() and set_boundary(), so this was
+    reachable from ordinary scripts (set_boundary() before set_quantity(), or any
+    mid-run set_quantity()), not just from tests.
+    """
+
+    def _run(self, mode, force_interface):
+        domain = rectangular_cross_domain(10, 10)
+        domain.set_flow_algorithm('DE0')
+        domain.set_name('setq')
+        domain.set_datadir(tempfile.mkdtemp())
+        domain.store = False
+        domain.set_multiprocessor_mode(mode)
+
+        domain.set_quantity('elevation', -10.0)
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+
+        if force_interface:
+            # Build the mode-2 device interface *before* stage is set.
+            domain.distribute_to_vertices_and_edges()
+
+        # Quiescent flat water well above the bed: stage must stay at 2.0.
+        domain.set_quantity('stage', 2.0)
+
+        for _ in domain.evolve(yieldstep=0.5, finaltime=1.0):
+            pass
+        return domain.quantities['stage'].centroid_values.copy()
+
+    def test_set_quantity_after_interface_built(self):
+        """stage set after the interface is built must be the stage that evolves."""
+        cpu = self._run(1, force_interface=True)
+        gpu = self._run(2, force_interface=True)
+
+        # The bug produced stage == 0 (device default) or the stale pre-set value.
+        np.testing.assert_allclose(
+            gpu, cpu, rtol=0, atol=1e-8,
+            err_msg='mode-2 ignored set_quantity() made after the GPU interface '
+                    'was built (device kept the stale values)')
+        self.assertAlmostEqual(float(gpu.min()), 2.0, places=6)
+        self.assertAlmostEqual(float(gpu.max()), 2.0, places=6)
+
+    def test_set_quantity_before_interface_built(self):
+        """The ordinary ordering must keep working (no interface yet)."""
+        cpu = self._run(1, force_interface=False)
+        gpu = self._run(2, force_interface=False)
+        np.testing.assert_allclose(gpu, cpu, rtol=0, atol=1e-8)
+        self.assertAlmostEqual(float(gpu.min()), 2.0, places=6)
+
+
 class Test_GPU_ForcingOperators(unittest.TestCase):
     """Wind_stress / Barometric_pressure / Rate OPERATORS must give identical
     results in mode 1 (legacy) and mode 2 (unified).

@@ -1286,6 +1286,19 @@ class Domain(Generic_Domain):
 
         We have to do something special for 'elevation'
         otherwise pass through to generic set_quantity
+
+        Mode-2 ('unified'): once the GPU interface exists the *device* holds the
+        authoritative centroid state.  A set_quantity() that touches only the host
+        arrays is then silently ignored — the next step reads the stale device
+        values, so the simulation runs with the wrong initial conditions.  This
+        bites whenever something builds the interface *before* the quantities are
+        set (e.g. distribute_to_vertices_and_edges() or set_boundary(), both of
+        which call _ensure_gpu_interface()), and for any mid-run set_quantity().
+
+        So: refresh the host from the device first — otherwise the sync back would
+        push stale host values for the *other* quantities over the device's current
+        ones — then apply the change, then push everything back.  Mirrors the
+        invalidate-and-rebuild that set_boundary() already does.
         """
 
 #        if name == 'elevation':
@@ -1297,7 +1310,19 @@ class Domain(Generic_Domain):
 #        else:
 #            Generic_Domain.set_quantity(self, name, *args, **kwargs)
 
+        gpu_active = (self.multiprocessor_mode == MULTIPROCESSOR_GPU
+                      and self.gpu_interface is not None)
+
+        if gpu_active:
+            try:
+                self.gpu_interface.sync_from_device()
+            except Exception:
+                pass
+
         Generic_Domain.set_quantity(self, name, *args, **kwargs)
+
+        if gpu_active:
+            self.gpu_interface.sync_to_device()
 
 
     def set_timezone(self, tz: str | ZoneInfoType | None = None) -> None:
