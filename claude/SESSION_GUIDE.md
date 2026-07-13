@@ -594,7 +594,13 @@ partitions** — ~88% of the job; the dump routines wrote files in a serial loop
     `acc_set_device_num(-1, ...)`, and a negative devicenum in OpenACC is not "run on
     the host" — the runtime just reverts to implementation-defined default. OpenACC has
     no equivalent of OpenMP's initial-device semantics. So the run stays on the GPU with
-    no error. Flagged as a merge blocker (fix, or hard-error on the OpenACC build).
+    no error. **Issue #190**, scoped as a merge blocker for #188 rather than a live bug
+    (the back end is only on the feature branch) so it survives a rebase/split of that PR.
+    Fix is likely to *hard-error* rather than implement: the OpenMP idiom has no OpenACC
+    counterpart at all (host execution is a device *type*, not a device *number*), and the
+    separate `g_gpu_offload_enabled` flag may already carry most of the weight.
+    **Note the validation above does not cover this path** — both runs used the GPU, so a
+    green `.sww` diff gives false comfort here.
   - Also flagged: the PR silently changes the **default** build's flags
     (`-mp=gpu,multicore` → `-mp=gpu`), which bears on the known nvc host-fallback
     pathology; and `acc_free` at `gpu_halo.c:121` frees device buffers without draining
