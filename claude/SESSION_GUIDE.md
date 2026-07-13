@@ -479,6 +479,42 @@ partitions** — ~88% of the job; the dump routines wrote files in a serial loop
   written to the CWD ⇒ isolate the whole TestCase in a temp CWD rather than
   chasing individual `os.remove` calls. (An earlier fix, `55d91479`, had used
   per-file `mkstemp` for `test_sww_extent` but never touched the ferret tests.)
+- **`set_quantity()` did not reach the device in mode 2 — a REAL silent
+  correctness bug** (`d22bb53f`). Triaging unified-mode test failures reported on
+  PR #187 (which we first suspected were just the known unified-in-one-process
+  aborts — they were **not**: no aborts, and they reproduced *in isolation*).
+  `test_sww2dem_verbose_True` stored an SWW whose stage was `[-0.6, -0.1]` after
+  being set to `1.0`. Root cause: once the GPU interface exists the **device**
+  holds the authoritative centroid state, but `Domain.set_quantity()` updated only
+  the **host** arrays — so the device kept evolving stale/default values. With the
+  initial condition removed, mode 2 evolved **stage = 0** (the device default),
+  proving `set_quantity` never reached it. **Reachable from ordinary scripts**,
+  because `set_boundary()` *and* `distribute_to_vertices_and_edges()` both call
+  `_ensure_gpu_interface()`:
+
+      domain.set_boundary(...)           # builds the device interface
+      domain.set_quantity('stage', ...)  # host only -> device never sees it
+      domain.evolve(...)                 # evolves stale values -> WRONG output
+
+  i.e. GPU runs could be silently wrong, no error or warning. Session 39 had fixed
+  exactly this for `set_boundary()`; `set_quantity()` was missed. Fix mirrors it:
+  sync host **from** device, apply the change, sync **to** device (no-op in legacy;
+  off the hot path — no operator/structure calls `set_quantity()` per timestep).
+  Guard: `Test_GPU_SetQuantityReachesDevice` (fails with the fix reverted).
+  **Lesson:** when a host array and the device can both hold state, *every* public
+  mutator needs the sync, not just the one that bit you. Worth auditing other
+  host-mutating APIs (e.g. direct `quantity.set_values()`) for the same gap.
+- **`test_urs2sts` unified failures were NOT a bug** (`b20bfca0`). Three tests
+  assert on `quantity.boundary_values`, a *host* array mode 2 never populates (it
+  evaluates boundaries on-device and only syncs centroids back). Verified the
+  **physics is mode-2-correct**: skipping only those host-array asserts, the tests'
+  own fbound-vs-Dirichlet comparisons all pass under unified. So they are white-box
+  mode-1-only-state checks ⇒ pinned to legacy per `CONVENTIONS.md`. `test_2pts`
+  already passed under unified.
+  **Triage rule that paid off:** before "fixing" a mode-2 test failure by pinning it
+  to legacy, check whether the *physics* still agrees — if it doesn't, you are
+  hiding a real bug. PR #187 proposed pinning these tests, which would have masked
+  the `set_quantity` corruption above.
 
 **Session 47 (2026-07-07/08):** Documentation overhaul — restructure, API
 cross-linking, meta-pages, and a warning-free Read the Docs build.
