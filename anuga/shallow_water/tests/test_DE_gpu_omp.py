@@ -2543,6 +2543,79 @@ class Test_GPU_SetQuantityReachesDevice(unittest.TestCase):
         self.assertAlmostEqual(float(gpu.max()), 2.0, places=6)
 
 
+class Test_GPU_RateOperatorGhostInflux(unittest.TestCase):
+    """Rate_operator mass tracking must exclude ghost cells in mode 2 (issue #191).
+
+    Under MPI a rainfall polygon straddling a partition boundary appears on several
+    ranks; only the rank that OWNS a triangle may count it toward the reported influx.
+    The CPU path masks its sum with ``full_indices``; the mode-2 kernel used to sum
+    over every index, so parallel runs over-reported rainfall influx (and hence
+    ``domain.fractional_step_volume_integral``) by the ghost-cell contribution. The
+    stage update itself was — and stays — applied to ghosts on both paths, since the
+    halo exchange overwrites them.
+
+    This is a serial test of a parallel bug: it fakes the partition by clearing
+    ``tri_full_flag``, which is the only thing ``set_full_indices()`` reads. That keeps
+    the regression catchable in the ordinary (non-MPI) suite.
+    """
+
+    RATE = 1.0e-3
+    TIMESTEP = 2.0
+
+    def _influx(self, mode):
+        from anuga import Rate_operator
+
+        domain = rectangular_cross_domain(10, 10)
+        domain.set_flow_algorithm('DE0')
+        domain.set_name('rate_ghost')
+        domain.set_datadir(tempfile.mkdtemp())
+        domain.store = False
+        domain.set_multiprocessor_mode(mode)
+
+        domain.set_quantity('elevation', -10.0)
+        domain.set_quantity('stage', 1.0)
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+        domain.distribute_to_vertices_and_edges()   # builds the mode-2 device interface
+
+        # Pretend an MPI partition owns only 2/3 of the triangles. Must happen before
+        # the operator is constructed — set_full_indices() reads tri_full_flag in
+        # Rate_operator.__init__.
+        domain.tri_full_flag[::3] = 0
+
+        op = Rate_operator(domain, rate=self.RATE, factor=1.0)
+
+        domain.timestep = self.TIMESTEP
+        op()
+
+        owned_area = domain.areas[domain.tri_full_flag == 1].sum()
+        all_area = domain.areas.sum()
+        return op.local_influx, owned_area, all_area
+
+    def test_influx_excludes_ghost_cells(self):
+        """Mode 2 must count only owned triangles — and agree with mode 1 and theory."""
+        cpu, owned_area, all_area = self._influx(1)
+        gpu, _, _ = self._influx(2)
+
+        # Exact expected value: rate * factor * timestep * (area of OWNED triangles).
+        expected = self.RATE * self.TIMESTEP * owned_area
+        # What the bug produced: the same sum over EVERY triangle, ghosts included.
+        buggy = self.RATE * self.TIMESTEP * all_area
+
+        # Guard the guard: the two must be far apart, or this test proves nothing.
+        self.assertGreater(abs(buggy - expected), 0.1 * abs(expected))
+
+        self.assertAlmostEqual(
+            cpu, expected, places=10,
+            msg='mode-1 reference influx does not match the analytic value')
+        self.assertAlmostEqual(
+            gpu, expected, places=10,
+            msg='mode-2 counted ghost cells in the rate-operator influx (issue #191)')
+        self.assertAlmostEqual(
+            gpu, cpu, places=10,
+            msg='mode-1 and mode-2 disagree on rate-operator influx')
+
+
 class Test_GPU_ForcingOperators(unittest.TestCase):
     """Wind_stress / Barometric_pressure / Rate OPERATORS must give identical
     results in mode 1 (legacy) and mode 2 (unified).
