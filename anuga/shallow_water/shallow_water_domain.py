@@ -104,6 +104,12 @@ from numpy.typing import ArrayLike
 if TYPE_CHECKING:
     from datetime import datetime as DateTime
     from zoneinfo import ZoneInfo as ZoneInfoType
+    # Only for set_collect_max_quantities()'s return annotation. The real import is
+    # done inside that method, because operators import this module — a module-level
+    # import here would be circular.
+    from anuga.operators.collect_max_quantities_operator import (
+        Collect_max_quantities_operator,
+    )
 
 
 try:

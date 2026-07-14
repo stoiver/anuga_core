@@ -122,8 +122,6 @@ if myid == 0:
 
 for t in domain.evolve(yieldstep = 10, finaltime = 2e4):
     domain.write_time()
-    if interactive_visualisation:
-        vis.update()
 
 domain.sww_merge(delete_old=True)
 

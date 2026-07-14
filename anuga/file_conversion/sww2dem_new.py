@@ -365,7 +365,12 @@ def sww2dem(name_in, name_out,
 
         grid_values = num.zeros(ncols*nrows, float)
 
-        eval_grid(nrows, ncols, NODATA_value, grid_points, vertex_points.flatten(), volumes, result, grid_values)
+        # FIXME: eval_grid() was never implemented — it exists nowhere in the codebase,
+        # in Python or C. This module is an abandoned rewrite of sww2dem.py (it defines the
+        # same two functions), is imported by nothing, and calc_grid_values() below cannot
+        # run. Kept only pending a decision to delete it; noqa so the rest of the codebase
+        # can enforce F821. See issue #197.
+        eval_grid(nrows, ncols, NODATA_value, grid_points, vertex_points.flatten(), volumes, result, grid_values)  # noqa: F821
         return grid_values.flatten()
 
     grid_values = calc_grid_values(vertex_points, volumes, result)
