@@ -204,6 +204,80 @@ def gpu_offload_enabled() -> bool:
     return bool(ge.get_offload_enabled()) if ge is not None else False
 
 
+def gpu_startup_banner(numprocs: int,
+                       num_devices: int,
+                       device_id: int,
+                       offload_active: bool,
+                       omp_num_threads: str = '1') -> list:
+    """Build the mode-2 ('unified') startup banner as a list of lines.
+
+    Pure function of its arguments so the rank/device mismatch warning can be tested
+    without an actual multi-GPU machine.
+
+    `numprocs` is the MPI rank count and `num_devices` the number of GPUs the runtime
+    can actually see.  These are DIFFERENT NUMBERS, and the banner used to print the
+    rank count labelled as "GPU(s)" — so a 4-rank run on a 1-GPU box cheerfully
+    reported "4 GPU(s)".  That mattered because ranks are assigned to devices
+    round-robin (``device_id = rank % num_devices``), so an oversubscribed run silently
+    puts several ranks on one device.  The banner was the natural place to notice that,
+    and instead it concealed it.  See issue #194.
+
+    Why the warning is worded the way it is.  Measured on one RTX 5070, a 160k-triangle
+    mode-2 evolve, ranks all sharing the single device:
+
+        ranks   no MPS     with MPS
+          1      3.80 s     3.51 s
+          2      7.13 s     3.48 s
+          4     11.21 s     3.72 s
+
+    So the *reliable* cost of oversubscribing is speed: without MPS the ranks time-slice
+    the device and it is ~3x slower.  NVIDIA MPS lets their kernels run concurrently and
+    restores parity — but never beats one rank per GPU, because a single rank with the
+    whole mesh already saturates the device; splitting it creates no new parallelism.
+    So MPS is a way to stop losing, not a way to go faster.
+
+    Hangs and garbled results have been reported in this configuration on real hardware,
+    but did NOT reproduce in the runs above (every rank count gave a bit-identical
+    checksum).  The warning therefore leads with the measured slowdown and reports the
+    hangs as a possibility, rather than promising a failure that may not arrive — an
+    oversubscribed run that quietly works but is 3x slow is the likelier outcome, and is
+    exactly the one a user would otherwise never notice.
+    """
+
+    bar = '+==============================================================================+'
+    lines = [bar]
+
+    if not offload_active:
+        lines.append("| ANUGA compute mode: 'unified' CPU multicore (gpu_ext kernels, no offload)   |")
+        lines.append(f'| OMP_NUM_THREADS={omp_num_threads}')
+    elif device_id < 0:
+        lines.append('| WARNING: No GPU devices found, running on CPU via OpenMP target offloading  |')
+    elif num_devices <= 0:
+        # Device count unavailable (query failed). Say so rather than inventing one —
+        # printing numprocs here is exactly the bug this function exists to remove.
+        lines.append(f'| GPU interface initialized: {numprocs} MPI rank(s), device count unknown, '
+                     f'OpenMP target offloading')
+    else:
+        lines.append(f'| GPU interface initialized: {numprocs} MPI rank(s) on {num_devices} GPU(s), '
+                     f'OpenMP target offloading')
+
+        if numprocs > num_devices:
+            lines.append(f'| WARNING: {numprocs} MPI ranks but only {num_devices} GPU(s). Ranks map round-robin')
+            lines.append(f'|          (rank % {num_devices}), so several ranks share one device. Mode-2 MPI')
+            lines.append('|          expects ONE RANK PER GPU. Measured: up to ~3x SLOWER than one')
+            lines.append('|          rank per GPU (the ranks time-slice the device); hangs and wrong')
+            lines.append('|          results have also been reported in this configuration.')
+            lines.append(f'|          Re-run with -np {num_devices}. NVIDIA MPS removes the slowdown')
+            lines.append('|          but never beats one rank per GPU, so it is not a way to go faster.')
+        elif numprocs < num_devices:
+            idle = num_devices - numprocs
+            lines.append(f'| NOTE: {idle} GPU(s) idle — {numprocs} rank(s) for {num_devices} device(s). '
+                         f'Use -np {num_devices} to use them all.')
+
+    lines.append(bar)
+    return lines
+
+
 def set_gpu_offload(enable: bool = True, verbose: bool = True) -> bool:
     """Enable or disable GPU offload for mode-2 ('unified') domains, process-wide.
 
@@ -5806,15 +5880,17 @@ class Domain(Generic_Domain):
                 self.gpu_offload_active = gpu_offload_enabled()
                 if myid == 0:
                     device_id = self.gpu_interface.gpu_dom.device_id
-                    print('+==============================================================================+')
-                    if not self.gpu_offload_active:
-                        print("| ANUGA compute mode: 'unified' CPU multicore (gpu_ext kernels, no offload)   |")
-                        print(f'| OMP_NUM_THREADS={omp_num_threads}')
-                    elif device_id < 0:
-                        print('| WARNING: No GPU devices found, running on CPU via OpenMP target offloading  |')
-                    else:
-                        print(f'| GPU interface initialized: {numprocs} GPU(s) using OpenMP target offloading')
-                    print('+==============================================================================+')
+
+                    # The number of GPUs the runtime can actually see — NOT numprocs.
+                    try:
+                        from anuga.shallow_water.sw_domain_gpu_ext import get_num_gpu_devices
+                        num_devices = get_num_gpu_devices()
+                    except Exception:
+                        num_devices = -1
+
+                    for line in gpu_startup_banner(numprocs, num_devices, device_id,
+                                                   self.gpu_offload_active, omp_num_threads):
+                        print(line)
                 return
             except Exception as e:
                 print(f'OpenMP GPU interface not available: {e}')

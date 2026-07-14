@@ -2543,6 +2543,82 @@ class Test_GPU_SetQuantityReachesDevice(unittest.TestCase):
         self.assertAlmostEqual(float(gpu.max()), 2.0, places=6)
 
 
+class Test_GPU_StartupBanner(unittest.TestCase):
+    """The mode-2 banner must report the GPU count, not the rank count (issue #194).
+
+    It used to print `numprocs` labelled as "GPU(s)", so a 4-rank run on a 1-GPU box
+    reported "4 GPU(s)". That concealed the one thing the banner was best placed to
+    catch: mode-2 MPI assigns ranks to devices round-robin (rank % num_devices), so
+    running more ranks than GPUs silently puts several ranks on one device, which may
+    hang or return wrong results.
+
+    gpu_startup_banner() is a pure function precisely so this matrix is testable
+    without a multi-GPU machine.
+    """
+
+    def _banner(self, numprocs, num_devices, device_id=0, offload_active=True):
+        from anuga.shallow_water.shallow_water_domain import gpu_startup_banner
+        return '\n'.join(gpu_startup_banner(numprocs, num_devices, device_id,
+                                            offload_active))
+
+    def test_reports_device_count_not_rank_count(self):
+        """4 ranks on 1 GPU must not claim 4 GPUs."""
+        text = self._banner(numprocs=4, num_devices=1)
+        self.assertIn('4 MPI rank(s) on 1 GPU(s)', text)
+        self.assertNotIn('4 GPU(s)', text)
+
+    def test_warns_when_ranks_exceed_gpus(self):
+        """Oversubscription must warn, and lead with the cost we actually measured.
+
+        Measured on one RTX 5070 (160k-tri mode-2 evolve, all ranks on the one device):
+        without MPS, np=1/2/4 took 3.80/7.13/11.21 s — so the dependable consequence is
+        a ~3x slowdown, not a crash. Results were bit-identical at every rank count, so
+        the banner must not promise a failure that may never arrive; a run that quietly
+        works but is 3x slow is the likelier outcome and the one users would miss.
+        """
+        text = self._banner(numprocs=4, num_devices=1)
+        self.assertIn('WARNING', text)
+        self.assertIn('ONE RANK PER GPU', text)
+        self.assertIn('SLOWER', text)          # the measured, reliable consequence
+        self.assertIn('MPS', text)             # and the mitigation, if they must do it
+
+    def test_no_warning_when_ranks_match_gpus(self):
+        """The supported configuration must stay quiet."""
+        text = self._banner(numprocs=4, num_devices=4)
+        self.assertIn('4 MPI rank(s) on 4 GPU(s)', text)
+        self.assertNotIn('WARNING', text)
+        self.assertNotIn('NOTE', text)
+
+    def test_notes_idle_gpus(self):
+        """Fewer ranks than GPUs is safe (distinct devices) — a note, not a warning."""
+        text = self._banner(numprocs=1, num_devices=4)
+        self.assertNotIn('WARNING', text)
+        self.assertIn('3 GPU(s) idle', text)
+
+    def test_serial_on_one_gpu_is_quiet(self):
+        """The overwhelmingly common case must not nag."""
+        text = self._banner(numprocs=1, num_devices=1)
+        self.assertNotIn('WARNING', text)
+        self.assertNotIn('NOTE', text)
+
+    def test_unknown_device_count_does_not_invent_one(self):
+        """If the device query fails, say so — do NOT fall back to printing numprocs."""
+        text = self._banner(numprocs=4, num_devices=-1)
+        self.assertIn('device count unknown', text)
+        self.assertNotIn('4 GPU(s)', text)
+        self.assertNotIn('WARNING', text)
+
+    def test_no_offload_and_no_device_paths(self):
+        """The CPU-multicore and no-device banners must not claim any GPU count."""
+        cpu = self._banner(numprocs=4, num_devices=0, offload_active=False)
+        self.assertIn('CPU multicore', cpu)
+        self.assertNotIn('GPU(s)', cpu)
+
+        nodev = self._banner(numprocs=4, num_devices=0, device_id=-1)
+        self.assertIn('No GPU devices found', nodev)
+        self.assertNotIn('4 GPU(s)', nodev)
+
+
 class Test_GPU_RateOperatorGhostInflux(unittest.TestCase):
     """Rate_operator mass tracking must exclude ghost cells in mode 2 (issue #191).
 
