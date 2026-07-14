@@ -73,9 +73,30 @@ pytest anuga/shallow_water/tests/test_shallow_water_domain.py  # single file
 
 # Per-test process isolation (required on a GPU build; works on any build).
 # -cm legacy|unified sets the default compute mode for every child.
-anuga_run_isolated_tests --pyargs anuga.shallow_water -cm unified   # 408 pass, 2 skip
+anuga_run_isolated_tests --pyargs anuga.shallow_water -cm unified   # 437 pass, 2 skip
 anuga_run_isolated_tests                                            # the GPU file
 ```
+
+⚠️ **The fast suite SKIPS `test_DE_gpu_omp.py` (86 tests) on a GPU-offload build.** A green
+`--run-fast` on the nvc build is *not* evidence for anything in that file — it never ran it.
+Tell the two apart by the counts:
+
+| build | `pytest --pyargs anuga --run-fast` |
+|---|---|
+| GPU offload (nvc) | 2610 pass / 218 skip ← the 86 are skipped |
+| CPU-only (gcc) | **2696 pass** / 219 skip ← the 86 actually run |
+
+So **validate any change to `test_DE_gpu_omp.py` on a CPU-only build** — which is what CI
+builds, and which is how a green local run still turned CI red on #192:
+
+```bash
+pip install --no-build-isolation -e . -Csetup-args=-Dgpu_offload=false   # CI's build
+```
+
+On a GPU build, use `anuga_run_isolated_tests` (it opts in via `ANUGA_GPU_TESTS_ISOLATED`)
+to exercise the file — but that is a *complement* to the CPU-build run, not a substitute:
+some assertions come out differently on the two builds (see the order-sensitivity trap in
+session 49).
 See `CLAUDE.md` → "Testing a GPU-offload (nvc) build" for the full GPU recipe.
 
 ### Build
@@ -409,12 +430,75 @@ sharply around t=360 s, so was an operator implemented differently on the two pa
   now leads with the measured slowdown and reports hangs as a possibility. A warning that
   predicts a crash that does not come is one people learn to ignore — which is how the
   original banner failed.
-- **Open: #192** — mode 1 runs fractional-step operators in registration order; mode 2
-  **hoists all Boyd culverts to the front** (batched via `GPUCulvertManager`). Towradgi
-  registers culverts first so the orders coincide *by luck*. Real trap: it makes
-  mode-1-vs-mode-2 comparison a less trustworthy oracle, and that comparison is what we lean
-  on to validate GPU work.
+- **BUG (#192, fixed — PR to `develop`): mode 2 IGNORED fractional-step operator
+  registration order.** Mode 1 runs operators in registration order; mode 2 hoisted every
+  Boyd culvert to the **front** (batched via `GPUCulvertManager`) before the loop. Mode 2
+  therefore returned **bit-identical** results whether a `Rate_operator` was registered
+  before or after a culvert, while mode 1 gave different answers:
+
+    | order sensitivity, max abs stage diff | mode 1 | mode 2 |
+    |---|---|---|
+    | pre-fix | responds (9.75e-05) | **0.0 — ignores order** |
+    | post-fix | responds (9.75e-05) | responds (9.78e-05) |
+
+  Towradgi registers its 22 culverts first, so the orders coincided *by luck*.
+  - **Steve asked the right design question: should the CPU adopt culverts-first instead?**
+    **No** — and the investigation shows why it would not even have worked. The batched GPU
+    path is **gather-all -> compute-all -> scatter-all**, so there are *two* divergences:
+    the hoisting, AND mode 2 applying culverts **simultaneously from a snapshot** where mode
+    1 applies them **sequentially** (culvert 2 sees culvert 1's stage change). Reordering the
+    CPU fixes the first and leaves the second — you would move every calibrated production
+    model's answers and *still* not have parity. Also: **mode 1 is the oracle** we validate
+    GPU work against; changing the oracle to match the thing under test is backwards.
+  - **Fix:** fire the batched cycle **at the position of the first culvert** rather than
+    before the loop. Contiguous culverts (what every real script does) then reproduce
+    registration order *exactly*, batching untouched, **zero performance cost**. Interleaved
+    culverts still get pulled forward — so it now **warns** instead of diverging silently.
+  - **The measurement trap — READ THIS BEFORE TOUCHING THE GUARD.** My first check said the
+    fix made things *worse* (656 -> 1076 cells differing). It had not. Comparing
+    mode-1-vs-mode-2 *divergence* is the wrong instrument: a separate, pre-existing
+    mode-1/mode-2 culvert discrepancy (~1e-4) dominates, and in this setup it is nearly
+    **equal and opposite** to the order effect — so the *wrong* order coincidentally looked
+    closer (1.4e-06) than the right one (9.77e-05, the floor). The correct instrument is
+    order **sensitivity** (does swapping the registration order change the answer?), which is
+    unambiguous: exactly 0.0 with the bug. The test docstring carries this warning so nobody
+    later "improves" the guard back into the misleading form.
+  - **Still open, separate:** the snapshot-vs-sequential culvert difference above, and the
+    ~1e-4 mode-1/mode-2 Boyd_box discrepancy that forms the floor. Neither is caused by #192
+    or by its fix (the culvert-first control is byte-for-byte unchanged across it).
+  - **NEAR-MISS + a real lint gap.** Inserting `_warn_if_culverts_interleaved()` after the
+    operator loop silently swallowed the trailing
+    `if gpu_mode and needs_cpu_sync: sync_to_device()` into the *new method*, where those
+    locals do not exist. `apply_fractional_steps()` then stopped pushing host work back to
+    the device, so CPU-only operators (wind stress) never reached the GPU — the exact bug
+    class fixed earlier this session. **The unified suite caught it (3 wind-stress
+    failures); `ruff check` did NOT.** The project's ruff config does not enable **F821
+    (undefined name)** — `ruff check` reports "All checks passed" on code with two undefined
+    names, while `ruff check --select F821` flags them. **112 F821s exist repo-wide**, so
+    enabling it is its own piece of work, but *lint here cannot catch a typo'd or orphaned
+    variable reference.* Do not rely on it to; run the suite.
 - **Testing lessons worth keeping.**
+  - ⚠️ **On a GPU-offload build the fast suite SKIPS `test_DE_gpu_omp.py` ENTIRELY — all 86
+    tests.** This bit hard: the #192 guard was written, "verified" with a green fast suite on
+    the nvc build, pushed — and CI went red on 8 jobs, because the fast suite had never
+    *run* the tests being added. Counts make it obvious once you know:
+
+        GPU-offload build (nvc):  2610 pass / 218 skip     <- test_DE_gpu_omp skipped
+        CPU-only build (gcc):     2696 pass / 219 skip     <- the extra 86 ARE those tests
+
+    **Any change to `test_DE_gpu_omp.py` must be validated on a CPU-only build**
+    (`pip install --no-build-isolation -e . -Csetup-args=-Dgpu_offload=false`), which is
+    what CI builds. The isolated runner (`anuga_run_isolated_tests`) *does* exercise the file
+    on a GPU build, but the *fast suite alone is not evidence* for it.
+  - **Do not assert on a mode-1-vs-mode-2 divergence MAGNITUDE — it is build-dependent.**
+    The first version of the #192 guard required mode-2's order-sensitivity to match mode-1's
+    within 5%. It passed on the GPU build (ratio 1.00) and failed on CI's CPU build (ratio
+    2.0), because the magnitude is confounded by the pre-existing mode-1/mode-2 culvert
+    discharge discrepancy, which differs per build. Assert on the *property* (mode 2 obeys
+    registration order — exactly 0.0 sensitivity when it does not), not on a number that a
+    separate discrepancy contaminates. **This is the same trap already documented two bullets
+    up, and I walked straight into it anyway** — which is precisely why it is written down
+    twice.
   - A parallel bug can often be made **serially catchable**: #191's guard fakes the partition
     by clearing `tri_full_flag` (the only thing `set_full_indices()` reads) and asserts
     against the analytic influx — so it runs in the ordinary non-MPI suite. #193's could
@@ -424,7 +508,12 @@ sharply around t=360 s, so was an operator implemented differently on the two pa
     on hardware CI lacks, so it was pulled out as a pure function of
     `(numprocs, num_devices, device_id, offload_active)`; the whole matrix is now covered
     serially.
-  - Both fixes were **proven by re-injecting the bug** and watching the new test fail.
+  - **`ruff check` does not catch undefined names here (issue #197).** F821 is not enabled,
+    so an orphaned/typo'd variable reference lints clean — it took the test suite to catch
+    one. 112 F821s exist repo-wide, 74 of them in the single broken module
+    `anuga/tsunami_source/eqf_v2.py`. Do not trust lint for this class of error.
+  - Every fix this session was **proven by re-injecting the bug** and watching the new test
+    fail. Do that; a guard you have not seen fail is not a guard.
 
 **Session 48 (2026-07-11/12):** Culvert/weir mode-1 vs mode-2 reporting parity,
 two real physics bugs, the **3.3.8 patch release**, then **partition-save
