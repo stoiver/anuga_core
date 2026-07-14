@@ -5013,8 +5013,25 @@ class Domain(Generic_Domain):
     def apply_fractional_steps(self):
         """Override to sync GPU data before fractional step operators run.
 
-        Boyd culvert operators are handled via GPUCulvertManager (batched,
-        only 2 GPU sync points) instead of the per-operator Python loop.
+        Boyd culvert operators are handled via GPUCulvertManager (batched, only 2 GPU
+        sync points) instead of the per-operator Python loop.
+
+        Operator ORDER matters: fractional-step operators mutate `stage` in sequence, so
+        running them in a different order gives different answers.  Mode 1 runs them in
+        registration order.  Mode 2 must too, or the same script silently disagrees with
+        itself across compute modes — and mode-1-vs-mode-2 agreement is the oracle we use
+        to validate GPU work, so it must not depend on the order a user happened to
+        construct their operators in.
+
+        The batch is therefore fired **at the position of the first culvert in the list**,
+        not before the loop.  When the culverts are registered together — which is what
+        every real script does (towradgi registers 22 in a row) — that is *exactly*
+        registration order, and the batching is untouched, so this costs nothing.
+
+        If culverts are interleaved with other operators, the later ones are still pulled
+        forward to the first culvert's slot (the C batches all registered culverts in one
+        gather/compute/scatter cycle, and there is no unbatched mode-2 culvert path).  We
+        warn in that case rather than diverge silently.  See issue #192.
         """
         gpu_mode = (self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None)
         gpu_culverts_active = (gpu_mode and self.gpu_culvert_manager is not None
@@ -5026,26 +5043,70 @@ class Domain(Generic_Domain):
             if needs_cpu_sync:
                 self.gpu_interface.sync_from_device()
 
-            # Execute all Boyd culverts in one batched GPU cycle
             if gpu_culverts_active:
-                self.gpu_culvert_manager.apply_all()
+                self._warn_if_culverts_interleaved()
 
         # The host copy is already in sync here and gets pushed back below, so an
         # operator that writes a quantity must not trigger its own round-trip per
         # call — that would be one full host<->device transfer pair per operator
         # per timestep.
         self._gpu_host_writes_suppressed = (gpu_mode and needs_cpu_sync)
+        culverts_done = False
         try:
-            # Run remaining operators (skip Boyd operators handled by GPU manager)
             for operator in self.fractional_step_operators:
                 if gpu_culverts_active and operator in self.gpu_culvert_manager.operators:
-                    continue  # Already handled by GPUCulvertManager
+                    # Fire the whole batched culvert cycle in the slot of the FIRST
+                    # culvert, then skip the rest — they were handled by that batch.
+                    if not culverts_done:
+                        self.gpu_culvert_manager.apply_all()
+                        culverts_done = True
+                    continue
                 operator()
         finally:
             self._gpu_host_writes_suppressed = False
 
+        # Push the host-side work of any CPU-only operator back to the device. Mode-2
+        # correctness depends on this: without it a CPU-only operator (wind stress,
+        # say) writes only the host arrays and the device never sees it.
         if gpu_mode and needs_cpu_sync:
             self.gpu_interface.sync_to_device()
+
+    def _warn_if_culverts_interleaved(self):
+        """Warn once if the Boyd culverts are not contiguous in the operator list.
+
+        The mode-2 culvert batch is a single gather/compute/scatter cycle over every
+        registered culvert, so it can only be fired at one point in the sequence. We fire
+        it where the first culvert sits, which reproduces registration order exactly when
+        the culverts are contiguous. When they are not, the later ones get pulled forward
+        and mode 2 will disagree with mode 1 — say so instead of diverging in silence.
+        """
+
+        if getattr(self, '_culvert_order_checked', False):
+            return
+        self._culvert_order_checked = True
+
+        culvert_ops = self.gpu_culvert_manager.operators
+        positions = [i for i, op in enumerate(self.fractional_step_operators)
+                     if op in culvert_ops]
+        if not positions:
+            return
+
+        contiguous = (positions[-1] - positions[0] + 1) == len(positions)
+        if contiguous:
+            return
+
+        interleaved = [self.fractional_step_operators[i].__class__.__name__
+                       for i in range(positions[0], positions[-1] + 1)
+                       if self.fractional_step_operators[i] not in culvert_ops]
+        import warnings
+        warnings.warn(
+            'mode 2: Boyd culvert operators are not registered contiguously — '
+            f'{sorted(set(interleaved))} sit between them. The GPU applies all culverts '
+            'in one batch at the position of the first, so those operators will run AFTER '
+            'the culverts here but BEFORE some of them in mode 1 (legacy), and the two '
+            'compute modes will not agree. Register the culverts together to avoid this. '
+            '(issue #192)',
+            UserWarning, stacklevel=3)
 
     def update_ghosts(self, quantities=None):
         """Override to use GPU ghost exchange when in GPU mode."""

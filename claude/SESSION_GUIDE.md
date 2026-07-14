@@ -409,11 +409,53 @@ sharply around t=360 s, so was an operator implemented differently on the two pa
   now leads with the measured slowdown and reports hangs as a possibility. A warning that
   predicts a crash that does not come is one people learn to ignore — which is how the
   original banner failed.
-- **Open: #192** — mode 1 runs fractional-step operators in registration order; mode 2
-  **hoists all Boyd culverts to the front** (batched via `GPUCulvertManager`). Towradgi
-  registers culverts first so the orders coincide *by luck*. Real trap: it makes
-  mode-1-vs-mode-2 comparison a less trustworthy oracle, and that comparison is what we lean
-  on to validate GPU work.
+- **BUG (#192, fixed — PR to `develop`): mode 2 IGNORED fractional-step operator
+  registration order.** Mode 1 runs operators in registration order; mode 2 hoisted every
+  Boyd culvert to the **front** (batched via `GPUCulvertManager`) before the loop. Mode 2
+  therefore returned **bit-identical** results whether a `Rate_operator` was registered
+  before or after a culvert, while mode 1 gave different answers:
+
+    | order sensitivity, max abs stage diff | mode 1 | mode 2 |
+    |---|---|---|
+    | pre-fix | responds (9.75e-05) | **0.0 — ignores order** |
+    | post-fix | responds (9.75e-05) | responds (9.78e-05) |
+
+  Towradgi registers its 22 culverts first, so the orders coincided *by luck*.
+  - **Steve asked the right design question: should the CPU adopt culverts-first instead?**
+    **No** — and the investigation shows why it would not even have worked. The batched GPU
+    path is **gather-all -> compute-all -> scatter-all**, so there are *two* divergences:
+    the hoisting, AND mode 2 applying culverts **simultaneously from a snapshot** where mode
+    1 applies them **sequentially** (culvert 2 sees culvert 1's stage change). Reordering the
+    CPU fixes the first and leaves the second — you would move every calibrated production
+    model's answers and *still* not have parity. Also: **mode 1 is the oracle** we validate
+    GPU work against; changing the oracle to match the thing under test is backwards.
+  - **Fix:** fire the batched cycle **at the position of the first culvert** rather than
+    before the loop. Contiguous culverts (what every real script does) then reproduce
+    registration order *exactly*, batching untouched, **zero performance cost**. Interleaved
+    culverts still get pulled forward — so it now **warns** instead of diverging silently.
+  - **The measurement trap — READ THIS BEFORE TOUCHING THE GUARD.** My first check said the
+    fix made things *worse* (656 -> 1076 cells differing). It had not. Comparing
+    mode-1-vs-mode-2 *divergence* is the wrong instrument: a separate, pre-existing
+    mode-1/mode-2 culvert discrepancy (~1e-4) dominates, and in this setup it is nearly
+    **equal and opposite** to the order effect — so the *wrong* order coincidentally looked
+    closer (1.4e-06) than the right one (9.77e-05, the floor). The correct instrument is
+    order **sensitivity** (does swapping the registration order change the answer?), which is
+    unambiguous: exactly 0.0 with the bug. The test docstring carries this warning so nobody
+    later "improves" the guard back into the misleading form.
+  - **Still open, separate:** the snapshot-vs-sequential culvert difference above, and the
+    ~1e-4 mode-1/mode-2 Boyd_box discrepancy that forms the floor. Neither is caused by #192
+    or by its fix (the culvert-first control is byte-for-byte unchanged across it).
+  - **NEAR-MISS + a real lint gap.** Inserting `_warn_if_culverts_interleaved()` after the
+    operator loop silently swallowed the trailing
+    `if gpu_mode and needs_cpu_sync: sync_to_device()` into the *new method*, where those
+    locals do not exist. `apply_fractional_steps()` then stopped pushing host work back to
+    the device, so CPU-only operators (wind stress) never reached the GPU — the exact bug
+    class fixed earlier this session. **The unified suite caught it (3 wind-stress
+    failures); `ruff check` did NOT.** The project's ruff config does not enable **F821
+    (undefined name)** — `ruff check` reports "All checks passed" on code with two undefined
+    names, while `ruff check --select F821` flags them. **112 F821s exist repo-wide**, so
+    enabling it is its own piece of work, but *lint here cannot catch a typo'd or orphaned
+    variable reference.* Do not rely on it to; run the suite.
 - **Testing lessons worth keeping.**
   - A parallel bug can often be made **serially catchable**: #191's guard fakes the partition
     by clearing `tri_full_flag` (the only thing `set_full_indices()` reads) and asserts

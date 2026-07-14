@@ -2543,6 +2543,100 @@ class Test_GPU_SetQuantityReachesDevice(unittest.TestCase):
         self.assertAlmostEqual(float(gpu.max()), 2.0, places=6)
 
 
+class Test_GPU_FractionalStepOperatorOrder(unittest.TestCase):
+    """Mode 2 must honour fractional-step operator REGISTRATION ORDER (issue #192).
+
+    Fractional-step operators mutate `stage` in sequence, so their order changes the
+    answer. Mode 1 runs them in registration order. Mode 2 used to hoist every Boyd
+    culvert to the FRONT (batched via GPUCulvertManager), discarding that order — so
+    mode 2 returned **bit-identical** results whether a Rate_operator was registered
+    before or after a culvert, while mode 1 gave different answers for the two.
+
+    Measured here, max|stage(rate-first) - stage(culvert-first)|:
+
+        pre-fix    mode 1: 9.75e-05 (responds)   mode 2: 0.0 (IGNORES ORDER)
+        post-fix   mode 1: 9.75e-05 (responds)   mode 2: 9.78e-05 (responds)
+
+    That mattered beyond any one script: it made mode-1-vs-mode-2 agreement depend on
+    the order a user happened to construct their operators in — and that agreement is
+    the oracle we use to validate GPU work.
+
+    NOTE for anyone extending this: do NOT write the guard as "mode-1 and mode-2 agree
+    more closely after the fix". They do not, and cannot — a separate, pre-existing
+    mode-1/mode-2 culvert discrepancy (~1e-4 here) dominates. In this setup the order
+    effect and that discrepancy happen to be nearly equal and OPPOSITE, so before the
+    fix the wrong-order run looked *closer* (1.4e-6) than the right-order one. Assert on
+    order-sensitivity, which is the actual property, not on a divergence magnitude.
+    """
+
+    def _run(self, mode, order):
+        from anuga import Boyd_box_operator, Rate_operator
+
+        domain = rectangular_cross_domain(20, 20, len1=50.0, len2=50.0)
+        domain.set_flow_algorithm('DE0')
+        domain.set_name('op_order')
+        domain.set_datadir(tempfile.mkdtemp())
+        domain.store = False
+        domain.set_multiprocessor_mode(mode)
+
+        domain.set_quantity('elevation', -2.0)
+        domain.set_quantity('stage', -1.0)
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+
+        def add_rate():
+            Rate_operator(domain, rate=1.0e-2, factor=1.0)
+
+        def add_culvert():
+            Boyd_box_operator(domain,
+                              end_points=[[10.0, 25.0], [40.0, 25.0]],
+                              losses=1.5, width=1.0, height=1.0, apron=0.0,
+                              use_momentum_jet=False, use_velocity_head=False,
+                              manning=0.013, verbose=False)
+
+        if order == 'rate_first':
+            add_rate()
+            add_culvert()
+        else:
+            add_culvert()
+            add_rate()
+
+        for _ in domain.evolve(yieldstep=1.0, finaltime=5.0):
+            pass
+        return domain.quantities['stage'].centroid_values.copy()
+
+    def _order_sensitivity(self, mode):
+        a = self._run(mode, 'rate_first')
+        b = self._run(mode, 'culvert_first')
+        return float(np.abs(a - b).max())
+
+    def test_mode2_does_not_ignore_operator_order(self):
+        """The core guard: mode 2 must not return the same answer for both orders.
+
+        With the bug this is EXACTLY 0.0 — the culverts were hoisted to the front either
+        way, so the registration order was thrown away.
+        """
+        gpu = self._order_sensitivity(2)
+        self.assertGreater(
+            gpu, 1e-9,
+            msg='mode-2 gave identical results for rate-before-culvert and '
+                'culvert-before-rate — it is ignoring fractional-step operator '
+                'registration order (issue #192)')
+
+    def test_mode2_order_sensitivity_matches_mode1(self):
+        """And it must respond to order the way mode 1 does, not merely respond."""
+        cpu = self._order_sensitivity(1)
+        gpu = self._order_sensitivity(2)
+
+        self.assertGreater(cpu, 1e-9,
+                           msg='mode-1 reference is order-insensitive here; the test '
+                               'setup no longer exercises the bug')
+        np.testing.assert_allclose(
+            gpu, cpu, rtol=0.05,
+            err_msg='mode-2 responds to operator order, but by a different amount than '
+                    'mode-1 — the orders still do not line up')
+
+
 class Test_GPU_StartupBanner(unittest.TestCase):
     """The mode-2 banner must report the GPU count, not the rank count (issue #194).
 
