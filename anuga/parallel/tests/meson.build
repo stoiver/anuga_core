@@ -23,6 +23,7 @@ python_sources = [
   'test_parallel_dist_settings.py',
   'test_parallel_file_boundary.py',
   'test_parallel_frac_op.py',
+  'test_parallel_inlet_fsvi.py',
   'test_parallel_inlet_operator.py',
   'test_parallel_inlet_operator_with_region.py',
   'test_parallel_riverwall.py',
