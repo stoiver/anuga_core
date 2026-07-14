@@ -349,7 +349,82 @@ Findings:
 
 ---
 
-## Recent session summaries (sessions 21–48)
+## Recent session summaries (sessions 21–49)
+
+**Session 49 (2026-07-13/14):** **Operator parity audit, mode-1 vs mode-2 vs parallel** —
+which found three real bugs, two of them in the *legacy* path, not the GPU one. Started
+from a question about the CPU/GPU divergence in the PR-188 validation: the differences grow
+sharply around t=360 s, so was an operator implemented differently on the two paths?
+- **The t=360 divergence was NOT a bug** — worth recording, because the negative result is
+  the point. The rainfall time series **steps up 3.5x at exactly t=360** (0.000375 ->
+  0.001314 m/s); more rain ⇒ more newly wetted cells ⇒ more wet/dry fronts ⇒ faster chaotic
+  amplification. Both paths see the identical rate. The clincher: the growth table showing
+  the t=360 jump was **OpenACC vs OpenMP-target — both mode 2, sharing identical operator
+  code**. Two runs with the *same* operators still show the jump, so it cannot be a CPU/GPU
+  operator mismatch. **Method:** when a divergence correlates with a time, check the
+  *forcing* before you go hunting in the code.
+- **Operator physics does match.** `Rate_operator`: both paths evaluate `t`, `timestep`,
+  `rate` and `factor` identically and apply the same update. `Inlet_operator`: both use the
+  time-averaged `Q = 0.5*(Q(t) + Q(t+dt))`. Culverts: harmonised back in session 48.
+- **BUG (#191, fixed `52705240`): mode-2 `Rate_operator` counted ghost cells in its mass
+  tracking.** The CPU masks its influx sum with `full_indices`; the GPU kernel summed over
+  every index. Under MPI a rainfall polygon straddling a partition boundary appears on
+  several ranks, so the reported influx (and `fractional_step_volume_integral`) was inflated
+  by the halo: **+4.8% at np=2, +9.1% at np=4** — which is exactly the discrepancy Steve had
+  seen on gadi with 4 GPUs/4 ranks. The insidious part: `full_indices`/`num_full` were
+  plumbed from Python into the C struct, malloc'd, memcpy'd, freed — and **never read by any
+  kernel**. The code *looked* like it handled ghosts. Fix bakes the mask into the area array
+  at init (`areas` -> `mass_areas`, zero for unowned cells; free, since `areas` was used for
+  nothing else) and **deletes the dead fields** so the trap cannot reappear.
+- **BUG (#193, fixed `c843ee78`): parallel inlet over-counted the mass balance by
+  x(number of ranks).** `fractional_step_volume_integral` is a per-rank LOCAL accumulator
+  (allreduce-summed on read), but the parallel inlet added the master's GLOBAL volume on
+  *every* participating rank: **np=1 -> 40.0, np=2 -> 80.0, np=4 -> 160.0** against a true
+  `Q*dt = 40.0`. **Not a GPU bug** — mode 1 and mode 2 gave identical wrong numbers, so this
+  had been corrupting `Water_volume_statistics` in *legacy* production MPI runs. Root defect
+  was a **convention clash**: `Rate_operator` contributes its local share, the inlet
+  contributed the global total, into the same accumulator. Fixed by routing all nine inlet
+  sites through `_add_fractional_step_volume()` (master-only) and documenting the
+  convention. Audited the other contributors: parallel **structure operators never touch the
+  accumulator at all** (internal transfers, mass-neutral), so they are clean.
+- **BUG (#194, PR #195): the mode-2 banner printed the RANK count labelled "GPU(s)".** A
+  4-rank run on a 1-GPU box reported "4 GPU(s)". It concealed the one thing the banner was
+  best placed to catch — ranks map to devices round-robin (`rank % num_devices`), so
+  oversubscription silently shares a device.
+- **Can you run several ranks on one GPU? Measured, and the answer is useful** (160k-tri
+  mode-2 evolve, one RTX 5070):
+
+    | ranks | no MPS | with MPS |
+    |---|---|---|
+    | 1 | 3.80 s | 3.51 s |
+    | 2 | 7.13 s | **3.48 s** |
+    | 4 | 11.21 s | **3.72 s** |
+
+  Without MPS the ranks **time-slice** the device: ~3x slower at np=4. **NVIDIA MPS erases
+  the penalty but never beats one rank per GPU** — a single rank with the whole mesh already
+  saturates the device, so splitting it adds no parallelism; MPS just lets the fragments
+  overlap again. *MPS is a way to stop losing, not a way to go faster.* Note it did **not**
+  hang and every rank count gave a **bit-identical checksum** — so the known hang/garble
+  failure is real (Steve has hit it on gadi) but **not universal**, which is why the banner
+  now leads with the measured slowdown and reports hangs as a possibility. A warning that
+  predicts a crash that does not come is one people learn to ignore — which is how the
+  original banner failed.
+- **Open: #192** — mode 1 runs fractional-step operators in registration order; mode 2
+  **hoists all Boyd culverts to the front** (batched via `GPUCulvertManager`). Towradgi
+  registers culverts first so the orders coincide *by luck*. Real trap: it makes
+  mode-1-vs-mode-2 comparison a less trustworthy oracle, and that comparison is what we lean
+  on to validate GPU work.
+- **Testing lessons worth keeping.**
+  - A parallel bug can often be made **serially catchable**: #191's guard fakes the partition
+    by clearing `tri_full_flag` (the only thing `set_full_indices()` reads) and asserts
+    against the analytic influx — so it runs in the ordinary non-MPI suite. #193's could
+    *not* be (at np=1 there is only the master, so the bug is structurally invisible), hence
+    a real `mpicmd` np=3 test.
+  - **Extract the untestable into a pure function.** `gpu_startup_banner()` only ever fires
+    on hardware CI lacks, so it was pulled out as a pure function of
+    `(numprocs, num_devices, device_id, offload_active)`; the whole matrix is now covered
+    serially.
+  - Both fixes were **proven by re-injecting the bug** and watching the new test fail.
 
 **Session 48 (2026-07-11/12):** Culvert/weir mode-1 vs mode-2 reporting parity,
 two real physics bugs, the **3.3.8 patch release**, then **partition-save
