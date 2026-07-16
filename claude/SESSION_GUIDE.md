@@ -319,6 +319,49 @@ Key findings:
 
 ---
 
+## GPU hardware comparison — RTX 5070 vs V100, per-kernel (nsys, 2026-07-16)
+
+Case: `run_small_towradgi.py -mpm 2 -go -ft 240`, ~256k tri, **OpenMP-target on both**
+(`nvc -mp=gpu`), single rank/GPU. Identical 4736-instance counts on both profiles ⇒
+same work, directly comparable. RTX 5070 = laptop (8GB GDDR7, ~450 GB/s); V100 = gadi
+SXM2 (HBM2, ~900 GB/s), profiled by Steve on gadi.
+
+**Headline: V100 only 1.16× faster in TOTAL GPU kernel time (4.64 s vs 5.40 s) — the 5070
+delivers 86% of V100 kernel throughput, nowhere near the ~2:1 raw-DRAM-bandwidth ratio.**
+
+| kernel | 5070 ms | V100 ms | faster |
+|---|--:|--:|:--|
+| **compute_fluxes_central** (dominant) | 2303.9 | 2690.2 | **5070 1.17×** |
+| extrapolate_second_order_edge | 1746.1 | 938.1 | V100 1.86× |
+| update_conserved_quantities | 585.8 | 182.7 | V100 3.21× |
+| manning_friction | 279.7 | 120.4 | V100 2.32× |
+| rate_operator_apply | 239.2 | 353.0 | 5070 1.48× |
+| **TOTAL GPU kernel** | **5399.5** | **4635.4** | **V100 1.16×** |
+
+Two camps. **Memory-bound** kernels (extrapolate, update_conserved, manning — gather /
+scatter / elementwise) go to the V100 by 1.9–3.2× — that IS the HBM2 bandwidth advantage.
+But the **compute-bound** `fluxes_central` (Riemann flux math, the single largest cost —
+43% of 5070 time, 58% of V100 time) goes to the **5070**: it is not bandwidth-limited, so
+Blackwell's newer/higher-clocked SMs win the arithmetic. Because that kernel dominates, the
+5070's win there nearly cancels the V100's bandwidth wins elsewhere.
+
+**Lesson (and a correction to record).** When Steve estimated the 5070 at ~75% of the V100
+from wall-clock (200 s vs 150 s at ft=3600), I pushed back that the real DRAM ratio is ~50%
+(V100 2×). I was right about the *spec sheet* — the memory-bound kernels confirm ~2× — but
+wrong about what matters for *this* code: towradgi is not bandwidth-bound end to end (its
+heaviest kernel is compute-bound), so the achieved ratio is 86%, not 50%. Steve's effective
+estimate was closer than my bandwidth correction. **Measure the kernels; do not infer GPU
+throughput from either the spec sheet or wall-clock.** Also note the kernel ratio (V100
+1.16×) is *smaller* than the wall-clock ratio (1.33×) — the ~1.15× remainder is host-side
+(gadi's server CPUs beat the laptop on the 30–70% non-kernel setup / Python / I/O portion).
+
+**Method, reusable:** for identical work, `time_A / time_B` per kernel *is* the inverse
+achieved-throughput ratio (no need for absolute GB/s). Match kernels by base name after
+stripping the `nvkernel_` prefix and `_F<n>L<n>_<n>` source-location suffix (the two builds'
+line numbers differ). Extract with `nsys stats --report cuda_gpu_kern_sum --format csv`.
+
+---
+
 ## Weak-scaling benchmark — rectangular, constant timestep (MSI laptop, RTX 5070, AMD Ryzen 9 32C/30GB, 2026-06-26)
 
 Case: `examples/parallel/run_parallel_rectangular_weak_scaling.py` — the extent grows with
