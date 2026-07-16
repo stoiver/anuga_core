@@ -1136,7 +1136,7 @@ class SWW_plotter:
 
         import matplotlib.pyplot as plt
 
-        self._speed_depth_frame(frame, figsize, dpi, vmin, vmax)
+        fig, ax = self._speed_depth_frame(frame, figsize, dpi, vmin, vmax)
 
         #plt.show()
 
@@ -1833,7 +1833,7 @@ class SWW_plotter:
         import matplotlib.pyplot as plt
         fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
 
-        im = ax.tripcolor(self.triang,  *args, **kwargs)
+        im = ax.tripcolor(self.triang, **kwargs)
         return fig, ax, im
 
     def get_flow_through_cross_section(self, polyline: list, verbose: bool = False) -> tuple[np.ndarray, list]:

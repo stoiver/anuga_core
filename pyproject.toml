@@ -116,7 +116,6 @@ ignore = [
     "F403",   # star import (57) — ANUGA uses * imports for domain API
     "F405",   # may be from star import (1405)
     "F811",   # redefined while unused (190) — some intentional
-    "F821",   # undefined name (176) — false positives from star imports
     "F841",   # local variable assigned but never used (1034)
 ]
 
