@@ -2544,30 +2544,37 @@ class Test_GPU_SetQuantityReachesDevice(unittest.TestCase):
 
 
 class Test_GPU_FractionalStepOperatorOrder(unittest.TestCase):
-    """Mode 2 must honour fractional-step operator REGISTRATION ORDER (issue #192).
+    """Mode 2 must apply fractional-step operators in REGISTRATION ORDER (issue #192).
 
     Fractional-step operators mutate `stage` in sequence, so their order changes the
-    answer. Mode 1 runs them in registration order. Mode 2 used to hoist every Boyd
-    culvert to the FRONT (batched via GPUCulvertManager), discarding that order — so
-    mode 2 returned **bit-identical** results whether a Rate_operator was registered
-    before or after a culvert, while mode 1 gave different answers for the two.
+    answer. Mode 1 runs them in registration order; mode 2 used to hoist every Boyd
+    culvert to the FRONT (batched via GPUCulvertManager), discarding that order. The fix
+    fires the batch at the position of the FIRST culvert, so registration order is honored.
 
-    Measured here, max|stage(rate-first) - stage(culvert-first)|:
+    DETERMINISTIC BY CONSTRUCTION — read before changing. An earlier version of this test
+    measured the order effect in a symmetric setup (flat bed, equal-depth inlets) where the
+    culvert is effectively a no-op, so operator order had NO genuine effect and the observed
+    difference was pure chaotic amplification of roundoff. That is numerics-dependent and bit
+    this test three times (a build-dependent ratio, then the amplification vanishing under an
+    unrelated kernel change). This version instead builds a setup where order genuinely
+    matters by a large, deterministic margin:
 
-        pre-fix    mode 1: 9.75e-05 (responds)   mode 2: 0.0 (IGNORES ORDER)
-        post-fix   mode 1: 9.75e-05 (responds)   mode 2: 9.78e-05 (responds)
+      * a sloped bed (`elevation = -x/10`) so the two culvert ends sit at different levels
+        and the culvert actually TRANSFERS water, and
+      * a strong Rate_operator confined by polygon to the UPSTREAM inlet, so applying it
+        before vs after the culvert changes the head the culvert reads.
 
-    That mattered beyond any one script: it made mode-1-vs-mode-2 agreement depend on
-    the order a user happened to construct their operators in — and that agreement is
-    the oracle we use to validate GPU work.
+    Over a short evolve (no time for chaos), this gives, measured directly:
 
-    NOTE for anyone extending this: do NOT write the guard as "mode-1 and mode-2 agree
-    more closely after the fix". They do not, and cannot — a separate, pre-existing
-    mode-1/mode-2 culvert discrepancy (~1e-4 here) dominates. In this setup the order
-    effect and that discrepancy happen to be nearly equal and OPPOSITE, so before the
-    fix the wrong-order run looked *closer* (1.4e-6) than the right-order one. Assert on
-    order-sensitivity, which is the actual property, not on a divergence magnitude.
+        with the fix   mode-1 order effect ~7e-3;  mode-2(rate-first) == mode-1(rate-first) to ~1e-15
+        with the bug   mode-1 order effect ~7e-3;  mode-2(rate-first)  = mode-1(CULVERT-first)  (~7e-3 away)
+
+    i.e. the fix/bug signal is a 12-order-of-magnitude separation, not a chaotic magnitude.
+    Assert on that, never on a chaotic-divergence value.
     """
+
+    FT = 2.0        # short evolve: the order effect is deterministic, chaos has no time to grow
+    ORDER_EFFECT_FLOOR = 1e-4   # mode-1 order effect must clear this for the setup to be valid
 
     def _run(self, mode, order):
         from anuga import Boyd_box_operator, Rate_operator
@@ -2579,18 +2586,22 @@ class Test_GPU_FractionalStepOperatorOrder(unittest.TestCase):
         domain.store = False
         domain.set_multiprocessor_mode(mode)
 
-        domain.set_quantity('elevation', -2.0)
-        domain.set_quantity('stage', -1.0)
+        # Sloped bed -> the culvert ends are at different levels -> it actually transfers.
+        domain.set_quantity('elevation', lambda x, y: -x / 10.0)
+        domain.set_quantity('stage', 2.0)
         Br = Reflective_boundary(domain)
         domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
 
         def add_rate():
-            Rate_operator(domain, rate=1.0e-2, factor=1.0)
+            # Confined to a polygon around the upstream (x~10) inlet, so the rate changes
+            # exactly the head the culvert reads there.
+            Rate_operator(domain, rate=0.5, factor=1.0,
+                          polygon=[[5, 20], [15, 20], [15, 30], [5, 30]])
 
         def add_culvert():
             Boyd_box_operator(domain,
                               end_points=[[10.0, 25.0], [40.0, 25.0]],
-                              losses=1.5, width=1.0, height=1.0, apron=0.0,
+                              losses=1.5, width=2.0, height=2.0, apron=0.0,
                               use_momentum_jet=False, use_velocity_head=False,
                               manning=0.013, verbose=False)
 
@@ -2601,61 +2612,51 @@ class Test_GPU_FractionalStepOperatorOrder(unittest.TestCase):
             add_culvert()
             add_rate()
 
-        for _ in domain.evolve(yieldstep=1.0, finaltime=5.0):
+        for _ in domain.evolve(yieldstep=self.FT, finaltime=self.FT):
             pass
         return domain.quantities['stage'].centroid_values.copy()
 
-    def _order_sensitivity(self, mode):
-        a = self._run(mode, 'rate_first')
-        b = self._run(mode, 'culvert_first')
+    def _maxdiff(self, a, b):
         return float(np.abs(a - b).max())
 
     def test_mode2_does_not_ignore_operator_order(self):
-        """The core guard: mode 2 must not return the same answer for both orders.
+        """Mode 2 must produce different answers for the two registration orders.
 
-        With the bug this is EXACTLY 0.0 — the culverts were hoisted to the front either
-        way, so the registration order was thrown away.
+        With the bug (culverts hoisted to the front) mode 2 runs the same sequence either
+        way, so this is EXACTLY 0.0.
         """
-        gpu = self._order_sensitivity(2)
+        gpu = self._maxdiff(self._run(2, 'rate_first'), self._run(2, 'culvert_first'))
         self.assertGreater(
-            gpu, 1e-9,
-            msg='mode-2 gave identical results for rate-before-culvert and '
+            gpu, self.ORDER_EFFECT_FLOOR,
+            msg='mode-2 gave the same answer for rate-before-culvert and '
                 'culvert-before-rate — it is ignoring fractional-step operator '
                 'registration order (issue #192)')
 
-    def test_mode2_order_sensitivity_is_comparable_to_mode1(self):
-        """Mode 2 must respond on the same SCALE as mode 1 — not by some trivial amount.
+    def test_mode2_applies_same_order_as_mode1(self):
+        """Mode 2 with a given registration order must match mode 1 with THAT order.
 
-        Deliberately a loose (order-of-magnitude) bound, and it must stay loose.  The
-        *magnitude* of the order effect depends on the culvert discharge calculation,
-        and mode 1 (Python) and mode 2 (C) genuinely differ there — by an amount that
-        is itself build-dependent:
-
-            build             mode 1      mode 2      ratio
-            GPU offload (nvc) 9.75e-05    9.78e-05    1.00
-            CPU-only (gcc)    9.77e-05    4.89e-05    2.0
-
-        An earlier version of this test asserted the two magnitudes agreed to within 5%.
-        That passed on a GPU-offload build by coincidence and failed on CI's CPU-only
-        build.  Do not tighten it back: the property being guarded is that mode 2 *obeys*
-        registration order (test above, exactly 0.0 when it does not), not that the two
-        compute modes compute identical culvert discharges — they do not, and that is a
-        separate pre-existing discrepancy.
+        The discriminating measurement (deterministic, no chaos): for `[rate, culvert]`,
+        mode-2 must track mode-1's rate-first result far more closely than the order effect
+        itself. With the bug mode-2 instead matches mode-1's CULVERT-first result, i.e. it
+        is a full order-effect away.
         """
-        cpu = self._order_sensitivity(1)
-        gpu = self._order_sensitivity(2)
+        m1_rate_first = self._run(1, 'rate_first')
+        m1_culvert_first = self._run(1, 'culvert_first')
+        m2_rate_first = self._run(2, 'rate_first')
 
-        self.assertGreater(cpu, 1e-9,
-                           msg='mode-1 reference is order-insensitive here; the test '
-                               'setup no longer exercises the bug')
+        order_effect = self._maxdiff(m1_rate_first, m1_culvert_first)
+        self.assertGreater(
+            order_effect, self.ORDER_EFFECT_FLOOR,
+            msg='the test setup no longer makes operator order matter in mode 1 '
+                '(order effect %.3e) — it can no longer detect the bug' % order_effect)
 
-        ratio = gpu / cpu
-        self.assertTrue(
-            0.1 < ratio < 10.0,
-            msg=f'mode-2 order sensitivity ({gpu:.3e}) is not on the same scale as '
-                f'mode-1 ({cpu:.3e}) — ratio {ratio:.2f}. Mode 2 appears to respond to '
-                f'operator order only incidentally, not by actually applying the '
-                f'operators in registration order (issue #192).')
+        mismatch = self._maxdiff(m2_rate_first, m1_rate_first)
+        self.assertLess(
+            mismatch, 0.01 * order_effect,
+            msg='mode-2 [rate, culvert] does not match mode-1 [rate, culvert]: mismatch '
+                '%.3e vs order effect %.3e. Mode 2 is applying a different operator order '
+                'than mode 1 (issue #192 — culverts hoisted to the front).'
+                % (mismatch, order_effect))
 
 
 class Test_GPU_StartupBanner(unittest.TestCase):

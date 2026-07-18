@@ -397,27 +397,33 @@ void core_update_conserved_quantities(struct domain *D, double timestep) {
         double xmom_c = xmom_cv[k];
         double ymom_c = ymom_cv[k];
 
-        // Normalize semi-implicit update by centroid value
-        double stage_si = (stage_c == 0.0) ? 0.0 : stage_siu[k] / stage_c;
-        double xmom_si = (xmom_c == 0.0) ? 0.0 : xmom_siu[k] / xmom_c;
-        double ymom_si = (ymom_c == 0.0) ? 0.0 : ymom_siu[k] / ymom_c;
-
         // Apply explicit updates
-        stage_cv[k] += timestep * stage_eu[k];
-        xmom_cv[k] += timestep * xmom_eu[k];
-        ymom_cv[k] += timestep * ymom_eu[k];
+        double stage_new = stage_c + timestep * stage_eu[k];
+        double xmom_new  = xmom_c  + timestep * xmom_eu[k];
+        double ymom_new  = ymom_c  + timestep * ymom_eu[k];
 
-        // Apply semi-implicit updates
-        double denom;
+        // Apply semi-implicit updates, reformulated to ONE division per quantity.
+        // The original did two FP64 divisions per quantity (si = siu/c, then cv/denom
+        // with denom = 1 - dt*si); algebraically
+        //     cv / (1 - dt*siu/c)  ==  cv*c / (c - dt*siu),
+        // so num = c - dt*siu = denom*c, and denom>0  <=>  num*c > 0. Halving the
+        // divisions matters on GeForce GPUs, where FP64 is 1/64 rate and ncu shows
+        // this kernel FP64-pipe-bound (see issue #199); mathematically identical, so
+        // results differ only at floating-point roundoff.
+        double num;
 
-        denom = 1.0 - timestep * stage_si;
-        if (denom > 0.0) stage_cv[k] /= denom;
+        num = stage_c - timestep * stage_siu[k];
+        if (stage_c != 0.0 && num * stage_c > 0.0) stage_new = stage_new * stage_c / num;
 
-        denom = 1.0 - timestep * xmom_si;
-        if (denom > 0.0) xmom_cv[k] /= denom;
+        num = xmom_c - timestep * xmom_siu[k];
+        if (xmom_c != 0.0 && num * xmom_c > 0.0) xmom_new = xmom_new * xmom_c / num;
 
-        denom = 1.0 - timestep * ymom_si;
-        if (denom > 0.0) ymom_cv[k] /= denom;
+        num = ymom_c - timestep * ymom_siu[k];
+        if (ymom_c != 0.0 && num * ymom_c > 0.0) ymom_new = ymom_new * ymom_c / num;
+
+        stage_cv[k] = stage_new;
+        xmom_cv[k] = xmom_new;
+        ymom_cv[k] = ymom_new;
 
         // Reset semi-implicit updates for next timestep
         stage_siu[k] = 0.0;
