@@ -360,6 +360,42 @@ achieved-throughput ratio (no need for absolute GB/s). Match kernels by base nam
 stripping the `nvkernel_` prefix and `_F<n>L<n>_<n>` source-location suffix (the two builds'
 line numbers differ). Extract with `nsys stats --report cuda_gpu_kern_sum --format csv`.
 
+### FP64 is the hidden bottleneck on GeForce — ncu, 2026-07-18 (issue #199)
+
+Followed up the "memory-bound" kernels with `ncu`, and the bandwidth framing was **wrong**.
+On the RTX 5070 these DP kernels are **FP64-COMPUTE-bound, not bandwidth-bound**:
+
+| kernel (5070) | DRAM % | FP64 pipe % | verdict |
+|---|--:|--:|---|
+| update_conserved_quantities | **12%** | **89%** | FP64-pipe-bound |
+| extrapolate_second_order_edge | 22% | 81% | FP64-pipe-bound |
+
+GeForce FP64 is **1/64 rate** (vs datacenter V100 **1/2**), so ANUGA's double-precision
+kernels — full of divisions — become **FP64-throughput-limited** on consumer cards even
+though they *look* memory-bound and are memory-bound on a V100. This is **why the 5070/V100
+kernel ratios varied** (update_conserved 3.2× — worse than the ~2× DRAM ratio — is the most
+FP64-bound one): the "achieved 55% of peak bandwidth" number was a red herring; the kernel
+is slow because it is doing FP64 division, not because it fails to move memory.
+
+**Actionable lever: cut FP64 divisions.** `update_conserved_quantities` did 6 FP64 divisions
+per element; reformulating `cv/(1-dt*siu/c) == cv*c/(c-dt*siu)` (halving to 3) gave **2.85×**
+on the 5070 (123.7 -> 43.4 µs/call, closing the gap to the V100's 38.6 µs), and helps the
+**CPU unified path** too (shared kernel). Committed `2d7893ee`. `extrapolate` (still 81% FP64)
+is the obvious next candidate — same treatment (count and reduce its DP divisions) should pay
+off similarly on GeForce. **General rule:** on a GeForce/consumer GPU, profile the DP kernels'
+`sm__pipe_fp64_cycles_active` before assuming they are bandwidth-bound; division count, not
+bytes, is often the lever. (Datacenter GPUs with fast FP64 are unaffected — they stay
+bandwidth-bound, so this is a consumer-hardware optimisation, not a portable win.)
+
+**Trap that cost time here, recorded for reuse:** a roundoff-level change to a *shared* kernel
+perturbs the chaotic trajectory of every mode-1-vs-mode-2 comparison test. It collapsed the
+#192 order-sensitivity test (whose signal was pure chaotic amplification — the flat-bed
+culvert was a no-op, so operator order never mattered *deterministically*). Fix was to rebuild
+that test on a setup where order matters by a **large deterministic margin** (sloped bed ->
+active culvert; rate confined to one inlet), giving a chaos-free 1e-15-vs-7e-3 fix/bug signal.
+**Lesson (again): never let a guard depend on chaotic-amplification magnitude** — assert the
+deterministic property (mode-2 [rate,culvert] matches mode-1 [rate,culvert], not [culvert,rate]).
+
 ---
 
 ## Weak-scaling benchmark — rectangular, constant timestep (MSI laptop, RTX 5070, AMD Ryzen 9 32C/30GB, 2026-06-26)
