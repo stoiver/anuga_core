@@ -449,7 +449,55 @@ Findings:
 
 ---
 
-## Recent session summaries (sessions 21–49)
+## Recent session summaries (sessions 21–50)
+
+**Session 50 (2026-07-16/19):** **mode-1 vs mode-2 difference notebook → two real GPU bugs.**
+Built `validation_tests/case_studies/towradgi/compare_mode1_mode2.ipynb` (uses
+`anuga.SWW_plotter`; white-background `YlOrRd` log difference maps, 3×1 stacked panels)
+to show *where/when* legacy and unified diverge on Towradgi small. Chasing the plot
+features found two genuine bugs, both fixed on `develop`.
+- **BUG (#199, fixed `2d7893ee`): `update_conserved_quantities` FP64-bound on GeForce.**
+  ncu (not nsys) is decisive: DRAM 12% / **FP64 pipe 89%** on the RTX 5070 — the kernel is
+  *compute*-bound on double-precision division, not bandwidth-bound (GeForce FP64 = 1/64
+  rate vs V100 1/2). Reformulating `cv/(1-dt·siu/c) == cv·c/(c-dt·siu)` halves the divisions
+  (6→3) → **2.85× faster** on the 5070 (123.7→43.4 µs/call), and helps the CPU unified path
+  too (shared kernel). See the "GPU hardware comparison" and "FP64 is the hidden bottleneck"
+  sections above.
+- **BUG (#200, fixed `b3a7da9a`): mode-2 loses startup forcing on deeply-dry cells.**
+  This is the one the notebook's t≈120 divergence was really showing. Towradgi sets initial
+  `stage=0`, but the creek-inlet bed is 215–320 m, so those cells start *deeply* dry
+  (stage ≪ bed). Mode 1 reconciles them to `stage=bed` in one step (its per-step protect);
+  the mode-2 device path converges only gradually — **halving the deficit each step, ~12
+  steps** — and the inlet's inflow during that window raises the sub-bed stage instead of
+  making depth, and is **permanently lost** (~24 m³ on Towradgi). Fix: clamp `stage` up to
+  `bed` for dry cells in `set_gpu_interface()` before the initial device sync (mass-neutral,
+  no-op for wet cells; mode 1 never calls it so is untouched). After the fix,
+  mode-1-vs-mode-2 max|dStage| at t=120 drops **2.8 cm → 7.6e-6** — the difference is finally
+  the roundoff-seeded chaos the notebook always *claimed* it was.
+  - **The chase, 4 wrong layers before the truth** (each ruled out by measurement, worth
+    reusing): "roundoff chaos" → no, systematic & localized; "inlet under-injects" → no, its
+    accounting says applied=Q·t; "whole device state frozen" → no, only inlet-cell *depth*;
+    "deep-dry alone" → no, needs deep-dry **at a bed gradient** on the real unstructured
+    mesh. Instrument the *device* (sync_from_device), not the host — the host-side protect
+    reconciles the host copy regardless, so a host read hides the bug.
+  - **Fine output cracked it open.** The default 120 s yieldstep made it look like a t=120
+    event; `-ys 0.1` showed the freeze is the **first ~1 s / ~12 internal steps** and the
+    coarse output was hiding it. Lesson: when a divergence sits suspiciously on an output
+    time, re-run with fine output before theorising.
+  - **Regression guard:** `Test_GPU_DryCellStartupReconciliation` checks the *device* stage
+    is reconciled after interface build (fails with fix reverted, GPU build only — CPU builds
+    share host/device arrays so cannot express it). The full dynamic mass loss is
+    **mesh-dependent** (a regular grid with the same bed does not reproduce it — only the real
+    unstructured mesh), so it is validated on Towradgi, not re-created as a unit test.
+- **Ruled out an operator bug at t=360** (user asked): toggled rain and culverts off — the
+  mode-1/mode-2 divergence is *bit-identical* with/without them, distributed domain-wide,
+  smooth (no step at t=360), sub-mm. It is chaotic amplification; the rain ramp only makes
+  chaos *visible earlier* (lift-off t~90 with rain, t~300 without), not a systematic jump.
+- **RTX 5070 vs V100 per-kernel** (nsys, both OpenMP-target): V100 only **1.16× faster in
+  total kernel time** (5070 = 86% of V100), because the dominant `fluxes_central` is
+  compute-bound and Blackwell wins it, while only the memory-bound kernels show the ~2× DRAM
+  ratio. Recorded in the "GPU hardware comparison" benchmark section; corrected the earlier
+  spec-sheet "50%" claim — measure kernels, don't infer from spec or wall-clock.
 
 **Session 49 (2026-07-13/14):** **Operator parity audit, mode-1 vs mode-2 vs parallel** —
 which found three real bugs, two of them in the *legacy* path, not the GPU one. Started
