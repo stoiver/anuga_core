@@ -1,7 +1,7 @@
 # Future Work Recommendations
 
-Generated: 2026-04-24 (session 23). Last updated: 2026-04-25 (session 25).
-Based on codebase investigation cross-referenced against 25 sessions of completed work.
+Generated: 2026-04-24 (session 23). Last updated: 2026-07-19 (session 50).
+Based on codebase investigation cross-referenced against 50 sessions of completed work.
 
 Items marked ~~strikethrough~~ have been invalidated (see notes).
 
@@ -13,6 +13,46 @@ Items marked ~~strikethrough~~ have been invalidated (see notes).
 > migrate the standard distribution to `multiprocessor_mode=2` + `gpu_offload=false`
 > (CPU-multicore C operators by default). Step 1 in review as PR #144; **step 2
 > (audit operator fall-back) is the next action.**
+
+---
+
+## Session 50 follow-ups (2026-07-19) — GPU mode-2 / OpenACC
+
+Open items from the mode-1-vs-mode-2 investigation (session 50). Seven bugs from that
+thread are already fixed on `develop` (#191–#194, #197, #199, #200); these remain.
+
+**P1 — #190 OpenACC `set_gpu_offload(False)` / `-ngo` silently stays on the GPU.** MERGE
+BLOCKER for PR #188. The host-fallback idiom `omp_set_default_device(omp_get_initial_device())`
+maps to `acc_set_device_num(-1, ...)`, and a negative devicenum is NOT "run on host" in
+OpenACC — the run silently stays on the GPU with no error. OpenACC has no device-*number*
+for host execution (it is a device-*type* concept). Likely fix: **hard-error** on the OpenACC
+build rather than implement, and lean on the separate `g_gpu_offload_enabled` flag. Only on
+the `#188` branch, so not live on `develop`. (Full analysis in the issue and session guide.)
+
+**P2 — #189 mode-2 never runs `apply_protection_against_isolated_degenerate_timesteps()`.**
+It hangs off `update_timestep()`, which the mode-2 step path returns early past (all three
+`evolve_one_*_step` functions dispatch to `_evolve_one_*_step_c` before it). Default-OFF
+(`config.py:151`), so low priority — but a user who enables it under GPU gets no protection
+*and no warning*. Cheapest fix: warn in mode 2 when it is enabled (mode 2 already warns for
+other unsupported forcing).
+
+**P2 — PR #188 (OpenACC backend) is WIP and needs the author.** Reviewed + numerically
+validated in session 50: bit-reproducible, agrees with OpenMP-target at the mode-1-vs-mode-2
+tolerance (see `validation_tests/case_studies/towradgi/compare_openmp_openacc.ipynb`), and the
+per-kernel `fluxes-central` ~20% win is real. Before it leaves WIP: fix #190; explain the
+unmentioned `-mp=gpu,multicore` → `-mp=gpu` change to the *default* build; drain the queue at
+the `acc_free` teardown in `gpu_halo.c`; add tests; and rebase onto `develop` (it lacks #199,
+#200). The kernel win does **not** reach wall-clock (the async queue issues 2.5× more
+`cuStreamSynchronize` than OpenMP-target) — headroom, not a blocker, but worth noting.
+
+**P3 — process, not code:**
+- **`develop` is ~833 commits ahead of `main`.** *Every* session-50 fix (including the #200
+  startup mass-loss and #193 parallel-inlet mass-balance correctness fixes) is unreleased,
+  gated behind the "no develop→main until v4.0.0" rule. Worth a conscious call on when v4.0.0
+  is cut — real correctness fixes are sitting unreleased.
+- **Branch-protection bypasses.** Merges/pushes to `develop` this session went through with
+  `--admin` ("Bypassed rule violations — changes must be made through a pull request"). Decide
+  whether the PR-required rule on `develop` should be enforced or relaxed.
 
 ---
 
