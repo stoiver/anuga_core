@@ -2735,6 +2735,83 @@ class Test_GPU_StartupBanner(unittest.TestCase):
         self.assertNotIn('4 GPU(s)', nodev)
 
 
+class Test_GPU_DryCellStartupReconciliation(unittest.TestCase):
+    """Mode 2 must reconcile deeply-dry cells to stage=bed when the device
+    interface is built (issue #200).
+
+    A dry cell should carry stage = bed (depth 0). Mode 1 reaches that via its
+    per-step protect on the first step; the mode-2 device path only converges to it
+    gradually (halving the stage<<bed deficit each step), and any forcing applied to
+    those cells during that window — an Inlet_operator, rainfall — is absorbed into
+    raising the sub-bed stage rather than making depth, and is permanently lost. On
+    the Towradgi small case (initial stage=0 under a 215 m creek bank with a 20 m³/s
+    inlet) that lost ~24 m³, driving the whole mode-1-vs-mode-2 divergence.
+
+    The fix clamps stage up to bed in set_gpu_interface() before the initial sync to
+    the device. This guards that clamp. (The full dynamic mass loss is mesh-dependent
+    — a regular-grid domain with the same bed does not reproduce it — so it is
+    validated on the Towradgi case, not here; this test guards the mechanism.)
+    """
+
+    def test_dry_cells_reconciled_to_bed_on_interface_build(self):
+        domain = rectangular_cross_domain(8, 8)
+        domain.set_flow_algorithm('DE0')
+        domain.set_name('dry_recon')
+        domain.set_datadir(tempfile.mkdtemp())
+        domain.store = False
+
+        # High bed, stage well below it -> every cell is deeply dry (stage << bed).
+        domain.set_quantity('elevation', 100.0)
+        domain.set_quantity('stage', 0.0)
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+
+        stage_c = domain.quantities['stage'].centroid_values
+        bed_c = domain.quantities['elevation'].centroid_values
+        self.assertTrue((stage_c < bed_c).all(),
+                        'setup precondition: all cells should start dry (stage < bed)')
+
+        # Building the mode-2 interface must reconcile stage up to the bed — on the
+        # DEVICE. Reading the host would pass regardless (the standard host-side
+        # protect in distribute_to_vertices_and_edges reconciles the host copy even
+        # without the fix); the bug is that the DEVICE keeps the un-reconciled stage,
+        # so sync it back before checking. On a CPU-only build host and device are the
+        # same arrays, so this can only fail on a real GPU-offload build — which is
+        # where the bug exists.
+        domain.set_multiprocessor_mode(2)
+        domain.distribute_to_vertices_and_edges()   # triggers set_gpu_interface()
+        domain.gpu_interface.sync_from_device()
+
+        stage_c = domain.quantities['stage'].centroid_values
+        bed_c = domain.quantities['elevation'].centroid_values
+        np.testing.assert_allclose(
+            stage_c, bed_c, rtol=0, atol=1e-9,
+            err_msg='mode-2 did not reconcile deeply-dry cells to stage=bed on the '
+                    'device at interface build (issue #200)')
+
+    def test_reconciliation_is_noop_for_wet_cells(self):
+        """Cells already at/above bed must be left untouched by the reconciliation."""
+        domain = rectangular_cross_domain(8, 8)
+        domain.set_flow_algorithm('DE0')
+        domain.set_name('wet_noop')
+        domain.set_datadir(tempfile.mkdtemp())
+        domain.store = False
+
+        domain.set_quantity('elevation', -5.0)
+        domain.set_quantity('stage', 2.0)          # wet everywhere (stage > bed)
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+
+        before = domain.quantities['stage'].centroid_values.copy()
+        domain.set_multiprocessor_mode(2)
+        domain.distribute_to_vertices_and_edges()
+
+        after = domain.quantities['stage'].centroid_values
+        np.testing.assert_allclose(
+            after, before, rtol=0, atol=1e-12,
+            err_msg='reconciliation must be a no-op where stage >= bed')
+
+
 class Test_GPU_RateOperatorGhostInflux(unittest.TestCase):
     """Rate_operator mass tracking must exclude ghost cells in mode 2 (issue #191).
 

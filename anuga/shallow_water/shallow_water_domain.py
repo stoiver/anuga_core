@@ -5933,6 +5933,22 @@ class Domain(Generic_Domain):
                     f"Current boundary_map has no boundary objects: {list(self.boundary_map.keys())}"
                 )
 
+            # Reconcile deeply-dry cells (stage < bed) to stage = bed before the initial
+            # state is synced to the device. A dry cell should carry stage = bed
+            # (depth 0); mode 1 reaches that via its per-step protect on the very first
+            # step, but the mode-2 device path only converges to it gradually (halving
+            # the deficit each step, ~a dozen steps to close a large stage<<bed gap).
+            # While it converges, any forcing applied to those cells — an Inlet_operator,
+            # rainfall — is absorbed into raising the sub-bed stage rather than making
+            # water depth, and is lost, leaving a permanent startup mass deficit
+            # (issue #200). Clamping stage up to bed here is mass-neutral (depth stays 0)
+            # and a no-op for wet cells, and makes mode 2 start already reconciled.
+            stage_c = self.quantities['stage'].centroid_values
+            bed_c = self.quantities['elevation'].centroid_values
+            if (stage_c < bed_c).any():
+                self.set_quantity('stage', num.maximum(stage_c, bed_c),
+                                  location='centroids')
+
             # Try OpenMP target offloading interface first
             try:
                 from .sw_domain_gpu_omp import GPU_OMP_interface
