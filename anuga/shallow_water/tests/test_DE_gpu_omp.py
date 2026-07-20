@@ -626,9 +626,11 @@ class Test_GPU_InletOperator(unittest.TestCase):
         self.assertAlmostEqual(cpu_volume, gpu_volume, delta=1e-6,
                                msg=f"Water volumes differ: CPU={cpu_volume}, GPU={gpu_volume}")
 
-        # Compare stage values
+        # Compare stage values. mode=1 and mode=2 apply the inlet with the same
+        # level-fill, so they agree to machine precision (~7e-17 on a GPU build,
+        # bit-identical on CPU); the bound catches any mode-1/mode-2 regression.
         stage_diff = np.abs(cpu_stage - gpu_stage)
-        self.assertLess(stage_diff.max(), 1e-8,
+        self.assertLess(stage_diff.max(), 1e-10,
                         f"Stage difference too large: max={stage_diff.max():.2e}")
 
     def test_inlet_operator_time_varying_Q(self):
@@ -694,9 +696,10 @@ class Test_GPU_InletOperator(unittest.TestCase):
         sync_from_device(gpu_dom)
         gpu_xmom = gpu_domain.quantities['xmomentum'].centroid_values.copy()
 
-        # Compare momentum
+        # Compare momentum. Inlet applied identically in mode=1 and mode=2, so
+        # agreement is to machine precision (~5e-16 on a GPU build).
         xmom_diff = np.abs(cpu_xmom - gpu_xmom)
-        self.assertLess(xmom_diff.max(), 1e-8,
+        self.assertLess(xmom_diff.max(), 1e-10,
                         f"Xmomentum difference too large: max={xmom_diff.max():.2e}")
 
 
@@ -1240,19 +1243,20 @@ class Test_GPU_Culvert(unittest.TestCase):
         gpu_stage = gpu_domain.quantities['stage'].centroid_values.copy()
         gpu_xmom = gpu_domain.quantities['xmomentum'].centroid_values.copy()
 
-        # mode=1 calls Python boyd_box_function (boyd_box_operator.py); mode=2
-        # calls the C boyd_box_discharge translation.  Tiny FP-order differences
-        # in pow()/sqrt() at step 1 (~1e-7) get amplified by the depth↔Q feedback
-        # to ~3% by t=5.  Volume is conserved (test_culvert_volume_conservation
-        # is the rigorous physical check); these atol bounds catch catastrophic
-        # failures (wrong flow direction, culvert not firing) without flagging
-        # normal amplified-FP drift.  Momentum is more sensitive than stage
-        # because momentum = depth * velocity compounds the depth error.
+        # mode=1 and mode=2 now share the single C culvert kernel
+        # (culvert_compute_one + culvert_gather_inlet_host), so they agree to
+        # machine precision: measured ~3e-16 (stage) / ~2e-15 (xmom) at t=5 on a
+        # GPU-offload build, and bit-identical on a CPU build.  (Previously mode=1
+        # called Python boyd_box_function and mode=2 the C translation, whose
+        # pow()/sqrt() FP-order differences amplified to ~3% by t=5 — hence the
+        # old atol=0.02/0.05.)  The tight bounds below catch any regression that
+        # reintroduces a mode-1/mode-2 divergence, with generous headroom over the
+        # measured ~1e-15.
         np.testing.assert_allclose(
-            gpu_stage, cpu_stage, rtol=0, atol=0.02,
+            gpu_stage, cpu_stage, rtol=0, atol=1e-10,
             err_msg='Culvert 5s: stage mismatch between mode=1 and mode=2')
         np.testing.assert_allclose(
-            gpu_xmom, cpu_xmom, rtol=0, atol=0.05,
+            gpu_xmom, cpu_xmom, rtol=0, atol=1e-9,
             err_msg='Culvert 5s: xmomentum mismatch between mode=1 and mode=2')
 
     def test_culvert_volume_conservation(self):
@@ -1418,10 +1422,12 @@ class Test_GPU_WeirTrapezoid(unittest.TestCase):
         sync_from_device(gpu_domain.gpu_interface.gpu_dom)
         gpu_stage = gpu_domain.quantities['stage'].centroid_values.copy()
 
-        # atol=0.02: physically reasonable tolerance for real GPU vs CPU FP divergence
-        # after 5 s.  Tight enough to catch wrong-direction or zero-flow failures.
+        # mode=1 and mode=2 share the single C weir/culvert kernel, so they agree
+        # to machine precision: ~4e-16 at t=5 on a GPU-offload build, bit-identical
+        # on a CPU build.  (Old atol=0.02 predated the shared kernel.)  Tight enough
+        # to catch any regression that reintroduces a mode-1/mode-2 divergence.
         np.testing.assert_allclose(
-            gpu_stage, cpu_stage, rtol=0, atol=0.02,
+            gpu_stage, cpu_stage, rtol=0, atol=1e-10,
             err_msg='Weir trapezoid 5s: stage mismatch between mode=1 and mode=2')
 
     def test_weir_trapezoid_cpu_gpu_velocity_match(self):
@@ -2931,7 +2937,11 @@ class Test_GPU_ForcingOperators(unittest.TestCase):
     def _assert_modes_agree(self, add_operator, label):
         d1 = self._run(1, add_operator, f'{label}_m1')
         d2 = self._run(2, add_operator, f'{label}_m2')
-        atol = 1e-8 if anuga.gpu_offload_enabled() else 1e-12
+        # These operators apply the same per-cell forcing in mode 1 and mode 2, so
+        # they agree to machine precision on still water: measured <=1.2e-15 at t=5
+        # for wind/pressure and bit-identical for rain on a GPU-offload build. The
+        # bound below catches any mode-1/mode-2 regression with wide headroom.
+        atol = 1e-10 if anuga.gpu_offload_enabled() else 1e-12
         for q in ['stage', 'xmomentum', 'ymomentum']:
             np.testing.assert_allclose(
                 d2.quantities[q].centroid_values,
