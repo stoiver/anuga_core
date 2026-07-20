@@ -400,6 +400,103 @@ cdef extern from "gpu_domain.h" nogil:
     void gpu_flop_counters_print_global(gpu_domain *GD)
 
 
+cdef extern from "gpu_culvert_operator.h" nogil:
+    void culvert_apply_one_host(
+        int type, double g, double width, double height, double diameter,
+        double z1, double z2, double length, double manning, double sum_loss,
+        double blockage, double barrels,
+        int use_velocity_head, int use_momentum_jet, int use_old_momentum_method,
+        int always_use_Q_wetdry_adjustment, double max_velocity,
+        double smoothing_timescale,
+        double ov0x, double ov0y, double ov1x, double ov1y,
+        double invert0, double invert1, int has_invert0, int has_invert1,
+        double *smooth_delta_total_energy, double *smooth_Q,
+        double timestep,
+        double e0_stage, double e0_xmom, double e0_ymom, double e0_elev,
+        double a0_stage, double a0_depth, double a0_xmom, double a0_ymom, double a0_area,
+        double e1_stage, double e1_xmom, double e1_ymom, double e1_elev,
+        double a1_stage, double a1_depth, double a1_xmom, double a1_ymom, double a1_area,
+        int *inflow_idx,
+        double *new_inflow_depth, double *new_inflow_xmom, double *new_inflow_ymom,
+        double *new_outflow_depth, double *new_outflow_xmom, double *new_outflow_ymom,
+        double *report_gain, double *report_discharge, double *report_velocity,
+        double *report_driving_energy, double *report_delta_total_energy,
+        double *outlet_culvert_depth)
+
+    void culvert_gather_inlet_host(
+        int n, const int *indices, const double *areas,
+        const double *stage_c, const double *xmom_c,
+        const double *ymom_c, const double *bed_c,
+        double total_area,
+        double *avg_stage, double *avg_depth,
+        double *avg_xmom, double *avg_ymom)
+
+
+def culvert_gather_inlet_host_py(
+        int[::1] indices, double[::1] areas,
+        double[::1] stage_c, double[::1] xmom_c,
+        double[::1] ymom_c, double[::1] bed_c,
+        double total_area):
+    """Inlet gather matching the mode-2 device gather bit-for-bit.
+
+    Returns (avg_stage, avg_depth, avg_xmom, avg_ymom).
+    """
+    cdef int n = indices.shape[0]
+    cdef double avg_stage = 0.0, avg_depth = 0.0, avg_xmom = 0.0, avg_ymom = 0.0
+    culvert_gather_inlet_host(
+        n, &indices[0], &areas[0],
+        &stage_c[0], &xmom_c[0], &ymom_c[0], &bed_c[0],
+        total_area, &avg_stage, &avg_depth, &avg_xmom, &avg_ymom)
+    return (avg_stage, avg_depth, avg_xmom, avg_ymom)
+
+
+def culvert_apply_one_host_py(
+        int type, double g, double width, double height, double diameter,
+        double z1, double z2, double length, double manning, double sum_loss,
+        double blockage, double barrels,
+        int use_velocity_head, int use_momentum_jet, int use_old_momentum_method,
+        int always_use_Q_wetdry_adjustment, double max_velocity,
+        double smoothing_timescale,
+        double ov0x, double ov0y, double ov1x, double ov1y,
+        double invert0, double invert1, int has_invert0, int has_invert1,
+        double smooth_dte, double smooth_Q, double timestep,
+        double e0_stage, double e0_xmom, double e0_ymom, double e0_elev,
+        double a0_stage, double a0_depth, double a0_xmom, double a0_ymom, double a0_area,
+        double e1_stage, double e1_xmom, double e1_ymom, double e1_elev,
+        double a1_stage, double a1_depth, double a1_xmom, double a1_ymom, double a1_area):
+    """Bit-identical single-culvert update shared with the mode-2 batch.
+
+    Returns (smooth_dte, smooth_Q, inflow_idx,
+             new_inflow_depth, new_inflow_xmom, new_inflow_ymom,
+             new_outflow_depth, new_outflow_xmom, new_outflow_ymom,
+             report_gain, report_discharge, report_velocity,
+             report_driving_energy, report_delta_total_energy,
+             outlet_culvert_depth).
+    """
+    cdef double sdte = smooth_dte
+    cdef double sQ = smooth_Q
+    cdef int inflow_idx = 0
+    cdef double nid = 0.0, nix = 0.0, niy = 0.0
+    cdef double nod = 0.0, nox = 0.0, noy = 0.0
+    cdef double rg = 0.0, rd = 0.0, rv = 0.0, rde = 0.0, rdte = 0.0
+    cdef double ocd = 0.0
+    culvert_apply_one_host(
+        type, g, width, height, diameter, z1, z2, length, manning, sum_loss,
+        blockage, barrels, use_velocity_head, use_momentum_jet,
+        use_old_momentum_method, always_use_Q_wetdry_adjustment, max_velocity,
+        smoothing_timescale, ov0x, ov0y, ov1x, ov1y,
+        invert0, invert1, has_invert0, has_invert1,
+        &sdte, &sQ, timestep,
+        e0_stage, e0_xmom, e0_ymom, e0_elev,
+        a0_stage, a0_depth, a0_xmom, a0_ymom, a0_area,
+        e1_stage, e1_xmom, e1_ymom, e1_elev,
+        a1_stage, a1_depth, a1_xmom, a1_ymom, a1_area,
+        &inflow_idx, &nid, &nix, &niy, &nod, &nox, &noy,
+        &rg, &rd, &rv, &rde, &rdte, &ocd)
+    return (sdte, sQ, inflow_idx, nid, nix, niy, nod, nox, noy,
+            rg, rd, rv, rde, rdte, ocd)
+
+
 # ============================================================================
 # GPU Domain Wrapper Class
 # ============================================================================

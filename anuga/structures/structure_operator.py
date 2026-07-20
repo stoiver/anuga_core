@@ -9,6 +9,148 @@ from anuga.utilities.system_tools import log_to_file
 from anuga.utilities.numerical_tools import ensure_numeric
 
 
+_c_culvert_funcs = None
+
+
+def _get_c_culvert_funcs():
+    """Lazily import the shared C culvert kernels (apply + inlet gather).
+
+    Returns (apply_fn, gather_fn), or (None, None) if the extension is
+    unavailable. These are the single source of truth for the Boyd/weir
+    discharge + water-transfer physics: mode-1 (here) and mode-2 (the GPU
+    culvert batch) call the same C code, so the two compute modes agree.
+    """
+    global _c_culvert_funcs
+    if _c_culvert_funcs is None:
+        try:
+            from anuga.shallow_water.sw_domain_gpu_ext import (
+                culvert_apply_one_host_py, culvert_gather_inlet_host_py)
+            _c_culvert_funcs = (culvert_apply_one_host_py,
+                                culvert_gather_inlet_host_py)
+        except Exception:
+            _c_culvert_funcs = (None, None)
+    return _c_culvert_funcs
+
+
+def _c_culvert_type_of(op):
+    """CULVERT_TYPE_* code (box=0, pipe=1, weir_trapezoid=2) for the shared C
+    kernel, or None if the operator has no C implementation. Handles both the
+    serial and parallel variants (same predicates the GPU culvert manager uses)."""
+    try:
+        from anuga.structures.gpu_culvert_manager import GPUCulvertManager
+    except Exception:
+        return None
+    if GPUCulvertManager._is_boyd_box(op):
+        return 0
+    if GPUCulvertManager._is_boyd_pipe(op):
+        return 1
+    if GPUCulvertManager._is_weir_trapezoid(op):
+        return 2
+    return None
+
+
+def _can_use_c_culvert(op):
+    """True if this operator's per-step update can run through the shared C
+    kernel: a supported Boyd/weir culvert that is fully local to this rank (so no
+    MPI is needed) with a C-covered outflow model. Cross-boundary parallel
+    culverts keep the Python + MPI path."""
+    if _c_culvert_type_of(op) is None:
+        return False
+    if op.inlets[0] is None or op.inlets[1] is None:
+        return False
+    # The C kernel models jet OR zero outflow momentum; Boyd/weir always satisfy
+    # this (zero_outflow_momentum == not use_momentum_jet).
+    if not (op.use_momentum_jet or op.zero_outflow_momentum):
+        return False
+    # Parallel operator: only take the C path when this rank fully owns the
+    # culvert (master, both enquiry points, both inlets). Otherwise MPI is needed.
+    if hasattr(op, 'myid'):
+        myid = op.myid
+        if myid != op.master_proc:
+            return False
+        if op.enquiry_proc[0] != myid or op.enquiry_proc[1] != myid:
+            return False
+        if op.inlet_master_proc[0] != myid or op.inlet_master_proc[1] != myid:
+            return False
+    return _get_c_culvert_funcs()[0] is not None
+
+
+def _call_c_culvert(op):
+    """Per-step culvert update via the shared C kernel — bit-identical to the
+    Python discharge_routine + transfer, and to the mode-2 GPU culvert batch.
+    This is the single source of truth for the Boyd/weir physics on the mode-1
+    (host) path; only reached for fully-local culverts (see _can_use_c_culvert)."""
+    apply_fn, gather_fn = _get_c_culvert_funcs()
+    ctype = _c_culvert_type_of(op)
+    d = op.domain
+    stage_c = d.quantities['stage'].centroid_values
+    xmom_c = d.quantities['xmomentum'].centroid_values
+    ymom_c = d.quantities['ymomentum'].centroid_values
+    bed_c = d.quantities['elevation'].centroid_values
+    i0, i1 = op.inlets[0], op.inlets[1]
+    ov0 = i0.outward_culvert_vector
+    ov1 = i1.outward_culvert_vector
+    inv0, inv1 = i0.invert_elevation, i1.invert_elevation
+    h0 = 1 if inv0 is not None else 0
+    h1 = 1 if inv1 is not None else 0
+
+    def gather(inl):
+        idx = num.ascontiguousarray(inl.triangle_indices, dtype=num.intc)
+        areas = num.ascontiguousarray(d.areas[inl.triangle_indices], dtype=float)
+        a_stage, a_depth, a_xmom, a_ymom = gather_fn(
+            idx, areas, stage_c, xmom_c, ymom_c, bed_c, inl.get_area())
+        return (inl.get_enquiry_stage(), inl.get_enquiry_xmom(),
+                inl.get_enquiry_ymom(), inl.get_enquiry_elevation(),
+                a_stage, a_depth, a_xmom, a_ymom, inl.get_area())
+
+    g0 = gather(i0)
+    g1 = gather(i1)
+    res = apply_fn(
+        ctype, d.g,
+        float(getattr(op, 'culvert_width', 0.0)),
+        float(getattr(op, 'culvert_height', 0.0)),
+        float(getattr(op, 'culvert_diameter', 0.0)),
+        float(getattr(op, 'culvert_z1', 0.0)),
+        float(getattr(op, 'culvert_z2', 0.0)),
+        op.culvert_length, op.manning, op.sum_loss,
+        float(getattr(op, 'culvert_blockage', getattr(op, 'blockage', 0.0))),
+        float(getattr(op, 'culvert_barrels', getattr(op, 'barrels', 1.0))),
+        1 if op.use_velocity_head else 0,
+        1 if op.use_momentum_jet else 0,
+        1 if getattr(op, 'use_old_momentum_method', True) else 0,
+        1 if getattr(op, 'always_use_Q_wetdry_adjustment', True) else 0,
+        op.max_velocity, op.smoothing_timescale,
+        ov0[0], ov0[1], ov1[0], ov1[1],
+        float(inv0) if h0 else 0.0, float(inv1) if h1 else 0.0, h0, h1,
+        op.smooth_delta_total_energy, op.smooth_Q, d.get_timestep(),
+        *g0, *g1)
+    (sdte, sQ, inflow_idx, nid, nix, niy, nod, nox, noy,
+     rg, rd, rv, rde, rdte, ocd) = res
+
+    op.smooth_delta_total_energy = sdte
+    op.smooth_Q = sQ
+    inflow = op.inlets[inflow_idx]
+    outflow = op.inlets[1 - inflow_idx]
+    op.inflow = inflow
+    op.outflow = outflow
+
+    inflow.set_depths(nid)
+    inflow.set_xmoms(nix)
+    inflow.set_ymoms(niy)
+    outflow.set_depths(nod)
+    outflow.set_xmoms(nox)
+    outflow.set_ymoms(noy)
+
+    # Reporting (matches the Python discharge routine and the mode-2 readback)
+    op.accumulated_flow += rg
+    if d.yieldstep:
+        op.discharge_abs_timemean += rg / d.yieldstep
+    op.discharge = rd
+    op.velocity = rv
+    op.driving_energy = rde
+    op.delta_total_energy = rdte
+    op.outlet_depth = ocd
+
 
 class Structure_operator(anuga.Operator):
     """Structure Operator - transfer water from one rectangular box to another.
@@ -214,6 +356,10 @@ class Structure_operator(anuga.Operator):
 
 
     def __call__(self):
+
+        if _can_use_c_culvert(self):
+            _call_c_culvert(self)
+            return
 
         timestep = self.domain.get_timestep()
 

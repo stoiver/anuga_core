@@ -1248,101 +1248,51 @@ static void scatter_single_inlet(struct gpu_domain *GD,
 // Cross-boundary culverts use MPI between gather and scatter phases.
 // ============================================================================
 
-void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
-    NVTX_PUSH("gpu_culverts_apply_all");
-    struct culvert_operators *CO = &GD->culvert_ops;
-    int nc = CO->num_culverts;
+// ============================================================================
+// Pure per-culvert compute: discharge determination + semi-implicit water
+// transfer.  This is THE single implementation of the Boyd/weir update, shared
+// by the mode-2 batch (gpu_culverts_apply_all, below) and the mode-1 host path
+// (via the Cython wrapper), so the two compute modes agree bit-for-bit.
+//
+// Assumes a local/master, in-bounds culvert; the caller handles non-master
+// parallel skips.  Reads gathered inlet data (data0/data1), reads+updates the
+// smoothing state (st), and writes the result (r) and the water transfer (t).
+// ============================================================================
+void culvert_compute_one(const struct inlet_data *data0,
+                         const struct inlet_data *data1,
+                         const struct culvert_params *p,
+                         struct culvert_state *st,
+                         double timestep,
+                         struct culvert_result *r,
+                         struct culvert_transfer *t) {
+    // Reset per-step reporting stats; filled in below where a discharge runs.
+    st->report_gain = 0.0;
+    st->report_discharge = 0.0;
+    st->report_velocity = 0.0;
+    st->report_driving_energy = 0.0;
+    st->report_delta_total_energy = 0.0;
 
-    if (nc == 0 || !CO->initialized) {
-        NVTX_POP();
-        return;
-    }
+    double dim = (p->type == CULVERT_TYPE_BOX || p->type == CULVERT_TYPE_WEIR_TRAPEZOID)
+                 ? p->height : p->diameter;
 
-    omp_set_default_device(gpu_compute_device(GD));
-    int myrank = GD->rank;
-
-    // Check if any parallel culverts exist
-    int has_parallel = 0;
-    for (int c = 0; c < nc; c++) {
-        if (!CO->indices[c].is_local) { has_parallel = 1; break; }
-    }
-
-    // Stack-allocate per-culvert working data
-    struct inlet_data data0[MAX_CULVERTS];
-    struct inlet_data data1[MAX_CULVERTS];
-    struct culvert_result results[MAX_CULVERTS];
-    struct culvert_transfer transfers[MAX_CULVERTS];
-
-    // ----------------------------------------------------------------
-    // PHASE 1: Batched GPU gather (2 target update from's)
-    // Gathers LOCAL data for ALL culverts (local + parallel).
-    // Remote enquiry points get placeholder values (overwritten by MPI).
-    // ----------------------------------------------------------------
-    gpu_culvert_gather_enquiry(GD, data0, data1);
-    gpu_culvert_gather_inlets(GD, data0, data1);
-
-    // ----------------------------------------------------------------
-    // PHASE 1b: MPI exchange for cross-boundary culverts
-    // ----------------------------------------------------------------
-    // Static allocation of MPI buffers (MAX_CULVERTS * ~200 bytes = ~12KB)
-    static struct culvert_mpi_bufs mpi_bufs;
-
-    if (has_parallel) {
-        mpi_exchange_enquiry(GD, data0, data1, &mpi_bufs);
-        mpi_exchange_inlet_averages(GD, data0, data1, &mpi_bufs);
-    }
-
-    // ----------------------------------------------------------------
-    // PHASE 2: CPU computation loop (all culverts, ~200 FLOPs each)
-    // Only master_proc computes for cross-boundary culverts.
-    // ----------------------------------------------------------------
-    for (int c = 0; c < nc; c++) {
-        struct culvert_indices *ci = &CO->indices[c];
-        struct culvert_params *p = &CO->params[c];
-        struct culvert_state *st = &CO->state[c];
-        struct culvert_result *r = &results[c];
-
-        // Reset per-step reporting stats; they stay zero on ranks / states that
-        // don't compute a discharge (non-master, closed, dry). Filled in below
-        // and in Phase 3, then read back by the Python logger.
-        st->report_gain = 0.0;
-        st->report_discharge = 0.0;
-        st->report_velocity = 0.0;
-        st->report_driving_energy = 0.0;
-        st->report_delta_total_energy = 0.0;
-
-        // Non-master ranks skip computation for cross-boundary culverts
-        if (!ci->is_local && myrank != ci->master_proc) {
-            r->Q = 0.0;
-            r->barrel_velocity = 0.0;
-            r->outlet_culvert_depth = 0.0;
-            r->flow_area = 0.00001;
-            r->inflow_idx = 0;
-            continue;
-        }
-
-        // Check culvert is open
-        double dim = (p->type == CULVERT_TYPE_BOX || p->type == CULVERT_TYPE_WEIR_TRAPEZOID)
-                     ? p->height : p->diameter;
-        if (dim <= 0.0) {
-            r->Q = 0.0;
-            r->barrel_velocity = 0.0;
-            r->outlet_culvert_depth = 0.0;
-            r->flow_area = 0.00001;
-            r->inflow_idx = 0;
-            continue;
-        }
-
+    if (dim <= 0.0) {
+        // Closed culvert: no discharge. Transfer below still runs (Q=0 => no-op).
+        r->Q = 0.0;
+        r->barrel_velocity = 0.0;
+        r->outlet_culvert_depth = 0.0;
+        r->flow_area = 0.00001;
+        r->inflow_idx = 0;
+    } else {
         // Compute delta_total_energy to determine flow direction
         double delta_total_energy;
         if (p->use_velocity_head) {
             double depth0, vh0, te0, se0;
             double depth1, vh1, te1, se1;
-            compute_enquiry_values(&data0[c], p, 0, &depth0, &vh0, &te0, &se0);
-            compute_enquiry_values(&data1[c], p, 1, &depth1, &vh1, &te1, &se1);
+            compute_enquiry_values(data0, p, 0, &depth0, &vh0, &te0, &se0);
+            compute_enquiry_values(data1, p, 1, &depth1, &vh1, &te1, &se1);
             delta_total_energy = te0 - te1;
         } else {
-            delta_total_energy = data0[c].enquiry_stage - data1[c].enquiry_stage;
+            delta_total_energy = data0->enquiry_stage - data1->enquiry_stage;
         }
 
         // Smooth delta_total_energy
@@ -1352,24 +1302,21 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
                               p->smoothing_timescale, &ts);
 
         // Determine inflow/outflow
-        struct inlet_data *inflow_data, *outflow_data;
+        const struct inlet_data *inflow_data, *outflow_data;
         if (st->smooth_delta_total_energy >= 0.0) {
             r->inflow_idx = 0;
-            inflow_data = &data0[c];
-            outflow_data = &data1[c];
+            inflow_data = data0;
+            outflow_data = data1;
             delta_total_energy = st->smooth_delta_total_energy;
         } else {
             r->inflow_idx = 1;
-            inflow_data = &data1[c];
-            outflow_data = &data0[c];
+            inflow_data = data1;
+            outflow_data = data0;
             delta_total_energy = -st->smooth_delta_total_energy;
         }
 
-        // Report the (absolute) smoothed delta total energy, matching mode-1's
-        // self.delta_total_energy.
         st->report_delta_total_energy = delta_total_energy;
 
-        // Only calculate if there's water at inflow
         double inflow_depth, inflow_vh, inflow_te, inflow_se;
         compute_enquiry_values(inflow_data, p, r->inflow_idx,
                                &inflow_depth, &inflow_vh, &inflow_te, &inflow_se);
@@ -1416,8 +1363,6 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
                 r->Q = r->flow_area * r->barrel_velocity;
             }
 
-            // Report instantaneous driving energy and barrel velocity
-            // (matching mode-1's self.driving_energy / self.velocity).
             st->report_driving_energy = driving_energy;
             st->report_velocity = r->barrel_velocity;
         } else {
@@ -1428,104 +1373,273 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
         }
     }
 
+    // ---- Semi-implicit water transfer (was PHASE 3) ----
+    t->inflow_idx = r->inflow_idx;
+
+    const struct inlet_data *inflow_data = (r->inflow_idx == 0) ? data0 : data1;
+    const struct inlet_data *outflow_data = (r->inflow_idx == 0) ? data1 : data0;
+    double inflow_area = inflow_data->total_area;
+    double outflow_area = outflow_data->total_area;
+
+    double old_inflow_depth = inflow_data->avg_depth;
+    double old_inflow_xmom = inflow_data->avg_xmom;
+    double old_inflow_ymom = inflow_data->avg_ymom;
+
+    // Semi-implicit factor
+    double dt_Q_on_d;
+    if (old_inflow_depth > 0.0)
+        dt_Q_on_d = timestep * r->Q / old_inflow_depth;
+    else
+        dt_Q_on_d = 0.0;
+
+    double factor = 1.0 / (1.0 + dt_Q_on_d / inflow_area);
+
+    double new_inflow_depth, timestep_star;
+    if (p->always_use_Q_wetdry_adjustment) {
+        new_inflow_depth = old_inflow_depth * factor;
+        if (old_inflow_depth > 0.0)
+            timestep_star = timestep * new_inflow_depth / old_inflow_depth;
+        else
+            timestep_star = 0.0;
+    } else {
+        new_inflow_depth = old_inflow_depth - timestep * r->Q / inflow_area;
+        timestep_star = timestep;
+    }
+
+    st->report_gain = r->Q * timestep_star;
+    st->report_discharge = (timestep > 0.0) ? (r->Q * timestep_star / timestep) : 0.0;
+
+    double new_inflow_xmom, new_inflow_ymom;
+    if (p->use_old_momentum_method) {
+        new_inflow_xmom = old_inflow_xmom * factor;
+        new_inflow_ymom = old_inflow_ymom * factor;
+    } else {
+        double factor2;
+        if (old_inflow_depth > 0.0) {
+            if (p->always_use_Q_wetdry_adjustment)
+                factor2 = 1.0 / (1.0 + dt_Q_on_d * new_inflow_depth / (old_inflow_depth * inflow_area));
+            else
+                factor2 = 1.0 / (1.0 + timestep * r->Q / (old_inflow_depth * inflow_area));
+        } else {
+            factor2 = 0.0;
+        }
+        new_inflow_xmom = old_inflow_xmom * factor2;
+        new_inflow_ymom = old_inflow_ymom * factor2;
+    }
+
+    t->new_inflow_depth = new_inflow_depth;
+    t->new_inflow_xmom = new_inflow_xmom;
+    t->new_inflow_ymom = new_inflow_ymom;
+
+    // Outflow
+    double outflow_extra_depth = r->Q * timestep_star / outflow_area;
+    double new_outflow_depth = outflow_data->avg_depth + outflow_extra_depth;
+
+    const double *outflow_vec = (r->inflow_idx == 0) ? p->outward_vector_1 : p->outward_vector_0;
+    double dir0 = -outflow_vec[0];
+    double dir1 = -outflow_vec[1];
+
+    double new_outflow_xmom, new_outflow_ymom;
+    if (p->use_momentum_jet) {
+        new_outflow_xmom = r->barrel_velocity * new_outflow_depth * dir0;
+        new_outflow_ymom = r->barrel_velocity * new_outflow_depth * dir1;
+    } else {
+        new_outflow_xmom = 0.0;
+        new_outflow_ymom = 0.0;
+    }
+
+    t->new_outflow_depth = new_outflow_depth;
+    t->new_outflow_xmom = new_outflow_xmom;
+    t->new_outflow_ymom = new_outflow_ymom;
+}
+
+// ============================================================================
+// Flat host entry point for the mode-1 (Python) path. Marshals scalars into the
+// culvert_params / culvert_state / inlet_data structs, calls the shared
+// culvert_compute_one(), and returns the transfer + reporting via out-params.
+// No gpu_domain, no device memory — operates purely on values gathered by the
+// Python operator, so mode-1 and mode-2 run identical culvert arithmetic.
+// ============================================================================
+void culvert_apply_one_host(
+        int type, double g, double width, double height, double diameter,
+        double z1, double z2, double length, double manning, double sum_loss,
+        double blockage, double barrels,
+        int use_velocity_head, int use_momentum_jet, int use_old_momentum_method,
+        int always_use_Q_wetdry_adjustment, double max_velocity,
+        double smoothing_timescale,
+        double ov0x, double ov0y, double ov1x, double ov1y,
+        double invert0, double invert1, int has_invert0, int has_invert1,
+        double *smooth_delta_total_energy, double *smooth_Q,
+        double timestep,
+        double e0_stage, double e0_xmom, double e0_ymom, double e0_elev,
+        double a0_stage, double a0_depth, double a0_xmom, double a0_ymom, double a0_area,
+        double e1_stage, double e1_xmom, double e1_ymom, double e1_elev,
+        double a1_stage, double a1_depth, double a1_xmom, double a1_ymom, double a1_area,
+        int *inflow_idx,
+        double *new_inflow_depth, double *new_inflow_xmom, double *new_inflow_ymom,
+        double *new_outflow_depth, double *new_outflow_xmom, double *new_outflow_ymom,
+        double *report_gain, double *report_discharge, double *report_velocity,
+        double *report_driving_energy, double *report_delta_total_energy,
+        double *outlet_culvert_depth) {
+
+    struct culvert_params p;
+    memset(&p, 0, sizeof(p));
+    p.type = type; p.g = g; p.width = width; p.height = height; p.diameter = diameter;
+    p.z1 = z1; p.z2 = z2; p.length = length; p.manning = manning; p.sum_loss = sum_loss;
+    p.blockage = blockage; p.barrels = barrels;
+    p.use_velocity_head = use_velocity_head;
+    p.use_momentum_jet = use_momentum_jet;
+    p.use_old_momentum_method = use_old_momentum_method;
+    p.always_use_Q_wetdry_adjustment = always_use_Q_wetdry_adjustment;
+    p.max_velocity = max_velocity; p.smoothing_timescale = smoothing_timescale;
+    p.outward_vector_0[0] = ov0x; p.outward_vector_0[1] = ov0y;
+    p.outward_vector_1[0] = ov1x; p.outward_vector_1[1] = ov1y;
+    p.invert_elevation_0 = invert0; p.invert_elevation_1 = invert1;
+    p.has_invert_elevation_0 = has_invert0; p.has_invert_elevation_1 = has_invert1;
+
+    struct culvert_state st;
+    memset(&st, 0, sizeof(st));
+    st.smooth_delta_total_energy = *smooth_delta_total_energy;
+    st.smooth_Q = *smooth_Q;
+
+    struct inlet_data d0, d1;
+    d0.enquiry_stage = e0_stage; d0.enquiry_xmom = e0_xmom;
+    d0.enquiry_ymom = e0_ymom; d0.enquiry_elevation = e0_elev;
+    d0.avg_stage = a0_stage; d0.avg_depth = a0_depth;
+    d0.avg_xmom = a0_xmom; d0.avg_ymom = a0_ymom; d0.total_area = a0_area;
+    d1.enquiry_stage = e1_stage; d1.enquiry_xmom = e1_xmom;
+    d1.enquiry_ymom = e1_ymom; d1.enquiry_elevation = e1_elev;
+    d1.avg_stage = a1_stage; d1.avg_depth = a1_depth;
+    d1.avg_xmom = a1_xmom; d1.avg_ymom = a1_ymom; d1.total_area = a1_area;
+
+    struct culvert_result r;
+    struct culvert_transfer t;
+    memset(&r, 0, sizeof(r));
+    memset(&t, 0, sizeof(t));
+
+    culvert_compute_one(&d0, &d1, &p, &st, timestep, &r, &t);
+
+    *smooth_delta_total_energy = st.smooth_delta_total_energy;
+    *smooth_Q = st.smooth_Q;
+    *inflow_idx = t.inflow_idx;
+    *new_inflow_depth = t.new_inflow_depth;
+    *new_inflow_xmom = t.new_inflow_xmom;
+    *new_inflow_ymom = t.new_inflow_ymom;
+    *new_outflow_depth = t.new_outflow_depth;
+    *new_outflow_xmom = t.new_outflow_xmom;
+    *new_outflow_ymom = t.new_outflow_ymom;
+    *report_gain = st.report_gain;
+    *report_discharge = st.report_discharge;
+    *report_velocity = st.report_velocity;
+    *report_driving_energy = st.report_driving_energy;
+    *report_delta_total_energy = st.report_delta_total_energy;
+    *outlet_culvert_depth = r.outlet_culvert_depth;
+}
+
+// Host inlet gather for the mode-1 path. Mirrors the inner reduction of
+// gpu_culvert_gather_inlets() exactly (same accumulation order, same depth
+// clamp, same divisor) so mode-1's inlet averages match mode-2's bit-for-bit.
+void culvert_gather_inlet_host(int n, const int *indices, const double *areas,
+                               const double *stage_c, const double *xmom_c,
+                               const double *ymom_c, const double *bed_c,
+                               double total_area,
+                               double *avg_stage, double *avg_depth,
+                               double *avg_xmom, double *avg_ymom) {
+    double sum_stage = 0.0, sum_depth = 0.0, sum_xmom = 0.0, sum_ymom = 0.0;
+    for (int j = 0; j < n; j++) {
+        int i = indices[j];
+        double area = areas[j];
+        double depth = stage_c[i] - bed_c[i];
+        if (depth < 0.0) depth = 0.0;
+        sum_stage += stage_c[i] * area;
+        sum_depth += depth * area;
+        sum_xmom += xmom_c[i] * area;
+        sum_ymom += ymom_c[i] * area;
+    }
+    if (total_area > 0.0) {
+        *avg_stage = sum_stage / total_area;
+        *avg_depth = sum_depth / total_area;
+        *avg_xmom = sum_xmom / total_area;
+        *avg_ymom = sum_ymom / total_area;
+    } else {
+        *avg_stage = 0.0; *avg_depth = 0.0; *avg_xmom = 0.0; *avg_ymom = 0.0;
+    }
+}
+
+void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
+    NVTX_PUSH("gpu_culverts_apply_all");
+    struct culvert_operators *CO = &GD->culvert_ops;
+    int nc = CO->num_culverts;
+
+    if (nc == 0 || !CO->initialized) {
+        NVTX_POP();
+        return;
+    }
+
+    omp_set_default_device(gpu_compute_device(GD));
+    int myrank = GD->rank;
+
+    // Check if any parallel culverts exist
+    int has_parallel = 0;
+    for (int c = 0; c < nc; c++) {
+        if (!CO->indices[c].is_local) { has_parallel = 1; break; }
+    }
+
+    // Stack-allocate per-culvert working data
+    struct inlet_data data0[MAX_CULVERTS];
+    struct inlet_data data1[MAX_CULVERTS];
+    struct culvert_result results[MAX_CULVERTS];
+    struct culvert_transfer transfers[MAX_CULVERTS];
+
     // ----------------------------------------------------------------
-    // PHASE 3: CPU water transfer (semi-implicit update per culvert)
-    // Only master computes for cross-boundary culverts.
+    // PHASE 1: Batched GPU gather (2 target update from's)
+    // Gathers LOCAL data for ALL culverts (local + parallel).
+    // Remote enquiry points get placeholder values (overwritten by MPI).
+    // ----------------------------------------------------------------
+    gpu_culvert_gather_enquiry(GD, data0, data1);
+    gpu_culvert_gather_inlets(GD, data0, data1);
+
+    // ----------------------------------------------------------------
+    // PHASE 1b: MPI exchange for cross-boundary culverts
+    // ----------------------------------------------------------------
+    // Static allocation of MPI buffers (MAX_CULVERTS * ~200 bytes = ~12KB)
+    static struct culvert_mpi_bufs mpi_bufs;
+
+    if (has_parallel) {
+        mpi_exchange_enquiry(GD, data0, data1, &mpi_bufs);
+        mpi_exchange_inlet_averages(GD, data0, data1, &mpi_bufs);
+    }
+
+    // ----------------------------------------------------------------
+    // PHASE 2+3: per-culvert discharge + semi-implicit water transfer.
+    // The actual physics lives in culvert_compute_one() (above), which mode-1
+    // also calls via Cython so both compute modes are bit-for-bit identical.
+    // Only master_proc computes for cross-boundary culverts.
     // ----------------------------------------------------------------
     for (int c = 0; c < nc; c++) {
         struct culvert_indices *ci = &CO->indices[c];
         struct culvert_params *p = &CO->params[c];
-        struct culvert_result *r = &results[c];
         struct culvert_state *st = &CO->state[c];
+        struct culvert_result *r = &results[c];
         struct culvert_transfer *t = &transfers[c];
 
-        // Non-master ranks: will receive transfer data via MPI
+        // Non-master ranks skip: results/transfer arrive via MPI below.
         if (!ci->is_local && myrank != ci->master_proc) {
+            st->report_gain = 0.0;
+            st->report_discharge = 0.0;
+            st->report_velocity = 0.0;
+            st->report_driving_energy = 0.0;
+            st->report_delta_total_energy = 0.0;
+            r->Q = 0.0;
+            r->barrel_velocity = 0.0;
+            r->outlet_culvert_depth = 0.0;
+            r->flow_area = 0.00001;
+            r->inflow_idx = 0;
             memset(t, 0, sizeof(*t));
             continue;
         }
 
-        t->inflow_idx = r->inflow_idx;
-
-        struct inlet_data *inflow_data = (r->inflow_idx == 0) ? &data0[c] : &data1[c];
-        struct inlet_data *outflow_data = (r->inflow_idx == 0) ? &data1[c] : &data0[c];
-        double inflow_area = inflow_data->total_area;
-        double outflow_area = outflow_data->total_area;
-
-        double old_inflow_depth = inflow_data->avg_depth;
-        double old_inflow_xmom = inflow_data->avg_xmom;
-        double old_inflow_ymom = inflow_data->avg_ymom;
-
-        // Semi-implicit factor
-        double dt_Q_on_d;
-        if (old_inflow_depth > 0.0)
-            dt_Q_on_d = timestep * r->Q / old_inflow_depth;
-        else
-            dt_Q_on_d = 0.0;
-
-        double factor = 1.0 / (1.0 + dt_Q_on_d / inflow_area);
-
-        // New inflow values (with wet-dry adjustment if always_use_Q_wetdry_adjustment)
-        double new_inflow_depth, timestep_star;
-        if (p->always_use_Q_wetdry_adjustment) {
-            new_inflow_depth = old_inflow_depth * factor;
-            if (old_inflow_depth > 0.0)
-                timestep_star = timestep * new_inflow_depth / old_inflow_depth;
-            else
-                timestep_star = 0.0;
-        } else {
-            new_inflow_depth = old_inflow_depth - timestep * r->Q / inflow_area;
-            timestep_star = timestep;
-        }
-
-        // Report instantaneous discharge and the volume gained this step,
-        // matching mode-1: gain = Q*timestep_star, discharge = gain/timestep.
-        st->report_gain = r->Q * timestep_star;
-        st->report_discharge = (timestep > 0.0) ? (r->Q * timestep_star / timestep) : 0.0;
-
-        double new_inflow_xmom, new_inflow_ymom;
-        if (p->use_old_momentum_method) {
-            new_inflow_xmom = old_inflow_xmom * factor;
-            new_inflow_ymom = old_inflow_ymom * factor;
-        } else {
-            double factor2;
-            if (old_inflow_depth > 0.0) {
-                if (p->always_use_Q_wetdry_adjustment)
-                    factor2 = 1.0 / (1.0 + dt_Q_on_d * new_inflow_depth / (old_inflow_depth * inflow_area));
-                else
-                    factor2 = 1.0 / (1.0 + timestep * r->Q / (old_inflow_depth * inflow_area));
-            } else {
-                factor2 = 0.0;
-            }
-            new_inflow_xmom = old_inflow_xmom * factor2;
-            new_inflow_ymom = old_inflow_ymom * factor2;
-        }
-
-        t->new_inflow_depth = new_inflow_depth;
-        t->new_inflow_xmom = new_inflow_xmom;
-        t->new_inflow_ymom = new_inflow_ymom;
-
-        // Outflow
-        double outflow_extra_depth = r->Q * timestep_star / outflow_area;
-        double new_outflow_depth = outflow_data->avg_depth + outflow_extra_depth;
-
-        // Outflow direction vector
-        double *outflow_vec = (r->inflow_idx == 0) ? p->outward_vector_1 : p->outward_vector_0;
-        double dir0 = -outflow_vec[0];
-        double dir1 = -outflow_vec[1];
-
-        double new_outflow_xmom, new_outflow_ymom;
-        if (p->use_momentum_jet) {
-            new_outflow_xmom = r->barrel_velocity * new_outflow_depth * dir0;
-            new_outflow_ymom = r->barrel_velocity * new_outflow_depth * dir1;
-        } else {
-            new_outflow_xmom = 0.0;
-            new_outflow_ymom = 0.0;
-        }
-
-        t->new_outflow_depth = new_outflow_depth;
-        t->new_outflow_xmom = new_outflow_xmom;
-        t->new_outflow_ymom = new_outflow_ymom;
+        culvert_compute_one(&data0[c], &data1[c], p, st, timestep, r, t);
     }
 
     // ----------------------------------------------------------------

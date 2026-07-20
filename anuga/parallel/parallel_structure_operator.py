@@ -260,6 +260,12 @@ class Parallel_Structure_operator(anuga.Operator):
 
     def __call__(self):
 
+        from anuga.structures.structure_operator import (
+            _can_use_c_culvert, _call_c_culvert)
+        if _can_use_c_culvert(self):
+            _call_c_culvert(self)
+            return
+
         timestep = self.domain.get_timestep()
 
         Q, barrel_speed, outlet_depth = self.discharge_routine()
