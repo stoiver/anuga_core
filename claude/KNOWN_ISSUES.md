@@ -324,6 +324,25 @@ writing new flux/operator code.
 
 Cells below this height are treated as dry. Negative depths are clipped.
 
+### mode-1 vs mode-2 differ by ~1 ULP at the wet/dry margin (2026-07-20)
+
+Both modes are **stage-primary** (`height == stage - bed` exactly in each) — there
+is *no* stage-vs-height representation flip. The residual is a **1-ULP difference
+in the core's near-dry stage value itself**: for a cell sitting essentially *at*
+the bed that gets lifted a hair off it (e.g. rain on dry ground, terrain ~343 m +
+~1e-5 m of rainfall), mode-2's stage going into the fractional step is already ~1
+ULP off from mode-1, and it is **masked by the dry-cell bed-clamp** (`protect` sets
+`stage = bed` exactly in both) until the lift exposes it. Only in the just-wetted
+cells, zero in momentum; chaos-amplifies to mm over hours. Ruled out along the way:
+the rate operator's arithmetic (rate inputs are bit-identical; rain on a *fully
+wet* domain is bit-identical) and the device sync (a plain memcpy). This is why
+**towradgi's mode-1/mode-2 divergence is rain-on-dry-cells** — remove rain and the
+whole run is bit-identical. Same family as the #200 dry-cell gap; benign (both
+modes valid). The exact operation was not isolated (it needs instrumenting the C
+RK loop's device state mid-step). The session-51 in-process double-precision
+localization harness (build two domains from the same setup, restartable lockstep
+evolve, diff `centroid_values` in double precision) is the tool if it's ever chased.
+
 ---
 
 ## API

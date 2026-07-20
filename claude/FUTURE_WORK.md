@@ -45,6 +45,63 @@ the `acc_free` teardown in `gpu_halo.c`; add tests; and rebase onto `develop` (i
 #200). The kernel win does **not** reach wall-clock (the async queue issues 2.5× more
 `cuStreamSynchronize` than OpenMP-target) — headroom, not a blocker, but worth noting.
 
+**~~P2 — Unify the culvert implementation so mode-1 and mode-2 are bit-identical.~~ DONE
+(session 51, uncommitted in working tree as of write-up).**
+
+**What was done.** There is now **one** implementation of the Boyd/weir per-culvert update —
+`culvert_compute_one()` in `shallow_water/gpu/gpu_culvert_operator.c` — plus a shared host inlet
+gather `culvert_gather_inlet_host()`. Mode-2's batch was refactored to call it (behaviour
+preserving); mode-1's Python operators (both `Structure_operator` and the *default*
+`Parallel_Structure_operator`) now route their per-step update through it via a Cython bridge
+(`culvert_apply_one_host` / `culvert_gather_inlet_host_py` in `sw_domain_gpu_ext.pyx`), gated to
+fully-local culverts (cross-boundary MPI culverts keep the Python+MPI path). Files touched:
+`gpu_culvert_operator.c/.h`, `sw_domain_gpu_ext.pyx`, `structures/structure_operator.py`,
+`parallel/parallel_structure_operator.py`. Result: **mode-1 == mode-2 bit-for-bit** for every
+culvert config (box/pipe, velocity head, blockage), at 1 and 16 threads. Full suite green in
+legacy (2698) and unified (2697); 230 structure/GPU tests pass. De-dups the Python/C physics on
+the runtime path (single source of truth).
+
+**Correction to the earlier diagnosis (don't repeat the wrong turns):** the seed was **not**
+momentum, ordering, or FMA. It was the **inlet-average gather** — mode-1 summed with numpy
+(`num.sum(v*a)/area`), mode-2 with a C loop; for a multi-cell inlet these round 1 ULP apart in a
+value-dependent way (plus a dry-cell depth clamp the C gather does and the Python global-average
+path didn't). Two earlier "proofs" were invalid because a monkeypatch hit the **unused serial
+`Structure_operator`** while the default operator is `Parallel_Structure_operator` (a *separate*
+class hierarchy). Lesson: `anuga.Boyd_box_operator` is a **factory** returning the parallel
+class even in serial — instrument the class that actually runs.
+
+---
+
+**Towradgi still diverges — and it is NOT culverts (diagnosed, recommend ACCEPT).**
+After the culvert fix, towradgi mode-1 vs mode-2 is unchanged (7.6e-6 → 2.5e-3). An in-process
+double-precision localization harness (two domains from the same setup, restartable lockstep
+evolve, double diff — reconstructable, see session 51) pinned the real seed:
+
+- The seed is **rainfall (`Rate_operator`) falling on DRY cells.** Remove the rate operators from
+  both domains → **zero divergence** (bit-identical); rain on a **fully wet** domain →
+  bit-identical; rain on **dry** cells → 1 ULP.
+- It is **not** the rate operator's arithmetic (numpy `arr+scalar` == a C loop; wet cells prove
+  it, and the rate inputs `local_rate/timestep/rate/factor` are bit-identical between modes) and
+  **not** the sync (a plain `omp target update` memcpy of stage). Both modes are in fact
+  **stage-primary** (`height == stage - bed` exactly in each) — there is no `stage = bed + height`
+  reconstruction to flip. The residual is a **1-ULP difference in the core's near-dry stage
+  itself**: mode-2's stage going *into* the rate op is already ~1 ULP off from mode-1, produced by
+  the unified C RK loop's dry-cell handling and **masked by the bed-clamp** (`protect` sets
+  `stage = bed` exactly in both) right up until rain lifts the cell off the bed and exposes it.
+  That's why bare runs are bit-identical and only *rain-on-dry* diverges. Same family as the
+  **#200** dry-cell issue (a wet/dry-margin roundoff gap between the legacy and unified paths).
+  The exact operation was not isolated — it needs instrumenting the C RK loop's device state
+  mid-step.
+- A red herring ruled out along the way: mode-2 also clamps dry cells to bed at
+  `set_multiprocessor_mode(2)` (#200) while mode-1 defers to first protect — but forcing mode-1
+  to clamp too left the divergence unchanged, so the *initial* state is not the cause.
+
+**Recommendation: accept it.** One ULP in the stage of dry ground under a hair of rain —
+physically meaningless, chaos-amplified to mm over hours, both modes equally valid. A real fix
+means reconciling stage-primary vs height-primary at the wet/dry margin (core-level, #200
+family, large blast radius, no physical payoff). Unifying the `Rate_operator` would **not** help
+(it's already identical on wet cells). If ever pursued, the localization harness is the tool.
+
 **P3 — process, not code:**
 - **`develop` is ~833 commits ahead of `main`.** *Every* session-50 fix (including the #200
   startup mass-loss and #193 parallel-inlet mass-balance correctness fixes) is unreleased,
