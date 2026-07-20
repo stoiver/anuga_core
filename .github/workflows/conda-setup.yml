@@ -137,3 +137,18 @@ jobs:
           export OMP_NUM_THREADS=1
           pytest --pyargs anuga --cov=anuga --cov-report=xml --cov-report=term-missing --cov-config=../.coveragerc
 
+      # Exercise the unified (mode-2) compute path — the v4.0 gpu_ext C kernels
+      # running on the CPU (gpu_offload=false). ANUGA_DEFAULT_COMPUTE_MODE=unified
+      # makes every default domain use mode 2, so this validates that whole path.
+      # Safe to run the full suite in one process on a CPU build (the NVHPC
+      # target-runtime abort is GPU-build-only). Linux / Python 3.14 only.
+      - name: Test package (unified compute mode, full — Linux / Python 3.14)
+        if: runner.os == 'Linux' && matrix.python-version == '3.14'
+        shell: bash -el {0}
+        run: |
+          conda activate anuga_env
+          cd sandpit
+          export OMP_NUM_THREADS=1
+          export ANUGA_DEFAULT_COMPUTE_MODE=unified
+          pytest -rs --pyargs anuga
+
