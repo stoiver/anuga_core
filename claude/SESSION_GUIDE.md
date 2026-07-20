@@ -449,7 +449,54 @@ Findings:
 
 ---
 
-## Recent session summaries (sessions 21–50)
+## Recent session summaries (sessions 21–51)
+
+**Session 51 (2026-07-19/20):** **Unify the culvert kernel (mode-1 == mode-2), diagnose
+Towradgi's residual as rain-on-dry, tighten comparison tolerances.** Rebuilt CPU-only
+(gcc, `-Dgpu_offload=false`), confirmed the full suite green in both modes (legacy 2698 /
+unified 2697), then closed out the mode-1-vs-mode-2 culvert difference and chased what's left.
+- **Culvert unification (commit `b7a010ae`).** Extracted the per-culvert discharge +
+  semi-implicit transfer into one C routine `culvert_compute_one()` plus a shared host inlet
+  gather `culvert_gather_inlet_host()` (`gpu_culvert_operator.c`). Mode-2's batch calls it
+  (behaviour-preserving); **mode-1's Python operators now route their per-step update through it
+  via a Cython bridge** (`culvert_apply_one_host` / `culvert_gather_inlet_host_py`), gated to
+  fully-local culverts (cross-boundary MPI keeps the Python path). Wired into **both**
+  `Structure_operator` and — the one that matters — `Parallel_Structure_operator`. Result:
+  **mode-1 == mode-2 bit-for-bit** for every culvert config (box/pipe, velocity head, blockage),
+  1 and 16 threads. De-dups the Python/C physics on the runtime path.
+  - **The seed was the inlet-average gather**, not momentum/ordering/FMA: mode-1 summed with
+    numpy, mode-2 with a C loop, 1 ULP apart for multi-cell inlets.
+  - **Two wrong-turn traps worth remembering:** (1) `anuga.Boyd_box_operator` is a **factory**
+    returning `Parallel_Boyd_box_operator` — a *separate* class hierarchy from `Structure_operator`
+    — even in serial, so a monkeypatch of `Structure_operator.__call__` silently hit an unused
+    class and produced two invalid "proofs". Instrument the class that actually runs. (2) An FMA
+    hypothesis was moot: the CPU build is generic x86-64 (no `-march`/`-mfma`).
+- **Towradgi still diverges → it's rain-on-dry, NOT culverts.** Built an **in-process
+  double-precision localization harness** (two domains from the same setup, restartable lockstep
+  evolve, diff `centroid_values` in double). It pinned the seed to `Rate_operator` on **dry**
+  cells: remove rain → bit-identical; rain on a **fully-wet** domain → bit-identical; rain on
+  **dry** → 1 ULP. **Corrected framing:** both modes are *stage-primary* (`height == stage - bed`
+  in each); the residual is a 1-ULP difference in the core's near-dry **stage itself**, masked by
+  the dry-cell bed-clamp (`protect` sets `stage=bed`) until rain lifts the cell off the bed. Rate
+  inputs and the device sync (a plain memcpy) are ruled out; exact operation not isolated (needs
+  C-RK-loop device-state instrumentation). Same family as #200; **benign, accepted**. Red
+  herring: the #200 init dry-cell clamp asymmetry — forcing mode-1 to clamp too left the
+  divergence unchanged, so the initial state is not the cause. Documented in FUTURE_WORK /
+  KNOWN_ISSUES (commit `aadbd8e7`).
+- **GPU build validated.** Rebuilt nvc (`gpu_offload=true`, cc120, RTX 5070). Towradgi
+  mode-1(CPU) vs mode-2(GPU): same-order divergence dominated by rain-on-dry (**wet-only ΔStage
+  ≈ 0 at t=120** — only dry cells differ; wet cells diverge later via chaos). Isolated GPU test
+  runner: **all classes pass** on the device, including the culvert/weir/dry-cell/fractional-step
+  tests that touch the changed code.
+- **Tightened mode-1/mode-2 comparison tolerances (commit `7a42bb2d`).** The culvert/weir
+  CPU-vs-GPU tests used **atol=0.02/0.05** with comments blaming Python-vs-C ~3% drift — obsolete
+  now that both run the same C kernel. Re-measured and tightened: culvert 0.02/0.05→1e-10/1e-9,
+  weir 0.02→1e-10, inlet 1e-8→1e-10, forcing helper (wind/pressure/**rate**) 1e-8→1e-10 on GPU.
+  Measured ≤1.2e-15 everywhere (rain bit-identical); kept 5–6 orders of headroom. These now catch
+  a mode-1/mode-2 regression instead of silently passing multi-percent drift. All 17 pass under
+  the isolated GPU runner. **Lesson:** when a comparison test's loose tolerance is justified by a
+  "Python vs C FP drift" note, re-measure after any unification — the rationale may be stale by
+  orders of magnitude. All commits on `develop`, pushed to `stoiver`.
 
 **Session 50 (2026-07-16/19):** **mode-1 vs mode-2 difference notebook → two real GPU bugs.**
 Built `validation_tests/case_studies/towradgi/compare_mode1_mode2.ipynb` (uses
