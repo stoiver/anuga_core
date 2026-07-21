@@ -139,7 +139,20 @@ class Sanddune_erosion_operator(Operator, Region)  :
         #------------------------------------------
         # Local variables
         #------------------------------------------
-        self.base = base
+        # self.base must be indexable the same way self.elev_c / self.stage_c
+        # are (i.e. a full-domain array), since __call__ does self.base[ind].
+        # Allow the caller to pass either a single uniform base level (int/float)
+        # or a pre-built per-triangle array.
+        if num.isscalar(base):
+            self.base = num.full(domain.number_of_elements, float(base))
+        else:
+            self.base = num.asarray(base, dtype=float)
+            if self.base.shape[0] != domain.number_of_elements:
+                raise ValueError(
+                    "sanddune_erosion_operator: 'base' array length (%d) does not "
+                    "match number of domain elements (%d)"
+                    % (self.base.shape[0], domain.number_of_elements)
+                )
 
         if self.indices != []:
 
