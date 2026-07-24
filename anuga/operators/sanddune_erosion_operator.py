@@ -154,27 +154,10 @@ class Sanddune_erosion_operator(Operator, Region)  :
                     % (self.base.shape[0], domain.number_of_elements)
                 )
 
-        if self.indices != []:
-
-            ind = self.indices
-            if ind is None:
-                # None means "apply to the entire domain" - see note in __call__.
-                ind = num.arange(domain.number_of_elements)
-
-            neighbours = self.domain.surrogate_neighbours
-
-            self.neighbourindices = neighbours[ind]           # get the neighbour Indices for each triangle in the erosion zone(s)
-
-            self.n0 = self.neighbourindices[:,0]              # separate into three lists
-            self.n1 = self.neighbourindices[:,1]
-            self.n2 = self.neighbourindices[:,2]
-
-            k = self.n0.shape[0]                              # Erosion poly lEN - num of triangles in poly
-
-            self.e = num.zeros((k,3))                         # create elev array k triangles, 3 neighbour elev
-
-            self.ident  = num.arange(k)                       # ident is array 0.. k-1, step 1
-
+        # Note: neighbour-index arrays are NOT cached here. Erosion-zone
+        # membership (self.indices) can change size between calls, so the
+        # neighbour arrays are rebuilt against the current indices every call
+        # in __call__ rather than once at construction.
 
 
     def __call__(self):
