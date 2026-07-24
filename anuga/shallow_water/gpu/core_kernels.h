@@ -31,6 +31,7 @@ double core_protect(struct domain *D);
 
 // Fix negative cells (after update)
 int core_fix_negative_cells(struct domain *D);
+double core_negative_cells_volume(struct domain *D);
 
 // Manning friction (flat, semi-implicit)
 void core_manning_friction_flat_semi_implicit(struct domain *D);

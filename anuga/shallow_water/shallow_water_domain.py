@@ -145,6 +145,13 @@ from anuga.utilities.parallel_abstraction import pypar_available, barrier
 # device-resident state and so needs no sync.  Keep this in step with the C.
 GPU_SYNCED_QUANTITIES = frozenset(('stage', 'xmomentum', 'ymomentum', 'height'))
 
+# Absolute lower bound (m^3) on the volume added by clamping negative-depth cells
+# below which the "possible loss of conservation" warning is never raised. This
+# rejects pure floating-point noise (femto/pico-litre deficits in a nearly-dry
+# domain) that can otherwise be a large *fraction* of an essentially-zero total
+# volume. Any physically meaningful conservation loss is many orders larger.
+_negative_volume_noise_floor = 1.0e-9
+
 
 #-----------------------------------------------------
 # Code for profiling cuda version
@@ -942,6 +949,9 @@ class Domain(Generic_Domain):
 
         self.set_minimum_allowed_height(minimum_allowed_height)
         self.maximum_allowed_speed = maximum_allowed_speed
+
+        from anuga.config import negative_volume_warning_fraction
+        self.negative_volume_warning_fraction = negative_volume_warning_fraction
 
         self.minimum_storable_height = minimum_storable_height
 
@@ -1994,6 +2004,24 @@ class Domain(Generic_Domain):
 
         return self.minimum_allowed_height
 
+    def set_negative_volume_warning_fraction(self, fraction: float) -> None:
+        """Set the fraction of the total domain water volume that must be added by
+        clamping negative-depth cells to zero depth in a single timestep before
+        update_conserved_quantities() emits a "possible loss of conservation"
+        warning.
+
+        Clamping a few cells by a near-zero depth is normal in wetting/drying and
+        involves negligible volume, so the default (see
+        anuga.config.negative_volume_warning_fraction) avoids warning on almost
+        every step. Set to 0.0 to warn whenever any volume is added.
+        """
+
+        self.negative_volume_warning_fraction = fraction
+
+    def get_negative_volume_warning_fraction(self) -> float:
+
+        return self.negative_volume_warning_fraction
+
     def set_maximum_allowed_speed(self, maximum_allowed_speed: float) -> None:
         """Set the maximum particle speed that is allowed in water shallower
         than minimum_allowed_height.
@@ -2921,14 +2949,32 @@ class Domain(Generic_Domain):
         else:
             raise Exception('Not implemented')
 
-        num_negative_ids = update_conserved_quantities(self, timestep)
+        num_negative_ids, negative_volume = update_conserved_quantities(self, timestep)
 
-        if num_negative_ids > 0:
-            # FIXME: This only warns the first time -- maybe we should warn whenever loss occurs?
-            import warnings
-            msg = f'{num_negative_ids} negative cells being set to zero depth, possible loss of conservation. \n' +\
-            'Consider using domain.report_water_volume_statistics() to check the extent of the problem'
-            warnings.warn(msg)
+        # Clamping negative-depth cells to zero depth adds water (a conservation
+        # error). A few cells clamped by a near-zero depth is normal in
+        # wetting/drying and involves negligible volume, so warn on the *volume*
+        # added rather than the cell count: only when it is a large enough fraction
+        # of the total water volume (threshold via
+        # set_negative_volume_warning_fraction; 0.0 warns on any added volume).
+        # The absolute floor rejects pure floating-point noise: a nearly-dry
+        # domain can clamp femtolitre deficits that are a large *fraction* of an
+        # essentially-zero total volume but are physically meaningless.
+        if num_negative_ids > 0 and negative_volume > _negative_volume_noise_floor:
+            total_volume = self.get_water_volume()
+            if total_volume > 0.0 and \
+                    negative_volume > self.negative_volume_warning_fraction * total_volume:
+                import warnings
+                fraction = negative_volume / total_volume
+                msg = (
+                    f'{num_negative_ids} negative cells set to zero depth, adding '
+                    f'{negative_volume:.3g} m^3 ({100.0 * fraction:.3g}% of the '
+                    f'{total_volume:.3g} m^3 in the domain): possible loss of '
+                    'conservation. \nConsider using '
+                    'domain.report_water_volume_statistics() to check the extent '
+                    'of the problem'
+                )
+                warnings.warn(msg)
 
         nvtxRangePop()
 

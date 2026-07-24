@@ -188,8 +188,9 @@ class GPU_OMP_interface:
         """Update conserved quantities with explicit and semi-implicit terms."""
         from anuga.shallow_water.sw_domain_gpu_ext import update_conserved_quantities_gpu
         update_conserved_quantities_gpu(self.gpu_dom, timestep)
-        # GPU protect kernel handles negative cells, return 0 for compatibility
-        return 0
+        # GPU protect kernel handles negative cells; return (count, volume) = (0, 0.0)
+        # to match the openmp wrapper's (num_negative_cells, negative_volume) shape.
+        return 0, 0.0
 
     def backup_conserved_quantities_kernel(self, domain):
         """Backup centroid values for RK2."""

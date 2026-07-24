@@ -115,6 +115,7 @@ cdef extern from "sw_domain_openmp.c" nogil:
 	double _openmp_protect(domain* D)
 	void _openmp_extrapolate_second_order_edge_sw(domain* D)
 	anuga_int _openmp_fix_negative_cells(domain* D)
+	double _openmp_negative_cells_volume(domain* D)
 	anuga_int _openmp_gravity(domain *D)
 	anuga_int _openmp_gravity_wb(domain *D) 
 	anuga_int _openmp_update_conserved_quantities(domain* D, double timestep)
@@ -1091,13 +1092,16 @@ def update_conserved_quantities(object domain_py_object,
                                 update_domain_c_struct=False):
 
 	cdef anuga_int num_negative_cells
+	cdef double negative_volume
 	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=update_domain_c_struct)
 
 	with nogil:
 		_openmp_update_conserved_quantities(D, timestep)
+		# Measure the deficit volume BEFORE the clamp erases it (stage->bed).
+		negative_volume = _openmp_negative_cells_volume(D)
 		num_negative_cells = _openmp_fix_negative_cells(D)
 
-	return num_negative_cells
+	return num_negative_cells, negative_volume
 
 def saxpy_conserved_quantities(object domain_py_object, 
                                double a, double b, double c,

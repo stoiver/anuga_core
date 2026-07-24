@@ -19,6 +19,7 @@ python_sources = [
 'test_friction.py',
 'test_loadsave.py',
 'test_most2nc.py',
+'test_negative_cells_warning.py',
 'test_shallow_water_domain.py',
 'test_sww_interrogate.py',
 'test_system.py',

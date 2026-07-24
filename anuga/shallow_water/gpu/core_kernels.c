@@ -572,6 +572,39 @@ int core_fix_negative_cells(struct domain *D) {
 }
 
 // ============================================================================
+// Negative-cell volume (read-only)
+//
+// Measures the water volume that fix_negative_cells will ADD by clamping
+// negative-depth cells up to zero depth (stage = bed) — i.e. the conservation
+// error the clamp introduces this step. Uses the SAME cell selection as
+// core_fix_negative_cells (stage - bed < 0 AND tri_full_flag > 0), so it must
+// be called AFTER the flux update but BEFORE core_fix_negative_cells (which
+// erases the deficit). Does not modify the domain.
+// ============================================================================
+
+double core_negative_cells_volume(struct domain *D) {
+    anuga_int n = D->number_of_elements;
+
+    double * restrict stage_cv = D->stage_centroid_values;
+    double * restrict bed_cv   = D->bed_centroid_values;
+    double * restrict areas    = D->areas;
+    anuga_int * restrict tri_full_flag = D->tri_full_flag;
+
+    double volume = 0.0;
+
+    OMP_PARALLEL_LOOP_REDUCTION_PLUS(volume)
+    for (anuga_int k = 0; k < n; k++) {
+        int full = (tri_full_flag == NULL) ? 1 : (tri_full_flag[k] > 0);
+        if ((stage_cv[k] - bed_cv[k] < 0.0) & full) {
+            // bed - stage > 0 here: volume needed to raise the cell to zero depth
+            volume = volume + (bed_cv[k] - stage_cv[k]) * areas[k];
+        }
+    }
+
+    return volume;
+}
+
+// ============================================================================
 // Manning friction (flat, semi-implicit)
 // ============================================================================
 
