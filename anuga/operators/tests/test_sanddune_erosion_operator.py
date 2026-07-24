@@ -104,6 +104,43 @@ class Test_sanddune_erosion_operator(unittest.TestCase):
             num.all(self.domain.quantities['elevation'].centroid_values
                     >= base_level - 1.0e-10))
 
+    def test_subset_indices_with_full_domain_base_array(self):
+        """Primary usage (see anuga-clinic notebook3): a full-domain base array
+        applied to a subset of triangles selected by indices.
+
+        Also a regression for the ``self.indices != []`` guard, which raised a
+        broadcast ValueError under NumPy 2.x once Region turned a non-empty
+        indices list into an ndarray.
+        """
+        # Notebook pattern: base is the initial (full-domain) elevation array.
+        base = self.domain.get_quantity('elevation').get_values(
+            location='centroids').copy()
+        indices = [0, 1]
+        operator = Sanddune_erosion_operator(
+            self.domain, base=base, indices=indices, Ra=45)
+
+        elev_before = self.domain.quantities['elevation'].centroid_values.copy()
+        self.domain.timestep = 1.0
+        operator()   # must not raise
+        elev_after = self.domain.quantities['elevation'].centroid_values
+
+        # Triangles outside the erosion indices are left untouched.
+        outside = [i for i in range(self.domain.number_of_elements)
+                   if i not in indices]
+        self.assertTrue(num.allclose(elev_before[outside], elev_after[outside]))
+
+    def test_empty_indices_is_a_noop(self):
+        """indices=[] means "apply nowhere": nothing changes and nothing raises."""
+        operator = Sanddune_erosion_operator(self.domain, indices=[])
+        elev_before = self.domain.quantities['elevation'].centroid_values.copy()
+        stage_before = self.domain.quantities['stage'].centroid_values.copy()
+        self.domain.timestep = 1.0
+        operator()
+        self.assertTrue(num.allclose(
+            elev_before, self.domain.quantities['elevation'].centroid_values))
+        self.assertTrue(num.allclose(
+            stage_before, self.domain.quantities['stage'].centroid_values))
+
 
 if __name__ == '__main__':
     unittest.main()

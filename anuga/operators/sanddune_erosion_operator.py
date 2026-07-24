@@ -171,7 +171,11 @@ class Sanddune_erosion_operator(Operator, Region)  :
 
         updated = True             # flag called OK
 
-        if self.indices != []:     # empty list no polygon - return
+        # self.indices is None (whole domain), [] (nothing to do), or a non-empty
+        # ndarray of triangle ids. Test with len()/is None rather than
+        # `self.indices != []`, which raises under NumPy 2.x when self.indices is
+        # an array (array-vs-empty-list broadcast error).
+        if self.indices is None or len(self.indices) > 0:
 
 
             Wd       = self.Wd
