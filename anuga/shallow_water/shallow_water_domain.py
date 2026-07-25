@@ -2942,6 +2942,11 @@ class Domain(Generic_Domain):
         # Update height based on discontinuous elevation
         assert self.get_using_discontinuous_elevation()
 
+        # Build (or defer to legacy) the mode-2 device interface, matching the
+        # other mode-2 entry points. A direct call outside evolve() on a
+        # default-'unified' domain would otherwise hit a None gpu_interface.
+        self._ensure_gpu_interface()
+
         if self.multiprocessor_mode == MULTIPROCESSOR_OPENMP:
             from .sw_domain_openmp_ext import update_conserved_quantities
         elif self.multiprocessor_mode == MULTIPROCESSOR_GPU:
