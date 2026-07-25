@@ -449,7 +449,31 @@ Findings:
 
 ---
 
-## Recent session summaries (sessions 21–51)
+## Recent session summaries (sessions 21–52)
+
+**Session 52 (2026-07-25):** **Fix the CI unified-compute-mode failure + harden
+`update_conserved_quantities`.** The `github CI` "Test package (unified compute mode,
+full — Linux / Python 3.14)" step (CPU build, `ANUGA_DEFAULT_COMPUTE_MODE=unified`)
+went red with 5 failures in `Test_negative_cells_warning`, all
+`AttributeError: 'NoneType' object has no attribute 'update_conserved_quantities_kernel'`
+at `shallow_water_domain.py:2948`.
+- **Root cause.** Those white-box tests call `domain.update_conserved_quantities()`
+  **directly, outside `evolve()`**, then inspect host `centroid_values`. Under the unified
+  default the domain is mode 2 (`MULTIPROCESSOR_GPU`) but `gpu_interface` is only built during
+  `evolve`, so the direct call hit `self.gpu_interface.…` with `gpu_interface` still `None`.
+- **Fix 1 — pin the tests (commit `641db3bd`).** Added `domain.set_compute_mode('legacy')`
+  in the test's `make_domain()` helper — the documented white-box pattern
+  (`test_forcing.py`/`test_friction.py`). Build-agnostic: legacy just selects the CPU openmp
+  solver per-domain, never touches GPU offload, so it's correct on the GPU-offload build too
+  (and sidesteps the NVHPC mode-2 domain-count abort). Verified 8/8 pass in both default and
+  unified. **CI confirmed fully green** (run 30145027044).
+- **Fix 2 — harden the method (commit `c80bc457`).** `update_conserved_quantities` was the lone
+  mode-2 entry point that read `self.gpu_interface` **without** first calling
+  `_ensure_gpu_interface()` (its siblings `compute_fluxes`/`compute_forcing_terms`/extrapolate/
+  distribute all guard). Added the guard: it builds the interface when boundaries are ready,
+  else falls back to legacy. No-op during normal evolve. Verified a direct unified call now runs
+  mode 2 instead of crashing; sw-domain evolve/conservation tests 14/14 green under unified.
+- Both commits on `develop`, pushed to `origin` (anuga-community).
 
 **Session 51 (2026-07-19/20):** **Unify the culvert kernel (mode-1 == mode-2), diagnose
 Towradgi's residual as rain-on-dry, tighten comparison tolerances.** Rebuilt CPU-only

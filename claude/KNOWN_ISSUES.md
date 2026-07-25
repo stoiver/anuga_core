@@ -272,6 +272,14 @@ host state are now pinned to `legacy` (`domain.set_compute_mode('legacy')`):
   `test_sww_interrogate.py::test_get_maximum_inundation_de0`). The two
   regression-snapshot domain helpers are pinned so that whole file stays
   deterministic under any `ANUGA_DEFAULT_COMPUTE_MODE`.
+- (Session 52) `test_negative_cells_warning.py` — its `make_domain()` helper calls
+  `domain.update_conserved_quantities()` **directly, outside `evolve()`** and reads host
+  `centroid_values`; pinned to `legacy`. Under the unified default this had failed with
+  `AttributeError: 'NoneType' object has no attribute 'update_conserved_quantities_kernel'`
+  because `gpu_interface` is only built during `evolve` (commit `641db3bd`). The method
+  itself was also hardened: it now calls `_ensure_gpu_interface()` first, like every other
+  mode-2 entry point, so any direct call builds the interface (or falls back to legacy)
+  rather than crashing on a `None` (commit `c80bc457`).
 
 These are test-harness artifacts, not solver bugs; the pins are no-ops for the
 distribution-default legacy path. Mode-2 numerical fidelity remains covered by the
