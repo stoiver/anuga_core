@@ -18,6 +18,11 @@ import anuga
 def make_domain(threshold=None):
     """Flat 1 m of water over a 0 m bed on a small mesh."""
     domain = anuga.rectangular_cross_domain(4, 4)
+    # White-box tests: they call update_conserved_quantities() directly (outside
+    # evolve, so no gpu_interface is set up) and inspect host centroid_values.
+    # Pin to legacy (mode 1) so the CPU openmp kernel runs regardless of the
+    # ANUGA_DEFAULT_COMPUTE_MODE the suite is exercised under.
+    domain.set_compute_mode('legacy')
     domain.set_quantity('elevation', 0.0)
     domain.set_quantity('stage', 1.0)
     Br = anuga.Reflective_boundary(domain)
