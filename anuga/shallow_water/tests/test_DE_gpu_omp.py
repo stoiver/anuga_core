@@ -2991,5 +2991,139 @@ class Test_GPU_ForcingOperators(unittest.TestCase):
         self.assertGreater(np.max(d1.quantities['stage'].centroid_values), 1.0)
 
 
+@pytest.mark.skipif(not gpu_available(), reason=_gpu_skip_reason())
+class Test_GPU_TimeBoundary(unittest.TestCase):
+    """Multiple Time_boundary objects with different values must not clobber
+    one another in mode 2.
+
+    Regression for the bug where the GPU time-boundary stored a single global
+    (stage, xmom, ymom) applied to every time-boundary edge. With two
+    Time_boundary tags carrying different values — worst on a sloped bed, where
+    the absolute stages at the two ends differ a lot — the last one set won and
+    corrupted the other boundary, diverging catastrophically from legacy
+    (e.g. avalanche_wet). The values are now stored per edge.
+    """
+
+    bed_slope = 0.1
+
+    def _make_domain(self):
+        L = 100.0
+        d = rectangular_cross_domain(12, 6, len1=L, len2=10.0)
+        d.set_flow_algorithm('DE1')
+        d.set_datadir(tempfile.mkdtemp())
+        d.store = False
+        d.set_quantity('friction', 0.0)
+        d.set_quantity('elevation', lambda x, y: self.bed_slope * x)
+        d.set_quantity('stage', lambda x, y: self.bed_slope * x + 5.0)
+        return d, L
+
+    def _run_mode(self, mode):
+        d, L = self._make_domain()
+        # Two Time_boundary objects with DIFFERENT, time-varying values. On the
+        # sloped bed the two absolute stages differ by ~bed_slope*L = 10 m.
+        def f_left(t):
+            return [5.0 + 0.2 * t, 0.0, 0.0]
+        def f_right(t):
+            return [self.bed_slope * L + 5.0 - 0.1 * t, 0.0, 0.0]
+        Bl = anuga.Time_boundary(d, f_left)
+        Brt = anuga.Time_boundary(d, f_right)
+        Bw = Reflective_boundary(d)
+        d.set_boundary({'left': Bl, 'right': Brt, 'top': Bw, 'bottom': Bw})
+        d.set_multiprocessor_mode(mode)
+        d.set_quantities_to_be_stored(None)
+        gauge = d.get_triangle_containing_point([L / 2.0, 5.0])
+        stage = d.get_quantity('stage')
+        xmom = d.get_quantity('xmomentum')
+        out = []
+        for _ in d.evolve(yieldstep=1.0, finaltime=5.0):
+            out.append((float(stage.centroid_values[gauge]),
+                        float(xmom.centroid_values[gauge])))
+        return out
+
+    def test_two_time_boundaries_mode1_vs_mode2(self):
+        """Two differing Time_boundaries on a slope: mode 1 == mode 2."""
+        g1 = self._run_mode(1)
+        g2 = self._run_mode(2)
+        self.assertEqual(len(g1), len(g2))
+        for (s1, x1), (s2, x2) in zip(g1, g2):
+            self.assertAlmostEqual(s1, s2, places=8,
+                msg=f"stage mode1={s1} vs mode2={s2}")
+            self.assertAlmostEqual(x1, x2, places=8,
+                msg=f"xmom mode1={x1} vs mode2={x2}")
+
+
+@pytest.mark.skipif(not gpu_available(), reason=_gpu_skip_reason())
+class Test_GPU_InletWithCpuOnlyOperator(unittest.TestCase):
+    """A GPU-accelerated Inlet_operator's inflow must survive when a CPU-only
+    fractional operator is also present.
+
+    Regression: GPU-path fractional operators (Inlet_operator, Rate_operator)
+    apply their update to the *device* arrays. When a CPU-only fractional
+    operator (e.g. an Internal_boundary bridge) is also present,
+    apply_fractional_steps() brackets the operator loop with
+    sync_from_device()/sync_to_device(); the trailing host->device sync then
+    overwrote the GPU operator's device write with host data that never received
+    it, silently dropping the inflow. bridge_hecras2 drained to the bed under
+    mode 2 because of this. The GPU operators now fall back to the host path
+    while _gpu_host_writes_suppressed is set, so the batch sync carries them.
+    """
+
+    INFLOW_Q = 5.0        # m^3/s
+    FINALTIME = 5.0
+
+    def _make_domain(self):
+        d = rectangular_cross_domain(10, 10, len1=100., len2=100.)
+        d.set_flow_algorithm('DE1')
+        d.set_datadir(tempfile.mkdtemp())
+        d.store = False
+        d.set_quantity('elevation', 0.0)
+        d.set_quantity('friction', 0.0)
+        d.set_quantity('stage', 1.0)          # 1 m over a 100x100 m closed box
+        Br = Reflective_boundary(d)
+        d.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+        return d
+
+    def _total_volume(self, d):
+        h = np.maximum(d.quantities['stage'].centroid_values
+                       - d.quantities['elevation'].centroid_values, 0.0)
+        return float((h * d.areas).sum())
+
+    def _run(self, mode):
+        from anuga.operators.base_operator import Operator
+
+        class _NoopCpuOperator(Operator):
+            # A plain Operator subclass is classified CPU-only, which forces
+            # apply_fractional_steps() into its sync_from/to_device bracket.
+            def __call__(self):
+                pass
+
+            def parallel_safe(self):
+                return True
+
+        d = self._make_domain()
+        Inlet_operator(d, [[20.0, 50.0], [80.0, 50.0]], self.INFLOW_Q)
+        _NoopCpuOperator(d)
+        d.set_multiprocessor_mode(mode)
+        d.set_quantities_to_be_stored(None)
+        for _ in d.evolve(yieldstep=1.0, finaltime=self.FINALTIME):
+            pass
+        return self._total_volume(d)
+
+    def test_inlet_inflow_survives_cpu_only_operator(self):
+        """Closed-box inflow volume matches between mode 1 and mode 2."""
+        v_m1 = self._run(1)
+        v_m2 = self._run(2)
+        self.assertAlmostEqual(v_m1, v_m2, places=4,
+            msg=f"mode1 vol={v_m1} vs mode2 vol={v_m2} (inflow lost under mode 2?)")
+
+    def test_inflow_actually_applied_mode2(self):
+        """Sanity: the inflow really raises the volume under mode 2 (not ~0)."""
+        v0 = 1.0 * 100.0 * 100.0                 # initial depth 1 over 1e4 area
+        expected = self.INFLOW_Q * self.FINALTIME  # closed box: all inflow retained
+        v_m2 = self._run(2)
+        self.assertGreater(v_m2 - v0, 0.8 * expected,
+            msg=f"expected ~{expected} m^3 of inflow, got {v_m2 - v0}")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

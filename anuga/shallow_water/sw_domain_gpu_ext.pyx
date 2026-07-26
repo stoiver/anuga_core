@@ -232,7 +232,7 @@ cdef extern from "gpu_domain.h" nogil:
     int gpu_time_boundary_init(gpu_domain *GD, int num_edges,
                                int *boundary_indices, int *vol_ids, int *edge_ids)
     void gpu_time_boundary_finalize(gpu_domain *GD)
-    void gpu_time_boundary_set_values(gpu_domain *GD, double stage, double xmom, double ymom)
+    void gpu_time_boundary_set_values(gpu_domain *GD, double *stage, double *xmom, double *ymom)
     void gpu_evaluate_time_boundary(gpu_domain *GD)
 
     # Absorbing_wave_boundary
@@ -1644,14 +1644,21 @@ def init_time_boundary(GPUDomain gpu_dom, object domain_object):
                            &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0])
 
 
-def set_time_boundary_values(GPUDomain gpu_dom, double stage, double xmom, double ymom):
+def set_time_boundary_values(GPUDomain gpu_dom,
+                             np.ndarray[double, ndim=1, mode="c"] stage,
+                             np.ndarray[double, ndim=1, mode="c"] xmom,
+                             np.ndarray[double, ndim=1, mode="c"] ymom):
     """
-    Update the values for Time_boundary.
+    Update the per-edge values for Time_boundary.
 
-    Call this each timestep before evaluate_time_boundary_gpu.
-    The values come from calling the Python time-dependent function.
+    Call this each timestep before evaluate_time_boundary_gpu. The arrays hold
+    one value per time-boundary edge, concatenated across all Time_boundary tags
+    in boundary_map order (matching init_time_boundary), so multiple Time_boundary
+    objects with different values do not clobber one another.
     """
-    gpu_time_boundary_set_values(&gpu_dom.GD, stage, xmom, ymom)
+    if len(stage) == 0:
+        return
+    gpu_time_boundary_set_values(&gpu_dom.GD, &stage[0], &xmom[0], &ymom[0])
 
 
 def evaluate_time_boundary_gpu(GPUDomain gpu_dom):

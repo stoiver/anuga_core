@@ -2584,9 +2584,7 @@ class Domain(Generic_Domain):
                 evaluate_transmissive_n_zero_t_boundary_gpu(gpu_dom)
 
                 # Handle Time_boundary (need Python function call for values)
-                for B in self._gpu_time_boundaries:
-                    q = B.get_boundary_values()
-                    set_time_boundary_values(gpu_dom, float(q[0]), float(q[1]), float(q[2]))
+                self._push_gpu_time_boundary_values(gpu_dom)
                 evaluate_time_boundary_gpu(gpu_dom)
 
                 # Handle File_boundary / Field_boundary (per-edge values from SWW interpolation)
@@ -3349,6 +3347,38 @@ class Domain(Generic_Domain):
         )
 
 
+
+    def _push_gpu_time_boundary_values(self, gpu_dom):
+        """Push per-edge Time_boundary values to the device (mode 2).
+
+        Each Time_boundary object carries one spatially-uniform [stage, xmom,
+        ymom] from its time function. The edges of all Time_boundary tags are
+        concatenated in boundary_map order (matching init_time_boundary in the
+        GPU extension), so a single per-edge array addresses every time-boundary
+        edge and multiple Time_boundary objects with different values no longer
+        clobber one another (previously a single global scalar was shared).
+        """
+        import numpy as num
+        from anuga.shallow_water.sw_domain_gpu_ext import set_time_boundary_values
+        stage_vals = []
+        xmom_vals = []
+        ymom_vals = []
+        for tag, B in self.boundary_map.items():
+            if B is not None and B.__class__.__name__ == 'Time_boundary':
+                edges = self.tag_boundary_cells.get(tag, None)
+                if edges is None or len(edges) == 0:
+                    continue
+                ne = len(edges)
+                q = B.get_boundary_values()
+                stage_vals.extend([float(q[0])] * ne)
+                xmom_vals.extend([float(q[1])] * ne)
+                ymom_vals.extend([float(q[2])] * ne)
+        if stage_vals:
+            set_time_boundary_values(
+                gpu_dom,
+                num.ascontiguousarray(stage_vals, dtype=float),
+                num.ascontiguousarray(xmom_vals, dtype=float),
+                num.ascontiguousarray(ymom_vals, dtype=float))
     def evolve_one_euler_step(self, yieldstep, finaltime):
         """One Euler Time Step
         Q^{n+1} = E(h) Q^n
@@ -3644,9 +3674,7 @@ class Domain(Generic_Domain):
                         stage_val = float(stage_val[0])
                     set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
                 evaluate_transmissive_n_zero_t_boundary_gpu(gpu_dom)
-                for B in self._gpu_time_boundaries:
-                    q = B.get_boundary_values()
-                    set_time_boundary_values(gpu_dom, float(q[0]), float(q[1]), float(q[2]))
+                self._push_gpu_time_boundary_values(gpu_dom)
                 evaluate_time_boundary_gpu(gpu_dom)
                 set_file_boundary_values_from_domain(gpu_dom, self)
                 evaluate_file_boundary_gpu(gpu_dom)
@@ -3784,9 +3812,7 @@ class Domain(Generic_Domain):
                 stage_val = float(stage_val[0])
             set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
 
-        for B in self._gpu_time_boundaries:
-            q = B.get_boundary_values()
-            set_time_boundary_values(gpu_dom, float(q[0]), float(q[1]), float(q[2]))
+        self._push_gpu_time_boundary_values(gpu_dom)
 
         set_file_boundary_values_from_domain(gpu_dom, self)
 
@@ -3935,9 +3961,7 @@ class Domain(Generic_Domain):
                     stage_val = float(stage_val[0])
                 set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
             evaluate_transmissive_n_zero_t_boundary_gpu(gpu_dom)
-            for B in self._gpu_time_boundaries:
-                q = B.get_boundary_values()
-                set_time_boundary_values(gpu_dom, float(q[0]), float(q[1]), float(q[2]))
+            self._push_gpu_time_boundary_values(gpu_dom)
             evaluate_time_boundary_gpu(gpu_dom)
             set_file_boundary_values_from_domain(gpu_dom, self)
             evaluate_file_boundary_gpu(gpu_dom)
@@ -4013,9 +4037,7 @@ class Domain(Generic_Domain):
                     stage_val = float(stage_val[0])
                 set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
             evaluate_transmissive_n_zero_t_boundary_gpu(gpu_dom)
-            for B in self._gpu_time_boundaries:
-                q = B.get_boundary_values()
-                set_time_boundary_values(gpu_dom, float(q[0]), float(q[1]), float(q[2]))
+            self._push_gpu_time_boundary_values(gpu_dom)
             evaluate_time_boundary_gpu(gpu_dom)
             set_file_boundary_values_from_domain(gpu_dom, self)
             evaluate_file_boundary_gpu(gpu_dom)
@@ -4159,9 +4181,7 @@ class Domain(Generic_Domain):
                     stage_val = float(stage_val[0])
                 set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
             evaluate_transmissive_n_zero_t_boundary_gpu(gpu_dom)
-            for B in self._gpu_time_boundaries:
-                q = B.get_boundary_values()
-                set_time_boundary_values(gpu_dom, float(q[0]), float(q[1]), float(q[2]))
+            self._push_gpu_time_boundary_values(gpu_dom)
             evaluate_time_boundary_gpu(gpu_dom)
             set_file_boundary_values_from_domain(gpu_dom, self)
             evaluate_file_boundary_gpu(gpu_dom)
@@ -4294,9 +4314,7 @@ class Domain(Generic_Domain):
                 stage_val = float(stage_val[0])
             set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
 
-        for B in self._gpu_time_boundaries:
-            q = B.get_boundary_values()
-            set_time_boundary_values(gpu_dom, float(q[0]), float(q[1]), float(q[2]))
+        self._push_gpu_time_boundary_values(gpu_dom)
 
         set_file_boundary_values_from_domain(gpu_dom, self)
 
@@ -4427,9 +4445,7 @@ class Domain(Generic_Domain):
                 stage_val = float(stage_val[0])
             set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
 
-        for B in self._gpu_time_boundaries:
-            q = B.get_boundary_values()
-            set_time_boundary_values(gpu_dom, float(q[0]), float(q[1]), float(q[2]))
+        self._push_gpu_time_boundary_values(gpu_dom)
 
         set_file_boundary_values_from_domain(gpu_dom, self)
 
@@ -4570,9 +4586,7 @@ class Domain(Generic_Domain):
                         stage_val = float(stage_val[0])
                     set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
                 evaluate_transmissive_n_zero_t_boundary_gpu(gpu_dom)
-                for B in self._gpu_time_boundaries:
-                    q = B.get_boundary_values()
-                    set_time_boundary_values(gpu_dom, float(q[0]), float(q[1]), float(q[2]))
+                self._push_gpu_time_boundary_values(gpu_dom)
                 evaluate_time_boundary_gpu(gpu_dom)
                 set_file_boundary_values_from_domain(gpu_dom, self)
                 evaluate_file_boundary_gpu(gpu_dom)
@@ -4762,9 +4776,7 @@ class Domain(Generic_Domain):
                 stage_val = float(stage_val[0])
             set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
 
-        for B in self._gpu_time_boundaries:
-            q = B.get_boundary_values()
-            set_time_boundary_values(gpu_dom, float(q[0]), float(q[1]), float(q[2]))
+        self._push_gpu_time_boundary_values(gpu_dom)
 
         set_file_boundary_values_from_domain(gpu_dom, self)
 
