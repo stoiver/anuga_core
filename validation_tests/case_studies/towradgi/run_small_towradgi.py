@@ -67,6 +67,7 @@ if myid == 0 and not os.path.isdir('DEM_bridges'):
 args = anuga.get_args()
 alg = args.alg
 verbose = args.verbose
+debug = args.debug   # -d/--debug: in-depth mesh generation reporting
 
 # --------------------------------------------------------------------------
 # Setup parameters  (CLI flags override these defaults)
@@ -396,7 +397,7 @@ Creating domain from scratch.
                                  interior_regions=interior_regions,
                                  breaklines=riverWalls.values(),
                                  use_cache=False,
-                                 verbose=False)
+                                 verbose=debug)
 
         domain = Domain(mesh)
     
@@ -1010,7 +1011,7 @@ for t in domain.evolve(yieldstep=yieldstep, outputstep=outputstep, finaltime=fin
 
     #domain.print_timestepping_statistics()
     #domain.report_water_volume_statistics()
-    if myid == 0:
+    if myid == 0 and verbose:
         domain.write_time()
 
     #domain.print_operator_timestepping_statistics()

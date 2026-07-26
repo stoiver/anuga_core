@@ -230,7 +230,7 @@ save_parameters_tex(domain)
 #------------------------------------------------------------------------------
 for t in domain.evolve(yieldstep=10.0, 
                        finaltime=dtQdata * (len(Qdata) - 2)):
-    if(myid==0 & verbose):
+    if(myid==0 and verbose):
         print(domain.timestepping_statistics())
 
 domain.sww_merge(delete_old=True)

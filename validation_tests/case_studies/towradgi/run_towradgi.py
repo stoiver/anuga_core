@@ -61,12 +61,12 @@ if myid == 0 and not os.path.isdir('DEM_bridges'):
 args = anuga.get_args()
 alg = args.alg
 verbose = args.verbose
+debug = args.debug   # -d/--debug: in-depth mesh generation reporting
 
 # --------------------------------------------------------------------------
 # Setup parameters
 # --------------------------------------------------------------------------
 
-verbose = False
 # yieldstep=60      # yield evolve loop every 50 seconds
 # outputstep=15*60. # update sww files every 15 minute
 # finaltime=24*3600. # run for 24 hours 
@@ -359,13 +359,13 @@ Creating domain from scratch.
                                  breaklines=riverWalls.values(),
                                  filename=meshname,
                                  use_cache=False,
-                                 verbose=False)
+                                 verbose=debug)
     
         # ------------------------------------------------------------------------------
         # SETUP COMPUTATIONAL DOMAIN
         # ------------------------------------------------------------------------------
     
-        domain = Domain(meshname, use_cache=False, verbose=False)
+        domain = Domain(meshname, use_cache=False, verbose=debug)
     
         domain.set_flow_algorithm(alg)
     
@@ -937,7 +937,7 @@ t0 = time.time()
 
 
 for t in domain.evolve(yieldstep=yieldstep, outputstep=outputstep, finaltime=finaltime):
-    if myid == 0:
+    if myid == 0 and verbose:
         domain.write_time()
 
 barrier()

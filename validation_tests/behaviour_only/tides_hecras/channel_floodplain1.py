@@ -176,7 +176,7 @@ if myid == 0:
 barrier()
 
 for t in domain.evolve(yieldstep=10.0, finaltime=9.*60.*60.):
-    if(myid==0):
+    if(myid==0 and verbose):
         print(domain.timestepping_statistics())
 
 barrier()
