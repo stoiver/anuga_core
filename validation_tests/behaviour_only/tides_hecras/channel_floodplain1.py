@@ -16,6 +16,7 @@ from anuga import distribute, myid, numprocs, finalize, barrier
 args = anuga.get_args()
 alg = args.alg
 verbose = args.verbose
+debug = args.debug
 
 #------------------------------------------------------------------------------
 # Useful parameters for controlling this case
@@ -81,7 +82,7 @@ if(myid==0):
                                        interior_regions = [ ],
                                        breaklines=meshBreakLines.values(),
                                        regionPtArea=regionPtAreas,
-                                       verbose=True)
+                                       verbose=debug)
     #
     domain=anuga.create_domain_from_file('channel_floodplain1.msh')
     outname='channel_floodplain1'#+str(smoothing_timescale)
@@ -178,6 +179,9 @@ barrier()
 for t in domain.evolve(yieldstep=10.0, finaltime=9.*60.*60.):
     if(myid==0 and verbose):
         print(domain.timestepping_statistics())
+
+    if verbose:
+        vol = domain.report_water_volume_statistics()
 
 barrier()
 
