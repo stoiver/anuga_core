@@ -75,6 +75,10 @@ def create_standard_parser():
     parser.add_argument('-d', '--debug', nargs='?', type=bool, const=True, default=False,
                    help='turn on debug-level reporting (e.g. mesh generation internals)')
 
+    parser.add_argument('-l', '--long', nargs='?', type=bool, const=True, default=False,
+                   help='include long-running validation tests (the HEC-RAS bridge/weir '
+                        'behaviour cases) that run_auto_validation_tests.py skips by default')
+
     parser.add_argument('-cp', '--checkpointing', nargs='?', type=bool, const=True, default=False,
                    help='turn on checkpointing')
 
