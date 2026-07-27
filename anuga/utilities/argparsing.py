@@ -90,9 +90,11 @@ def create_standard_parser():
     parser.add_argument('--checkpoint_time', type=float, default=-1.0,
                        help='checkpoint time')
 
-    parser.add_argument('-mpm', '--multiprocessor_mode', type=int, default=1,
+    parser.add_argument('-mpm', '--multiprocessor_mode', type=int, default=argparse.SUPPRESS,
                        choices=[1, 2],
-                       help='multiprocessor mode: 1=legacy CPU OpenMP, 2=unified gpu_ext kernels')
+                       help='multiprocessor mode: 1=legacy CPU OpenMP, 2=unified gpu_ext '
+                            'kernels. If unset, the domain keeps its default compute mode '
+                            '(ANUGA_DEFAULT_COMPUTE_MODE, else legacy)')
 
     parser.add_argument('-nt', '--omp_num_threads', type=int, default=argparse.SUPPRESS,
                        help='number of OpenMP threads (process-wide). '
