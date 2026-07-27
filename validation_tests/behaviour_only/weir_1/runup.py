@@ -59,7 +59,7 @@ if myid == 0:
     #==================================================================
     # Create Sequential Domain
     #==================================================================
-    anuga.create_mesh_from_regions(boundaryPolygon, 
+    anuga.create_pmesh_from_regions(boundaryPolygon, 
                              boundary_tags={'left': [0],
                                             'top': [1],
                                             'right': [2],
@@ -108,7 +108,7 @@ else:
 #======================================================================    
 domain = distribute(domain)
 
-domain.riverwallData.create_riverwalls(riverWall)
+domain.riverwallData.create_riverwalls(riverWall, verbose=verbose)
 
 #--------------------------
 # Setup boundary conditions

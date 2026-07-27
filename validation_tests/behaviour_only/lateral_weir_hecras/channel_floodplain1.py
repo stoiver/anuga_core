@@ -78,7 +78,7 @@ regionPtAreas=[ [0.01, 0.01, 0.5*l0*l0],
 
 if(myid==0):
     # Define domain with appropriate boundary conditions
-    anuga.create_mesh_from_regions( boundary_polygon, 
+    anuga.create_pmesh_from_regions( boundary_polygon, 
                                        boundary_tags={'left': [0],
                                                       'top1': [1],
                                                       'chan_out': [2],
