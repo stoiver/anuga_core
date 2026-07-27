@@ -4,9 +4,15 @@ __date__ ="$20/08/2012 11:20:00 PM$"
 
 
 
-def run_script(script, args=None, np=1, alg=None, verbose=False, debug=False, allow_parallel=True):
-    #from anuga.validation_utilities.fabricate import run
+def run_script(script, args=None, np=1, alg=None, verbose=False, debug=False,
+               cfl=None, allow_parallel=True):
+    """Run a validation script in a child process.
 
+    ``cfl`` is accepted only for backwards compatibility (run_validation_script
+    forwards it). It is deliberately NOT passed on to the child: the standard
+    parser no longer exposes -cfl, so a child script would reject it.
+    """
+    import subprocess
 
     if args is None:
         if alg is None:
@@ -17,39 +23,23 @@ def run_script(script, args=None, np=1, alg=None, verbose=False, debug=False, al
         verbose = args.verbose
         debug = getattr(args, 'debug', False)
 
-
-    #print args
-    args_dict = vars(args)
-    #print args_dict
-    #print zip(args_dict.keys(), args_dict.values())
-
-
-    # Forward the standard flags to the child process
-    flags = ''
+    # Build the child command as an argument list (no shell); forward the
+    # standard flags. -cfl is not a valid child argument, so cfl is not passed.
+    cmd = ['python', script, '-alg', str(alg)]
+    if np > 1 and allow_parallel:
+        cmd = ['mpiexec', '-np', str(np)] + cmd
     if verbose:
-        flags += ' -v'
+        cmd.append('-v')
     if debug:
-        flags += ' -d'
+        cmd.append('-d')
 
+    if verbose:
+        print(50*'=')
+        print('Run ' + ' '.join(cmd))
+        print(50*'=')
 
-    import subprocess
-    import os
     try:
-        if np>1 and allow_parallel:
-            cmd = 'mpiexec -np %s python %s -alg %s%s' % (str(np), script, str(alg), flags)
-        else:
-            cmd = 'python %s -alg %s%s' % (script, str(alg), flags)
-
-        if verbose:
-            print(50*'=')
-            print('Run '+cmd)
-            print(50*'=')
-
-        #os.system(cmd)
-        res = subprocess.call([cmd], shell=True)
-
-        return res
-
+        return subprocess.call(cmd)
     except Exception:
         return 1
 
