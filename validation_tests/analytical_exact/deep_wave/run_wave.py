@@ -121,7 +121,7 @@ if myid == 0:
 #------------------------------------------------------------------------------
 
 for t in domain.evolve(yieldstep = 10, finaltime = 2e4):
-    domain.write_time()
+    if myid == 0 and verbose: domain.write_time()
 
 domain.sww_merge(delete_old=True)
 

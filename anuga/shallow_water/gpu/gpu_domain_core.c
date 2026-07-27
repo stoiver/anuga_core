@@ -330,9 +330,9 @@ int gpu_domain_init(struct gpu_domain *GD, MPI_Comm comm, int rank, int nprocs) 
     GD->time_bdry.boundary_indices = NULL;
     GD->time_bdry.vol_ids = NULL;
     GD->time_bdry.edge_ids = NULL;
-    GD->time_bdry.stage_value = 0.0;
-    GD->time_bdry.xmom_value = 0.0;
-    GD->time_bdry.ymom_value = 0.0;
+    GD->time_bdry.stage_values = NULL;
+    GD->time_bdry.xmom_values = NULL;
+    GD->time_bdry.ymom_values = NULL;
     GD->time_bdry.mapped = 0;
 
     // Initialize file_boundary to empty
@@ -635,8 +635,12 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
         int *b_idx = TB->boundary_indices;
         int *v_ids = TB->vol_ids;
         int *e_ids = TB->edge_ids;
+        double *s_val = TB->stage_values;
+        double *x_val = TB->xmom_values;
+        double *y_val = TB->ymom_values;
 
-        #pragma omp target enter data map(to: b_idx[0:ne], v_ids[0:ne], e_ids[0:ne])
+        #pragma omp target enter data map(to: b_idx[0:ne], v_ids[0:ne], e_ids[0:ne], \
+                                              s_val[0:ne], x_val[0:ne], y_val[0:ne])
         TB->mapped = 1;
 
         if (GD->rank == 0 && GD->verbose) {
@@ -867,8 +871,12 @@ void gpu_remap_boundary_arrays(struct gpu_domain *GD) {
         int *b_idx = TB->boundary_indices;
         int *v_ids = TB->vol_ids;
         int *e_ids = TB->edge_ids;
+        double *s_val = TB->stage_values;
+        double *x_val = TB->xmom_values;
+        double *y_val = TB->ymom_values;
 
-        #pragma omp target enter data map(to: b_idx[0:ne], v_ids[0:ne], e_ids[0:ne])
+        #pragma omp target enter data map(to: b_idx[0:ne], v_ids[0:ne], e_ids[0:ne], \
+                                              s_val[0:ne], x_val[0:ne], y_val[0:ne])
         TB->mapped = 1;
 
         if (GD->rank == 0 && GD->verbose) {
@@ -1057,7 +1065,11 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
         int *b_idx = TB->boundary_indices;
         int *v_ids = TB->vol_ids;
         int *e_ids = TB->edge_ids;
-        #pragma omp target exit data map(delete: b_idx[0:ne], v_ids[0:ne], e_ids[0:ne])
+        double *s_val = TB->stage_values;
+        double *x_val = TB->xmom_values;
+        double *y_val = TB->ymom_values;
+        #pragma omp target exit data map(delete: b_idx[0:ne], v_ids[0:ne], e_ids[0:ne], \
+                                                 s_val[0:ne], x_val[0:ne], y_val[0:ne])
         TB->mapped = 0;
     }
 

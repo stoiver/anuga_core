@@ -105,9 +105,9 @@ struct time_boundary {
     int *boundary_indices;       // Where to write in boundary_values arrays [num_edges]
     int *vol_ids;                // Interior cell IDs [num_edges]
     int *edge_ids;               // Which edge (0, 1, or 2) [num_edges]
-    double stage_value;          // Current stage value (updated each timestep from Python)
-    double xmom_value;           // Current xmom value (updated each timestep from Python)
-    double ymom_value;           // Current ymom value (updated each timestep from Python)
+    double *stage_values;        // Per-edge stage (updated each timestep from Python) [num_edges]
+    double *xmom_values;         // Per-edge xmom  [num_edges]
+    double *ymom_values;         // Per-edge ymom  [num_edges]
     int mapped;                  // Whether arrays are mapped to GPU
 };
 
@@ -581,7 +581,7 @@ void gpu_evaluate_flather_boundary(struct gpu_domain *GD);
 int gpu_time_boundary_init(struct gpu_domain *GD, int num_edges,
                            int *boundary_indices, int *vol_ids, int *edge_ids);
 void gpu_time_boundary_finalize(struct gpu_domain *GD);
-void gpu_time_boundary_set_values(struct gpu_domain *GD, double stage, double xmom, double ymom);
+void gpu_time_boundary_set_values(struct gpu_domain *GD, double *stage, double *xmom, double *ymom);
 void gpu_evaluate_time_boundary(struct gpu_domain *GD);
 
 // Rate operators - rain, extraction, etc.

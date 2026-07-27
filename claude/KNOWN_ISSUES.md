@@ -432,6 +432,74 @@ correct if the active step path falls back to host evaluation. All four DE
 algorithms now do. If you add a new evolve path, replicate the
 `if not self._gpu_all_on_gpu: return self._evolve_one_*_step_gpu(...)` fallback.
 
+### RESOLVED (2026-07-26): mode-2 shared one global `Time_boundary` value across all time-boundary edges
+
+**Symptom (now fixed):** `validation_tests/analytical_exact/avalanche_wet`
+diverged catastrophically under `ANUGA_DEFAULT_COMPUTE_MODE=unified` (xvelocity
+L¹ error 0.93 vs legacy 0.006; momentum ran to ~230 vs ~62). `avalanche_dry`,
+with the *same* physics, passed — the tell was that dry uses a **single**
+`Time_boundary` (the other end is Transmissive) while wet uses **two** (left and
+right), and on the sloped bed their absolute stages differ by ~10 m.
+
+**Root cause.** The GPU time boundary stored a **single global** `(stage, xmom,
+ymom)` (`struct time_boundary` in `gpu/gpu_domain.h`) applied to *every*
+time-boundary edge. `init_time_boundary` (`sw_domain_gpu_ext.pyx`) lumps the
+edges of all `Time_boundary` tags into one list, and the evolve loop did
+`for B in self._gpu_time_boundaries: set_time_boundary_values(gpu_dom, q0, q1,
+q2)` — each call **overwrote** the global, so the last boundary won and
+`gpu_evaluate_time_boundary` wrote that one value to all edges. With two
+differing boundaries the other one was corrupted. Ablation confirmed it:
+`Reflective + slope` was bit-identical (1e-13), only `Time_boundary + slope`
+diverged.
+
+**Fix.** Per-edge value arrays, mirroring `file_boundary`: `time_boundary` now
+holds `stage_values/xmom_values/ymom_values[num_edges]` (mapped to device, pushed
+each step via `omp target update`). New helper
+`Domain._push_gpu_time_boundary_values()` builds the per-edge array by evaluating
+**each** `Time_boundary` over its own edges in `boundary_map` order (matching
+`init_time_boundary`), replacing the 10 clobbering loops. After the fix,
+avalanche_wet mode-1 vs mode-2 is bit-identical. Files: `gpu/gpu_domain.h`,
+`gpu/gpu_boundaries.c`, `gpu/gpu_domain_core.c`, `sw_domain_gpu_ext.pyx`,
+`shallow_water_domain.py`. **Requires a C/Cython rebuild.** Regression:
+`test_DE_gpu_omp.py::Test_GPU_TimeBoundary` (two differing Time_boundaries on a
+slope, mode 1 == mode 2). **General lesson:** any GPU boundary/operator that
+holds a per-edge quantity must store it per-edge, not as one scalar shared across
+tags — the existing single-substep `Test_GPU_TimeBoundarySubstep` used a single
+boundary and so missed this.
+
+### RESOLVED (2026-07-26): mode-2 GPU fractional operators clobbered by the CPU-sync bracket
+
+**Symptom (now fixed):** `validation_tests/behaviour_only/bridge_hecras2` drained
+to the bed under `unified` (peak_max_stage −0.0067 vs baseline 1.19; HEC-RAS
+correlation −0.39 vs 0.997), while `bridge_hecras` passed. Ablation localized it:
+removing the bridge made the modes match, and the largest stage divergence was at
+the **inflow** (y≈11), not the bridge (y≈480–520) or the outflow.
+
+**Root cause.** GPU-accelerated fractional operators (`Inlet_operator` /
+`Parallel_Inlet_operator`, `Rate_operator`) apply their update straight to the
+**device** arrays in mode 2. When a **CPU-only** fractional operator is also
+present (here the `Internal_boundary_operator` bridge),
+`apply_fractional_steps()` brackets the operator loop with
+`sync_from_device()` … `sync_to_device()`. The trailing host→device sync then
+**overwrote the GPU operator's device write** with host data that never received
+it — silently dropping the inflow (~600 m³/step here). On a CPU-only build
+(host == device) the sync is a no-op so this stays hidden; it bites only on a
+real GPU-offload build (device ≠ host).
+
+**Fix.** In `__call__`, skip the device fast-path while
+`domain._gpu_host_writes_suppressed` is set (that flag marks the sync-bracketed
+region), falling through to the host path so the batch `sync_to_device()` carries
+the change. `bridge_hecras2` uses the *parallel* factory, so the guard is needed
+in `Parallel_Inlet_operator.__call__` (`anuga/parallel/parallel_inlet_operator.py`)
+as well as the base `Inlet_operator` (`anuga/structures/inlet_operator.py`) and
+`Rate_operator` (`anuga/operators/rate_operators.py`). Python-only, no rebuild.
+Regression: `test_DE_gpu_omp.py::Test_GPU_InletWithCpuOnlyOperator` (inlet +
+a no-op CPU-only operator, mode 1 == mode 2, inflow retained). **General
+lesson:** a GPU-path operator that writes conserved quantities on-device must
+route through the host path whenever `_gpu_host_writes_suppressed` is set, or the
+batch host→device sync will discard its work. `collect_max` is exempt — it writes
+only the separate `max_*` arrays, not synced conserved quantities.
+
 ---
 
 ## SWW GUI / animate.py
