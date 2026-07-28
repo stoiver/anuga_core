@@ -162,6 +162,12 @@ if openmp.found()
   # The new mode 2 code (sw_domain_gpu_ext) has its own flags in shallow_water/meson.build
   #
   # Uses effective_compiler_id to handle Cray wrappers correctly
+  #
+  # Do NOT use -march=native here: it bakes the build host's ISA into the
+  # compiled extensions, so a wheel built on e.g. a Sapphire Rapids CI runner
+  # gets AVX-512 and dies with an illegal instruction at `import anuga` on any
+  # CPU without it (this broke the 3.3.8 PyPI wheels, e.g. on Colab). Leave the
+  # toolchain's portable default in place (conda-forge sets -march=nocona).
 
   if effective_compiler_id in ['intel', 'intel-cl']
     openmp_c_args = ['-O3', '-qopenmp', '-g']
