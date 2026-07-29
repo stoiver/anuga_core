@@ -379,13 +379,32 @@ def set_gpu_offload(enable: bool = True, verbose: bool = True) -> bool:
     return state
 
 
+# Process-wide OpenMP thread count for ANUGA kernels. This is the single source
+# of truth read back by ``Domain.omp_num_threads`` (a property), so that setting
+# it once via ``anuga.set_omp_num_threads(n)`` is reflected by every domain in
+# the session — including ones already constructed (important in notebooks).
+# Initialised from OMP_NUM_THREADS so introspection is sane before the first
+# call / domain construction.
+try:
+    _omp_num_threads = int(os.environ.get('OMP_NUM_THREADS', 1))
+except (ValueError, TypeError):
+    _omp_num_threads = 1
+
+
+def get_omp_num_threads() -> int:
+    """Return the current process-wide OpenMP thread count for ANUGA kernels."""
+    return _omp_num_threads
+
+
 def set_omp_num_threads(omp_num_threads: int | None = None, verbose: bool = True) -> int:
     """Set the OpenMP thread count for ANUGA kernels (process-wide).
 
     ``OMP_NUM_THREADS`` / ``omp_set_num_threads`` controls the whole process, so
     this is a module-level setting, not per-domain — it affects every domain's
     OpenMP regions (both the legacy ``sw_domain_openmp_ext`` solver and the
-    unified ``gpu_ext`` kernels). ``Domain.set_omp_num_threads`` delegates here.
+    unified ``gpu_ext`` kernels), and is reflected by the ``omp_num_threads``
+    property of every existing domain. ``Domain.set_omp_num_threads`` delegates
+    here.
 
     Parameters
     ----------
@@ -421,6 +440,10 @@ def set_omp_num_threads(omp_num_threads: int | None = None, verbose: bool = True
     # Keep the env var consistent so banners / introspection / any subprocess
     # report the same count (the runtime ICV is already set above).
     os.environ['OMP_NUM_THREADS'] = str(omp_num_threads)
+    # Record the process-wide count so every domain's omp_num_threads property
+    # reflects this call (including domains constructed before it).
+    global _omp_num_threads
+    _omp_num_threads = omp_num_threads
 
     if verbose:
         print(f'Setting omp_num_threads to {omp_num_threads}')
@@ -5950,15 +5973,31 @@ class Domain(Generic_Domain):
         """
         return self.multiprocessor_mode
 
+    @property
+    def omp_num_threads(self) -> int:
+        """The process-wide OpenMP thread count (read-only view).
+
+        OpenMP thread count is a process-level setting, not per-domain, so this
+        reflects the live value set by :func:`anuga.set_omp_num_threads` for
+        *every* domain in the session — including domains constructed before the
+        call. Assigning to it (``domain.omp_num_threads = n``) is kept for
+        backward compatibility and sets the count process-wide.
+        """
+        return get_omp_num_threads()
+
+    @omp_num_threads.setter
+    def omp_num_threads(self, value: int) -> None:
+        set_omp_num_threads(value, verbose=False)
+
     def set_omp_num_threads(self, omp_num_threads: int | None = None, verbose: bool = True) -> None:
         """Set the OpenMP thread count (process-wide).
 
         OpenMP thread count is a process-level setting, not per-domain. This is a
         thin wrapper that delegates to the module-level
         :func:`anuga.set_omp_num_threads`; prefer that in new code. Kept for
-        backward compatibility, and records ``self.omp_num_threads``.
+        backward compatibility.
         """
-        self.omp_num_threads = set_omp_num_threads(omp_num_threads, verbose=verbose)
+        set_omp_num_threads(omp_num_threads, verbose=verbose)
 
 
     @property

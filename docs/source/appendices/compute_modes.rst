@@ -67,6 +67,96 @@ degrade gracefully to the CPU path — ``set_gpu_offload(True)`` warns and retur
 :ref:`use_gpu_offloading` for hardware/compiler requirements and build steps).
 
 
+When is parallelism worth it? (mesh-size guidance)
+--------------------------------------------------
+
+Neither OpenMP threads nor GPU offload speed up a *small* mesh. The shallow
+water solver is memory-bandwidth-bound, and each timestep is a sequence of short
+parallel regions. On a small domain the fixed per-region costs — OpenMP
+fork/join, and for the GPU the kernel-launch latency — dominate the actual
+arithmetic, so extra threads give little and the GPU can be *slower than a single
+CPU core*. Parallelism only pays off once the mesh is large enough to amortise
+that overhead.
+
+The numbers below are illustrative measurements on **one machine** (32-core CPU
+vs an RTX 5070 Laptop GPU, single rank, ``unified`` mode, steady-state timing
+with one-time setup excluded). **Treat the crossover sizes, not the exact
+ratios, as the takeaway** — both shift with CPU core count, memory bandwidth,
+GPU class, and problem.
+
+**OpenMP thread scaling** (speedup over a single core):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 20 20
+
+   * - Triangles
+     - 8-thread speedup
+     - Notes
+   * - ~400
+     - 0.4×
+     - *slower* — fork/join overhead wins
+   * - ~1,600
+     - 1.4×
+     - barely worthwhile
+   * - ~6,400
+     - 2.6×
+     -
+   * - ~25,600
+     - 4.4×
+     -
+   * - ~100,000+
+     - ~5–6×
+     - near-peak (bandwidth-bound plateau, below the ideal 8×)
+
+**GPU offload crossover** (speedup, same meshes):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 20 20
+
+   * - Triangles
+     - vs 1 core
+     - vs 8 threads
+   * - ~100–400
+     - 0.5× (slower)
+     - 0.6× (slower)
+   * - ~1,600
+     - 1.1×
+     - 0.7× (slower)
+   * - ~6,400
+     - 3.4×
+     - ~1.0× (tie)
+   * - ~25,600
+     - 7.9×
+     - 1.5×
+   * - ~100,000
+     - 12×
+     - 1.8×
+   * - ~400,000
+     - 15×
+     - 2.9× (still climbing)
+
+**Rule of thumb:**
+
+- Small exploratory meshes (a few hundred to a few thousand triangles, e.g. a
+  quick Jupyter notebook) — stay on **legacy, single-threaded**. Threads give
+  almost nothing and the GPU is counterproductive.
+- From **~10k triangles**, raise ``anuga.set_omp_num_threads()`` for a useful CPU
+  speedup.
+- Reach for the **GPU above ~25k triangles** versus a multicore CPU (or above
+  ~1.5k versus a single core); its lead keeps growing into the hundreds of
+  thousands of triangles, which is where these solvers are meant to run.
+
+.. note::
+
+   OpenMP thread count is **process-wide**, so ``anuga.set_omp_num_threads(n)``
+   applies to every domain in the session — including ones already constructed
+   (each domain's ``omp_num_threads`` reflects the live process-wide value).
+   Setting it once at the top of a notebook is enough;
+   ``anuga.get_omp_num_threads()`` reports the current value.
+
+
 Command-line flags
 ------------------
 
