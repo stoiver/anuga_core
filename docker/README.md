@@ -117,12 +117,21 @@ docker/aws_run_gpu.sh \
 # results (+ anuga-run.log) appear under --output; the instance is gone.
 ```
 
+Validate first (checks creds, GPU quota, AMI; prints the plan; launches nothing):
+```bash
+docker/aws_run_gpu.sh --region ap-southeast-2 \
+  --output s3://my-bucket/anuga/out --command "python run.py" --dry-run
+```
+
 Defaults to `g5.2xlarge` (1× A10G / cc86, 8 vCPU, 32 GB — a good balance since
-mesh-gen + DEM fitting are CPU-bound). Flags: `--instance`, `--spot`, `--keep`
-(don't self-terminate, for debugging), `--ami`, `--instance-profile`, `--region`,
-`--disk`. Prereqs: `awscli` configured, an S3 bucket, and a one-time **GPU vCPU
-service-quota increase** (new accounts start at 0 for G/P families). Each user
-runs this in **their own AWS account and pays for their own usage**.
+mesh-gen + DEM fitting are CPU-bound). Flags: `--dry-run`, `--instance`, `--spot`,
+`--keep` (don't self-terminate, for debugging), `--ami`, `--instance-profile`,
+`--region`, `--disk`. Prereqs: `awscli` configured, an S3 bucket, and a one-time
+**GPU vCPU service-quota increase** (new accounts start at 0 for G/P families).
+Each user runs this in **their own AWS account and pays for their own usage**.
+
+**New to AWS?** Follow [`AWS_SETUP.md`](AWS_SETUP.md) — account, budget alerts,
+the quota increase, region + bucket, then dry-run and launch.
 
 A ~1M-triangle single-GPU run fits comfortably (only a few GB of GPU memory).
 

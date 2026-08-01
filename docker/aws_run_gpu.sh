@@ -19,6 +19,9 @@
 #
 # Results (and anuga-run.log) appear under --output. The instance is gone.
 #
+# Add --dry-run to validate creds / GPU quota / AMI and print the launch plan
+# without creating or charging anything.
+#
 # NOTE: authored but not yet exercised against a live account — test with your
 # own creds and a tiny run first.
 set -euo pipefail
@@ -30,7 +33,7 @@ REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-}}"
 DISK_GB=100                       # root volume; DEMs + SWW output can be large
 COMPUTE_MODE="unified"            # GPU offload for mode-2 domains
 INPUT_S3="" ; OUTPUT_S3="" ; COMMAND="" ; UPLOAD_DIR="" ; OUTPUT_DIR=""
-INSTANCE_PROFILE="" ; AMI="" ; SSH_KEY="" ; SPOT=0 ; KEEP=0
+INSTANCE_PROFILE="" ; AMI="" ; SSH_KEY="" ; SPOT=0 ; KEEP=0 ; DRY=0
 
 usage() {
   sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
@@ -55,6 +58,7 @@ while [ $# -gt 0 ]; do
     --ssh-key)          SSH_KEY="$2"; shift 2 ;;
     --spot)             SPOT=1; shift ;;
     --keep)             KEEP=1; shift ;;              # don't self-terminate (debug)
+    --dry-run)          DRY=1; shift ;;              # validate + print plan; launch nothing
     -h|--help)          usage 0 ;;
     *) echo "unknown arg: $1" >&2; usage 1 ;;
   esac
@@ -71,8 +75,12 @@ bucket_of() { echo "$1" | sed -E 's#^s3://([^/]+).*#\1#'; }
 
 # ---- optional: upload a local project dir to the input prefix ---------------
 if [ -n "$UPLOAD_DIR" ]; then
-  echo ">> uploading ${UPLOAD_DIR} -> ${INPUT_S3}"
-  aws s3 sync "$UPLOAD_DIR" "$INPUT_S3"
+  if [ "$DRY" = "1" ]; then
+    echo "[dry-run] would upload ${UPLOAD_DIR} -> ${INPUT_S3}"
+  else
+    echo ">> uploading ${UPLOAD_DIR} -> ${INPUT_S3}"
+    aws s3 sync "$UPLOAD_DIR" "$INPUT_S3"
+  fi
 fi
 
 # ---- resolve a GPU-ready AMI (Docker + NVIDIA toolkit + driver preinstalled) -
@@ -89,7 +97,11 @@ echo ">> AMI: $AMI   instance: $INSTANCE_TYPE   region: $REGION"
 if [ -z "$INSTANCE_PROFILE" ]; then
   INSTANCE_PROFILE="anuga-gpu-runner"
   ROLE="$INSTANCE_PROFILE"
-  if ! aws iam get-instance-profile --instance-profile-name "$INSTANCE_PROFILE" >/dev/null 2>&1; then
+  if aws iam get-instance-profile --instance-profile-name "$INSTANCE_PROFILE" >/dev/null 2>&1; then
+    : # already exists
+  elif [ "$DRY" = "1" ]; then
+    echo "[dry-run] would create IAM instance profile '$INSTANCE_PROFILE' (S3 access to the input/output buckets)"
+  else
     echo ">> creating IAM instance profile '$INSTANCE_PROFILE' (S3 access)"
     IN_B=$(bucket_of "${INPUT_S3:-$OUTPUT_S3}") ; OUT_B=$(bucket_of "$OUTPUT_S3")
     aws iam create-role --role-name "$ROLE" \
@@ -139,6 +151,31 @@ RUN_ARGS=(
 [ "$SPOT" = "1" ] && RUN_ARGS+=(--instance-market-options "MarketType=spot")
 # The metadata hop limit of 2 is REQUIRED so the container can reach IMDSv2 for
 # the instance-profile credentials the entrypoint's aws sync uses.
+
+if [ "$DRY" = "1" ]; then
+  echo
+  echo "================= DRY RUN — nothing launched, nothing charged ================="
+  echo "-- identity --"
+  aws sts get-caller-identity --output text 2>&1 | sed 's/^/  /' || echo "  (could not verify creds — is the CLI configured?)"
+  echo "-- GPU on-demand vCPU quota (needs >= this instance's vCPUs) --"
+  q=$("${AWS[@]}" service-quotas get-service-quota --service-code ec2 --quota-code L-DB2E81BA \
+        --query 'Quota.Value' --output text 2>/dev/null) \
+    && echo "  current 'Running On-Demand G and P instances' = ${q} vCPUs" \
+    || echo "  (could not read quota — check Service Quotas; new accounts start at 0, see AWS_SETUP.md step 6)"
+  echo "-- plan --"
+  printf '  %-16s %s\n' image "$IMAGE" instance "$INSTANCE_TYPE (spot=$SPOT, disk=${DISK_GB}GB)" \
+    region "$REGION" ami "$AMI" profile "$INSTANCE_PROFILE" \
+    input "${INPUT_S3:-<none>}" output "$OUTPUT_S3" command "$COMMAND" compute-mode "$COMPUTE_MODE"
+  echo "-- ec2 run-instances permission check --"
+  if aws iam get-instance-profile --instance-profile-name "$INSTANCE_PROFILE" >/dev/null 2>&1; then
+    "${AWS[@]}" ec2 run-instances "${RUN_ARGS[@]}" --dry-run 2>&1 | sed 's/^/  /' | head -3
+  else
+    echo "  (skipped — instance profile not created yet; it would be created on a real run)"
+  fi
+  echo "==============================================================================="
+  echo "Re-run without --dry-run to launch."
+  exit 0
+fi
 
 echo ">> launching..."
 IID=$("${AWS[@]}" ec2 run-instances "${RUN_ARGS[@]}" --query 'Instances[0].InstanceId' --output text)
