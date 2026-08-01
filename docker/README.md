@@ -84,13 +84,14 @@ and, driven by env vars:
 
 | Env var | Effect |
 |---------|--------|
-| `INPUT_S3` | `aws s3 cp $INPUT_S3 /work/input --recursive` before the run |
-| `OUTPUT_S3` | `aws s3 cp /work/output $OUTPUT_S3 --recursive` after a successful run |
-| `STAGE_OUT_ON_FAILURE=1` | also upload output when the run fails |
+| `INPUT_S3` | `aws s3 sync $INPUT_S3 /work` before the run — input lands **in place** (so `python run.py` finds `run.py` at `/work/run.py`) |
+| `OUTPUT_S3` | `aws s3 sync <ANUGA_OUTPUT_DIR> $OUTPUT_S3` after a successful run |
+| `ANUGA_OUTPUT_DIR` | what to upload (default `/work` — captures output wherever the script writes it, e.g. `MODEL_OUTPUTS/`; set to a subdir to skip re-sending large inputs) |
+| `STAGE_OUT_ON_FAILURE=1` | also upload when the run fails |
 | `AWS_BATCH_JOB_ARRAY_INDEX` | appended to `OUTPUT_S3` (array jobs land in `.../0/`, `.../1/`, …) |
 
-Write results to `/work/output`. Credentials come from the environment / instance
-role — none are baked in. Test the flow locally with a mounted dir and no S3:
+Credentials come from the environment / instance role — none are baked in. Test
+the flow locally with a mounted dir and no S3:
 
 ```bash
 docker run --rm -v "$PWD/docker/data:/work" anuga:cpu python /work/my_run.py
@@ -99,9 +100,38 @@ docker run --rm -v "$PWD/docker/data:/work" anuga:cpu python /work/my_run.py
 
 ---
 
-## Running on AWS
+## Simplest AWS path — one self-terminating GPU instance
 
-Push to a registry AWS can pull (GHCR public, or your account's ECR):
+For a **single** GPU run with **no standing infrastructure** (ideal if you have
+no local GPU), `aws_run_gpu.sh` launches one GPU EC2 instance that pulls the
+image, runs your command with S3 in/out, uploads results, and **terminates
+itself**. You pay only for the job's instance-hours.
+
+```bash
+# upload your project (run script + data), launch, walk away:
+docker/aws_run_gpu.sh \
+  --upload  ./my_tohoku_project \
+  --input   s3://my-bucket/anuga/in \
+  --output  s3://my-bucket/anuga/out \
+  --command "python run_Tohoku.py -alg DE0"
+# results (+ anuga-run.log) appear under --output; the instance is gone.
+```
+
+Defaults to `g5.2xlarge` (1× A10G / cc86, 8 vCPU, 32 GB — a good balance since
+mesh-gen + DEM fitting are CPU-bound). Flags: `--instance`, `--spot`, `--keep`
+(don't self-terminate, for debugging), `--ami`, `--instance-profile`, `--region`,
+`--disk`. Prereqs: `awscli` configured, an S3 bucket, and a one-time **GPU vCPU
+service-quota increase** (new accounts start at 0 for G/P families). Each user
+runs this in **their own AWS account and pays for their own usage**.
+
+A ~1M-triangle single-GPU run fits comfortably (only a few GB of GPU memory).
+
+---
+
+## Running many jobs on AWS Batch
+
+For sweeps/ensembles, push to a registry AWS can pull (GHCR public, or your
+account's ECR) and use Batch array jobs:
 
 ```bash
 # ECR example
@@ -160,8 +190,10 @@ docker push "$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com/anuga:gpu"
   (The images set `HOME=/tmp` so `--user` runs have a writable config dir. With
   compose, `export UID GID` first — see the header of docker-compose.yml.)
 - **Image size:** the GPU image's NVHPC base is ~10–15 GB. A slimmer multi-stage
-  runtime (CUDA-runtime base + copied NVHPC redistributable libs + the venv) is a
-  worthwhile follow-up once the single-stage image is confirmed working.
+  runtime (CUDA-runtime base + copied NVHPC redistributable libs + the venv) is
+  drafted in `Dockerfile.gpu.slim` (**experimental** — needs local build-testing
+  to confirm the runtime-lib set). It should drop the image to a few GB, cutting
+  storage and AWS cold-start pull time.
 - **Version string:** `.git` is excluded from the build context, so a
   source-built GPU image reports `0.0.0+unknown` for `anuga.__version__`
   (cosmetic; the code is the checkout's).

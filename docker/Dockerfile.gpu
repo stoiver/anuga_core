@@ -5,9 +5,9 @@
 # against nvc with gpu_offload=true for a multi-arch fat binary that runs on
 # both AWS datacenter GPUs and a local Blackwell laptop.
 #
-#   GPU_ARCH default cc70,cc75,cc80,cc86,cc90,cc120 covers:
+#   GPU_ARCH default cc70,cc75,cc80,cc86,cc89,cc90,cc120 covers:
 #     cc70 V100 (p3)   cc75 T4 (g4dn)   cc80 A100 (p4d)
-#     cc86 A10G (g5)   cc90 H100 (p5)   cc120 RTX 50-series (local laptop)
+#     cc86 A10G (g5)   cc89 L4 (g6)     cc90 H100 (p5)   cc120 RTX 50-series (laptop)
 #
 # NVHPC_TAG must be an nvcr.io/nvidia/nvhpc *devel* tag that exists AND whose
 # nvc supports every arch in GPU_ARCH (Blackwell/cc120 needs NVHPC >= 25.1).
@@ -27,7 +27,7 @@
 ARG NVHPC_TAG=25.9-devel-cuda_multi-ubuntu24.04
 FROM nvcr.io/nvidia/nvhpc:${NVHPC_TAG}
 
-ARG GPU_ARCH=cc70,cc75,cc80,cc86,cc90,cc120
+ARG GPU_ARCH=cc70,cc75,cc80,cc86,cc89,cc90,cc120
 
 SHELL ["/bin/bash", "-lc"]
 
