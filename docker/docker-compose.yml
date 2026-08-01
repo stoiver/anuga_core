@@ -6,12 +6,17 @@
 #       python /work/my_run.py -alg DE0
 #
 # Put input in ./docker/data (mounted at /work); results land there too.
+#
+# Run as your host user so output files are owned by you, not root:
+#   UID=$(id -u) GID=$(id -g) docker compose -f docker/docker-compose.yml run --rm anuga-gpu ...
 services:
   anuga-cpu:
     build:
       context: ..
       dockerfile: docker/Dockerfile.cpu
     image: anuga:cpu
+    # Owns output as the host user (avoids root-owned files on the bind mount).
+    user: "${UID:-0}:${GID:-0}"
     volumes:
       - ./data:/work
 
@@ -27,6 +32,8 @@ services:
         # arches above (cc120/Blackwell needs NVHPC >= 25.1).
         NVHPC_TAG: 25.9-devel-cuda_multi-ubuntu24.04
     image: anuga:gpu
+    # Owns output as the host user (avoids root-owned files on the bind mount).
+    user: "${UID:-0}:${GID:-0}"
     environment:
       # Opt into GPU offload for unified (mode-2) domains.
       ANUGA_DEFAULT_COMPUTE_MODE: unified

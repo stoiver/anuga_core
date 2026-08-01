@@ -21,13 +21,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libgomp1 ca-certificates && \
     rm -rf /var/lib/apt/lists/*
 
+# anuga[data] pulls the optional geodata stack (rasterio/fiona/shapely/xarray/
+# pandas/openpyxl) that case-study scripts need — e.g. spatialInputUtil's
+# readListOfRiverWalls, shapefile/raster/polygon-CSV I/O — which otherwise
+# import in a degraded mode and raise AttributeError/ImportError.
 RUN pip install --no-cache-dir -U pip && \
-    pip install --no-cache-dir "anuga${ANUGA_VERSION:+==${ANUGA_VERSION}}" awscli && \
-    python -c "import anuga; print('ANUGA', anuga.__version__, 'imported OK')"
+    pip install --no-cache-dir "anuga[data]${ANUGA_VERSION:+==${ANUGA_VERSION}}" awscli && \
+    python -c "import anuga, fiona, rasterio, shapely; print('ANUGA', anuga.__version__, '+ geodata imported OK')"
 
 COPY docker/anuga-entrypoint.sh /usr/local/bin/anuga-entrypoint
 RUN chmod +x /usr/local/bin/anuga-entrypoint
 
 ENV ANUGA_WORKDIR=/work
+# Writable HOME/config so `docker run --user $(id -u):$(id -g)` works (host-owned
+# output, no root-owned files) without a home dir for the arbitrary uid.
+ENV HOME=/tmp MPLCONFIGDIR=/tmp
 WORKDIR /work
 ENTRYPOINT ["/usr/local/bin/anuga-entrypoint"]

@@ -148,6 +148,17 @@ docker push "$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com/anuga:gpu"
 
 ## Notes & caveats
 
+- **File ownership / run as your host user.** By default the container runs as
+  **root**, so anything it writes to the bind-mounted dir (e.g. `MODEL_OUTPUTS/*.sww`)
+  is owned by `root` on the host. A later non-root run then can't overwrite those
+  files, and ANUGA silently reopens+appends to the stale `.sww` (garbled time
+  axis) instead of truncating. Avoid it by running as yourself:
+  ```bash
+  docker run --rm --gpus all --user "$(id -u):$(id -g)" \
+    -v "$PWD:/work" anuga:gpu python run.py
+  ```
+  (The images set `HOME=/tmp` so `--user` runs have a writable config dir. With
+  compose, `export UID GID` first — see the header of docker-compose.yml.)
 - **Image size:** the GPU image's NVHPC base is ~10–15 GB. A slimmer multi-stage
   runtime (CUDA-runtime base + copied NVHPC redistributable libs + the venv) is a
   worthwhile follow-up once the single-stage image is confirmed working.
