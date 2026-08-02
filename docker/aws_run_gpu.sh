@@ -27,7 +27,7 @@
 set -euo pipefail
 
 # ---- defaults ---------------------------------------------------------------
-IMAGE="ghcr.io/anuga-community/anuga:latest-gpu"
+IMAGE="ghcr.io/anuga-community/anuga:develop-gpu"   # pre-release (built from develop)
 INSTANCE_TYPE="g5.2xlarge"        # 1x A10G (24GB, cc86), 8 vCPU, 32GB RAM
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-}}"
 DISK_GB=100                       # root volume; DEMs + SWW output can be large

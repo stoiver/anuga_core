@@ -49,6 +49,37 @@ docker build -f docker/Dockerfile.gpu -t anuga:gpu .
 # ...or a faster laptop-only build (RTX 50-series = cc120):
 docker build -f docker/Dockerfile.gpu \
   --build-arg GPU_ARCH=cc120 -t anuga:gpu-local .
+
+# Stamp a real version (else anuga.__version__ is 0.0.0+unknown, since .git is
+# excluded from the build context):
+docker build -f docker/Dockerfile.gpu \
+  --build-arg ANUGA_VERSION="$(python _git_version.py)" -t anuga:gpu .
+```
+
+### Published (pre-release) image
+
+The GPU image is built from the **develop** branch (v4.0 line), which isn't
+released yet — so it's published to GHCR under a **pre-release** tag, not
+`latest`:
+
+```bash
+docker pull ghcr.io/anuga-community/anuga:develop-gpu     # branch channel
+# or an immutable commit:  ghcr.io/anuga-community/anuga:sha-<short>-gpu
+```
+
+Publishing a container from develop is fine — it's an artifact, not a source
+release. The `docker-publish.yml` workflow (manual `workflow_dispatch`,
+`build_gpu=true`) tags `develop-gpu` + `sha-<short>-gpu`; version tags + `latest`
+only appear on a GitHub Release. Until CI has a big enough runner for the ~15 GB
+NVHPC base, the reliable path is to **build locally and push**:
+
+```bash
+docker build -f docker/Dockerfile.gpu \
+  --build-arg ANUGA_VERSION="$(python _git_version.py)" \
+  -t ghcr.io/anuga-community/anuga:develop-gpu .
+echo "$GHCR_PAT" | docker login ghcr.io -u <user> --password-stdin
+docker push ghcr.io/anuga-community/anuga:develop-gpu
+# then make the package public (org package settings) so AWS pulls without creds
 ```
 
 Verify offload actually reaches the GPU (needs `--gpus all`):

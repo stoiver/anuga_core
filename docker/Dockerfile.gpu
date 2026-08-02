@@ -28,6 +28,15 @@ ARG NVHPC_TAG=25.9-devel-cuda_multi-ubuntu24.04
 FROM nvcr.io/nvidia/nvhpc:${NVHPC_TAG}
 
 ARG GPU_ARCH=cc70,cc75,cc80,cc86,cc89,cc90,cc120
+# PEP 440 version to stamp into the build (.git is excluded from the context, so
+# `git describe` can't run inside the image). Pass what it would have produced:
+#   --build-arg ANUGA_VERSION="$(python _git_version.py)"
+# Left empty => anuga.__version__ is 0.0.0+unknown (cosmetic).
+ARG ANUGA_VERSION=
+
+LABEL org.opencontainers.image.title="ANUGA (GPU, nvc)" \
+      org.opencontainers.image.source="https://github.com/anuga-community/anuga_core" \
+      org.opencontainers.image.version="${ANUGA_VERSION}"
 
 SHELL ["/bin/bash", "-lc"]
 
@@ -52,7 +61,8 @@ RUN set -euo pipefail && \
     echo "Using nvc: $NVC ($($NVC --version | head -1))" && \
     pip install --no-cache-dir -U pip && \
     pip install --no-cache-dir "numpy>=2.0" cython "meson>=1.4" meson-python ninja pybind11 && \
-    CC="$NVC" pip install --no-cache-dir --no-build-isolation -v \
+    ANUGA_VERSION="${ANUGA_VERSION}" CC="$NVC" \
+      pip install --no-cache-dir --no-build-isolation -v \
         -Csetup-args=-Dgpu_offload=true \
         -Csetup-args=-Dgpu_arch="${GPU_ARCH}" \
         ".[data]" && \
