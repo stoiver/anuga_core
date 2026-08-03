@@ -79,8 +79,18 @@ docker build -f docker/Dockerfile.gpu \
   -t ghcr.io/anuga-community/anuga:develop-gpu .
 echo "$GHCR_PAT" | docker login ghcr.io -u <user> --password-stdin
 docker push ghcr.io/anuga-community/anuga:develop-gpu
-# then make the package public (org package settings) so AWS pulls without creds
 ```
+
+**Make the package public** (so AWS pulls without credentials). Two steps, both
+require an org **owner**:
+1. Allow public packages org-wide: **Org Settings → "Code, planning, and
+   automation" → Packages** → enable public packages.
+2. On the package: **Package settings → Danger Zone → Change visibility → Public**
+   (also link it to `anuga_core` via *Manage Actions access* so the workflow can
+   update it).
+
+`ghcr.io/anuga-community/anuga:develop-gpu` is currently **published and public**
+(anonymous `docker pull` verified).
 
 Verify offload actually reaches the GPU (needs `--gpus all`):
 
