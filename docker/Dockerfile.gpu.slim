@@ -21,7 +21,7 @@ ARG CUDA_RUNTIME_TAG=12.6.2-runtime-ubuntu24.04
 
 # ---- builder: compile anuga with nvc (as in Dockerfile.gpu) -----------------
 FROM nvcr.io/nvidia/nvhpc:${NVHPC_TAG} AS builder
-ARG GPU_ARCH=cc70,cc75,cc80,cc86,cc89,cc90,cc120
+ARG GPU_ARCH=cc75,cc80,cc86,cc89,cc90,cc120
 ARG ANUGA_VERSION=
 SHELL ["/bin/bash", "-lc"]
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -5,9 +5,13 @@
 # against nvc with gpu_offload=true for a multi-arch fat binary that runs on
 # both AWS datacenter GPUs and a local Blackwell laptop.
 #
-#   GPU_ARCH default cc70,cc75,cc80,cc86,cc89,cc90,cc120 covers:
-#     cc70 V100 (p3)   cc75 T4 (g4dn)   cc80 A100 (p4d)
-#     cc86 A10G (g5)   cc89 L4 (g6)     cc90 H100 (p5)   cc120 RTX 50-series (laptop)
+#   GPU_ARCH default cc75,cc80,cc86,cc89,cc90,cc120 covers:
+#     cc75 T4 (g4dn)   cc80 A100 (p4d)  cc86 A10G (g5)
+#     cc89 L4 (g6)     cc90 H100 (p5)   cc120 RTX 50-series (laptop)
+#   cc70 (V100 / p3) is intentionally excluded: NVHPC 25.9 defaults to CUDA 13,
+#   which dropped Volta (sm_70), so it can't share a fat binary with Blackwell
+#   (cc120). For V100 build a separate image with an older CUDA/NVHPC and
+#   --build-arg GPU_ARCH=cc70.
 #
 # NVHPC_TAG must be an nvcr.io/nvidia/nvhpc *devel* tag that exists AND whose
 # nvc supports every arch in GPU_ARCH (Blackwell/cc120 needs NVHPC >= 25.1).
@@ -27,7 +31,7 @@
 ARG NVHPC_TAG=25.9-devel-cuda_multi-ubuntu24.04
 FROM nvcr.io/nvidia/nvhpc:${NVHPC_TAG}
 
-ARG GPU_ARCH=cc70,cc75,cc80,cc86,cc89,cc90,cc120
+ARG GPU_ARCH=cc75,cc80,cc86,cc89,cc90,cc120
 # PEP 440 version to stamp into the build (.git is excluded from the context, so
 # `git describe` can't run inside the image). Pass what it would have produced:
 #   --build-arg ANUGA_VERSION="$(python _git_version.py)"

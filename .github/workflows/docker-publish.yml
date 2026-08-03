@@ -23,7 +23,7 @@ on:
         default: '25.9-devel-cuda_multi-ubuntu24.04'
       gpu_arch:
         description: 'nvc -gpu arch list for the GPU image'
-        default: 'cc70,cc75,cc80,cc86,cc89,cc90,cc120'
+        default: 'cc75,cc80,cc86,cc89,cc90,cc120'
 
 permissions:
   contents: read
