@@ -6,6 +6,7 @@ dependencies:
   - pip
   - affine
   - cartopy
+  - contextily
   - cython
   - dill
   - rasterio

@@ -1,0 +1,122 @@
+# Build and publish ANUGA container images to GitHub Container Registry (GHCR).
+#
+# - CPU image: built + pushed automatically on a GitHub Release (and on demand).
+# - GPU image: opt-in only (workflow_dispatch with build_gpu=true), because the
+#   NVHPC base is ~15 GB and the multi-arch build is heavy for free runners —
+#   it may need disk cleanup and/or a larger runner. It is never in the release
+#   critical path.
+#
+# Images: ghcr.io/<owner>/anuga:<tag>-cpu  and  ...:<tag>-gpu
+name: Build and Publish Docker images
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      build_gpu:
+        description: 'Also build & push the (large) GPU image'
+        type: boolean
+        default: false
+      nvhpc_tag:
+        description: 'nvcr.io/nvidia/nvhpc devel tag for the GPU image'
+        default: '25.9-devel-cuda_multi-ubuntu24.04'
+      gpu_arch:
+        description: 'nvc -gpu arch list for the GPU image'
+        default: 'cc75,cc80,cc86,cc89,cc90,cc120'
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository_owner }}/anuga
+
+jobs:
+  cpu:
+    name: CPU image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags for CPU image
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: |
+            suffix=-cpu,onlatest=true
+          tags: |
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+
+      - name: Build & push CPU image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.cpu
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  gpu:
+    name: GPU image (opt-in)
+    if: github.event_name == 'workflow_dispatch' && inputs.build_gpu
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free up disk space (NVHPC base is large)
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history + tags so _git_version.py can describe
+
+      - name: Compute ANUGA version (PEP 440, from git)
+        id: ver
+        run: echo "v=$(python _git_version.py)" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tags for GPU image
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: |
+            suffix=-gpu,onlatest=false
+          tags: |
+            # branch name (e.g. develop-gpu) — the pre-release channel
+            type=ref,event=branch
+            # immutable commit tag (e.g. sha-abc1234-gpu)
+            type=sha
+            # release version (e.g. 4.0.0-gpu) and latest-gpu, only on a Release
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+
+      - name: Build & push GPU image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.gpu
+          push: true
+          build-args: |
+            NVHPC_TAG=${{ inputs.nvhpc_tag }}
+            GPU_ARCH=${{ inputs.gpu_arch }}
+            ANUGA_VERSION=${{ steps.ver.outputs.v }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}

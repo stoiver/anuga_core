@@ -243,3 +243,4 @@ claude/CDAC_EXECUTIVE_SUMMARY.md
 
 # Profiling artifacts
 *.prof
+docker/data/output/

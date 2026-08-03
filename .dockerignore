@@ -1,0 +1,32 @@
+# Keep the Docker build context small and reproducible.
+# (Applies to builds whose context is the repo root, e.g. docker/Dockerfile.gpu.)
+#
+# NOTE: the meson build only descends into anuga/ (plus scripts/ and
+# _git_version.py), and installs package data such as anuga/**/data/*.tsh|*.msh.
+# So do NOT exclude those by extension — instead drop the large directories that
+# are not part of the wheel build (validation data, examples, docs, sandpit).
+
+.git
+.github
+build
+dist
+*.egg-info
+**/__pycache__
+**/*.pyc
+**/*.so
+**/*.o
+
+# Large directories not needed to build/install the wheel
+validation_tests
+examples
+docs
+sandpit
+claude
+
+# Editor / OS noise
+.vscode
+.idea
+.DS_Store
+
+# Docker's own runtime mount (not build input)
+docker/data

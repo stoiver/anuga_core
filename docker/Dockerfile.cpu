@@ -1,0 +1,40 @@
+# ANUGA — CPU image (slim, PyPI wheel).
+#
+# Runs ANUGA on the CPU, including the unified (mode-2) kernels as multicore
+# OpenMP. Ideal for CPU AWS Batch jobs and cheap instances. Tracks the
+# published release, not the working tree.
+#
+# Build (context = repo root, so the entrypoint script is available):
+#   docker build -f docker/Dockerfile.cpu -t anuga:cpu .
+#   docker build -f docker/Dockerfile.cpu --build-arg ANUGA_VERSION=3.3.10 -t anuga:cpu-3.3.10 .
+#
+# Run a script (mount a host dir with your input + collect the .sww output):
+#   docker run --rm -v "$PWD/data:/work" anuga:cpu python /work/my_run.py -alg DE0
+FROM python:3.12-slim
+
+# Empty = latest release; pin with e.g. --build-arg ANUGA_VERSION=3.3.10
+ARG ANUGA_VERSION=
+
+# libgomp1: OpenMP runtime the manylinux extension links against.
+# ca-certificates: TLS for pip/aws.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgomp1 ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# anuga[data] pulls the optional geodata stack (rasterio/fiona/shapely/xarray/
+# pandas/openpyxl) that case-study scripts need — e.g. spatialInputUtil's
+# readListOfRiverWalls, shapefile/raster/polygon-CSV I/O — which otherwise
+# import in a degraded mode and raise AttributeError/ImportError.
+RUN pip install --no-cache-dir -U pip && \
+    pip install --no-cache-dir "anuga[data]${ANUGA_VERSION:+==${ANUGA_VERSION}}" awscli && \
+    python -c "import anuga, fiona, rasterio, shapely; print('ANUGA', anuga.__version__, '+ geodata imported OK')"
+
+COPY docker/anuga-entrypoint.sh /usr/local/bin/anuga-entrypoint
+RUN chmod +x /usr/local/bin/anuga-entrypoint
+
+ENV ANUGA_WORKDIR=/work
+# Writable HOME/config so `docker run --user $(id -u):$(id -g)` works (host-owned
+# output, no root-owned files) without a home dir for the arbitrary uid.
+ENV HOME=/tmp MPLCONFIGDIR=/tmp
+WORKDIR /work
+ENTRYPOINT ["/usr/local/bin/anuga-entrypoint"]
