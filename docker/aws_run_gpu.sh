@@ -22,18 +22,26 @@
 # Add --dry-run to validate creds / GPU quota / AMI and print the launch plan
 # without creating or charging anything.
 #
+# Robustness: creates a default VPC if the account has none (or pass --subnet-id);
+# on InsufficientInstanceCapacity it falls back across instance types and AZs
+# (--instance takes a single type or a comma list). The run log records timing
+# (image-pull vs container vs total).
+#
 # NOTE: authored but not yet exercised against a live account — test with your
 # own creds and a tiny run first.
 set -euo pipefail
 
 # ---- defaults ---------------------------------------------------------------
 IMAGE="ghcr.io/anuga-community/anuga:develop-gpu"   # pre-release (built from develop)
-INSTANCE_TYPE="g5.2xlarge"        # 1x A10G (24GB, cc86), 8 vCPU, 32GB RAM
+# Comma-separated capacity-fallback chain: the first type with capacity (in any
+# AZ) wins. g5.2xlarge (A10G/cc86, 8 vCPU) -> g5.xlarge -> g4dn.xlarge (T4/cc75,
+# cheap + widely available). Override with --instance (single or comma list).
+INSTANCE_TYPES="g5.2xlarge,g5.xlarge,g4dn.xlarge"
 REGION="${AWS_REGION:-${AWS_DEFAULT_REGION:-}}"
 DISK_GB=100                       # root volume; DEMs + SWW output can be large
 COMPUTE_MODE="unified"            # GPU offload for mode-2 domains
 INPUT_S3="" ; OUTPUT_S3="" ; COMMAND="" ; UPLOAD_DIR="" ; OUTPUT_DIR=""
-INSTANCE_PROFILE="" ; AMI="" ; SSH_KEY="" ; SPOT=0 ; KEEP=0 ; DRY=0
+INSTANCE_PROFILE="" ; AMI="" ; SSH_KEY="" ; SPOT=0 ; KEEP=0 ; DRY=0 ; SUBNET_ID=""
 
 usage() {
   sed -n '2,40p' "$0" | sed 's/^# \{0,1\}//'
@@ -44,7 +52,8 @@ usage() {
 while [ $# -gt 0 ]; do
   case "$1" in
     --image)            IMAGE="$2"; shift 2 ;;
-    --instance)         INSTANCE_TYPE="$2"; shift 2 ;;
+    --instance)         INSTANCE_TYPES="$2"; shift 2 ;;   # single or comma list
+    --subnet-id)        SUBNET_ID="$2"; shift 2 ;;        # else default-VPC subnets
     --region)           REGION="$2"; shift 2 ;;
     --disk)             DISK_GB="$2"; shift 2 ;;
     --input)            INPUT_S3="$2"; shift 2 ;;
@@ -91,7 +100,7 @@ if [ -z "$AMI" ]; then
     --query 'Parameter.Value' --output text 2>/dev/null) \
     || die "could not resolve the DLAMI AMI id via SSM; pass --ami ami-xxxxx (a GPU AMI with Docker + the NVIDIA Container Toolkit)"
 fi
-echo ">> AMI: $AMI   instance: $INSTANCE_TYPE   region: $REGION"
+echo ">> AMI: $AMI   instances: $INSTANCE_TYPES   region: $REGION"
 
 # ---- ensure an instance profile with S3 access ------------------------------
 if [ -z "$INSTANCE_PROFILE" ]; then
@@ -114,6 +123,36 @@ if [ -z "$INSTANCE_PROFILE" ]; then
   fi
 fi
 
+# ---- resolve subnet(s) to launch into ---------------------------------------
+# EC2 places the instance in the default VPC when no subnet is given; if the
+# account has no default VPC (a common surprise), run-instances fails with
+# VPCIdNotSpecified. Resolve one subnet per AZ so the capacity loop below can
+# also try alternate AZs. --subnet-id overrides all of this.
+SUBNETS=()
+if [ -n "$SUBNET_ID" ]; then
+  SUBNETS=("$SUBNET_ID")
+else
+  VPC=$("${AWS[@]}" ec2 describe-vpcs --filters Name=isDefault,Values=true \
+        --query 'Vpcs[0].VpcId' --output text 2>/dev/null || echo None)
+  if [ "$VPC" = "None" ] || [ -z "$VPC" ]; then
+    if [ "$DRY" = "1" ]; then
+      echo "[dry-run] no default VPC in $REGION — would run 'aws ec2 create-default-vpc'"
+    else
+      echo ">> no default VPC in $REGION — creating one"
+      "${AWS[@]}" ec2 create-default-vpc >/dev/null \
+        || die "no default VPC and create-default-vpc failed; pass --subnet-id of an existing subnet"
+      VPC=$("${AWS[@]}" ec2 describe-vpcs --filters Name=isDefault,Values=true \
+            --query 'Vpcs[0].VpcId' --output text)
+    fi
+  fi
+  if [ -n "${VPC:-}" ] && [ "$VPC" != "None" ]; then
+    mapfile -t SUBNETS < <("${AWS[@]}" ec2 describe-subnets \
+      --filters Name=vpc-id,Values="$VPC" Name=default-for-az,Values=true \
+      --query 'Subnets[].SubnetId' --output text | tr '\t' '\n' | grep -v '^$')
+  fi
+fi
+[ ${#SUBNETS[@]} -eq 0 ] && SUBNETS=("<none>")   # dry-run w/o default VPC
+
 # ---- build user-data (runs at boot on the GPU instance) ---------------------
 TERMINATE="shutdown -h now"
 [ "$KEEP" = "1" ] && TERMINATE="echo '[--keep] leaving instance up; terminate it manually when done.'"
@@ -121,7 +160,9 @@ USER_DATA=$(cat <<EOF
 #!/bin/bash
 set -x
 exec > /var/log/anuga-run.log 2>&1
+T0=\$(date +%s)
 docker pull "${IMAGE}" || true
+TR=\$(date +%s)
 docker run --rm --gpus all \
   -e ANUGA_DEFAULT_COMPUTE_MODE='${COMPUTE_MODE}' \
   ${INPUT_S3:+-e INPUT_S3='${INPUT_S3}'} \
@@ -129,16 +170,17 @@ docker run --rm --gpus all \
   ${OUTPUT_DIR:+-e ANUGA_OUTPUT_DIR='${OUTPUT_DIR}'} \
   "${IMAGE}" sh -c '${COMMAND}'
 rc=\$?
+TE=\$(date +%s)
+echo "anuga timing: image-pull \$((TR-T0))s | container \$((TE-TR))s | total(boot-script) \$((TE-T0))s | rc=\$rc"
 aws s3 cp /var/log/anuga-run.log "${OUTPUT_S3%/}/anuga-run.log" || true
-echo "anuga job exited rc=\$rc"
 ${TERMINATE}
 EOF
 )
 
-# ---- launch -----------------------------------------------------------------
+# ---- launch (capacity fallback across instance types x AZs) -----------------
+# Static args; --instance-type and --subnet-id are added per attempt below.
 RUN_ARGS=(
   --image-id "$AMI"
-  --instance-type "$INSTANCE_TYPE"
   --count 1
   --iam-instance-profile "Name=$INSTANCE_PROFILE"
   --instance-initiated-shutdown-behavior terminate
@@ -149,8 +191,8 @@ RUN_ARGS=(
 )
 [ -n "$SSH_KEY" ] && RUN_ARGS+=(--key-name "$SSH_KEY")
 [ "$SPOT" = "1" ] && RUN_ARGS+=(--instance-market-options "MarketType=spot")
-# The metadata hop limit of 2 is REQUIRED so the container can reach IMDSv2 for
-# the instance-profile credentials the entrypoint's aws sync uses.
+# hop limit 2 lets the container reach IMDSv2 for the instance-profile creds the
+# entrypoint's `aws s3 sync` uses.
 
 if [ "$DRY" = "1" ]; then
   echo
@@ -163,12 +205,15 @@ if [ "$DRY" = "1" ]; then
     && echo "  current 'Running On-Demand G and P instances' = ${q} vCPUs" \
     || echo "  (could not read quota — check Service Quotas; new accounts start at 0, see AWS_SETUP.md step 6)"
   echo "-- plan --"
-  printf '  %-16s %s\n' image "$IMAGE" instance "$INSTANCE_TYPE (spot=$SPOT, disk=${DISK_GB}GB)" \
-    region "$REGION" ami "$AMI" profile "$INSTANCE_PROFILE" \
+  printf '  %-16s %s\n' image "$IMAGE" instances "$INSTANCE_TYPES (spot=$SPOT, disk=${DISK_GB}GB)" \
+    region "$REGION" ami "$AMI" profile "$INSTANCE_PROFILE" subnets "${SUBNETS[*]}" \
     input "${INPUT_S3:-<none>}" output "$OUTPUT_S3" command "$COMMAND" compute-mode "$COMPUTE_MODE"
   echo "-- ec2 run-instances permission check --"
   if aws iam get-instance-profile --instance-profile-name "$INSTANCE_PROFILE" >/dev/null 2>&1; then
-    "${AWS[@]}" ec2 run-instances "${RUN_ARGS[@]}" --dry-run 2>&1 | sed 's/^/  /' | head -3
+    dt="${INSTANCE_TYPES%%,*}"; ds="${SUBNETS[0]}"
+    DA=( "${RUN_ARGS[@]}" --instance-type "$dt" )
+    [ "$ds" != "<none>" ] && DA+=( --subnet-id "$ds" )
+    "${AWS[@]}" ec2 run-instances "${DA[@]}" --dry-run 2>&1 | sed 's/^/  /' | head -3
   else
     echo "  (skipped — instance profile not created yet; it would be created on a real run)"
   fi
@@ -177,11 +222,28 @@ if [ "$DRY" = "1" ]; then
   exit 0
 fi
 
-echo ">> launching..."
-IID=$("${AWS[@]}" ec2 run-instances "${RUN_ARGS[@]}" --query 'Instances[0].InstanceId' --output text)
-echo ">> instance $IID launched ($INSTANCE_TYPE${SPOT:+, spot})."
+echo ">> launching (types: $INSTANCE_TYPES; ${#SUBNETS[@]} AZ subnet(s))..."
+IID="" ; USED_TYPE="" ; USED_SUBNET=""
+for itype in ${INSTANCE_TYPES//,/ }; do
+  for subnet in "${SUBNETS[@]}"; do
+    ATTEMPT=( "${RUN_ARGS[@]}" --instance-type "$itype" )
+    [ "$subnet" != "<none>" ] && ATTEMPT+=( --subnet-id "$subnet" )
+    if out=$("${AWS[@]}" ec2 run-instances "${ATTEMPT[@]}" \
+               --query 'Instances[0].InstanceId' --output text 2>&1); then
+      IID="$out" ; USED_TYPE="$itype" ; USED_SUBNET="$subnet" ; break 2
+    elif echo "$out" | grep -qE "InsufficientInstanceCapacity|Unsupported|InvalidParameterValue"; then
+      echo "   $itype${subnet:+ / $subnet}: unavailable — trying next"
+      continue
+    else
+      die "run-instances failed: $out"
+    fi
+  done
+done
+[ -z "$IID" ] && die "no capacity for any of [$INSTANCE_TYPES] across ${#SUBNETS[@]} AZ(s); try --spot, --instance <other type>, another --region, or retry later"
+
+echo ">> instance $IID launched ($USED_TYPE${SPOT:+, spot}${USED_SUBNET:+, $USED_SUBNET})."
 echo ">> it will run: ${COMMAND}"
-echo ">> results ->   ${OUTPUT_S3}    (+ anuga-run.log)"
+echo ">> results ->   ${OUTPUT_S3}    (+ anuga-run.log with timing)"
 if [ "$KEEP" = "1" ]; then
   echo ">> --keep set: instance will NOT self-terminate. Terminate with:"
   echo "     aws --region $REGION ec2 terminate-instances --instance-ids $IID"
