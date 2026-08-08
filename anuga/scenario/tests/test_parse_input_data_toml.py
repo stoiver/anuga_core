@@ -421,6 +421,7 @@ class TestMeshSection(unittest.TestCase):
         self.assertEqual(p.bounding_polygon_and_tags_file, 'extent.shp')
         self.assertAlmostEqual(p.default_res, 500000.0)
         self.assertEqual(p.interior_regions_data, [])
+        self.assertEqual(p.interior_holes_data, [])
         self.assertIsNone(p.bounding_polygon_explicit_tags)
         self.assertEqual(p.breakline_files, [])
         self.assertEqual(p.riverwall_csv_files, [])
@@ -440,6 +441,35 @@ class TestMeshSection(unittest.TestCase):
         self.assertEqual(len(p.interior_regions_data), 2)
         self.assertEqual(p.interior_regions_data[0], ['region_a.shp', 10000.0])
         self.assertEqual(p.interior_regions_data[1], ['region_b.shp', 5000.0])
+
+    def test_interior_holes_parsed(self):
+        extra = textwrap.dedent("""\
+            [[mesh.interior_holes]]
+            polygon = "building_a.csv"
+            tag = "building"
+            [[mesh.interior_holes]]
+            polygon = "building_b.csv"
+        """)
+        p = self._make(mesh_extra=extra)
+        self.assertEqual(len(p.interior_holes_data), 2)
+        # tag is optional; absent means None, which pmesh renders as its own
+        # 'interior' default rather than a named tag.
+        self.assertEqual(p.interior_holes_data[0], ['building_a.csv', 'building'])
+        self.assertEqual(p.interior_holes_data[1], ['building_b.csv', None])
+
+    def test_interior_holes_coexist_with_interior_regions(self):
+        # Holes and regions are independent: a hole removes triangles, a region
+        # only resizes them, so a mesh may legitimately carry both.
+        extra = textwrap.dedent("""\
+            [[mesh.interior_regions]]
+            polygon = "region_a.shp"
+            resolution = 10000.0
+            [[mesh.interior_holes]]
+            polygon = "building_a.csv"
+        """)
+        p = self._make(mesh_extra=extra)
+        self.assertEqual(len(p.interior_regions_data), 1)
+        self.assertEqual(len(p.interior_holes_data), 1)
 
     def test_boundary_tags_parsed(self):
         extra = textwrap.dedent("""\

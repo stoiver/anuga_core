@@ -164,6 +164,24 @@ class PrepareData(ProjectData):
         self.interior_regions = [[su.read_polygon(ir[0]), ir[1]] for ir in
                                  self.interior_regions_data]
 
+        # Same treatment for interior holes: read each polygon file, and build
+        # the tag structure create_pmesh_from_regions expects.
+        #
+        # hole_tags is documented as "see boundary_tags", i.e. a list with one
+        # entry PER HOLE, each entry a dict mapping a tag name to the segment
+        # indices carrying it -- not a list of tag strings. The TOML takes a
+        # single friendly `tag = "building"` per hole, so expand it here to cover
+        # every segment of that hole's polygon (n points -> n closing segments).
+        # Holes with no tag pass None, which pmesh renders as its own 'interior'
+        # default.
+        holes_data = getattr(self, 'interior_holes_data', [])
+        self.interior_holes = [su.read_polygon(ih[0]) for ih in holes_data]
+        self.hole_tags = None
+        if any(ih[1] is not None for ih in holes_data):
+            self.hole_tags = [
+                ({ih[1]: list(range(len(poly)))} if ih[1] is not None else None)
+                for ih, poly in zip(holes_data, self.interior_holes)]
+
         # Deal with intersections in the bounding polygon / breaklines /
         # riverwalls. At the moment we cannot add points to the bounding
         # polygon because the boundary tags are not adjusted -- so check that

@@ -378,6 +378,25 @@ class ProjectDataTOML:
             _v.positive(res, f'interior_regions resolution ({poly!r})', 'mesh')
             self.interior_regions_data.append([poly, res])
 
+        # Interior holes — polygons excluded from the mesh entirely, leaving a
+        # void rather than a refined region. Used for anything water should
+        # neither enter nor flow through: building footprints, tank pads, solid
+        # structures.
+        #
+        # create_pmesh_from_regions() has always accepted interior_holes and
+        # hole_tags; there was simply no way to express them here.
+        #
+        # Distinct from interior_regions, which keeps the triangles and only
+        # changes their size — so no resolution is taken. The optional 'tag'
+        # maps to hole_tags, letting boundary conditions address the hole's
+        # edges by name; omit it and the mesh generator uses its own default.
+        self.interior_holes_data = []
+        for ih in m.get('interior_holes', []):
+            poly = _normpath(str(ih['polygon']))
+            tag = ih.get('tag')
+            self.interior_holes_data.append(
+                [poly, str(tag) if tag is not None else None])
+
         # Explicit boundary tags — required when bounding_polygon is a CSV file,
         # ignored when it is a shapefile (tags come from the shapefile attributes)
         raw_tags = m.get('boundary_tags', [])

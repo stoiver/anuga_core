@@ -121,6 +121,24 @@ bounding_polygon = "cairns_mesh/cairnsextent.shp"
 # edges = [3]
 
 
+# [[mesh.interior_holes]] -- polygons cut OUT of the mesh entirely, leaving a
+# void rather than a refined region. Use for anything water should neither
+# enter nor flow through: building footprints, tank pads, solid structures.
+#
+# Different from interior_regions above, which keeps the triangles and only
+# changes their size -- so no resolution is given here.
+#
+# 'tag' is optional and names the hole's edges so a boundary condition can be
+# bound to them. If you set it, you MUST add a matching
+# [[boundary_conditions.boundaries]] entry, or the run fails with
+# 'Tag "..." has not been bound to a boundary object'. Omit it and the mesh
+# generator applies its own 'interior' default instead.
+#
+# [[mesh.interior_holes]]
+# polygon = "cairns_mesh/buildings.csv"
+# tag     = "building"
+
+
 # Default maximum triangle area [m²] across the whole domain
 default_res = 1000000.0
 
