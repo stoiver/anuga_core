@@ -7,8 +7,10 @@ via its public constructor.
 """
 import math
 import os
+import shutil
 import tempfile
 import textwrap
+import warnings
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -1931,3 +1933,126 @@ class TestValidation(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestErosion(unittest.TestCase):
+    """[[erosion]] — five behaviours over seven operator classes."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.toml_path = os.path.join(self.tmp, 'cfg.toml')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _make(self, erosion_toml=''):
+        content = textwrap.dedent(f"""\
+            [project]
+            scenario = "test_scenario"
+            output_base_directory = "OUTPUT/"
+            yieldstep = 60.0
+            finaltime = 3600.0
+            projection_information = -55
+            flow_algorithm = "DE0"
+
+            [mesh]
+            bounding_polygon = "extent.shp"
+            default_res = 1000000.0
+        """) + textwrap.dedent(erosion_toml)
+        _write_toml(self.toml_path, content)
+        return ProjectDataTOML(self.toml_path)
+
+    def test_absent_by_default(self):
+        p = self._make()
+        self.assertEqual(p.erosion_data, [])
+
+    def test_polygon_form_parsed(self):
+        p = self._make("""
+            [[erosion]]
+            type = "simple"
+            polygon = "scour.csv"
+            threshold = 1.5
+            base = -2.0
+        """)
+        self.assertEqual(len(p.erosion_data), 1)
+        e = p.erosion_data[0]
+        self.assertEqual(e['type'], 'simple')
+        self.assertEqual(e['polygon'], 'scour.csv')
+        self.assertAlmostEqual(e['threshold'], 1.5)
+        self.assertAlmostEqual(e['base'], -2.0)
+        self.assertIsNone(e['center'])
+
+    def test_circle_form_parsed(self):
+        p = self._make("""
+            [[erosion]]
+            type = "simple"
+            center = [10.0, 20.0]
+            radius = 5.0
+        """)
+        e = p.erosion_data[0]
+        self.assertEqual(e['center'], [10.0, 20.0])
+        self.assertAlmostEqual(e['radius'], 5.0)
+        self.assertIsNone(e['polygon'])
+
+    def test_type_specific_params_kept(self):
+        p = self._make("""
+            [[erosion]]
+            type = "bed_shear"
+            polygon = "a.csv"
+            shear_factor = 1234.0
+        """)
+        self.assertAlmostEqual(p.erosion_data[0]['shear_factor'], 1234.0)
+
+    def test_type_specific_param_on_wrong_type_rejected(self):
+        # Silently ignoring it would let a user believe they had configured
+        # something they had not.
+        with self.assertRaises(ValueError) as cm:
+            self._make("""
+                [[erosion]]
+                type = "flat_slice"
+                polygon = "a.csv"
+                shear_factor = 1234.0
+            """)
+        self.assertIn('shear_factor', str(cm.exception))
+
+    def test_unknown_type_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            self._make("""
+                [[erosion]]
+                type = "landslide"
+                polygon = "a.csv"
+            """)
+        self.assertIn('landslide', str(cm.exception))
+
+    def test_region_required(self):
+        with self.assertRaises(ValueError) as cm:
+            self._make("""
+                [[erosion]]
+                type = "simple"
+            """)
+        self.assertIn('region', str(cm.exception))
+
+    def test_both_region_forms_rejected(self):
+        with self.assertRaises(ValueError) as cm:
+            self._make("""
+                [[erosion]]
+                type = "simple"
+                polygon = "a.csv"
+                center = [1.0, 2.0]
+                radius = 3.0
+            """)
+        self.assertIn('not both', str(cm.exception))
+
+    def test_warns_when_elevation_not_stored_per_timestep(self):
+        # Erosion changes elevation, but ANUGA stores it statically by default,
+        # so the .sww would show the initial terrain forever.
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
+            self._make("""
+                [[erosion]]
+                type = "simple"
+                polygon = "a.csv"
+            """)
+        msgs = ' '.join(str(x.message) for x in w)
+        self.assertIn('store_elevation_every_timestep', msgs)
+

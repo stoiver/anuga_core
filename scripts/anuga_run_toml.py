@@ -59,6 +59,7 @@ from anuga.scenario import (
     setup_mesh,
     setup_initial_conditions,
     setup_riverwalls,
+    setup_erosion,
     raster_outputs,
 )
 from anuga.scenario.prepare_data import PrepareData
@@ -139,6 +140,12 @@ setup_bridges.setup_bridges(domain, project)
 
 progress('Making pumping stations')
 setup_pumping_stations.setup_pumping_stations(domain, project)
+
+# Erosion operators change elevation as the run proceeds. Added after the
+# forcing terms and before boundary conditions, matching the ordering of the
+# other operator setups.
+progress('Making erosion operators')
+setup_erosion.setup_erosion(domain, project)
 
 # ---------------------------------------------------------------------------
 # Boundary conditions

@@ -11,6 +11,7 @@ Python versions (pip install tomli).
 """
 
 import os
+import warnings
 import glob as glob_module
 
 from anuga.utilities import spatialInputUtil as su
@@ -254,6 +255,7 @@ class ProjectDataTOML:
         self._parse_pumping_stations(cfg.get('pumping_stations', []))
         self._parse_culverts(cfg.get('culverts', []), _v)
         self._parse_weirs(cfg.get('weirs', []), _v)
+        self._parse_erosion(cfg.get('erosion', []), _v)
 
         _v.raise_if_errors(filename)
 
@@ -526,6 +528,103 @@ class ProjectDataTOML:
     # -----------------------------------------------------------------------
     # Rainfall
     # -----------------------------------------------------------------------
+
+    # Erosion / scour operators. anuga/operators/ has provided these for years
+    # (erosion_operators.py, sanddune_erosion_operator.py) but nothing in
+    # anuga/scenario/ reached them, so any scenario involving bed erosion had to
+    # drop out of the TOML workflow entirely.
+    #
+    # Five behaviours, not seven classes: Circular_erosion_operator and
+    # Polygonal_erosion_operator are thin region-specification wrappers over the
+    # base class and add no erosion physics, so they are reached here by giving
+    # 'simple' a center/radius or a polygon rather than by naming them.
+    EROSION_TYPES = ('simple', 'bed_shear', 'flat_slice', 'flat_fill', 'sand_dune')
+
+    # Parameters accepted only by particular types. Validated rather than
+    # ignored: silently dropping shear_factor from a flat_slice entry would let
+    # a user believe they had configured something they had not.
+    EROSION_TYPE_PARAMS = {
+        'bed_shear': ('shear_factor',),
+        'flat_slice': ('elevation',),
+        'flat_fill': ('elevation',),
+        'sand_dune': ('Ra',),
+    }
+
+    def _parse_erosion(self, erosion, _v):
+        self.erosion_data = []
+        for i, e in enumerate(erosion):
+            sec = f'erosion[{i}]'
+            etype = _v.require(e, 'type', sec)
+            _v.one_of(etype, self.EROSION_TYPES, 'type', sec)
+
+            # Region: polygon OR center+radius, exactly one. 'indices' is
+            # deliberately not supported — raw triangle indices are a Python-API
+            # convenience that cannot survive a re-mesh, so they have no stable
+            # meaning in a declarative config.
+            polygon = e.get('polygon')
+            center, radius = e.get('center'), e.get('radius')
+            has_poly = polygon is not None
+            has_circle = center is not None or radius is not None
+            if has_poly and has_circle:
+                _v.errors.append(
+                    f"[{sec}]: give either 'polygon' or 'center'+'radius', not both")
+            elif not has_poly and not has_circle:
+                _v.errors.append(
+                    f"[{sec}]: needs a region — either 'polygon' or 'center'+'radius'")
+            if has_circle:
+                if center is None or radius is None:
+                    _v.errors.append(
+                        f"[{sec}]: 'center' and 'radius' must be given together")
+                else:
+                    if not (isinstance(center, (list, tuple)) and len(center) == 2):
+                        _v.errors.append(
+                            f"[{sec}] 'center': expected [x, y], got {center!r}")
+                    _v.positive(float(radius), 'radius', sec)
+            if has_poly:
+                polygon = _normpath(str(polygon))
+
+            row = {
+                'type': etype,
+                'polygon': polygon,
+                'center': list(center) if has_circle and center is not None else None,
+                'radius': float(radius) if has_circle and radius is not None else None,
+                'threshold': float(e.get('threshold', 0.0)),
+                'base': float(e.get('base', 0.0)),
+                'description': e.get('description'),
+                'label': e.get('label'),
+                'logging': bool(e.get('logging', False)),
+            }
+
+            # Type-specific parameters: accept this type's own, reject others'.
+            allowed = self.EROSION_TYPE_PARAMS.get(etype, ())
+            for other_type, params in self.EROSION_TYPE_PARAMS.items():
+                if other_type == etype:
+                    continue
+                for prm in params:
+                    if prm in e and prm not in allowed:
+                        _v.errors.append(
+                            f"[{sec}] {prm!r}: only valid for type "
+                            f"{other_type!r}, not {etype!r}")
+            for prm in allowed:
+                if prm in e:
+                    row[prm] = float(e[prm])
+
+            self.erosion_data.append(row)
+
+        # Erosion changes elevation as the run proceeds, but ANUGA stores
+        # elevation statically by default — so the .sww shows the initial
+        # terrain forever and the erosion is invisible in every downstream
+        # product. Warn rather than override: silently flipping a setting the
+        # user wrote explicitly is worse than telling them.
+        if self.erosion_data and not getattr(
+                self, 'store_elevation_every_timestep', False):
+            warnings.warn(
+                'Scenario defines [[erosion]] operators but '
+                '[project] store_elevation_every_timestep is false: elevation '
+                'will be written once at t=0, so the eroded bed will not appear '
+                'in the .sww or any raster derived from it. Set it true to '
+                'record elevation as it changes.',
+                stacklevel=2)
 
     def _parse_rainfall(self, rainfall):
         self.rain_data = []
