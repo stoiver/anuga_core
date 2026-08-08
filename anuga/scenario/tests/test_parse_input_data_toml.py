@@ -1946,7 +1946,7 @@ class TestErosion(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _make(self, erosion_toml=''):
-        content = textwrap.dedent(f"""\
+        content = textwrap.dedent("""\
             [project]
             scenario = "test_scenario"
             output_base_directory = "OUTPUT/"
