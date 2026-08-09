@@ -735,7 +735,7 @@ A missing required field or an out-of-range value produces a message like::
 
    TOML configuration errors in 'scenario.toml':
      [project] 'scenario' is required but missing
-     [project] 'flow_algorithm' must be one of ('DE0', 'DE1') — got 'de0'
+     [project] 'flow_algorithm' must be one of ('DE0', 'DE1', 'DE2', 'DE0_7', 'DE1_7', 'DE_ader2') — got 'de0'
      culverts['road_culvert_1'] 'width' must be > 0 — got -0.9
 
 The run aborts after reporting all errors.
