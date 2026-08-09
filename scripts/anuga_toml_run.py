@@ -194,6 +194,27 @@ def compute_water_balance(domain):
     return (v0, fs, bf, vol, vol - v0 - bf - fs)
 
 
+def quantity_summary(name):
+    """One-line description of an initial-condition quantity's data list.
+
+    Each entry is [polygon, value]; value is a constant or a file path. Returns
+    None if the quantity was not configured.
+    """
+    entries = getattr(project, f'{name}_data', None) or []
+    if not entries:
+        return None
+    if len(entries) == 1:
+        val = entries[0][1]
+        return os.path.basename(val) if isinstance(val, str) else ('%g' % val)
+    # Multiple entries: a spatial source (file) dominates; otherwise it's a set
+    # of constant-value zones, so report the count and numeric range.
+    files = [e[1] for e in entries if isinstance(e[1], str)]
+    if files:
+        return '%s (+%d more)' % (os.path.basename(files[0]), len(entries) - 1)
+    nums = [e[1] for e in entries if isinstance(e[1], (int, float))]
+    return '%d zones (%g-%g)' % (len(entries), min(nums), max(nums))
+
+
 # ---------------------------------------------------------------------------
 # Load configuration
 # ---------------------------------------------------------------------------
@@ -230,13 +251,19 @@ try:
 except Exception as _e:
     emit('   (could not set domain CRS: %s)' % _e)
 
-# One-line mesh summary (serial: len(domain)/extent are the full mesh; under MPI
-# they would be this rank's partition, so only report it in serial).
-if myid == 0 and numprocs == 1:
-    ext = domain.get_extent()
-    emit('   {:,} triangles   extent {:.0f} x {:.0f} m{}'.format(
-        len(domain), ext[1] - ext[0], ext[3] - ext[2],
-        '   EPSG:%d' % epsg if epsg else ''))
+if myid == 0:
+    # Serial: len(domain)/extent are the full mesh; under MPI they are this
+    # rank's partition, so only report those in serial.
+    if numprocs == 1:
+        ext = domain.get_extent()
+        emit('   {:,} triangles   extent {:.0f} x {:.0f} m{}'.format(
+            len(domain), ext[1] - ext[0], ext[3] - ext[2],
+            '   EPSG:%d' % epsg if epsg else ''))
+    emit('   background resolution %g m^2   |   interior regions %d   |   '
+         'riverwalls %d'
+         % (getattr(project, 'default_res', float('nan')),
+            len(getattr(project, 'interior_regions_data', []) or []),
+            len(getattr(project, 'riverwall_csv_files', []) or [])))
 
 # ---------------------------------------------------------------------------
 # [2/6] Initial conditions (quantities + riverwalls, added after distribute)
@@ -245,6 +272,12 @@ if myid == 0 and numprocs == 1:
 section('INITIAL CONDITIONS', 2, 6)
 setup_initial_conditions.setup_initial_conditions(domain, project)
 setup_riverwalls.setup_riverwalls(domain, project)
+if myid == 0:
+    _parts = ['%s: %s' % (q, quantity_summary(q))
+              for q in ('elevation', 'friction', 'stage')
+              if quantity_summary(q) is not None]
+    if _parts:
+        emit('   ' + '   '.join(_parts))
 
 # ---------------------------------------------------------------------------
 # [3/6] Forcing & structures (rainfall, inlets, bridges, pumps, erosion)
@@ -258,6 +291,18 @@ setup_pumping_stations.setup_pumping_stations(domain, project)
 # Erosion operators change elevation during the run; added after the other
 # forcing terms and before boundary conditions.
 setup_erosion.setup_erosion(domain, project)
+if myid == 0:
+    _counts = [
+        ('rainfall inputs', len(getattr(project, 'rain_data', []) or [])),
+        ('inlets', len(getattr(project, 'inlet_data', []) or [])),
+        ('culverts', len(getattr(project, 'culvert_data', []) or [])),
+        ('weirs', len(getattr(project, 'weir_data', []) or [])),
+        ('bridges', len(getattr(project, 'bridge_data', []) or [])),
+        ('pumping stations', len(getattr(project, 'pumping_station_data', []) or [])),
+        ('erosion operators', len(getattr(project, 'erosion_data', []) or [])),
+    ]
+    _shown = ['%s %d' % (n, c) for n, c in _counts if c]
+    emit('   ' + ('   '.join(_shown) if _shown else '(none)'))
 
 # ---------------------------------------------------------------------------
 # [4/6] Boundary conditions
@@ -265,6 +310,10 @@ setup_erosion.setup_erosion(domain, project)
 
 section('BOUNDARY CONDITIONS', 4, 6)
 setup_boundary_conditions.setup_boundary_conditions(domain, project)
+if myid == 0:
+    _bd = getattr(project, 'boundary_data', []) or []
+    _pairs = '   '.join('%s=%s' % (r[0], r[1]) for r in _bd)
+    emit('   %d boundaries:  %s' % (len(_bd), _pairs))
 
 # ---------------------------------------------------------------------------
 # Track maximum quantities
@@ -287,6 +336,18 @@ else:
 domain.set_omp_num_threads(project.omp_num_threads)
 
 section('EVOLVE', 5, 6)
+if myid == 0:
+    _mode = domain.get_compute_mode() if hasattr(domain, 'get_compute_mode') else 'legacy'
+    if _mode == 'unified':
+        _mode_label = ('unified, GPU offload' if anuga.gpu_offload_enabled()
+                       else 'unified, CPU multicore')
+    else:
+        _mode_label = 'legacy (CPU OpenMP)'
+    _ostep = project.outputstep if project.outputstep is not None else project.yieldstep
+    emit('   algorithm %s   compute %s   OMP threads %s'
+         % (project.flow_algorithm, _mode_label, domain.omp_num_threads))
+    emit('   yieldstep %g s   outputstep %g s   finaltime %g s'
+         % (project.yieldstep, _ostep, project.finaltime))
 
 barrier()
 evolve_start = time.time()
