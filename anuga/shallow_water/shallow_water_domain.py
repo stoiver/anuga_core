@@ -2986,34 +2986,55 @@ class Domain(Generic_Domain):
         # The absolute floor rejects pure floating-point noise: a nearly-dry
         # domain can clamp femtolitre deficits that are a large *fraction* of an
         # essentially-zero total volume but are physically meaningless.
-        if num_negative_ids > 0 and negative_volume > _negative_volume_noise_floor:
-            # Use this rank's LOCAL water volume for the warning ratio. Do NOT
-            # call get_water_volume() here: in parallel it does an MPI allreduce
-            # (collective), but this branch is entered per-rank — only on ranks
-            # that clamped negative cells this substep. When ranks disagree
-            # (routine in wetting/drying), a collective here deadlocks (rank A
-            # waits in the volume allreduce while rank B has moved on to the
-            # ghost exchange). negative_volume is itself a per-rank quantity, so
-            # a per-rank ratio is the correct comparison for a local warning.
-            # Sum (stage - elevation)*area over local cells directly: valid both
-            # during evolve and when called standalone before evolve (unlike the
-            # 'height' quantity, which is only populated once evolve starts).
-            stage_c = self.quantities['stage'].centroid_values
-            elev_c = self.quantities['elevation'].centroid_values
-            total_volume = float(num.sum((stage_c - elev_c) * self.areas))
-            if total_volume > 0.0 and \
-                    negative_volume > self.negative_volume_warning_fraction * total_volume:
-                import warnings
-                fraction = negative_volume / total_volume
-                msg = (
-                    f'{num_negative_ids} negative cells set to zero depth, adding '
-                    f'{negative_volume:.3g} m^3 ({100.0 * fraction:.3g}% of the '
-                    f'{total_volume:.3g} m^3 in the domain): possible loss of '
-                    'conservation. \nConsider using '
-                    'domain.report_water_volume_statistics() to check the extent '
-                    'of the problem'
-                )
-                warnings.warn(msg)
+        # "Loss of conservation" is a GLOBAL property, so judge the clamped
+        # volume against the whole-domain water volume — never this rank's
+        # partition. A nearly-dry sub-domain holds only femtolitre-scale
+        # numerical noise, so routine wetting/drying clamps there read as a huge
+        # *fraction* of ~nothing and warn spuriously (seen only under MPI). Sum
+        # (stage - elevation)*area locally, then reduce across ranks.
+        #
+        # The reduction is a SINGLE, UNCONDITIONAL allreduce (never gated on the
+        # per-rank num_negative_ids): a collective placed under rank-local state
+        # deadlocks when ranks disagree — rank A waits in the reduction while
+        # rank B advances to the ghost exchange. Reduce the clamped volume, the
+        # local water volume and the clamped-cell count together; warn on rank 0.
+        # (self.evolved_called is true and discontinuous elevation is asserted
+        # above, so stage-elevation is the local depth.)
+        from anuga import numprocs, myid
+        stage_c = self.quantities['stage'].centroid_values
+        elev_c = self.quantities['elevation'].centroid_values
+        local_volume = float(num.sum((stage_c - elev_c) * self.areas))
+
+        if numprocs > 1:
+            from mpi4py import MPI
+            packed = num.array(
+                [negative_volume, local_volume, float(num_negative_ids)],
+                dtype=float)
+            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, packed, op=MPI.SUM)
+            g_negative_volume, g_total_volume = packed[0], packed[1]
+            g_negative_ids = int(round(packed[2]))
+            warn_here = (myid == 0)
+        else:
+            g_negative_volume, g_total_volume = negative_volume, local_volume
+            g_negative_ids = num_negative_ids
+            warn_here = True
+
+        if (warn_here and g_negative_ids > 0
+                and g_negative_volume > _negative_volume_noise_floor
+                and g_total_volume > 0.0
+                and g_negative_volume
+                > self.negative_volume_warning_fraction * g_total_volume):
+            import warnings
+            fraction = g_negative_volume / g_total_volume
+            msg = (
+                f'{g_negative_ids} negative cells set to zero depth, adding '
+                f'{g_negative_volume:.3g} m^3 ({100.0 * fraction:.3g}% of the '
+                f'{g_total_volume:.3g} m^3 in the domain): possible loss of '
+                'conservation. \nConsider using '
+                'domain.report_water_volume_statistics() to check the extent '
+                'of the problem'
+            )
+            warnings.warn(msg)
 
         nvtxRangePop()
 
