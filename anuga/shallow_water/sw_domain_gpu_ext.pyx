@@ -1979,19 +1979,24 @@ def extrapolate_second_order_gpu(GPUDomain gpu_dom):
     gpu_extrapolate_second_order(&gpu_dom.GD)
 
 
-def compute_fluxes_gpu(GPUDomain gpu_dom):
+def compute_fluxes_gpu(GPUDomain gpu_dom, int substep_count=0, int timestep_fluxcalls=1):
     """
     Compute fluxes across all edges on GPU.
 
     Uses the central upwind Kurganov-Noelle-Petrova scheme.
+
+    substep_count / timestep_fluxcalls index domain.boundary_flux_sum so the
+    Python boundary_flux_integral_operator gets each RK substep's boundary flux.
+    The defaults (0, 1) suit a single flux call (euler / ader2 / a standalone
+    compute_fluxes()); multi-substep callers must pass the substep index, e.g.
+    rk2 -> (0,2),(1,2) and rk3 -> (0,3),(1,3),(2,3).
 
     Returns
     -------
     float
         The local minimum timestep (caller should do MPI_Allreduce for global min)
     """
-    # Standalone single flux call: substep 0 of 1 (euler-equivalent).
-    return gpu_compute_fluxes(&gpu_dom.GD, 0, 1)
+    return gpu_compute_fluxes(&gpu_dom.GD, substep_count, timestep_fluxcalls)
 
 
 def update_conserved_quantities_gpu(GPUDomain gpu_dom, double timestep):

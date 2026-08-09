@@ -4022,7 +4022,7 @@ class Domain(Generic_Domain):
             sync_boundary_values(gpu_dom)
 
         # Compute fluxes
-        self.flux_timestep = compute_fluxes_gpu(gpu_dom)
+        self.flux_timestep = compute_fluxes_gpu(gpu_dom, 0, 2)
 
         # Forcing terms
         self.compute_forcing_terms()
@@ -4098,7 +4098,7 @@ class Domain(Generic_Domain):
             sync_boundary_values(gpu_dom)
 
         # Compute fluxes (ignore timestep from second step)
-        compute_fluxes_gpu(gpu_dom)
+        compute_fluxes_gpu(gpu_dom, 1, 2)
 
         # Forcing terms
         self.compute_forcing_terms()
@@ -4659,7 +4659,7 @@ class Domain(Generic_Domain):
         extrapolate_second_order_gpu(gpu_dom)
         _eval_boundaries()
 
-        self.flux_timestep = compute_fluxes_gpu(gpu_dom)
+        self.flux_timestep = compute_fluxes_gpu(gpu_dom, 0, 3)
 
         # Forcing terms
         self.compute_forcing_terms()
@@ -4682,7 +4682,7 @@ class Domain(Generic_Domain):
         extrapolate_second_order_gpu(gpu_dom)
         _eval_boundaries()
 
-        compute_fluxes_gpu(gpu_dom)
+        compute_fluxes_gpu(gpu_dom, 1, 3)
         self.compute_forcing_terms()
         update_conserved_quantities_gpu(gpu_dom, self.timestep)
 
@@ -4702,7 +4702,7 @@ class Domain(Generic_Domain):
         extrapolate_second_order_gpu(gpu_dom)
         _eval_boundaries()
 
-        compute_fluxes_gpu(gpu_dom)
+        compute_fluxes_gpu(gpu_dom, 2, 3)
         self.compute_forcing_terms()
         update_conserved_quantities_gpu(gpu_dom, self.timestep)
 

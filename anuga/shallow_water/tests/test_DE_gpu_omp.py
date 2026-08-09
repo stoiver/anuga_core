@@ -952,10 +952,10 @@ class Test_GPU_EndToEnd(unittest.TestCase):
     show up here before it can affect real GPU runs.
     """
 
-    def _create_tidal_domain(self, name):
+    def _create_tidal_domain(self, name, algorithm='DE0'):
         """20×10 domain with a sloping bed and a tidal left boundary."""
         domain = rectangular_cross_domain(20, 10, len1=200., len2=100.)
-        domain.set_flow_algorithm('DE0')
+        domain.set_flow_algorithm(algorithm)
         domain.set_low_froude(0)
         domain.set_name(name)
         domain.set_datadir(tempfile.mkdtemp())
@@ -1043,6 +1043,43 @@ class Test_GPU_EndToEnd(unittest.TestCase):
                 gpu_q[qname], cpu_q[qname],
                 rtol=0, atol=1e-12,
                 err_msg=f'10s dam break: {qname} mismatch between mode=1 and mode=2')
+
+    def test_boundary_flux_integral_de1_mode1_vs_mode2(self):
+        """Regression: boundary_flux_integral must match mode=1 vs mode=2 for a
+        multi-substep scheme (DE1/RK2) with a Python-evaluated GPU boundary.
+
+        The Python-orchestrated unified RK loop once called compute_fluxes_gpu
+        with a fixed substep index (0, 1), so every substep overwrote
+        boundary_flux_sum[0] and the 2nd RK substep's boundary flux was dropped
+        — halving the integral. Physics (volume) was unaffected; this guards the
+        diagnostic. The tidal domain uses the transmissive-set-stage boundary
+        that forces the Python-orchestrated path.
+        """
+        from anuga.shallow_water.sw_domain_gpu_ext import (
+            sync_to_device, sync_from_device)
+
+        cpu = self._create_tidal_domain('bfi_cpu', algorithm='DE1')
+        gpu = self._create_tidal_domain('bfi_gpu', algorithm='DE1')
+
+        cpu.set_multiprocessor_mode(1)
+        for _ in cpu.evolve(yieldstep=2.0, finaltime=10.0):
+            pass
+
+        gpu.set_multiprocessor_mode(2)
+        sync_to_device(gpu.gpu_interface.gpu_dom)
+        for _ in gpu.evolve(yieldstep=2.0, finaltime=10.0):
+            pass
+        sync_from_device(gpu.gpu_interface.gpu_dom)
+
+        bf_cpu = cpu.get_boundary_flux_integral()
+        bf_gpu = gpu.get_boundary_flux_integral()
+        # Guard the test itself: the tidal boundary must move real water.
+        self.assertGreater(abs(bf_cpu), 1.0,
+                           'test setup: expected a non-trivial boundary flux')
+        np.testing.assert_allclose(
+            bf_gpu, bf_cpu, rtol=1e-9, atol=1e-9,
+            err_msg=f'DE1 boundary_flux_integral mismatch: '
+                    f'mode1={bf_cpu}, mode2={bf_gpu}')
 
     def test_volume_conservation_mode2(self):
         """Water volume is conserved over 10 s in GPU mode (closed boundaries)."""
