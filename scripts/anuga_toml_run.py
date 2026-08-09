@@ -353,6 +353,32 @@ else:
     domain.set_multiprocessor_mode(project.multiprocessor_mode)  # Excel back-compat
 domain.set_omp_num_threads(project.omp_num_threads)
 
+# Guard the classic MPI-GPU footgun: mode-2 (unified) with GPU offload hangs /
+# garbles unless the MPI rank count matches the number of GPUs (ranks map
+# round-robin device_id = rank % num_devices, so oversubscribed ranks share a
+# device and the omp-target runtime deadlocks). Every rank evaluates the same
+# condition, so aborting here is collective — no deadlock, and a clear message
+# instead of a silent hang. See claude/KNOWN_ISSUES.md.
+if (numprocs > 1
+        and getattr(domain, 'get_compute_mode', lambda: 'legacy')() == 'unified'
+        and anuga.gpu_offload_enabled()):
+    try:
+        from anuga.shallow_water.sw_domain_gpu_ext import get_num_gpu_devices
+        _ndev = int(get_num_gpu_devices())
+    except Exception:
+        _ndev = 0
+    if _ndev <= 0 or numprocs != _ndev:
+        if myid == 0:
+            _terminal.write(
+                '\nERROR: compute_mode = "unified" with GPU offload needs the MPI '
+                'rank count to\n       match the number of GPUs. This run has '
+                '%d rank(s) and %d GPU(s), which\n       would hang. Re-run with '
+                '-np %d, or set compute_mode = "legacy" for a\n       multi-rank '
+                'CPU run.\n' % (numprocs, _ndev, _ndev if _ndev > 0 else 1))
+            _terminal.flush()
+        finalize()
+        sys.exit(1)
+
 section('EVOLVE', 5, 6)
 if myid == 0:
     _mode = domain.get_compute_mode() if hasattr(domain, 'get_compute_mode') else 'legacy'
