@@ -13,6 +13,7 @@ outputstep             = 120.0
 projection_information = "EPSG:32756"
 flow_algorithm         = "DE1"
 compute_mode           = "unified"  # "legacy" (CPU OpenMP) or "unified" (CPU/GPU)
+report_mass_conservation_statistics = true  # water balance each yieldstep
 
 [mesh]
 bounding_polygon    = "bounding_polygon.csv"

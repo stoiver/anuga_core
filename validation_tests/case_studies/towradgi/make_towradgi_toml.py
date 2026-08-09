@@ -221,6 +221,7 @@ def main():
     A(f'projection_information = "EPSG:{EPSG}"')
     A('flow_algorithm         = "DE1"')   # matches run_small_towradgi.py's default (-alg DE1)
     A('compute_mode           = "unified"  # "legacy" (CPU OpenMP) or "unified" (CPU/GPU)')
+    A('report_mass_conservation_statistics = true  # water balance each yieldstep')
     A('')
     A('[mesh]')
     A('bounding_polygon    = "bounding_polygon.csv"')
