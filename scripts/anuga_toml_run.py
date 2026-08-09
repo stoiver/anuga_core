@@ -29,6 +29,12 @@ parser.add_argument(
     metavar='CONFIG.toml',
     help='Path to the TOML scenario configuration file.')
 parser.add_argument(
+    '-v', '--verbose', action='store_true',
+    help='Echo the detailed library output (mesh generation, riverwall setup, '
+         'raster writing, ...) to the terminal. By default that goes only to '
+         'the run log file and the terminal shows just the phase banners and '
+         'summary. The full log is always written either way.')
+parser.add_argument(
     '-n', '--dry-run', action='store_true',
     help='Do not run the simulation. Preview the scenario in the format given '
          'by --format (default: open an HTML summary in the browser).')
@@ -134,25 +140,42 @@ except ImportError:
 
 t0 = time.time()
 
+# Where banners/summary go. Default is the real terminal; PrepareData installs a
+# saved terminal handle in _terminal below once it knows the verbosity, so the
+# banners still show even when the run's detailed stdout is redirected to the
+# log file (quiet mode).
+_terminal = sys.__stdout__
+
 
 def progress(msg):
-    """Print a setup milestone to the terminal regardless of log redirection."""
-    sys.__stdout__.write(msg + '\n')
-    sys.__stdout__.flush()
+    """Write to the terminal only (regardless of stdout redirection)."""
+    _terminal.write(msg + '\n')
+    _terminal.flush()
+
+
+def emit(msg=''):
+    """Runner output that belongs in both the log and the terminal (once).
+
+    print() goes to the log (fd 1 in quiet mode; also the terminal via the tee
+    in --verbose); in quiet mode we additionally echo to the saved terminal.
+    """
+    print(msg)
+    if not args.verbose:
+        progress(msg)
 
 
 _SECTION_BAR = '=' * 64
 
 
 def section(title, n=None, total=None):
-    """Print a consistent phase banner to the terminal (rank 0 only)."""
+    """Print a consistent phase banner (log + terminal, rank 0 only)."""
     if myid != 0:
         return
     tag = f'[{n}/{total}]  ' if n is not None else ''
-    progress('')
-    progress(_SECTION_BAR)
-    progress(f'  {tag}{title}')
-    progress(_SECTION_BAR)
+    emit('')
+    emit(_SECTION_BAR)
+    emit(f'  {tag}{title}')
+    emit(_SECTION_BAR)
 
 
 def compute_water_balance(domain):
@@ -175,7 +198,11 @@ def compute_water_balance(domain):
 # Load configuration
 # ---------------------------------------------------------------------------
 
-project = PrepareData(config_basename, output_log='Simulation_logfile.log')
+project = PrepareData(config_basename, output_log='Simulation_logfile.log',
+                      echo_terminal=args.verbose)
+# In quiet mode PrepareData redirected fd 1 to the log file; use the terminal
+# handle it saved so banners/summary still reach the console.
+_terminal = getattr(project, 'terminal', sys.__stdout__)
 
 # ---------------------------------------------------------------------------
 # [1/6] Mesh
@@ -198,16 +225,16 @@ try:
     if epsg is not None:
         domain.set_epsg(epsg)
     else:
-        progress('   (could not resolve an EPSG code from projection %r)'
-                 % project.proj4string)
+        emit('   (could not resolve an EPSG code from projection %r)'
+             % project.proj4string)
 except Exception as _e:
-    progress('   (could not set domain CRS: %s)' % _e)
+    emit('   (could not set domain CRS: %s)' % _e)
 
 # One-line mesh summary (serial: len(domain)/extent are the full mesh; under MPI
 # they would be this rank's partition, so only report it in serial).
 if myid == 0 and numprocs == 1:
     ext = domain.get_extent()
-    progress('   {:,} triangles   extent {:.0f} x {:.0f} m{}'.format(
+    emit('   {:,} triangles   extent {:.0f} x {:.0f} m{}'.format(
         len(domain), ext[1] - ext[0], ext[3] - ext[2],
         '   EPSG:%d' % epsg if epsg else ''))
 
@@ -267,16 +294,22 @@ for t in domain.evolve(yieldstep=project.yieldstep,
                        finaltime=project.finaltime,
                        outputstep=project.outputstep):
     if myid == 0:
-        domain.print_timestepping_statistics()
+        _stats = domain.timestepping_statistics()
+        print(_stats)                       # -> log (and terminal via tee if -v)
+        if not args.verbose:
+            progress(_stats)                # keep the quiet terminal informed
 
     if project.report_mass_conservation_statistics:
         _wb = compute_water_balance(domain)   # collective (all ranks)
         if myid == 0 and _wb is not None:
             _v0, _fs, _bf, _vol, _resid = _wb
             _den = max(abs(_vol), abs(_v0) + abs(_fs) + abs(_bf), 1.0)
-            print('   └─ balance:  V=%.2f  FS=%.2f  BF=%.2f  '
-                  'imbalance=%.2e (%.1e rel)'
-                  % (_vol, _fs, _bf, _resid, _resid / _den))
+            _bal = ('   └─ balance:  V=%.2f  FS=%.2f  BF=%.2f  '
+                    'imbalance=%.2e (%.1e rel)'
+                    % (_vol, _fs, _bf, _resid, _resid / _den))
+            print(_bal)
+            if not args.verbose:
+                progress(_bal)
 
     if project.report_peak_velocity_statistics and _have_user_functions:
         user_functions.print_velocity_statistics(domain, max_quantities)
@@ -298,35 +331,34 @@ try:
     water_balance = compute_water_balance(domain)
 except Exception as _e:
     if myid == 0:
-        progress(f'Water balance unavailable: {_e}')
+        emit(f'Water balance unavailable: {_e}')
 
 # ---------------------------------------------------------------------------
-# [6/6] Run summary (rank 0). Written to the real terminal via progress() so it
-# shows even when stdout is redirected to the log file.
+# [6/6] Run summary (rank 0), to both the log and the terminal.
 # ---------------------------------------------------------------------------
 if myid == 0:
     section('RUN SUMMARY', 6, 6)
-    progress('   Phase timings (s)')
+    emit('   Phase timings (s)')
     if mesh_build_time is not None:
-        progress('     mesh construction   %10.2f' % mesh_build_time)
+        emit('     mesh construction   %10.2f' % mesh_build_time)
     if mesh_distribute_time is not None and numprocs > 1:
-        progress('     distribute          %10.2f' % mesh_distribute_time)
-    progress('     evolve              %10.2f' % evolve_time)
-    progress('     total (wall)        %10.2f' % (time.time() - t0))
+        emit('     distribute          %10.2f' % mesh_distribute_time)
+    emit('     evolve              %10.2f' % evolve_time)
+    emit('     total (wall)        %10.2f' % (time.time() - t0))
 
     if water_balance is not None:
         v0, fs, bf, vol, resid = water_balance
         denom = max(abs(vol), abs(v0) + abs(fs) + abs(bf), 1.0)
         rel = resid / denom
         verdict = 'OK conserved' if abs(rel) < 1e-6 else 'CHECK imbalance'
-        progress('')
-        progress('   Water balance (m^3)')
-        progress('     initial volume          %14.2f' % v0)
-        progress('     rainfall + inlets (FS)  %14.2f' % fs)
-        progress('     net boundary flux (BF)  %14.2f' % bf)
-        progress('     final volume            %14.2f' % vol)
-        progress('     imbalance               %14.2f   (%.1e rel)  %s'
-                 % (resid, rel, verdict))
+        emit('')
+        emit('   Water balance (m^3)')
+        emit('     initial volume          %14.2f' % v0)
+        emit('     rainfall + inlets (FS)  %14.2f' % fs)
+        emit('     net boundary flux (BF)  %14.2f' % bf)
+        emit('     final volume            %14.2f' % vol)
+        emit('     imbalance               %14.2f   (%.1e rel)  %s'
+             % (resid, rel, verdict))
 
 # ---------------------------------------------------------------------------
 # Outputs (max-quantity CSVs, parallel SWW merge, GeoTIFF rasters)
@@ -334,7 +366,7 @@ if myid == 0:
 
 section('OUTPUTS')
 if myid == 0:
-    progress('   writing to %s' % project.output_dir)
+    emit('   writing to %s' % project.output_dir)
 
 max_quantity_file_start = domain.get_datadir() + '/Max_quantities_'
 max_quantities.export_max_quantities_to_csv(max_quantity_file_start)
