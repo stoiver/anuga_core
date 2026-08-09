@@ -158,6 +158,42 @@ class TestScenarioSummary(unittest.TestCase):
     def test_no_rainfall_returns_none(self):
         self.assertIsNone(_aggregate_rainfall([], self.tmp))
 
+    # ---- inlets: constant rate vs time-varying hydrograph ------------------
+
+    def _inlet_body(self, name='hydro.csv'):
+        return _BASE + textwrap.dedent(f"""\
+            [[inlets]]
+            name = "creek"
+            line_file = "line.csv"
+            timeseries_file = "{name}"
+            start_time = 0.0
+        """)
+
+    def test_inlet_constant_rate_reported(self):
+        with open(os.path.join(self.tmp, 'hydro.csv'), 'w') as fh:
+            fh.write('time,discharge\n0,20\n1000000,20\n')
+        html = build_summary_html(self._write(self._inlet_body()))
+        self.assertIn('constant 20 m³/s', html)
+        self.assertNotIn('class="ln-reed"', html)   # no chart element
+
+    def test_inlet_varying_gets_chart(self):
+        with open(os.path.join(self.tmp, 'hydro.csv'), 'w') as fh:
+            fh.write('time,discharge\n0,0\n1800,50\n3600,10\n')
+        html = build_summary_html(self._write(self._inlet_body()))
+        self.assertIn('class="ln-reed"', html)       # chart element present
+        self.assertIn('peak 50', html)
+        self.assertIn('mean', html)
+
+    def test_inlet_missing_timeseries_falls_back(self):
+        html = build_summary_html(self._write(self._inlet_body('nope.csv')))
+        self.assertIn('creek', html)
+        self.assertIn('line source', html)           # generic fallback, no crash
+
+    def test_is_constant_helper(self):
+        from anuga.scenario.scenario_summary import _is_constant
+        self.assertTrue(_is_constant([5.0, 5.0, 5.0]))
+        self.assertFalse(_is_constant([0.0, 5.0, 1.0]))
+
     # ---- friction tiers ----------------------------------------------------
 
     def test_friction_tiers(self):

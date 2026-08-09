@@ -66,6 +66,72 @@ def _read_timeseries(path):
         return None
 
 
+def _read_two_col(path):
+    """Return (x, y) float arrays from a 2-column CSV with an optional header.
+
+    Used for inlet discharge hydrographs ``[time_s, discharge_m3s]``. Returns
+    ``None`` if the file is missing or unreadable.
+    """
+    import numpy as np
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with open(path) as fh:
+            first = fh.readline()
+        skip = 1 if any(c.isalpha() for c in first) else 0
+        arr = np.genfromtxt(path, delimiter=',', skip_header=skip)
+        if arr.ndim != 2 or arr.shape[1] < 2:
+            return None
+        return arr[:, 0].astype(float), arr[:, 1].astype(float)
+    except Exception:
+        return None
+
+
+def _is_constant(y):
+    import numpy as np
+    y = np.asarray(y, dtype=float)
+    return float(y.max() - y.min()) <= 1e-9 * max(1.0, abs(float(y.max())))
+
+
+def _line_chart_svg(t, y, unit, accent='water'):
+    """Compact line chart of *y* (in *unit*) versus time in hours."""
+    import numpy as np
+    t = np.asarray(t, dtype=float)
+    y = np.asarray(y, dtype=float)
+    th = t / 3600.0
+    T = th[-1] if th[-1] > 0 else 1.0
+    ymax = float(y.max()) if y.max() > 0 else 1.0
+    W, H, padL, padR, padT, padB = 720, 150, 40, 12, 14, 24
+    pw, ph = W - padL - padR, H - padT - padB
+    ybase = padT + ph
+
+    def X(v):
+        return padL + v / T * pw
+
+    def Y(v):
+        return padT + (1 - v / ymax) * ph
+
+    pts = ' '.join(f'{X(a):.1f},{Y(b):.1f}' for a, b in zip(th, y))
+    step = 6 if T > 14 else (2 if T > 4 else 1)
+    ticks = []
+    h = 0
+    while h <= T + 1e-6:
+        x = X(h)
+        ticks.append(
+            f'<line class="ax" x1="{x:.1f}" y1="{ybase:.1f}" x2="{x:.1f}" y2="{ybase + 4:.1f}"/>'
+            f'<text class="axl" x="{x:.1f}" y="{H - 6}" text-anchor="middle">{h}h</text>')
+        h += step
+    axes = (
+        f'<text class="hy-axl hy-{accent}" x="{padL - 6}" y="{padT + 4:.0f}" text-anchor="end">{ymax:g}</text>'
+        f'<text class="hy-axl hy-{accent}" x="{padL - 6}" y="{ybase:.0f}" text-anchor="end">0</text>'
+        f'<text class="axl" x="{padL - 6}" y="{padT - 3:.0f}" text-anchor="end">{esc(unit)}</text>')
+    return (
+        f'<svg viewBox="0 0 {W} {H}" class="hyeto" role="img" '
+        f'aria-label="Inlet discharge over time">'
+        f'<line class="grid" x1="{padL}" y1="{ybase:.1f}" x2="{padL + pw}" y2="{ybase:.1f}"/>'
+        f'<polyline class="ln-{accent}" points="{pts}"/>{"".join(ticks)}{axes}</svg>')
+
+
 # ---------------------------------------------------------------------------
 # Rainfall aggregation
 # ---------------------------------------------------------------------------
@@ -415,11 +481,32 @@ def build_summary_html(config_path, base_dir=None):
             f'<div class="card"><p class="eyebrow" style="margin-bottom:0">'
             f'Rainfall — catchment-mean hyetograph · {len(rain_entries)} input(s)</p>{body}</div>')
     if inlets:
-        rows = ''.join(
-            f'<div class="kv"><span class="k">{esc(str(i.get("name", "inlet")).replace("_", " "))}</span>'
-            f'<span class="v">line source</span></div>' for i in inlets)
-        forcing.append(f'<div class="card" style="margin-top:1.1rem">'
-                       f'<p class="eyebrow" style="margin-bottom:.6rem">Inlets — line sources</p>{rows}</div>')
+        import numpy as np
+        blocks = []
+        for i in inlets:
+            name = esc(str(i.get('name', 'inlet')).replace('_', ' '))
+            ts = i.get('timeseries_file')
+            series = _read_two_col(os.path.join(base_dir, ts)) if ts else None
+            if series is None or len(series[0]) < 1:
+                blocks.append(
+                    f'<div class="kv"><span class="k">{name}</span>'
+                    f'<span class="v">line source</span></div>')
+            elif len(series[1]) == 1 or _is_constant(series[1]):
+                q = float(series[1][0])
+                blocks.append(
+                    f'<div class="kv"><span class="k">{name}</span>'
+                    f'<span class="v">constant {q:g} m³/s</span></div>')
+            else:
+                t, q = series
+                blocks.append(
+                    f'<div class="inlet-plot"><div class="kv" style="border:0;padding-bottom:.2rem">'
+                    f'<span class="k">{name}</span>'
+                    f'<span class="v">peak {float(q.max()):g} · mean {float(q.mean()):g} m³/s</span></div>'
+                    f'{_line_chart_svg(t, q, "m³/s", accent="reed")}</div>')
+        forcing.append(
+            f'<div class="card" style="margin-top:1.1rem">'
+            f'<p class="eyebrow" style="margin-bottom:.6rem">Inlets — line sources '
+            f'(discharge)</p>{"".join(blocks)}</div>')
     if forcing:
         sections.append(f'<section><h2>Forcing</h2>{"".join(forcing)}</section>')
 
@@ -578,8 +665,12 @@ td.num{font-family:var(--mono);font-variant-numeric:tabular-nums;color:var(--ink
 .hyeto{width:100%;height:auto;display:block;margin:.5rem 0 .2rem;overflow:visible}
 .hy-bar{fill:var(--water);opacity:.55}
 .hy-cum{fill:none;stroke:var(--silt);stroke-width:1.8;stroke-linejoin:round}
+.ln-water{fill:none;stroke:var(--water);stroke-width:1.8;stroke-linejoin:round}
+.ln-reed{fill:none;stroke:var(--reed);stroke-width:1.8;stroke-linejoin:round}
+.inlet-plot{padding:.4rem 0;border-bottom:1px solid var(--line)}
+.inlet-plot:last-child{border-bottom:0}
 .hy-axl{font-family:var(--mono);font-size:10px;font-variant-numeric:tabular-nums}
-.hy-l{fill:var(--water)}.hy-r{fill:var(--silt)}
+.hy-l{fill:var(--water)}.hy-r{fill:var(--silt)}.hy-reed{fill:var(--reed)}.hy-water{fill:var(--water)}
 .hy-legend text{fill:var(--ink-soft);font-family:var(--mono);font-size:10px}
 .grid{stroke:var(--line);stroke-width:1}
 .ax{stroke:var(--ink-faint);stroke-width:1}
