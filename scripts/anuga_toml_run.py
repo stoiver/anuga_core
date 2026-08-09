@@ -141,6 +141,22 @@ def progress(msg):
     sys.__stdout__.flush()
 
 
+def compute_water_balance(domain):
+    """Return (v0, fs, bf, vol, imbalance) for the mass-balance identity
+    ``V = V0 + BF + FS``, or None if unavailable (non-DE).
+
+    Collective: the volume getters reduce across ranks, so this must be called
+    on every rank (print on rank 0 only). v0=initial volume, fs=fractional-step
+    inflow (rainfall/inlets/operators), bf=net boundary flux, vol=current volume.
+    """
+    stats = domain.report_water_volume_statistics(verbose=False, returnStats=True)
+    if stats is None:
+        return None
+    vol, bf, fs = stats
+    v0 = domain.volume_history[0] if getattr(domain, 'volume_history', None) else 0.0
+    return (v0, fs, bf, vol, vol - v0 - bf - fs)
+
+
 # ---------------------------------------------------------------------------
 # Load configuration
 # ---------------------------------------------------------------------------
@@ -241,7 +257,13 @@ for t in domain.evolve(yieldstep=project.yieldstep,
         domain.print_timestepping_statistics()
 
     if project.report_mass_conservation_statistics:
-        domain.report_water_volume_statistics()
+        _wb = compute_water_balance(domain)   # collective (all ranks)
+        if myid == 0 and _wb is not None:
+            _v0, _fs, _bf, _vol, _resid = _wb
+            _den = max(abs(_vol), abs(_v0) + abs(_fs) + abs(_bf), 1.0)
+            print('    water balance: V=%.2f  FS(rain+inlet)=%.2f  BF=%.2f  '
+                  'imbalance=%.3g (%.2e rel)'
+                  % (_vol, _fs, _bf, _resid, _resid / _den))
 
     if project.report_peak_velocity_statistics and _have_user_functions:
         user_functions.print_velocity_statistics(domain, max_quantities)
@@ -255,16 +277,12 @@ for t in domain.evolve(yieldstep=project.yieldstep,
 barrier()
 evolve_time = time.time() - evolve_start
 
-# Water balance (DE only). The getters reduce across ranks, so call on ALL
-# ranks (collective) here; print on rank 0 below. Identity: final volume =
-# initial + boundary flux + fractional-step (rainfall/inlet/operator) inflow.
+# Final water balance (DE only). Collective: compute on ALL ranks, print on
+# rank 0 below. Identity: final volume = initial + boundary flux + fractional-
+# step (rainfall/inlet/operator) inflow.
 water_balance = None
 try:
-    _wb = domain.report_water_volume_statistics(verbose=False, returnStats=True)
-    if _wb is not None:
-        _vol, _bf, _fs = _wb
-        _v0 = domain.volume_history[0] if getattr(domain, 'volume_history', None) else 0.0
-        water_balance = (_v0, _fs, _bf, _vol, _vol - _v0 - _bf - _fs)
+    water_balance = compute_water_balance(domain)
 except Exception as _e:
     if myid == 0:
         progress(f'Water balance unavailable: {_e}')
