@@ -219,7 +219,7 @@ def main():
     A('finaltime              = 3600.0')
     A('outputstep             = 120.0')
     A(f'projection_information = "EPSG:{EPSG}"')
-    A('flow_algorithm         = "DE0"')
+    A('flow_algorithm         = "DE1"')   # matches run_small_towradgi.py's default (-alg DE1)
     A('compute_mode           = "unified"  # "legacy" (CPU OpenMP) or "unified" (CPU/GPU)')
     A('')
     A('[mesh]')

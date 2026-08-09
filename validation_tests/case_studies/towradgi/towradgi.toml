@@ -11,7 +11,7 @@ yieldstep              = 120.0
 finaltime              = 3600.0
 outputstep             = 120.0
 projection_information = "EPSG:32756"
-flow_algorithm         = "DE0"
+flow_algorithm         = "DE1"
 compute_mode           = "unified"  # "legacy" (CPU OpenMP) or "unified" (CPU/GPU)
 
 [mesh]
