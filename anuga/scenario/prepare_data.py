@@ -105,6 +105,15 @@ class PrepareData(ProjectData):
             else:
                 stdout_file = output_log
 
+            # Per-rank log files in parallel: every rank redirects its own fd 1
+            # to this one file, so a single shared path interleaves all ranks'
+            # output line-by-line (unreadable). Give each rank its own file
+            # (…_P{myid}.log) so the logs stay separable; rank 0's terminal
+            # summary is unaffected.
+            if numprocs > 1:
+                _root, _ext = os.path.splitext(stdout_file)
+                stdout_file = '%s_P%d%s' % (_root, myid, _ext)
+
             if echo_terminal:
                 # Tee stdout to both the terminal and the log file.
                 if myid == 0:
@@ -122,7 +131,15 @@ class PrepareData(ProjectData):
                 sys.stdout.flush()
                 self.terminal = os.fdopen(os.dup(1), 'w', buffering=1)
                 if myid == 0:
-                    self.terminal.write('Detailed output -> ' + stdout_file + '\n')
+                    if numprocs > 1:
+                        _root, _ext = os.path.splitext(stdout_file)
+                        # strip the _P0 suffix to show the shared pattern
+                        _pat = _root.rsplit('_P', 1)[0] + '_P{rank}' + _ext
+                        self.terminal.write(
+                            'Detailed output -> %s (one per rank)\n' % _pat)
+                    else:
+                        self.terminal.write(
+                            'Detailed output -> ' + stdout_file + '\n')
                     self.terminal.flush()
                 self._log_fh = open(stdout_file, 'a', encoding='utf-8')
                 os.dup2(self._log_fh.fileno(), 1)
