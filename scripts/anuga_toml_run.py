@@ -251,14 +251,32 @@ try:
 except Exception as _e:
     emit('   (could not set domain CRS: %s)' % _e)
 
+# Global mesh size. After distribute, len(domain)/get_extent() are this rank's
+# partition, so reduce across ranks: total non-ghost triangles (sum) and the
+# global extent (min/max). This is collective — run on every rank.
+_ext = domain.get_extent()  # (xmin, xmax, ymin, ymax) for this rank
+if numprocs > 1:
+    try:
+        from mpi4py import MPI
+        _c = MPI.COMM_WORLD
+        _ntri = _c.allreduce(int(domain.number_of_full_triangles), op=MPI.SUM)
+        _xmin = _c.allreduce(_ext[0], op=MPI.MIN)
+        _xmax = _c.allreduce(_ext[1], op=MPI.MAX)
+        _ymin = _c.allreduce(_ext[2], op=MPI.MIN)
+        _ymax = _c.allreduce(_ext[3], op=MPI.MAX)
+    except Exception:
+        _ntri = None
+else:
+    _ntri = len(domain)
+    _xmin, _xmax, _ymin, _ymax = _ext
+
 if myid == 0:
-    # Serial: len(domain)/extent are the full mesh; under MPI they are this
-    # rank's partition, so only report those in serial.
-    if numprocs == 1:
-        ext = domain.get_extent()
+    if _ntri is not None:
         emit('   {:,} triangles   extent {:.0f} x {:.0f} m{}'.format(
-            len(domain), ext[1] - ext[0], ext[3] - ext[2],
+            _ntri, _xmax - _xmin, _ymax - _ymin,
             '   EPSG:%d' % epsg if epsg else ''))
+    elif epsg:
+        emit('   EPSG:%d' % epsg)
     emit('   background resolution %g m^2   |   interior regions %d   |   '
          'riverwalls %d'
          % (getattr(project, 'default_res', float('nan')),
