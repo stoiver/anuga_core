@@ -232,8 +232,16 @@ configure_file(
 )
 
 configure_file(
-    input: 'scripts/anuga_run_toml.py',
-    output: 'anuga_run_toml',
+    input: 'scripts/anuga_toml_run.py',
+    output: 'anuga_toml_run',
+    configuration: conf,
+    install_dir: get_option('bindir'),
+    install_mode: 'rwxr-xr-x'
+)
+
+configure_file(
+    input: 'scripts/anuga_toml_view.py',
+    output: 'anuga_toml_view',
     configuration: conf,
     install_dir: get_option('bindir'),
     install_mode: 'rwxr-xr-x'

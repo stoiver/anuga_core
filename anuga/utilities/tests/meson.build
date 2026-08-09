@@ -16,6 +16,7 @@ python_sources = [
 'test_sparse.py',
 'test_spatialInputUtil.py',
 'test_system_tools.py',
+'test_toml_view.py',
 'test_where_close.py',
 'test_xml_tools.py',
 'test_parse_time.py',

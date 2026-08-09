@@ -1174,7 +1174,7 @@ serial operators, absent here); MPI's growing `distribute` overhead (→30 s at
 **Session 42 (2026-06-25):** Test robustness, PR #144 conflict resolution, and an
 MPI build gotcha. Made the run_toml end-to-end test directory-independent: locate
 the checkout via `cwd` (not just `__file__`, which lives in site-packages for an
-installed pkg), then self-contained — prefer the installed `anuga_run_toml`
+installed pkg), then self-contained — prefer the installed `anuga_toml_run`
 console command + inline-generated inputs, so it runs from any directory and
 skips only when no runner exists (commits `316620e5`, `e9400c6d`). Resolved the
 conflicts on **PR #144** ("Defer GPU/offload interface build to first evolve"):
@@ -1190,7 +1190,7 @@ re-ran MPI detection; fixed by rebuilding into a fresh `-Cbuild-dir` (mpi4py
 fallback then finds `mpicc`/`mpi.h`), documented in `KNOWN_ISSUES.md` (commit
 `a07216dd`). Those four tests then pass (8/8).
 
-**Session 41 (2026-06-23):** `anuga_run_toml` TOML scenario runner — examples,
+**Session 41 (2026-06-23):** `anuga_toml_run` TOML scenario runner — examples,
 georeferencing, and an end-to-end test. Added `examples/run_toml/` with
 self-contained `simple/` (dam break) and `complex/` (floodplain) scenarios + per-
 scenario READMEs (commits `0c3c9546`, `d2f85ad4`). Added `"EPSG:<code>"`
@@ -1422,7 +1422,7 @@ suite: 58.13% → 58.68%.
 | Memory reporting | `anuga/utilities/system_tools.py::memory_stats()` |
 | Timestepping output | `anuga/abstract_2d_finite_volumes/generic_domain.py::timestepping_statistics()` |
 | Triangle quiet/verbose | `anuga/pmesh/mesh.py::_generateMesh_impl()` |
-| TOML scenario config | `anuga/scenario/`, `scripts/anuga_run_toml.py`, `examples/run_toml/` (simple/complex/cairns; shared DEM in `examples/data/cairns/`); legacy Excel front-end in `examples/cairns_toml_excel/` |
+| TOML scenario config | `anuga/scenario/`, `scripts/anuga_toml_run.py`, `examples/run_toml/` (simple/complex/cairns; shared DEM in `examples/data/cairns/`); legacy Excel front-end in `examples/cairns_toml_excel/` |
 | Single-process benchmark | `benchmarks/run_benchmarks.py` + `benchmarks/compare_benchmarks.py` |
 | MPI distribution benchmark | `benchmarks/distribute_benchmarks.py` + `benchmarks/run_benchmark_grid.py` |
 

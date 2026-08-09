@@ -1,6 +1,6 @@
-# Running ANUGA from a TOML file with `anuga_run_toml`
+# Running ANUGA from a TOML file with `anuga_toml_run`
 
-`anuga_run_toml` runs a complete ANUGA simulation from a single plain-text
+`anuga_toml_run` runs a complete ANUGA simulation from a single plain-text
 [TOML](https://toml.io) configuration file — no Python scripting required.
 You describe the mesh (including voids for buildings and other obstructions),
 initial conditions, boundaries, rainfall, inlets, hydraulic structures and bed
@@ -27,25 +27,25 @@ interface; new scenarios should use the TOML runner shown here.
 
 ## How to run
 
-`anuga_run_toml` is installed as a console command (via meson). In a source
+`anuga_toml_run` is installed as a console command (via meson). In a source
 checkout you can also run the script directly with
-`python <repo>/scripts/anuga_run_toml.py`.
+`python <repo>/scripts/anuga_toml_run.py`.
 
 ```bash
 # Simple scenario (serial)
 cd simple
-anuga_run_toml dam_break.toml
+anuga_toml_run dam_break.toml
 
 # Complex scenario (serial)
 cd ../complex
-anuga_run_toml floodplain.toml
+anuga_toml_run floodplain.toml
 
 # Either scenario in parallel (e.g. 4 processes)
-mpiexec -np 4 anuga_run_toml floodplain.toml
+mpiexec -np 4 anuga_toml_run floodplain.toml
 
 # Dry run: preview the scenario as an HTML summary in your browser,
 # without building a mesh or running the simulation.
-anuga_run_toml floodplain.toml --dry-run
+anuga_toml_run floodplain.toml --dry-run
 ```
 
 The runner `cd`s into the TOML's directory first, so all paths inside the TOML
@@ -63,12 +63,28 @@ curve) read straight from the gauge timeseries — then opens it in the default
 browser. Nothing is simulated, so it is a fast way to sanity-check a config.
 
 ```bash
-anuga_run_toml floodplain.toml --dry-run                 # write + open in browser
-anuga_run_toml floodplain.toml --dry-run --no-browser    # write the file only
-anuga_run_toml floodplain.toml --dry-run --summary-output preview.html
+anuga_toml_run floodplain.toml --dry-run                 # write + open in browser
+anuga_toml_run floodplain.toml --dry-run --no-browser    # write the file only
+anuga_toml_run floodplain.toml --dry-run --summary-output preview.html
 ```
 
 The summary defaults to `<config>_summary.html` next to the TOML.
+
+### Viewing the raw TOML — `anuga_toml_view`
+
+To read the config *text* in the terminal, `anuga_toml_view` syntax-highlights
+it and collapses long runs of repeated array-of-table blocks (the many
+one-per-file friction / culvert / rainfall entries) to the first block plus a
+"N more" marker, so a big scenario stays legible:
+
+```bash
+anuga_toml_view towradgi.toml            # highlighted, collapsed, paged
+anuga_toml_view towradgi.toml --full     # expand every block
+anuga_toml_view towradgi.toml --no-color # plain text
+```
+
+(A source checkout without the console scripts installed can run
+`python <repo>/scripts/anuga_toml_view.py …`.)
 
 ## Anatomy of a scenario directory
 

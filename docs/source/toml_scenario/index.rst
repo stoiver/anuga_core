@@ -1,12 +1,12 @@
 .. _toml_scenario:
 
 =====================================
-Running Scenarios with anuga_run_toml
+Running Scenarios with anuga_toml_run
 =====================================
 
 .. currentmodule:: anuga
 
-The ``anuga_run_toml`` script provides a ready-made runner for ANUGA flood and
+The ``anuga_toml_run`` script provides a ready-made runner for ANUGA flood and
 tsunami scenarios.  All simulation inputs are described in a single
 `TOML <https://toml.io>`_ configuration file — no Python coding required for
 standard setups.  The same script also accepts legacy Excel (``.xlsx``) files
@@ -24,13 +24,13 @@ Quick Start
 
 .. code-block:: bash
 
-   anuga_run_toml  path/to/scenario.toml
+   anuga_toml_run  path/to/scenario.toml
 
 **Parallel run (MPI):**
 
 .. code-block:: bash
 
-   mpirun -np 6  anuga_run_toml  path/to/scenario.toml
+   mpirun -np 6  anuga_toml_run  path/to/scenario.toml
 
 All relative paths inside the TOML file are resolved relative to the directory
 that contains the TOML file, so the script can be invoked from any working
@@ -50,8 +50,8 @@ The (≈9 MB) DEM is shared under ``examples/data/cairns/``.
 .. code-block:: bash
 
    cd examples/run_toml/cairns
-   anuga_run_toml cairns_example.toml          # serial
-   mpirun -np 4 anuga_run_toml cairns_example.toml   # parallel
+   anuga_toml_run cairns_example.toml          # serial
+   mpirun -np 4 anuga_toml_run cairns_example.toml   # parallel
 
 The same scenario is also available through a legacy Excel front-end under
 ``examples/cairns_toml_excel/`` (see *Excel Compatibility* below).
@@ -799,7 +799,7 @@ Each run creates a timestamped directory under ``output_base_directory``::
        ├── *.tif                  ← GeoTiff rasters of peak quantities
        ├── code/                  ← archived copy of all input files
        │   ├── scenario.toml
-       │   ├── anuga_run_toml     ← copy of the runner script
+       │   ├── anuga_toml_run     ← copy of the runner script
        │   └── user_functions.py
        └── SPATIAL_TEXT/          ← text copies of spatial inputs (for QC)
 
@@ -807,9 +807,9 @@ Each run creates a timestamped directory under ``output_base_directory``::
 Excel Compatibility
 --------------------
 
-``anuga_run_toml`` also accepts legacy Excel files::
+``anuga_toml_run`` also accepts legacy Excel files::
 
-   anuga_run_toml  path/to/ANUGA_setup.xlsx
+   anuga_toml_run  path/to/ANUGA_setup.xlsx
 
 The Excel format is described in the ``cairns_toml_excel`` example directory.
 Attributes that exist only in the TOML interface

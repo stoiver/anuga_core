@@ -1,6 +1,6 @@
 #!/usr/bin/python
 """
-Render an anuga_run_toml scenario as a self-contained HTML summary.
+Render an anuga_toml_run scenario as a self-contained HTML summary.
 
 A "dry run" for a TOML scenario: parse the config (no mesh build, no evolve),
 summarise the domain / mesh / friction / structures / forcing, and — for
@@ -14,7 +14,7 @@ Public API:
     write_scenario_summary(config_path, output_html=None,
                            base_dir=None, open_browser=False) -> str  # -> path
 
-Used by `anuga_run_toml --dry-run`.
+Used by `anuga_toml_run --dry-run`.
 """
 
 import os
@@ -515,7 +515,7 @@ def build_summary_html(config_path, base_dir=None):
             f"<code>{esc(os.path.basename(config_path))}</code>. This is a dry-run summary "
             f"of the configuration — no mesh was built and no simulation was run.")
     body_html = (
-        f'<div class="wrap"><p class="eyebrow">ANUGA scenario · anuga_run_toml --dry-run</p>'
+        f'<div class="wrap"><p class="eyebrow">ANUGA scenario · anuga_toml_run --dry-run</p>'
         f'<h1>{esc(scenario.replace("_", " "))}</h1><p class="lede">{lede}</p>'
         f'<div class="badges">{"".join(badges)}</div>'
         f'<div class="stats">{"".join(stats)}</div>'

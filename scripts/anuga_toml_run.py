@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-anuga_run_toml — run an ANUGA scenario from a TOML configuration file.
+anuga_toml_run — run an ANUGA scenario from a TOML configuration file.
 
 Usage (serial):
-    anuga_run_toml  path/to/scenario.toml
+    anuga_toml_run  path/to/scenario.toml
 
 Usage (parallel, N processes):
-    mpirun -np N anuga_run_toml  path/to/scenario.toml
+    mpirun -np N anuga_toml_run  path/to/scenario.toml
 
 The working directory is changed to the directory that contains the TOML
 file before the simulation starts, so all relative paths inside the TOML
