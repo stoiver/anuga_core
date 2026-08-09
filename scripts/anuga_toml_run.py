@@ -30,16 +30,31 @@ parser.add_argument(
     help='Path to the TOML scenario configuration file.')
 parser.add_argument(
     '-n', '--dry-run', action='store_true',
-    help='Do not run the simulation. Render an HTML summary of the scenario '
-         '(domain, mesh, friction, structures, and a rainfall hyetograph) and '
-         'open it in the default browser.')
+    help='Do not run the simulation. Preview the scenario in the format given '
+         'by --format (default: open an HTML summary in the browser).')
+parser.add_argument(
+    '--format', choices=('text', 'html', 'browser'), default='browser',
+    help='Dry-run output. "browser" (default): write the HTML summary and open '
+         'it. "html": write the HTML summary only. "text": print the '
+         'highlighted, folded config to the terminal (no browser needed).')
 parser.add_argument(
     '--summary-output', metavar='FILE.html', default=None,
-    help='Where to write the --dry-run summary (default: <config>_summary.html '
-         'next to the TOML).')
+    help='For --format html/browser: where to write the summary '
+         '(default: <config>_summary.html next to the TOML).')
+# --format text options
 parser.add_argument(
-    '--no-browser', action='store_true',
-    help='With --dry-run, write the summary file but do not open a browser.')
+    '--full', action='store_true',
+    help='--format text: do not collapse repeated blocks; show every one.')
+parser.add_argument(
+    '--no-color', action='store_true',
+    help='--format text: disable syntax highlighting.')
+parser.add_argument(
+    '--no-pager', action='store_true',
+    help='--format text: write straight to stdout instead of a pager.')
+parser.add_argument(
+    '--threshold', type=int, default=6, metavar='N',
+    help='--format text: collapse a run only when it has more than N identical '
+         'blocks (default: 6).')
 args = parser.parse_args()
 
 config_path = os.path.abspath(args.config)
@@ -53,15 +68,30 @@ os.chdir(scenario_dir)
 config_basename = os.path.basename(config_path)
 
 # ---------------------------------------------------------------------------
-# Dry run: summarise the scenario as HTML and open it, without building a mesh
-# or evolving.  Done before the heavy ANUGA/mesh imports so it stays fast.
+# Dry run: preview the scenario without building a mesh or evolving.  Done
+# before the heavy ANUGA/mesh imports so it stays fast.
+#   text    -> highlighted, folded config to the terminal
+#   html    -> write the HTML summary file
+#   browser -> write the HTML summary and open it
 # ---------------------------------------------------------------------------
 if args.dry_run:
-    from anuga.scenario.scenario_summary import write_scenario_summary
-    out = write_scenario_summary(
-        config_path, output_html=args.summary_output,
-        base_dir=scenario_dir, open_browser=not args.no_browser)
-    print(f'Scenario summary written to: {out}')
+    if args.format == 'text':
+        from anuga.utilities.toml_view import render, page
+        with open(config_path, encoding='utf-8') as _fh:
+            _text = _fh.read()
+        _color = (not args.no_color) and (sys.stdout.isatty() or not args.no_pager)
+        _out = render(_text, collapse=not args.full, color=_color,
+                      threshold=args.threshold)
+        if args.no_pager:
+            sys.stdout.write(_out)
+        else:
+            page(_out)
+    else:
+        from anuga.scenario.scenario_summary import write_scenario_summary
+        out = write_scenario_summary(
+            config_path, output_html=args.summary_output,
+            base_dir=scenario_dir, open_browser=(args.format == 'browser'))
+        print(f'Scenario summary written to: {out}')
     sys.exit(0)
 
 # ---------------------------------------------------------------------------

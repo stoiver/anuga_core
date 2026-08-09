@@ -240,14 +240,6 @@ configure_file(
 )
 
 configure_file(
-    input: 'scripts/anuga_toml_view.py',
-    output: 'anuga_toml_view',
-    configuration: conf,
-    install_dir: get_option('bindir'),
-    install_mode: 'rwxr-xr-x'
-)
-
-configure_file(
     input: 'scripts/anuga_animate_gui.py',
     output: 'anuga_animate_gui',
     configuration: conf,

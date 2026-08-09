@@ -12,8 +12,9 @@ Public API:
     collapse_toml(text, threshold=6) -> str
     highlight(text, color=True) -> str
     render(text, collapse=True, color=True, threshold=6) -> str
+    page(text)
 
-Used by the ``anuga_toml_view`` console script.
+Powers ``anuga_toml_run <config> --dry-run --format text``.
 """
 
 import re
@@ -125,3 +126,26 @@ def render(text, collapse=True, color=True, threshold=6):
     if collapse:
         text = collapse_toml(text, threshold=threshold)
     return highlight(text, color=color)
+
+
+def page(text):
+    """Send *text* to a pager when stdout is an interactive terminal.
+
+    Honours ``$PAGER`` (default ``less -R`` so ANSI colour survives); writes
+    plainly when not a tty or if the pager cannot be launched.
+    """
+    import sys
+    import os
+    if not sys.stdout.isatty():
+        sys.stdout.write(text)
+        return
+    pager = os.environ.get('PAGER', 'less -R')
+    try:
+        import subprocess
+        proc = subprocess.Popen(pager, shell=True, stdin=subprocess.PIPE)
+        proc.communicate(text.encode('utf-8', 'replace'))
+    except (OSError, BrokenPipeError, KeyboardInterrupt):
+        try:
+            sys.stdout.write(text)
+        except BrokenPipeError:
+            pass

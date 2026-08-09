@@ -55,36 +55,29 @@ the inputs under `code/`, and peak-quantity rasters).
 
 ### Dry run — preview a scenario
 
-`--dry-run` (`-n`) parses the TOML and writes a self-contained HTML summary —
-project settings, mesh resolution and refinement, boundary conditions, a
-Manning's-*n* friction breakdown, a structures table, and, for rainfall, a
-catchment-mean **hyetograph** (15-minute intensity bars with a cumulative-depth
-curve) read straight from the gauge timeseries — then opens it in the default
-browser. Nothing is simulated, so it is a fast way to sanity-check a config.
+`--dry-run` (`-n`) previews a scenario without building a mesh or simulating.
+`--format` chooses how:
 
 ```bash
-anuga_toml_run floodplain.toml --dry-run                 # write + open in browser
-anuga_toml_run floodplain.toml --dry-run --no-browser    # write the file only
-anuga_toml_run floodplain.toml --dry-run --summary-output preview.html
+anuga_toml_run floodplain.toml --dry-run                  # (browser, default)
+anuga_toml_run floodplain.toml --dry-run --format html    # write the HTML file only
+anuga_toml_run floodplain.toml --dry-run --format text    # highlighted config in the terminal
 ```
 
-The summary defaults to `<config>_summary.html` next to the TOML.
-
-### Viewing the raw TOML — `anuga_toml_view`
-
-To read the config *text* in the terminal, `anuga_toml_view` syntax-highlights
-it and collapses long runs of repeated array-of-table blocks (the many
-one-per-file friction / culvert / rainfall entries) to the first block plus a
-"N more" marker, so a big scenario stays legible:
-
-```bash
-anuga_toml_view towradgi.toml            # highlighted, collapsed, paged
-anuga_toml_view towradgi.toml --full     # expand every block
-anuga_toml_view towradgi.toml --no-color # plain text
-```
-
-(A source checkout without the console scripts installed can run
-`python <repo>/scripts/anuga_toml_view.py …`.)
+- **`--format browser`** *(default)* writes a self-contained HTML summary —
+  project settings, mesh resolution and refinement, boundary conditions, a
+  Manning's-*n* friction breakdown, a structures table, and, for rainfall, a
+  catchment-mean **hyetograph** (15-minute intensity bars with a
+  cumulative-depth curve) plus each inlet's rate or discharge plot — and opens
+  it in the default browser.
+- **`--format html`** writes that same summary but does not open a browser
+  (path via `--summary-output`, default `<config>_summary.html` next to the
+  TOML). Good for headless/CI use.
+- **`--format text`** prints the config to the terminal, syntax-highlighted,
+  with long runs of repeated array-of-table blocks (the many one-per-file
+  friction / culvert / rainfall entries) collapsed to the first block plus a
+  "N more" marker, so a big scenario stays legible. `--full` expands every
+  block; `--no-color` disables highlighting; `--no-pager` skips the pager.
 
 ## Anatomy of a scenario directory
 
