@@ -153,6 +153,9 @@ project = PrepareData(config_basename, output_log='Simulation_logfile.log')
 
 progress('Building mesh')
 domain = setup_mesh.setup_mesh(project)
+# Phase timings recorded by setup_mesh (build vs partition/distribute).
+mesh_build_time = getattr(domain, '_mesh_build_time', None)
+mesh_distribute_time = getattr(domain, '_mesh_distribute_time', None)
 
 # Propagate the scenario's coordinate reference system to the domain so it is
 # written into the SWW file (zone / hemisphere / EPSG). Without this the SWW
@@ -230,6 +233,7 @@ domain.set_omp_num_threads(project.omp_num_threads)
 progress('Evolving')
 
 barrier()
+evolve_start = time.time()
 for t in domain.evolve(yieldstep=project.yieldstep,
                        finaltime=project.finaltime,
                        outputstep=project.outputstep):
@@ -249,6 +253,21 @@ for t in domain.evolve(yieldstep=project.yieldstep,
         user_functions.print_operator_inputs(domain)
 
 barrier()
+evolve_time = time.time() - evolve_start
+
+# ---------------------------------------------------------------------------
+# Phase timing summary (rank 0). Written to the real terminal via progress()
+# so it shows even when stdout is redirected to the log file.
+# ---------------------------------------------------------------------------
+if myid == 0:
+    progress('')
+    progress('Phase timings (seconds):')
+    if mesh_build_time is not None:
+        progress('  mesh construction : %10.2f' % mesh_build_time)
+    if mesh_distribute_time is not None and numprocs > 1:
+        progress('  distribute        : %10.2f' % mesh_distribute_time)
+    progress('  evolve            : %10.2f' % evolve_time)
+    progress('  total (wall)      : %10.2f' % (time.time() - t0))
 
 # ---------------------------------------------------------------------------
 # Post-processing
