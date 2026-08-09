@@ -29,6 +29,18 @@ parser.add_argument(
     'config',
     metavar='CONFIG.toml',
     help='Path to the TOML scenario configuration file.')
+parser.add_argument(
+    '-n', '--dry-run', action='store_true',
+    help='Do not run the simulation. Render an HTML summary of the scenario '
+         '(domain, mesh, friction, structures, and a rainfall hyetograph) and '
+         'open it in the default browser.')
+parser.add_argument(
+    '--summary-output', metavar='FILE.html', default=None,
+    help='Where to write the --dry-run summary (default: <config>_summary.html '
+         'next to the TOML).')
+parser.add_argument(
+    '--no-browser', action='store_true',
+    help='With --dry-run, write the summary file but do not open a browser.')
 args = parser.parse_args()
 
 config_path = os.path.abspath(args.config)
@@ -40,6 +52,18 @@ if not os.path.exists(config_path):
 scenario_dir = os.path.dirname(config_path)
 os.chdir(scenario_dir)
 config_basename = os.path.basename(config_path)
+
+# ---------------------------------------------------------------------------
+# Dry run: summarise the scenario as HTML and open it, without building a mesh
+# or evolving.  Done before the heavy ANUGA/mesh imports so it stays fast.
+# ---------------------------------------------------------------------------
+if args.dry_run:
+    from anuga.scenario.scenario_summary import write_scenario_summary
+    out = write_scenario_summary(
+        config_path, output_html=args.summary_output,
+        base_dir=scenario_dir, open_browser=not args.no_browser)
+    print(f'Scenario summary written to: {out}')
+    sys.exit(0)
 
 # ---------------------------------------------------------------------------
 # ANUGA imports (after chdir so parallel init finds the right cwd)

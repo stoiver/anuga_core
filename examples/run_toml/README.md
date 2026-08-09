@@ -42,12 +42,33 @@ anuga_run_toml floodplain.toml
 
 # Either scenario in parallel (e.g. 4 processes)
 mpiexec -np 4 anuga_run_toml floodplain.toml
+
+# Dry run: preview the scenario as an HTML summary in your browser,
+# without building a mesh or running the simulation.
+anuga_run_toml floodplain.toml --dry-run
 ```
 
 The runner `cd`s into the TOML's directory first, so all paths inside the TOML
 are relative to the TOML file. Output lands in
 `OUTPUT/RUN_<timestamp>_<scenario>/` (SWW, a `Simulation_logfile.log`, a copy of
 the inputs under `code/`, and peak-quantity rasters).
+
+### Dry run — preview a scenario
+
+`--dry-run` (`-n`) parses the TOML and writes a self-contained HTML summary —
+project settings, mesh resolution and refinement, boundary conditions, a
+Manning's-*n* friction breakdown, a structures table, and, for rainfall, a
+catchment-mean **hyetograph** (15-minute intensity bars with a cumulative-depth
+curve) read straight from the gauge timeseries — then opens it in the default
+browser. Nothing is simulated, so it is a fast way to sanity-check a config.
+
+```bash
+anuga_run_toml floodplain.toml --dry-run                 # write + open in browser
+anuga_run_toml floodplain.toml --dry-run --no-browser    # write the file only
+anuga_run_toml floodplain.toml --dry-run --summary-output preview.html
+```
+
+The summary defaults to `<config>_summary.html` next to the TOML.
 
 ## Anatomy of a scenario directory
 

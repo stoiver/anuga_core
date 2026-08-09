@@ -6,6 +6,7 @@ python_sources = [
     'prepare_data.py',
     'raster_outputs.py',
     'read_boundary_tags_line_shapefile.py',
+    'scenario_summary.py',
     'setup_boundary_conditions.py',
     'setup_bridges.py',
     'setup_culverts.py',
