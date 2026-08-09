@@ -356,8 +356,8 @@ for t in domain.evolve(yieldstep=project.yieldstep,
                        outputstep=project.outputstep):
     if myid == 0:
         _stats = domain.timestepping_statistics()
-        # Indent to line up with the section's 3-space content.
-        _stats = '\n'.join('   ' + _ln for _ln in _stats.splitlines())
+        # Blank line before each yieldstep, indented to the section's 3 spaces.
+        _stats = '\n' + '\n'.join('   ' + _ln for _ln in _stats.splitlines())
         print(_stats)                       # -> log (and terminal via tee if -v)
         if not args.verbose:
             progress(_stats)                # keep the quiet terminal informed
