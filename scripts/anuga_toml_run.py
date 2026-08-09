@@ -255,9 +255,23 @@ for t in domain.evolve(yieldstep=project.yieldstep,
 barrier()
 evolve_time = time.time() - evolve_start
 
+# Water balance (DE only). The getters reduce across ranks, so call on ALL
+# ranks (collective) here; print on rank 0 below. Identity: final volume =
+# initial + boundary flux + fractional-step (rainfall/inlet/operator) inflow.
+water_balance = None
+try:
+    _wb = domain.report_water_volume_statistics(verbose=False, returnStats=True)
+    if _wb is not None:
+        _vol, _bf, _fs = _wb
+        _v0 = domain.volume_history[0] if getattr(domain, 'volume_history', None) else 0.0
+        water_balance = (_v0, _fs, _bf, _vol, _vol - _v0 - _bf - _fs)
+except Exception as _e:
+    if myid == 0:
+        progress(f'Water balance unavailable: {_e}')
+
 # ---------------------------------------------------------------------------
-# Phase timing summary (rank 0). Written to the real terminal via progress()
-# so it shows even when stdout is redirected to the log file.
+# Phase timing + water-balance summary (rank 0). Written to the real terminal
+# via progress() so it shows even when stdout is redirected to the log file.
 # ---------------------------------------------------------------------------
 if myid == 0:
     progress('')
@@ -268,6 +282,18 @@ if myid == 0:
         progress('  distribute        : %10.2f' % mesh_distribute_time)
     progress('  evolve            : %10.2f' % evolve_time)
     progress('  total (wall)      : %10.2f' % (time.time() - t0))
+
+    if water_balance is not None:
+        v0, fs, bf, vol, resid = water_balance
+        denom = max(abs(vol), abs(v0) + abs(fs) + abs(bf), 1.0)
+        progress('')
+        progress('Water balance (m^3):')
+        progress('  initial volume            : %14.2f' % v0)
+        progress('  rainfall + inlets (FS)    : %14.2f' % fs)
+        progress('  net boundary flux (BF)    : %14.2f' % bf)
+        progress('  final volume              : %14.2f' % vol)
+        progress('  imbalance (V-V0-BF-FS)    : %14.2f  (%.2e relative)'
+                 % (resid, resid / denom))
 
 # ---------------------------------------------------------------------------
 # Post-processing
