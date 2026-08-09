@@ -2987,7 +2987,20 @@ class Domain(Generic_Domain):
         # domain can clamp femtolitre deficits that are a large *fraction* of an
         # essentially-zero total volume but are physically meaningless.
         if num_negative_ids > 0 and negative_volume > _negative_volume_noise_floor:
-            total_volume = self.get_water_volume()
+            # Use this rank's LOCAL water volume for the warning ratio. Do NOT
+            # call get_water_volume() here: in parallel it does an MPI allreduce
+            # (collective), but this branch is entered per-rank — only on ranks
+            # that clamped negative cells this substep. When ranks disagree
+            # (routine in wetting/drying), a collective here deadlocks (rank A
+            # waits in the volume allreduce while rank B has moved on to the
+            # ghost exchange). negative_volume is itself a per-rank quantity, so
+            # a per-rank ratio is the correct comparison for a local warning.
+            # Sum (stage - elevation)*area over local cells directly: valid both
+            # during evolve and when called standalone before evolve (unlike the
+            # 'height' quantity, which is only populated once evolve starts).
+            stage_c = self.quantities['stage'].centroid_values
+            elev_c = self.quantities['elevation'].centroid_values
+            total_volume = float(num.sum((stage_c - elev_c) * self.areas))
             if total_volume > 0.0 and \
                     negative_volume > self.negative_volume_warning_fraction * total_volume:
                 import warnings
