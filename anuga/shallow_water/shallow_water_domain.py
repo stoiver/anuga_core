@@ -2983,58 +2983,36 @@ class Domain(Generic_Domain):
         # added rather than the cell count: only when it is a large enough fraction
         # of the total water volume (threshold via
         # set_negative_volume_warning_fraction; 0.0 warns on any added volume).
-        # The absolute floor rejects pure floating-point noise: a nearly-dry
-        # domain can clamp femtolitre deficits that are a large *fraction* of an
-        # essentially-zero total volume but are physically meaningless.
-        # "Loss of conservation" is a GLOBAL property, so judge the clamped
-        # volume against the whole-domain water volume — never this rank's
-        # partition. A nearly-dry sub-domain holds only femtolitre-scale
-        # numerical noise, so routine wetting/drying clamps there read as a huge
-        # *fraction* of ~nothing and warn spuriously (seen only under MPI). Sum
-        # (stage - elevation)*area locally, then reduce across ranks.
+        # The absolute floor rejects pure floating-point noise.
         #
-        # The reduction is a SINGLE, UNCONDITIONAL allreduce (never gated on the
-        # per-rank num_negative_ids): a collective placed under rank-local state
-        # deadlocks when ranks disagree — rank A waits in the reduction while
-        # rank B advances to the ghost exchange. Reduce the clamped volume, the
-        # local water volume and the clamped-cell count together; warn on rank 0.
-        # (self.evolved_called is true and discontinuous elevation is asserted
-        # above, so stage-elevation is the local depth.)
-        from anuga import numprocs, myid
-        stage_c = self.quantities['stage'].centroid_values
-        elev_c = self.quantities['elevation'].centroid_values
-        local_volume = float(num.sum((stage_c - elev_c) * self.areas))
-
-        if numprocs > 1:
-            from mpi4py import MPI
-            packed = num.array(
-                [negative_volume, local_volume, float(num_negative_ids)],
-                dtype=float)
-            MPI.COMM_WORLD.Allreduce(MPI.IN_PLACE, packed, op=MPI.SUM)
-            g_negative_volume, g_total_volume = packed[0], packed[1]
-            g_negative_ids = int(round(packed[2]))
-            warn_here = (myid == 0)
-        else:
-            g_negative_volume, g_total_volume = negative_volume, local_volume
-            g_negative_ids = num_negative_ids
-            warn_here = True
-
-        if (warn_here and g_negative_ids > 0
-                and g_negative_volume > _negative_volume_noise_floor
-                and g_total_volume > 0.0
-                and g_negative_volume
-                > self.negative_volume_warning_fraction * g_total_volume):
-            import warnings
-            fraction = g_negative_volume / g_total_volume
-            msg = (
-                f'{g_negative_ids} negative cells set to zero depth, adding '
-                f'{g_negative_volume:.3g} m^3 ({100.0 * fraction:.3g}% of the '
-                f'{g_total_volume:.3g} m^3 in the domain): possible loss of '
-                'conservation. \nConsider using '
-                'domain.report_water_volume_statistics() to check the extent '
-                'of the problem'
-            )
-            warnings.warn(msg)
+        # SERIAL ONLY. "Loss of conservation" is a GLOBAL property, so the ratio
+        # must use the whole-domain volume. In parallel this rank sees only its
+        # partition: a nearly-dry sub-domain holds femtolitre-scale noise, so a
+        # local ratio warns spuriously. Getting the global volume would need a
+        # per-substep collective inside this hot function, which is not viable —
+        # update_conserved_quantities is not called in guaranteed lock-step
+        # across ranks (structure operators, euler vs rk2, small/empty
+        # partitions), so any collective here deadlocks (two separate hangs were
+        # traced to exactly this). In parallel, use the periodic global
+        # report_water_volume_statistics() (e.g. the TOML runner's per-yieldstep
+        # water balance) to check conservation instead.
+        from anuga import numprocs
+        if numprocs == 1 and num_negative_ids > 0 \
+                and negative_volume > _negative_volume_noise_floor:
+            total_volume = self.get_water_volume()
+            if total_volume > 0.0 and \
+                    negative_volume > self.negative_volume_warning_fraction * total_volume:
+                import warnings
+                fraction = negative_volume / total_volume
+                msg = (
+                    f'{num_negative_ids} negative cells set to zero depth, adding '
+                    f'{negative_volume:.3g} m^3 ({100.0 * fraction:.3g}% of the '
+                    f'{total_volume:.3g} m^3 in the domain): possible loss of '
+                    'conservation. \nConsider using '
+                    'domain.report_water_volume_statistics() to check the extent '
+                    'of the problem'
+                )
+                warnings.warn(msg)
 
         nvtxRangePop()
 
