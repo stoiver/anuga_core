@@ -1,5 +1,6 @@
 python_sources = [
     '__init__.py',
+    'emit_script.py',
     'make_spatially_averaged_function.py',
     'parse_input_data.py',
     'parse_input_data_toml.py',

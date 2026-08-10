@@ -37,6 +37,29 @@ that contains the TOML file, so the script can be invoked from any working
 directory.
 
 
+Eject to a standalone Python script
+-----------------------------------
+
+When you need to go beyond what the TOML supports — a custom operator, a
+scripted boundary function, bespoke post-processing — generate an equivalent
+standalone script and edit it::
+
+   anuga_toml_run --emit-script my_run.py  path/to/scenario.toml
+
+This writes ``my_run.py`` (and exits without running). The script parses the
+same TOML via ``PrepareData`` and drives the standard phases (mesh → initial
+conditions → forcing/structures → boundaries → evolve), so it runs identically
+to ``anuga_toml_run``::
+
+   python my_run.py
+   mpiexec -np 4 python my_run.py        # legacy (CPU) parallel
+
+It is ordinary, editable Python: delete phases you do not need, splice in your
+own operators or boundaries between phases, or replace any ``setup_*`` call with
+hand-written ANUGA code. Keep the script alongside the TOML (it resolves
+TOML-relative paths from its own directory).
+
+
 Working example — Cairns tsunami scenario
 ------------------------------------------
 

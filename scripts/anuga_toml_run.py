@@ -61,6 +61,11 @@ parser.add_argument(
     '--threshold', type=int, default=6, metavar='N',
     help='--format text: collapse a run only when it has more than N identical '
          'blocks (default: 6).')
+parser.add_argument(
+    '--emit-script', metavar='FILE',
+    help='Write a standalone, editable ANUGA Python script equivalent to this '
+         'run (mesh -> initial conditions -> forcing -> boundaries -> evolve) '
+         'and exit without running. Use it as a base for customisation.')
 args = parser.parse_args()
 
 config_path = os.path.abspath(args.config)
@@ -72,6 +77,17 @@ if not os.path.exists(config_path):
 scenario_dir = os.path.dirname(config_path)
 os.chdir(scenario_dir)
 config_basename = os.path.basename(config_path)
+
+# ---------------------------------------------------------------------------
+# Emit a standalone run script and exit (no mesh build / evolve). Done before
+# the heavy ANUGA imports so it stays fast.
+# ---------------------------------------------------------------------------
+if args.emit_script:
+    from anuga.scenario.emit_script import write_run_script
+    out = os.path.abspath(args.emit_script)
+    write_run_script(config_basename, out)
+    print(f'Run script written to: {out}')
+    sys.exit(0)
 
 # ---------------------------------------------------------------------------
 # Dry run: preview the scenario without building a mesh or evolving.  Done

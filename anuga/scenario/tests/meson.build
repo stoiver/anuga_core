@@ -1,5 +1,6 @@
 python_sources = [
     '__init__.py',
+    'test_emit_script.py',
     'test_parse_input_data_toml.py',
     'test_scenario_summary.py',
     'test_read_boundary_tags.py',
