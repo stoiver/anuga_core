@@ -371,13 +371,10 @@ class RiverWall:
             riverwalli = riverwalls[riverwalli_name]
             ns = len(riverwalli) - 1
 
-            if verbose:
-                printInfo += '  Wall ' + str(i) + ' ....\n'
+            wall_edges = 0      # edges matched to this wall
+            n_short = 0         # segments skipped as shorter than tol
 
             for j in range(ns):
-                if verbose:
-                    printInfo += '    Segment ' + str(j) + ' ....\n'
-
                 start = riverwalli[j]
                 end = riverwalli[j + 1]
 
@@ -387,8 +384,7 @@ class RiverWall:
 
                 segLen = ((start[0] - end[0])**2 + (start[1] - end[1])**2)**0.5
                 if segLen < tol:
-                    if verbose:
-                        printInfo += '  Segment with length < tolerance ' + str(tol) + ' ignored\n'
+                    n_short += 1
                     continue
 
                 # Unit vector along segment
@@ -414,9 +410,7 @@ class RiverWall:
                 if len(onLevee) == 0:
                     continue
 
-                if verbose:
-                    printInfo += '       Finding ' + str(len(onLevee)) + ' edges on this segment\n'
-
+                wall_edges += len(onLevee)
                 domain.edge_flux_type[onLevee] = 1
 
                 # Interpolate elevation as weighted average of start/end elevations
@@ -426,6 +420,15 @@ class RiverWall:
                 riverwall_elevation[onLevee] = start[2] * (1.0 - w0) + w0 * end[2]
 
                 riverwall_rowIndex[onLevee] = i
+
+            if verbose:
+                extra = ''
+                if n_short:
+                    extra = ' (%d short segment%s skipped)' % (
+                        n_short, '' if n_short == 1 else 's')
+                printInfo += '  %s: %d edges, %d segment%s%s\n' % (
+                    riverwalli_name, wall_edges, ns,
+                    '' if ns == 1 else 's', extra)
 
         return riverwall_elevation, riverwall_rowIndex, printInfo
 
@@ -443,18 +446,17 @@ class RiverWall:
             name = nw_names[i]
             wall_par = riverwallPar.get(name)
 
+            custom = []
             for j, hydraulicVar in enumerate(self.hydraulic_variable_names):
                 if wall_par is not None and hydraulicVar in wall_par:
-                    if verbose:
-                        printInfo += ('  Using provided ' + str(hydraulicVar) + ' ' +
-                                      str(wall_par[hydraulicVar]) + ' for riverwall ' + str(name) + '\n')
                     hydraulicTmp[i, j] = wall_par[hydraulicVar]
+                    custom.append('%s=%s' % (hydraulicVar, wall_par[hydraulicVar]))
                 else:
-                    if verbose:
-                        printInfo += ('  Using default ' + str(hydraulicVar) + ' ' +
-                                      str(default_riverwallPar[hydraulicVar]) +
-                                      ' for riverwall ' + str(name) + '\n')
                     hydraulicTmp[i, j] = default_riverwallPar[hydraulicVar]
+
+            if verbose:
+                printInfo += '  %s params: %s\n' % (
+                    name, ', '.join(custom) if custom else 'defaults')
 
         for i in nw:
             if hydraulicTmp[i, 1] >= hydraulicTmp[i, 2]:
@@ -673,6 +675,7 @@ class RiverWall:
 
         # Preliminary definitions
         isConnected = True
+        n_connected = 0
         printInfo = ''
 
         if(len(self.names)==0):
@@ -742,18 +745,16 @@ class RiverWall:
             num_disconnected_edges = ((v1Counter==1)*(1-uV1_boundary)).sum()+\
                                      ((v2Counter==1)*(1-uV2_boundary)).sum()
 
-            if(verbose):
-                printInfo = printInfo+ '  On riverwall '+ str(name) +' there are '+ str(num_disconnected_edges)+\
-                         ' endpoints inside the domain [ignoring points on the boundary polygon] (P'+str(myid)+')\n'
-
             if(num_disconnected_edges <= 2):
-                if(verbose):
-                    pass
-                    #printInfo=printInfo+ "  This is consistent with a continuous wall \n"
+                n_connected += 1
             else:
                 isConnected = False
                 printInfo = printInfo + '  Riverwall ' + name +' appears to be discontinuous. (P'+str(myid)+')\n'+\
                     '  This suggests there is a gap in the wall, which should not occur\n'
+
+        if verbose and isConnected and n_connected > 0:
+            printInfo = printInfo + '  %d riverwall%s connected (P%d)\n' % (
+                n_connected, '' if n_connected == 1 else 's', myid)
 
         return [printInfo, isConnected]
 
