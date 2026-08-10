@@ -313,6 +313,9 @@ class ProjectDataTOML:
                 f' (got {self.max_quantity_collection_start_time}, finaltime={self.finaltime})')
 
         self.store_vertices_uniquely        = bool(p.get('store_vertices_uniquely', False))
+        # Track whether the user set this explicitly: with [[erosion]] present we
+        # default it to true, but still warn if they deliberately chose false.
+        self._store_elevation_explicit      = 'store_elevation_every_timestep' in p
         self.store_elevation_every_timestep = bool(p.get('store_elevation_every_timestep', False))
         self.spatial_text_output_dir        = str(p.get('spatial_text_output_dir', 'SPATIAL_TEXT'))
 
@@ -615,17 +618,21 @@ class ProjectDataTOML:
         # Erosion changes elevation as the run proceeds, but ANUGA stores
         # elevation statically by default — so the .sww shows the initial
         # terrain forever and the erosion is invisible in every downstream
-        # product. Warn rather than override: silently flipping a setting the
-        # user wrote explicitly is worse than telling them.
-        if self.erosion_data and not getattr(
-                self, 'store_elevation_every_timestep', False):
-            warnings.warn(
-                'Scenario defines [[erosion]] operators but '
-                '[project] store_elevation_every_timestep is false: elevation '
-                'will be written once at t=0, so the eroded bed will not appear '
-                'in the .sww or any raster derived from it. Set it true to '
-                'record elevation as it changes.',
-                stacklevel=2)
+        # product. When erosion is present, default to storing elevation every
+        # timestep so the changing bed is recorded. Only warn if the user
+        # explicitly asked for static storage: don't silently override a choice
+        # they wrote deliberately, but do tell them the eroded bed won't appear.
+        if self.erosion_data and not self.store_elevation_every_timestep:
+            if getattr(self, '_store_elevation_explicit', False):
+                warnings.warn(
+                    'Scenario defines [[erosion]] operators but [project] '
+                    'store_elevation_every_timestep is explicitly false: '
+                    'elevation will be written once at t=0, so the eroded bed '
+                    'will not appear in the .sww or any raster derived from it.',
+                    stacklevel=2)
+            else:
+                # Not set by the user: adopt the erosion-appropriate default.
+                self.store_elevation_every_timestep = True
 
     def _parse_rainfall(self, rainfall):
         self.rain_data = []
