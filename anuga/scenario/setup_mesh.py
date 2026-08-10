@@ -13,6 +13,7 @@ import glob
 import os
 from os.path import join
 import gc
+import time
 
 import anuga
 from anuga.parallel import myid, numprocs, barrier
@@ -100,11 +101,19 @@ def setup_mesh(project, setup_initial_conditions=None):
     OUTPUT: domain
     """
 
+    # Phase timers: total mesh phase and (separately) the geometry build, so
+    # the runner can report mesh-construction vs distribute times. Distribute
+    # is total minus build (~0 in serial, where there is no partition step).
+    _t_phase = time.time()
+    _t_build = 0.0
+
     # ------------------------------------------------------------------
     # Serial shortcut: build the mesh directly, no pickle/partition cycle
     # ------------------------------------------------------------------
     if numprocs == 1:
+        _b = time.time()
         domain = build_mesh(project)
+        _t_build += time.time() - _b
 
         if setup_initial_conditions is not None:
             setup_initial_conditions.setup_initial_conditions(domain, project)
@@ -125,7 +134,9 @@ def setup_mesh(project, setup_initial_conditions=None):
                 log.verbose('Saved domain seems to already exist')
             else:
                 log.info('Creating partitioned domain')
+                _b = time.time()
                 domain = build_mesh(project)
+                _t_build += time.time() - _b
 
                 if setup_initial_conditions is not None:
                     setup_initial_conditions.setup_initial_conditions(
@@ -209,5 +220,10 @@ def setup_mesh(project, setup_initial_conditions=None):
         domain.quantities_to_be_stored['elevation'] = 2
     else:
         domain.quantities_to_be_stored['elevation'] = 1
+
+    # Record phase timings for the runner's summary (build on this rank; the
+    # rest of the mesh phase — partition/dump/load — counts as distribute).
+    domain._mesh_build_time = _t_build
+    domain._mesh_distribute_time = max(time.time() - _t_phase - _t_build, 0.0)
 
     return domain

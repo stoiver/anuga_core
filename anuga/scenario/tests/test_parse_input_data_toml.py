@@ -284,6 +284,32 @@ class TestProjectSection(unittest.TestCase):
         self.assertAlmostEqual(p.finaltime, 3600.0)
         self.assertEqual(p.flow_algorithm, 'DE0')
 
+    def _make_with_algorithm(self, alg):
+        content = textwrap.dedent(f"""\
+            [project]
+            scenario = "test_scenario"
+            output_base_directory = "OUTPUT/"
+            yieldstep = 60.0
+            finaltime = 3600.0
+            projection_information = -55
+            flow_algorithm = "{alg}"
+            [mesh]
+            bounding_polygon = "extent.shp"
+            default_res = 1000000.0
+        """)
+        _write_toml(self.toml_path, content)
+        return ProjectDataTOML(self.toml_path)
+
+    def test_all_supported_flow_algorithms_accepted(self):
+        # Must stay in sync with Domain.set_flow_algorithm's accepted list.
+        for alg in ('DE0', 'DE1', 'DE2', 'DE0_7', 'DE1_7', 'DE_ader2'):
+            p = self._make_with_algorithm(alg)
+            self.assertEqual(p.flow_algorithm, alg)
+
+    def test_invalid_flow_algorithm_raises(self):
+        with self.assertRaises(ValueError):
+            self._make_with_algorithm('DE_nope')
+
     def test_projection_information_as_int(self):
         p = self._make()
         self.assertEqual(p.projection_information, -55)

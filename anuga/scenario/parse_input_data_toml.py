@@ -16,7 +16,8 @@ import glob as glob_module
 
 from anuga.utilities import spatialInputUtil as su
 
-_VALID_FLOW_ALGORITHMS = ('DE0', 'DE1', 'DE2', 'DE0_7', 'DE1_7')
+# Must track Domain.set_flow_algorithm's accepted list.
+_VALID_FLOW_ALGORITHMS = ('DE0', 'DE1', 'DE2', 'DE0_7', 'DE1_7', 'DE_ader2')
 
 # ---------------------------------------------------------------------------
 # Validation helper
