@@ -185,6 +185,15 @@ The TOML file is divided into sections (TOML *tables*).  Every key shown
 without a comment is **required**; keys shown with a ``# default:`` comment
 are optional.
 
+.. note::
+
+   TOML has no arithmetic, so ``finaltime = 5*60`` is a syntax error. Numeric
+   fields therefore also accept a **quoted** arithmetic expression, which the
+   parser evaluates — e.g. ``finaltime = "5*60"`` gives ``300``,
+   ``finaltime = "7*24*3600"`` gives one week. Only numeric literals and
+   ``+ - * / // % **`` with parentheses are permitted (no names or function
+   calls). Plain numbers such as ``finaltime = 21600.0`` work as before.
+
 .. _toml-project:
 
 [project]

@@ -2104,3 +2104,61 @@ class TestErosion(unittest.TestCase):
         msgs = ' '.join(str(x.message) for x in w)
         self.assertIn('store_elevation_every_timestep', msgs)
 
+
+
+class TestArithmeticValues(unittest.TestCase):
+    """Numeric fields accept a quoted simple-arithmetic string (e.g. "5*60")."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.toml_path = os.path.join(self.tmpdir, 'config.toml')
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _make(self, yieldstep, finaltime, extra=''):
+        _write_toml(self.toml_path, textwrap.dedent(f"""\
+            [project]
+            scenario = "s"
+            output_base_directory = "OUTPUT/"
+            yieldstep = {yieldstep}
+            finaltime = {finaltime}
+            projection_information = -55
+            flow_algorithm = "DE0"
+            {extra}
+
+            [mesh]
+            bounding_polygon = "extent.shp"
+            default_res = 1000000.0
+        """))
+        return ProjectDataTOML(self.toml_path)
+
+    def test_arithmetic_time_fields(self):
+        p = self._make(yieldstep='"2*30"', finaltime='"5*60"',
+                       extra='outputstep = "10*60"')
+        self.assertAlmostEqual(p.yieldstep, 60.0)
+        self.assertAlmostEqual(p.finaltime, 300.0)
+        self.assertAlmostEqual(p.outputstep, 600.0)
+
+    def test_plain_numbers_still_work(self):
+        p = self._make(yieldstep=60.0, finaltime=3600.0)
+        self.assertAlmostEqual(p.yieldstep, 60.0)
+        self.assertAlmostEqual(p.finaltime, 3600.0)
+
+    def test_parentheses_and_power(self):
+        p = self._make(yieldstep='"(1+1)*30"', finaltime='"2**3 * 60"')
+        self.assertAlmostEqual(p.yieldstep, 60.0)
+        self.assertAlmostEqual(p.finaltime, 480.0)
+
+    def test_bad_expression_reported(self):
+        with self.assertRaises(ValueError) as cm:
+            self._make(yieldstep=60.0, finaltime='"5 * "')
+        self.assertIn('finaltime', str(cm.exception))
+
+    def test_names_and_calls_rejected(self):
+        with self.assertRaises(ValueError):
+            self._make(yieldstep=60.0, finaltime='"__import__(\'os\')"')
+
+
+if __name__ == '__main__':
+    unittest.main()
