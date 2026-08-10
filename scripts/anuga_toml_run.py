@@ -190,7 +190,11 @@ def compute_water_balance(domain):
     if stats is None:
         return None
     vol, bf, fs = stats
-    v0 = domain.volume_history[0] if getattr(domain, 'volume_history', None) else 0.0
+    # Prefer the volume captured before evolve (seeded on all ranks); fall back
+    # to volume_history[0] only if that seed is somehow absent.
+    v0 = getattr(domain, '_toml_initial_volume', None)
+    if v0 is None:
+        v0 = domain.volume_history[0] if getattr(domain, 'volume_history', None) else 0.0
     return (v0, fs, bf, vol, vol - v0 - bf - fs)
 
 
@@ -393,11 +397,25 @@ if myid == 0:
     emit('   yieldstep %g s   outputstep %g s   finaltime %g s'
          % (project.yieldstep, _ostep, project.finaltime))
 
+# V0 for the end-of-run water balance is captured at the first yieldstep (t=0)
+# inside the loop, where the clamped 'height' is valid. Computing it here, before
+# evolve, would take get_water_volume()'s pre-evolve path (unclamped
+# stage-elevation) and count negative "depth" in dry topographic cells — a large
+# bogus V0. Seed the slot so compute_water_balance has a defined initial, and so
+# the first-yield capture below triggers regardless of
+# report_mass_conservation_statistics.
+domain._toml_initial_volume = None
+
 barrier()
 evolve_start = time.time()
 for t in domain.evolve(yieldstep=project.yieldstep,
                        finaltime=project.finaltime,
                        outputstep=project.outputstep):
+    # First yield is t=0 (initial state): record V0 on every rank
+    # (get_water_volume is collective) so the balance is correct even when
+    # per-yieldstep reporting is off.
+    if domain._toml_initial_volume is None:
+        domain._toml_initial_volume = domain.get_water_volume()
     if myid == 0:
         _stats = domain.timestepping_statistics()
         # Blank line before each yieldstep, indented to the section's 3 spaces.
