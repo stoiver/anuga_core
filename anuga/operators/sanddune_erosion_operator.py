@@ -115,6 +115,11 @@ class Sanddune_erosion_operator(Operator, Region)  :
 
         Operator.__init__(self, domain, description, label, logging, verbose)
 
+        # Erosion changes the bed every timestep: store elevation time-varying
+        # (see _mark_domain_erosion / Domain.initialise_storage).
+        from anuga.operators.erosion_operators import _mark_domain_erosion
+        _mark_domain_erosion(self.domain)
+
 
 
         Region.__init__(self, domain,
