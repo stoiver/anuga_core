@@ -10,8 +10,8 @@
 #
 # Validated on the RTX 5070 (cc120) laptop, Aug 2026: builds, `import anuga`
 # works in the runtime stage, and a real GPU-offload evolve runs (compute mode
-# 'unified', device 0). Result: anuga:gpu-slim = 5.73 GB / 1.9 GB compressed —
-# roughly 9x smaller than the devel-based image.
+# 'unified', device 0). On the CUDA -base image the result is 2.15 GB / 459 MB
+# compressed — ~37x smaller to pull than the devel-based image (~16.7 GB).
 #
 # Build + smoke test:
 #   docker build -f docker/Dockerfile.gpu.slim --build-arg GPU_ARCH=cc120 -t anuga:gpu-slim .
@@ -20,12 +20,14 @@
 # If import ever fails with a missing .so, read the `ldd sw_domain_gpu_ext`
 # block in the build log and widen the REDIST copy glob below.
 #
-# Further shrink (not yet done): the CUDA *runtime* base carries libcudart etc.
-# that OpenMP-target offload may not need — try nvidia/cuda:<ver>-base and add
-# only the CUDA device libs actually required; and trim REDIST to the ldd set.
+# Further shrink (not yet done): trim REDIST to just the ldd-listed libs.
 
 ARG NVHPC_TAG=25.9-devel-cuda_multi-ubuntu24.04
-ARG CUDA_RUNTIME_TAG=12.6.2-runtime-ubuntu24.04
+# CUDA *-base* (not -runtime): OpenMP-target offload needs only libnvomp (from
+# the NVHPC REDIST copied below) plus the host driver injected by --gpus, NOT
+# libcudart. -base drops the image to 2.15 GB / 459 MB compressed (vs 5.73 GB /
+# 1.9 GB on -runtime). If a future feature links libcudart, switch to -runtime.
+ARG CUDA_RUNTIME_TAG=12.6.2-base-ubuntu24.04
 
 # ---- builder: compile anuga with nvc (as in Dockerfile.gpu) -----------------
 FROM nvcr.io/nvidia/nvhpc:${NVHPC_TAG} AS builder
