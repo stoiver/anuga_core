@@ -78,7 +78,13 @@ yieldstep  = getattr(args, 'yieldstep',  120.)          # -ys / --yieldstep
 finaltime  = getattr(args, 'finaltime',  3600.)          # -ft / --finaltime
 outputstep = getattr(args, 'outputstep', yieldstep)      # -os / --outputstep
 
-scale = 1 # For coarse mesh set to 10 (135237 triangles), fine mesh set to 1 (256688 triangles)
+# -sc / --scale: mesh refinement. Smaller is finer — it scales the target
+# triangle areas of the catchment regions below, so the triangle count grows
+# roughly as 1/scale:
+#     10  coarse       135 237 triangles
+#      1  fine (default)   256 688 triangles
+#      0.1 super fine   ~1.6 million triangles
+scale = getattr(args, 'scale', 1)
 maximum_triangle_area = 1000 # This doesn't make much difference for this mesh
 
 # Choices are 1 (legacy CPU OpenMP) 2 (unified gpu_ext kernels).
