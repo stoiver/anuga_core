@@ -108,6 +108,29 @@ class logTestCase(unittest.TestCase):
         assert 'quiet C' not in printed
         assert 'loud python' in printed
 
+    def test_each_run_starts_a_fresh_logfile(self):
+        """set_logfile() truncates: a run must not inherit the previous log."""
+        first, _ = run_logging_script("""
+            print('from the first run')
+            """, self.path)
+        assert 'from the first run' in first
+
+        second, _ = run_logging_script("""
+            print('from the second run')
+            """, self.path)
+        assert 'from the second run' in second
+        assert 'from the first run' not in second
+
+    def test_reinit_does_not_wipe_the_current_log(self):
+        """Rebuilding the handlers mid-run must not truncate what was logged."""
+        logged, _ = run_logging_script("""
+            print('early output')
+            log.close_logfile()
+            log.info('later record')
+            """, self.path)
+        assert 'early output' in logged
+        assert 'later record' in logged
+
     def test_close_logfile_restores_stdout(self):
         """fd 1 must be handed back, so later output is not swallowed."""
         before = os.fstat(1)

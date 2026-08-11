@@ -7,7 +7,7 @@ Basic usage (print + log both go to terminal and file):
 
     import anuga.utilities.log as log
 
-    log.set_logfile('./my.log')   # activates tee to file
+    log.set_logfile('./my.log')   # truncates my.log, activates tee to file
 
     log.debug('A message at DEBUG level')
     log.info('Another message, INFO level')
@@ -400,8 +400,10 @@ def set_logfile(path,
 
     After this call:
 
-    - sys.stdout is replaced with a TeeStream so every print() goes to
-      both the terminal and *path*.
+    - *path* is truncated: each run starts a fresh log rather than
+      appending to the previous run's.
+    - file descriptor 1 is tee'd, so print() *and* output from the C
+      extensions go to both the terminal and *path*.
     - log.info() writes to both terminal and file.
     - log.verbose() / log.debug() write to the file only (unless
       verbose_to_screen=True).
@@ -440,6 +442,15 @@ def set_logfile(path,
     console_logging_level = console_level
     log_logging_level = file_level
     _setup = False  # force re-initialisation on next log() call
+
+    # Start a fresh log for this run.  Truncating here, once, rather than
+    # opening the writers in 'w' mode means a later handler rebuild (after
+    # close_logfile(), say) reopens the file without wiping what the run has
+    # already written.
+    try:
+        open(path, 'w').close()
+    except OSError:
+        pass  # unwritable path — the open() below reports it properly
 
     # Tee file descriptor 1 so that print() *and* output from the C extensions
     # reach both the terminal and the file.  sys.stdout is deliberately left
