@@ -31,7 +31,18 @@ import numpy
 import time
 import anuga
 
-args = anuga.get_args()
+# -sc/--scale is added to the standard parser here, rather than inside anuga
+# itself, so that it travels with this script: in a containerised run the
+# script comes from the staged input directory while anuga comes from the
+# image, which may be older.  type=float (not arithmetic_float) for the same
+# reason.
+parser = anuga.create_standard_parser()
+parser.add_argument('-sc', '--scale', type=float, default=1.0,
+                    help='mesh refinement scale, smaller is finer: '
+                         '10 = coarse (135237 triangles), '
+                         '1 = fine (256688, default), '
+                         '0.1 = super fine (~1.6 million)')
+args = parser.parse_args()
 alg = args.alg
 verbose = args.verbose
 debug = args.debug   # -d/--debug: in-depth mesh generation reporting
@@ -78,13 +89,7 @@ yieldstep  = getattr(args, 'yieldstep',  120.)          # -ys / --yieldstep
 finaltime  = getattr(args, 'finaltime',  3600.)          # -ft / --finaltime
 outputstep = getattr(args, 'outputstep', yieldstep)      # -os / --outputstep
 
-# -sc / --scale: mesh refinement. Smaller is finer — it scales the target
-# triangle areas of the catchment regions below, so the triangle count grows
-# roughly as 1/scale:
-#     10  coarse       135 237 triangles
-#      1  fine (default)   256 688 triangles
-#      0.1 super fine   ~1.6 million triangles
-scale = getattr(args, 'scale', 1)
+scale = args.scale  # -sc/--scale; see the parser above for the mesh sizes
 maximum_triangle_area = 1000 # This doesn't make much difference for this mesh
 
 # Choices are 1 (legacy CPU OpenMP) 2 (unified gpu_ext kernels).

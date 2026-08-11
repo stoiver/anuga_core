@@ -63,11 +63,6 @@ def create_standard_parser():
     parser.add_argument('-os', '--outputstep', type=arithmetic_float, default=argparse.SUPPRESS,
                        help='outputstep (defaults to yieldstep if not set; accepts arithmetic)')
 
-    parser.add_argument('-sc', '--scale', type=arithmetic_float, default=argparse.SUPPRESS,
-                       help='mesh refinement scale: smaller is finer. Scales the '
-                            'target triangle areas, so triangle count grows roughly '
-                            'as 1/scale (accepts arithmetic, e.g. 1/10)')
-
     parser.add_argument('-alg', type=str, default = default_alg,
                        help='flow algorithm')
 
