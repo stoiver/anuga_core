@@ -240,11 +240,14 @@ docker push "$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com/anuga:gpu"
   ```
   (The images set `HOME=/tmp` so `--user` runs have a writable config dir. With
   compose, `export UID GID` first — see the header of docker-compose.yml.)
-- **Image size:** the GPU image's NVHPC base is ~10–15 GB. A slimmer multi-stage
-  runtime (CUDA-runtime base + copied NVHPC redistributable libs + the venv) is
-  drafted in `Dockerfile.gpu.slim` (**experimental** — needs local build-testing
-  to confirm the runtime-lib set). It should drop the image to a few GB, cutting
-  storage and AWS cold-start pull time.
+- **Image size:** the devel-based GPU image (`Dockerfile.gpu`) is ~50 GB
+  (~16.7 GB compressed to pull). `Dockerfile.gpu.slim` is a multi-stage build
+  (CUDA-runtime base + copied NVHPC redistributable libs + the venv) that is
+  **~5.73 GB (1.9 GB compressed)** — roughly 9x smaller, cutting storage and
+  AWS cold-start pull time. Validated on the cc120 laptop: `import anuga` and a
+  real GPU-offload evolve both work in the runtime stage. Build with
+  `docker build -f docker/Dockerfile.gpu.slim -t anuga:gpu-slim .`. Further
+  shrink is possible (a `-base` CUDA image and trimming the redist libs).
 - **Version string:** `.git` is excluded from the build context, so a
   source-built GPU image reports `0.0.0+unknown` for `anuga.__version__`
   (cosmetic; the code is the checkout's).

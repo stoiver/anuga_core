@@ -1,20 +1,28 @@
-# ANUGA — GPU image, SLIM multi-stage build.  *** EXPERIMENTAL / DRAFT ***
+# ANUGA — GPU image, SLIM multi-stage build.
 #
-# Goal: cut the ~15 GB single-stage image (Dockerfile.gpu, whole NVHPC devel SDK)
-# down to a few GB by shipping only:
+# Cuts the single-stage image (Dockerfile.gpu, whole NVHPC devel SDK, ~50 GB /
+# ~16.7 GB compressed) down by shipping only:
 #   * a CUDA *runtime* base,
-#   * the NVHPC *redistributable* runtime libs the nvc-compiled .so need, and
+#   * the NVHPC *redistributable* runtime libs the nvc-compiled .so need
+#     (REDIST/compilers/lib), and
 #   * the built venv (anuga + deps).
 # Smaller image => cheaper storage and much faster AWS cold-start pulls.
 #
-# NOT YET VALIDATED. The fragile part is getting the exact set of NVHPC runtime
-# libraries right — `import anuga` and a GPU run must both work in the runtime
-# stage. Build locally and iterate (add any missing *.so to the REDIST copy)
-# the same way the single-stage image was brought up:
+# Validated on the RTX 5070 (cc120) laptop, Aug 2026: builds, `import anuga`
+# works in the runtime stage, and a real GPU-offload evolve runs (compute mode
+# 'unified', device 0). Result: anuga:gpu-slim = 5.73 GB / 1.9 GB compressed —
+# roughly 9x smaller than the devel-based image.
+#
+# Build + smoke test:
 #   docker build -f docker/Dockerfile.gpu.slim --build-arg GPU_ARCH=cc120 -t anuga:gpu-slim .
 #   docker run --rm --gpus all -e ANUGA_DEFAULT_COMPUTE_MODE=unified \
-#     -v "$PWD/data:/work" anuga:gpu-slim python /work/example_run.py
-# If import fails with a missing .so, widen the REDIST copy glob below.
+#     anuga:gpu-slim python -c "import anuga; print(anuga.gpu_offload_enabled())"
+# If import ever fails with a missing .so, read the `ldd sw_domain_gpu_ext`
+# block in the build log and widen the REDIST copy glob below.
+#
+# Further shrink (not yet done): the CUDA *runtime* base carries libcudart etc.
+# that OpenMP-target offload may not need — try nvidia/cuda:<ver>-base and add
+# only the CUDA device libs actually required; and trim REDIST to the ldd set.
 
 ARG NVHPC_TAG=25.9-devel-cuda_multi-ubuntu24.04
 ARG CUDA_RUNTIME_TAG=12.6.2-runtime-ubuntu24.04
@@ -43,9 +51,18 @@ RUN set -euo pipefail && \
 # Collect the NVHPC redistributable runtime libs (libnvomp / libnvc / libacc* /
 # libnvhpcatm / libnvcpumath ...) the compiled extensions link against. REDIST
 # holds exactly the redistributable subset. Widen this glob if a lib is missing.
-RUN mkdir -p /opt/nvhpc-redist && \
+#
+# Diagnostic: print the shared-library dependencies of the compiled GPU
+# extension (sw_domain_gpu_ext*.so). Anything under hpc_sdk/.../compilers/lib
+# is what the runtime stage must provide — read this in the build log if
+# `import anuga` fails at runtime with a missing .so.
+RUN set -euo pipefail && \
+    GPU_EXT="$(find "$VIRTUAL_ENV" -name 'sw_domain_gpu_ext*.so' | head -1)" && \
+    echo "GPU extension: ${GPU_EXT:-<not found>}" && \
+    if [ -n "$GPU_EXT" ]; then echo '--- ldd sw_domain_gpu_ext ---'; ldd "$GPU_EXT" || true; fi && \
+    mkdir -p /opt/nvhpc-redist && \
     cp -aL /opt/nvidia/hpc_sdk/Linux_x86_64/*/REDIST/compilers/lib/*.so* /opt/nvhpc-redist/ 2>/dev/null || true && \
-    ls -1 /opt/nvhpc-redist | sed 's/^/  redist: /'
+    du -sh /opt/nvhpc-redist && ls -1 /opt/nvhpc-redist | sed 's/^/  redist: /'
 
 # ---- runtime: small CUDA-runtime base + venv + NVHPC redist libs ------------
 FROM nvidia/cuda:${CUDA_RUNTIME_TAG}
