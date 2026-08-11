@@ -59,10 +59,12 @@ COPY . .
 
 # Build every extension with nvc (CC=nvc), GPU offload on, multi-arch.
 # --no-build-isolation so the pinned build deps + CC=nvc are the ones meson uses.
-# CFLAGS/CXXFLAGS=-tp=haswell: nvc defaults to the *build host* CPU, which bakes
+# CFLAGS=-tp=haswell: nvc defaults to the *build host* CPU, which bakes
 # in that CPU's ISA (e.g. AVX-512) and SIGILLs ("Illegal instruction") on any
 # host lacking it — notably AWS g5 (AMD Zen2, no AVX-512). haswell (AVX2) is the
 # portable baseline every AWS GPU host and the dev laptops support.
+# C only: CC=nvc but CXX is left as g++, which rejects -tp (and needs no such
+# flag — meson.build deliberately avoids -march=native, so g++ is portable).
 RUN set -euo pipefail && \
     NVC="$(command -v nvc || true)"; \
     if [ -z "$NVC" ]; then echo "ERROR: nvc not found on PATH in this NVHPC image" >&2; exit 1; fi && \
@@ -70,7 +72,7 @@ RUN set -euo pipefail && \
     pip install --no-cache-dir -U pip && \
     pip install --no-cache-dir "numpy>=2.0" cython "meson>=1.4" meson-python ninja pybind11 && \
     ANUGA_VERSION="${ANUGA_VERSION}" CC="$NVC" \
-      CFLAGS="-tp=haswell" CXXFLAGS="-tp=haswell" \
+      CFLAGS="-tp=haswell" \
       pip install --no-cache-dir --no-build-isolation -v \
         -Csetup-args=-Dgpu_offload=true \
         -Csetup-args=-Dgpu_arch="${GPU_ARCH}" \

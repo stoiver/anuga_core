@@ -42,15 +42,17 @@ RUN python3 -m venv "$VIRTUAL_ENV"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 WORKDIR /opt/anuga
 COPY . .
-# CFLAGS/CXXFLAGS=-tp=haswell: nvc otherwise targets the build host's CPU and the
+# CFLAGS=-tp=haswell: nvc otherwise targets the build host's CPU and the
 # extensions SIGILL ("Illegal instruction") on any host lacking that ISA — e.g.
 # AWS g5 (AMD Zen2, no AVX-512). haswell (AVX2) runs on every AWS GPU host.
+# C only: CC=nvc but CXX is left as g++, which rejects -tp (and needs no such
+# flag — meson.build deliberately avoids -march=native, so g++ is portable).
 RUN set -euo pipefail && \
     NVC="$(command -v nvc)" && \
     pip install --no-cache-dir -U pip && \
     pip install --no-cache-dir "numpy>=2.0" cython "meson>=1.4" meson-python ninja pybind11 && \
     ANUGA_VERSION="${ANUGA_VERSION}" CC="$NVC" \
-    CFLAGS="-tp=haswell" CXXFLAGS="-tp=haswell" \
+    CFLAGS="-tp=haswell" \
     pip install --no-cache-dir --no-build-isolation \
         -Csetup-args=-Dgpu_offload=true -Csetup-args=-Dgpu_arch="${GPU_ARCH}" ".[data]" && \
     pip install --no-cache-dir awscli && \
