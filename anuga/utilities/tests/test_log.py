@@ -19,13 +19,22 @@ import anuga.utilities.log as log
 
 
 PREAMBLE = """
-import ctypes
+import os
+import subprocess
+import sys
 import anuga.utilities.log as log
 
-def c_printf(text):
-    libc = ctypes.CDLL(None)
-    libc.printf(b'%s', text.encode('utf-8'))
-    libc.fflush(None)
+def fd_write(text):
+    # Write straight to file descriptor 1, bypassing sys.stdout — this is how
+    # the compiled extensions' printf() reaches the terminal.  Portable, unlike
+    # calling libc printf() through ctypes (which cannot be done on Windows and
+    # crashes on macOS arm64, whose variadic ABI ctypes does not implement).
+    os.write(1, text.encode('utf-8'))
+
+def child_write(text):
+    # Output from a separate program inheriting fd 1 — the other way output
+    # arrives without passing through this interpreter's sys.stdout.
+    subprocess.run([sys.executable, '-c', 'print(%r)' % text], check=True)
 
 log.set_logfile(LOGFILE)
 """
@@ -67,19 +76,41 @@ class logTestCase(unittest.TestCase):
         assert 'a python print' in logged
         assert 'a python print' in printed
 
-    def test_c_output_goes_to_logfile(self):
-        """C printf bypasses sys.stdout — the fd-level tee must still catch it."""
+    def test_fd_output_goes_to_logfile(self):
+        """Output written to fd 1 bypasses sys.stdout — the tee must catch it."""
         logged, printed = run_logging_script("""
-            c_printf('output from C\\n')
+            fd_write('written to fd 1\\n')
+            """, self.path)
+        assert 'written to fd 1' in logged
+        assert 'written to fd 1' in printed
+
+    def test_child_process_output_goes_to_logfile(self):
+        """A child inheriting fd 1 writes without touching our sys.stdout."""
+        logged, printed = run_logging_script("""
+            child_write('hello from a child')
+            """, self.path)
+        assert 'hello from a child' in logged
+        assert 'hello from a child' in printed
+
+    @unittest.skipUnless(sys.platform.startswith('linux'),
+                         'ctypes cannot call variadic printf on macOS arm64, '
+                         'and CDLL(None) does not exist on Windows')
+    def test_libc_printf_goes_to_logfile(self):
+        """The real case the fd tee exists for: libc printf() from C code."""
+        logged, printed = run_logging_script("""
+            import ctypes
+            libc = ctypes.CDLL(None)
+            libc.printf(b'%s', b'output from C\\n')
+            libc.fflush(None)
             """, self.path)
         assert 'output from C' in logged
         assert 'output from C' in printed
 
     def test_logfile_keeps_write_order(self):
-        """print(), C output and log records must interleave in write order."""
+        """print(), fd-level output and log records must interleave in order."""
         logged, _ = run_logging_script("""
             print('first')
-            c_printf('second\\n')
+            fd_write('second\\n')
             log.info('third')
             print('fourth')
             """, self.path)
@@ -95,17 +126,17 @@ class logTestCase(unittest.TestCase):
         assert logged.count('only once please') == 1
 
     def test_file_only_hides_terminal_but_keeps_logfile(self):
-        """file_only() must also hide C output, which it never used to."""
+        """file_only() must also hide fd-level output, which it never used to."""
         logged, printed = run_logging_script("""
             with log.file_only():
                 print('quiet python')
-                c_printf('quiet C\\n')
+                fd_write('quiet fd 1\\n')
             print('loud python')
             """, self.path)
         assert 'quiet python' in logged
-        assert 'quiet C' in logged
+        assert 'quiet fd 1' in logged
         assert 'quiet python' not in printed
-        assert 'quiet C' not in printed
+        assert 'quiet fd 1' not in printed
         assert 'loud python' in printed
 
     def test_each_run_starts_a_fresh_logfile(self):
