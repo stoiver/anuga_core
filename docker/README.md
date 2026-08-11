@@ -171,6 +171,15 @@ mesh-gen + DEM fitting are CPU-bound). Flags: `--dry-run`, `--instance`, `--spot
 **GPU vCPU service-quota increase** (new accounts start at 0 for G/P families).
 Each user runs this in **their own AWS account and pays for their own usage**.
 
+**Image source:** by default it pulls the public GHCR image
+(`ghcr.io/anuga-community/anuga:develop-gpu`). Add **`--ecr`** to use the private
+in-region ECR image `…dkr.ecr.<region>.amazonaws.com/anuga:gpu-slim` instead —
+the ~459 MB slim build, so the instance's cold-start pull drops from ~16.7 GB to
+~0.5 GB. The script builds the URI from your account + region, grants the
+instance role `AmazonEC2ContainerRegistryReadOnly`, and logs the instance in to
+ECR before pulling. Override the repo:tag with `--ecr-repo anuga:<tag>`, or pass
+a full ECR URI via `--image …` (auto-detected). Push the image first (below).
+
 **New to AWS?** Follow [`AWS_SETUP.md`](AWS_SETUP.md) — account, budget alerts,
 the quota increase, region + bucket, then dry-run and launch.
 
@@ -188,8 +197,8 @@ account's ECR) and use Batch array jobs:
 aws ecr create-repository --repository-name anuga || true
 aws ecr get-login-password | docker login --username AWS --password-stdin \
   "$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com"
-docker tag anuga:gpu "$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com/anuga:gpu"
-docker push "$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com/anuga:gpu"
+docker tag anuga:gpu-slim "$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com/anuga:gpu-slim"
+docker push "$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com/anuga:gpu-slim"
 ```
 
 ### AWS Batch (GPU)
