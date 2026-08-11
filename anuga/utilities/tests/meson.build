@@ -6,6 +6,7 @@ python_sources = [
 'test_data_audit.py',
 'test_file_utils.py',
 'test_function_utils.py',
+'test_log.py',
 'test_log_analyser.py',
 'test_mem_time_equation.py',
 'test_model_tools.py',
