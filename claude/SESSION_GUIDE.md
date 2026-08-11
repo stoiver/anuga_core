@@ -449,7 +449,49 @@ Findings:
 
 ---
 
-## Recent session summaries (sessions 21–52)
+## Recent session summaries (sessions 21–53)
+
+**Session 53 (2026-08-09 – 08-11):** Parallel bug fixes + Docker slim image +
+first real AWS GPU run of towradgi.
+- **MPI deadlock in `update_conserved_quantities`** (negative-cells "loss of
+  conservation" warning called the collective `get_water_volume()` under a
+  per-rank `if num_negative_ids>0` branch → `-np 1` worked, `-np 2` hung;
+  faulthandler pinned it). Fixed: warn **serial-only** (no collective in the hot
+  per-substep path; two earlier attempts — local volume, then unconditional
+  Allreduce — each caused a *new* hang, incl. `test_parallel_boyd_box_operator`).
+  → **PR #216, merged to develop.** Regression test
+  `test_parallel_negative_cells_deadlock.py` added.
+- **anuga_toml_run**: per-rank MPI logs; ranks≠GPUs unified guard (fail fast, not
+  hang); end-of-run water-balance V0 fix (capture at first yieldstep, not before
+  evolve — pre-evolve `get_water_volume` gives a bogus unclamped V0); `--emit-script`
+  (eject an editable standalone run script). *(on branch add-toml-scenario-features / PR #213)*
+- **Erosion**: default elevation to time-varying storage when erosion present —
+  TOML parser (warn only on explicit static) **and** core operators
+  (`_mark_domain_erosion`; `initialise_storage` warns if reset to static).
+- **Riverwall verbose output** condensed to one line per wall.
+- **TOML numeric fields** accept quoted arithmetic (`finaltime = "5*60"`, safe ast eval).
+- **Docker**: slim multi-stage GPU image (CUDA **-base** + NVHPC REDIST + venv) =
+  **2.15 GB / 459 MB compressed, ~37x smaller** to pull; validated locally. `-tp=haswell`
+  portability fix (native nvc build SIGILLs on AWS g5/Zen2 — no AVX-512). `aws_run_gpu.sh`
+  gained **`--ecr`** (private in-region image + role ECR-read + instance login).
+- **AWS**: validated `run_small_towradgi.py` end-to-end via ECR slim image
+  (`aws_run_gpu.sh --ecr --instance g4dn.xlarge`, rc=0, ~2 min). Coords in memory
+  `reference_aws_towradgi_run.md`.
+
+**RESUME STATE (as of 2026-08-11):**
+- On `develop`, **10 commits AHEAD of origin/develop, all UNPUSHED** (cf5d3ffb →
+  394b61b8: install-script note, erosion×2, riverwall, toml arithmetic, docker
+  slim×2, --ecr, spot-label, -tp fix). Decide: push to `stoiver` or PR to origin.
+- **PR #216 merged**; **PR #213 (add-toml-scenario-features) still open** (the
+  toml-runner feature set).
+- **Pending Docker follow-up:** the image in ECR is still the *native* (AVX-512)
+  build — rebuild the slim image with the committed `-tp=haswell` fix and re-push
+  (`docker build -f docker/Dockerfile.gpu.slim -t anuga:gpu-slim-multi . && docker
+  tag … $ECR/anuga:gpu-slim && docker push …`) so AWS **g5** works too (g4dn
+  already does). Then multi-arch slim → ECR is the shipping image.
+- Uncommitted working-tree edit: `towradgi.toml` has a *demo* of the arithmetic
+  feature (`finaltime="3600*24"` = 24 h) — not for committing; `git checkout --` it.
+
 
 **Session 52 (2026-07-25):** **Fix the CI unified-compute-mode failure + harden
 `update_conserved_quantities`.** The `github CI` "Test package (unified compute mode,
