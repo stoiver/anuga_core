@@ -280,7 +280,8 @@ for itype in ${INSTANCE_TYPES//,/ }; do
 done
 [ -z "$IID" ] && die "no capacity for any of [$INSTANCE_TYPES] across ${#SUBNETS[@]} AZ(s); try --spot, --instance <other type>, another --region, or retry later"
 
-echo ">> instance $IID launched ($USED_TYPE${SPOT:+, spot}${USED_SUBNET:+, $USED_SUBNET})."
+SPOT_LABEL="" ; [ "$SPOT" = "1" ] && SPOT_LABEL=", spot"   # ${SPOT:+} misfires: "0" is non-empty
+echo ">> instance $IID launched ($USED_TYPE${SPOT_LABEL}${USED_SUBNET:+, $USED_SUBNET})."
 echo ">> it will run: ${COMMAND}"
 echo ">> results ->   ${OUTPUT_S3}    (+ anuga-run.log with timing)"
 if [ "$KEEP" = "1" ]; then
