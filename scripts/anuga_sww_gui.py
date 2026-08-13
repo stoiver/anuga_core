@@ -333,7 +333,37 @@ class SWWAnimationGUI:
     # UI construction                                                 #
     # -------------------------------------------------------------- #
 
+    def _build_menubar(self):
+        """File menu — Open/config/Quit, reusing the toolbar's handlers.
+
+        Quit goes through _on_close so it does exactly what the window's close
+        button does: cancel any running generation, stop playback and close the
+        matplotlib figures.  Calling root.destroy() directly would leave a
+        worker pool and open figures behind.
+        """
+        menubar = tk.Menu(self.root)
+
+        file_menu = tk.Menu(menubar, tearoff=0)
+        file_menu.add_command(label='Open SWW...', accelerator='Ctrl+O',
+                              command=self._browse_sww)
+        file_menu.add_separator()
+        file_menu.add_command(label='Load Config...', command=self._load_config)
+        file_menu.add_command(label='Save Config...', command=self._save_config)
+        file_menu.add_separator()
+        file_menu.add_command(label='Quit', accelerator='Ctrl+Q',
+                              command=self._on_close)
+        menubar.add_cascade(label='File', menu=file_menu)
+
+        self.root.config(menu=menubar)
+
+        # Keyboard accelerators (the labels above are only cosmetic; tk needs
+        # the bindings made explicitly).
+        self.root.bind_all('<Control-o>', lambda e: self._browse_sww())
+        self.root.bind_all('<Control-q>', lambda e: self._on_close())
+
     def _build_ui(self):
+        self._build_menubar()
+
         # ---- status bar (packed first so it anchors to the bottom) ----
         status_frame = ttk.Frame(self.root)
         status_frame.pack(side=tk.BOTTOM, fill=tk.X)
