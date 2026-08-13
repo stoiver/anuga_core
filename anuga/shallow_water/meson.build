@@ -330,6 +330,18 @@ endif
 #                              Python binary; portable across any conda env path
 #   sys.prefix/lib           — absolute fallback for non-standard layouts
 gpu_link_args = []
+
+# nvc performs the *device* link when producing the shared module, and it picks
+# the target architectures from the -gpu= on the LINK line -- the -gpu= used at
+# compile time does not carry through.  With no -gpu= here nvc guesses: the
+# build host's own GPU when one is visible, or every architecture the bundled
+# CUDA supports when none is (e.g. inside a container).  Either way -Dgpu_arch
+# was silently ignored, so a build "for cc80" could come out as sm_120, and the
+# Docker images were portable only by accident.  Repeat the flags at link time
+# so the requested architectures are the ones actually embedded.
+if gpu_offload and effective_compiler_id == 'nvidia_hpc'
+  gpu_link_args += ['-mp=gpu,multicore', '-gpu=' + gpu_arch]
+endif
 if host_machine.system() == 'darwin' and have_full_mpi
   _py_prefix = run_command(py3, ['-c', 'import sys; print(sys.prefix)'], check: false)
   if _py_prefix.returncode() == 0

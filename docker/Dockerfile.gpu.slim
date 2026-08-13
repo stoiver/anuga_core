@@ -31,7 +31,13 @@ ARG CUDA_RUNTIME_TAG=12.6.2-base-ubuntu24.04
 
 # ---- builder: compile anuga with nvc (as in Dockerfile.gpu) -----------------
 FROM nvcr.io/nvidia/nvhpc:${NVHPC_TAG} AS builder
-ARG GPU_ARCH=cc75,cc80,cc86,cc89,cc90,cc120
+# cuda12.9 is deliberate, and must come first.  The cuda_multi base bundles
+# CUDA 12.9 and 13.0 and defaults to 13.0, whose libnvvm dropped Volta:
+# cc70 then fails with "-arch=compute_70 is an unsupported option".  CUDA 12.9
+# still supports Volta and already supports Blackwell (sm_120, added in 12.8),
+# so selecting it is what lets ONE fat binary span V100 (cc70) through the
+# RTX 50-series (cc120) — no separate V100 image needed.
+ARG GPU_ARCH=cuda12.9,cc70,cc75,cc80,cc86,cc89,cc90,cc120
 ARG ANUGA_VERSION=
 SHELL ["/bin/bash", "-lc"]
 RUN apt-get update && apt-get install -y --no-install-recommends \
