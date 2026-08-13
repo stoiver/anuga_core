@@ -203,8 +203,9 @@ docker push "$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com/anuga:gpu-slim"
 
 ### AWS Batch (GPU)
 
-1. **Compute environment** — EC2 with GPU instance types (`g4dn`/`g5`/`g6`/`p4d`/`p5`;
-   `p3`/V100 is not covered by the default image — see GPU_ARCH note in Dockerfile.gpu)
+1. **Compute environment** — EC2 with GPU instance types (`g4dn`/`g5`/`g6`/`p4d`/`p5`,
+   and `p3`/V100 — the default image now spans cc70–cc120, see the GPU_ARCH note
+   in Dockerfile.gpu)
    using the **ECS GPU-optimized AMI** (driver + `nvidia-container-runtime`
    preinstalled). Spot is fine for interruptible runs.
 2. **Job definition** — key fields:

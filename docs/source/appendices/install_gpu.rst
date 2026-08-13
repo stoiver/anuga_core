@@ -77,6 +77,11 @@ dir, builds, and runs the isolated GPU tests):
    # options via env vars, e.g. build for an A100 with Python 3.13:
    PY=3.13 GPU_ARCH=cc80 bash tools/install_anuga_nvc.sh
 
+``GPU_ARCH`` defaults to the compute capability of the GPU in the machine you
+are building on, read from ``nvidia-smi``, so you normally do not set it. Set it
+explicitly when building for a *different* card than the one present (e.g. on a
+login node for a compute node with other GPUs).
+
 **Manual build:**
 
 .. code-block:: bash
@@ -99,8 +104,40 @@ Pick ``gpu_arch`` for your card:
      - H100
    * - ``cc80``
      - A100
+   * - ``cc86``
+     - RTX 30-series (Ampere)
+   * - ``cc89``
+     - RTX 40-series / L4 (Ada)
+   * - ``cc75``
+     - T4 / RTX 20-series (Turing)
    * - ``cc70``
      - V100
+
+Several may be given at once for a binary that runs on any of them, e.g.
+``-Dgpu_arch=cc80,cc86,cc90``. Note that the CUDA bundled with recent NVIDIA HPC
+SDKs dropped Volta, so ``cc70`` needs an older CUDA selected alongside it:
+``-Dgpu_arch=cuda12.9,cc70,cc80``.
+
+.. warning::
+
+   **Build for the right architecture.** The build contains only the
+   architectures you ask for. Requesting the wrong one still compiles cleanly
+   and then fails at *every kernel launch* — which appears as the GPU tests
+   reporting ``CRASH`` after an apparently successful install, not as a build
+   error.
+
+   Check what a build actually contains::
+
+       cuobjdump --list-elf $(python -c \
+           "import anuga.shallow_water.sw_domain_gpu_ext as m; print(m.__file__)") \
+           | grep -o 'sm_[0-9]*' | sort -u
+
+   and compare with your card::
+
+       nvidia-smi --query-gpu=name,compute_cap --format=csv
+
+   ``compute_cap`` 8.6 means you want ``cc86``. ``tools/install_anuga_nvc.sh``
+   performs this check for you and reports a mismatch before running the tests.
 
 .. warning::
 

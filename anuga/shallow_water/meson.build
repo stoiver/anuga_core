@@ -207,6 +207,17 @@ if gpu_offload
   endif
   message('GPU offloading enabled')
   message('GPU architecture: ' + gpu_arch)
+  # The build contains ONLY the architectures named here, and a mismatch is not
+  # a build error -- it fails later, at every kernel launch. Anyone who leaves
+  # the option at its default is very unlikely to want a V100-only build, so say
+  # so while they can still act on it.
+  if gpu_arch == 'cc70'
+    warning('gpu_arch is at its default (cc70 = V100). The build will contain ' +
+            'ONLY that architecture and will fail at every kernel launch on any ' +
+            'other GPU. Pass -Dgpu_arch=<ccXX> for your card ' +
+            '(nvidia-smi --query-gpu=compute_cap --format=csv), or use ' +
+            'tools/install_anuga_nvc.sh, which detects it.')
+  endif
 else
   # CPU multicore execution (no GPU offloading)
   # #pragma omp target teams loop becomes regular OpenMP parallel
