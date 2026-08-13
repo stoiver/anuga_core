@@ -680,5 +680,50 @@ class TestDomainPlotter(unittest.TestCase):
         self.assertTrue(os.path.exists(png))
 
 
+class Test_tile_client_config(unittest.TestCase):
+    """ANUGA must identify itself to tile servers (no network needed).
+
+    contextily defaults to USER_AGENT = "contextily-" + uuid4().hex, i.e. a
+    fresh random agent per process.  OpenStreetMap's tile usage policy requires
+    a stable agent identifying the application and blocks rotating ones -- and
+    the block arrives as an HTTP 200 tile whose image reads "Access blocked",
+    so it silently renders onto the map instead of raising.
+    """
+
+    def setUp(self):
+        try:
+            import contextily  # noqa: F401
+        except ImportError:
+            self.skipTest('contextily is not installed')
+
+    def test_contextily_default_agent_is_replaced(self):
+        import contextily as cx
+        import contextily.tile as tile
+        from anuga.utilities import animate
+
+        original = tile.USER_AGENT
+        try:
+            tile.USER_AGENT = 'contextily-0123456789abcdef'
+            animate._configure_tile_client(cx)
+            self.assertIn('ANUGA', tile.USER_AGENT)
+            self.assertFalse(tile.USER_AGENT.startswith('contextily-'))
+        finally:
+            tile.USER_AGENT = original
+
+    def test_user_supplied_agent_is_left_alone(self):
+        """Only contextily's own default is replaced, never a deliberate one."""
+        import contextily as cx
+        import contextily.tile as tile
+        from anuga.utilities import animate
+
+        original = tile.USER_AGENT
+        try:
+            tile.USER_AGENT = 'MyApp/1.0 (+https://example.org)'
+            animate._configure_tile_client(cx)
+            self.assertEqual(tile.USER_AGENT, 'MyApp/1.0 (+https://example.org)')
+        finally:
+            tile.USER_AGENT = original
+
+
 if __name__ == '__main__':
     unittest.main()

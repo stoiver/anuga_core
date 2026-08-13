@@ -31,7 +31,11 @@
 ARG NVHPC_TAG=25.9-devel-cuda_multi-ubuntu24.04
 FROM nvcr.io/nvidia/nvhpc:${NVHPC_TAG}
 
-ARG GPU_ARCH=cc75,cc80,cc86,cc89,cc90,cc120
+# cuda12.9 first: the cuda_multi base bundles CUDA 12.9 and 13.0 and defaults
+# to 13.0, whose libnvvm dropped Volta ("-arch=compute_70 is an unsupported
+# option").  12.9 supports Volta AND Blackwell (sm_120, added in 12.8), so one
+# fat binary covers cc70 (V100) through cc120 (RTX 50-series).
+ARG GPU_ARCH=cuda12.9,cc70,cc75,cc80,cc86,cc89,cc90,cc120
 # PEP 440 version to stamp into the build (.git is excluded from the context, so
 # `git describe` can't run inside the image). Pass what it would have produced:
 #   --build-arg ANUGA_VERSION="$(python _git_version.py)"
