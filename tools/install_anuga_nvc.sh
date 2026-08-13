@@ -22,6 +22,14 @@
 #               architectures asked for, so a mismatched value produces a
 #               package that compiles fine and then crashes on every kernel
 #               launch.
+#   GPU_AWARE_MPI  1 = build with -Dgpu_aware_mpi=true (default 0).
+#               Halo buffers are then allocated with omp_target_alloc and staged
+#               with omp_target_memcpy, instead of mapped host buffers moved
+#               with 'target update'.  NOTE this does NOT pass device pointers
+#               to MPI: anuga/shallow_water/gpu/gpu_halo.c stages every halo
+#               through host memory in both paths, because some UCX transports
+#               (uct_mm intra-node shared memory) SIGSEGV on device pointers.
+#               So it needs no CUDA-aware MPI, and gives no GPUDirect.
 #   SKIP_TESTS  1 = do not run the GPU test suite at all.
 #   FORCE_TESTS 1 = run it even when no GPU is visible (default: skip, so an
 #               HPC login node does not spend a long time on tests that
@@ -351,7 +359,7 @@ echo " "
 echo "#============================================================"
 echo "# Building ANUGA with GPU offloading"
 echo "#   CC=$NVC"
-echo "#   gpu_offload=true  gpu_arch=${GPU_ARCH}"
+echo "#   gpu_offload=true  gpu_arch=${GPU_ARCH}  gpu_aware_mpi=${GPU_AWARE_MPI:-0}"
 echo "#============================================================"
 echo " "
 
@@ -384,10 +392,26 @@ else
 fi
 echo " "
 
+GPU_AWARE_MPI_ARG=""
+if [ "${GPU_AWARE_MPI:-0}" = "1" ]; then
+    GPU_AWARE_MPI_ARG="-Csetup-args=-Dgpu_aware_mpi=true"
+    echo "# GPU_AWARE_MPI=1: building with -Dgpu_aware_mpi=true"
+    echo "#   (device-allocated halo buffers; MPI itself still receives host"
+    echo "#    pointers - see gpu_halo.c. No CUDA-aware MPI is required.)"
+    if ! $CONDA_RUN python -c "import mpi4py" >/dev/null 2>&1; then
+        echo "#   WARNING: mpi4py is not installed in this environment, so the"
+        echo "#            extension will be built against the single-process"
+        echo "#            stubs and this flag will have no effect. Install"
+        echo "#            mpi4py (and pymetis) first if you want parallel runs."
+    fi
+    echo " "
+fi
+
 $CONDA_RUN bash -c \
     "CC='$NVC' pip install --no-build-isolation -v ${PIP_TARGET_ARGS} \
      -Csetup-args=-Dgpu_offload=true \
-     -Csetup-args=-Dgpu_arch=${GPU_ARCH}"
+     -Csetup-args=-Dgpu_arch=${GPU_ARCH} \
+     ${GPU_AWARE_MPI_ARG}"
 
 echo " "
 # ---------------------------------------------------------------------------
