@@ -13,7 +13,13 @@
 #
 #   PY          Python version to use (default: 3.14)
 #   GPU_ARCH    GPU compute capability, e.g. cc120 (RTX 5070 Blackwell),
-#               cc90 (H100), cc80 (A100), cc70 (V100).  Default: cc120
+#               cc86 (RTX 30xx Ampere), cc90 (H100), cc80 (A100), cc70 (V100).
+#               Default: DETECTED from the GPU in this machine via nvidia-smi,
+#               falling back to a multi-architecture build if that fails.
+#               Getting this wrong matters: the build now contains only the
+#               architectures asked for, so a mismatched value produces a
+#               package that compiles fine and then crashes on every kernel
+#               launch.
 #   NVHPC_ROOT  Override path to NVIDIA HPC SDK root if auto-detection fails.
 #               e.g. /opt/nvidia/hpc_sdk/Linux_x86_64/26.3
 #
@@ -26,7 +32,28 @@
 #   - conda environment anuga_env_${PY} created via install_miniforge.sh
 
 PY=${PY:-"3.14"}
-GPU_ARCH=${GPU_ARCH:-"cc120"}
+
+# Detect this machine's GPU rather than assuming one.  nvidia-smi reports the
+# compute capability as e.g. "8.6", which becomes cc86.
+#
+# This used to be hardcoded to cc120 (the author's laptop) and nobody noticed,
+# because -Dgpu_arch was not reaching nvc's device link: nvc fell back to the
+# GPU it found on the build machine, so any value happened to work.  Once that
+# was fixed the hardcoded default started producing sm_120-only builds that
+# crash on every other card.
+detect_gpu_arch() {
+    local cap
+    cap=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null \
+          | head -1 | tr -d ' ')
+    if [[ "$cap" =~ ^[0-9]+\.[0-9]+$ ]]; then
+        echo "cc${cap//./}"
+    else
+        # No usable nvidia-smi (headless build node, driver not loaded, ...):
+        # build for every architecture ANUGA supports rather than guess one.
+        echo "cc70,cc75,cc80,cc86,cc89,cc90,cc120"
+    fi
+}
+GPU_ARCH=${GPU_ARCH:-"$(detect_gpu_arch)"}
 
 set -e
 
@@ -216,6 +243,40 @@ $CONDA_RUN bash -c \
      -Csetup-args=-Dgpu_arch=${GPU_ARCH}"
 
 echo " "
+# ---------------------------------------------------------------------------
+# Sanity check: does the built extension actually contain code for THIS GPU?
+#
+# A mismatch here is the difference between "it works" and every GPU test
+# reporting CRASH: the build succeeds either way, and the kernels only fail
+# when they are launched.  Diagnose it up front rather than leaving the user
+# to interpret a wall of crashes.
+# ---------------------------------------------------------------------------
+GPU_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ')
+if [[ "$GPU_CAP" =~ ^[0-9]+\.[0-9]+$ ]]; then
+    WANT_SM="sm_${GPU_CAP//./}"
+    GPU_EXT=$($CONDA_RUN python -c \
+        "import anuga.shallow_water.sw_domain_gpu_ext as m; print(m.__file__)" 2>/dev/null | tail -1)
+    CUOBJDUMP=$(command -v cuobjdump || ls "${NVHPC_ROOT}"/cuda/bin/cuobjdump 2>/dev/null | head -1)
+    if [[ -n "$GPU_EXT" && -n "$CUOBJDUMP" && -f "$GPU_EXT" ]]; then
+        BUILT_SM=$("$CUOBJDUMP" --list-elf "$GPU_EXT" 2>/dev/null \
+                   | grep -oE 'sm_[0-9]+' | sort -uV | tr '\n' ' ')
+        echo "# GPU in this machine : ${WANT_SM} (compute capability ${GPU_CAP})"
+        echo "# Built for           : ${BUILT_SM:-<none found>}"
+        if [[ -n "$BUILT_SM" && " $BUILT_SM " != *" $WANT_SM "* ]]; then
+            echo ""
+            echo "#=================================================================="
+            echo "# WARNING: this build does NOT include ${WANT_SM}, the GPU in this"
+            echo "# machine.  It compiled cleanly, but every GPU kernel launch will"
+            echo "# fail and the tests below will report CRASH."
+            echo "#"
+            echo "# Rebuild for this GPU:"
+            echo "#     GPU_ARCH=cc${GPU_CAP//./} bash ${SCRIPT}"
+            echo "#=================================================================="
+            echo ""
+        fi
+    fi
+fi
+
 echo "#============================================================"
 echo "# Running GPU test suite (isolated runner)"
 echo "#   One fresh process per test.  A plain 'pytest' on this file"
