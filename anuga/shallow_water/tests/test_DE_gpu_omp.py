@@ -3162,5 +3162,64 @@ class Test_GPU_InletWithCpuOnlyOperator(unittest.TestCase):
             msg=f"expected ~{expected} m^3 of inflow, got {v_m2 - v0}")
 
 
+class Test_GPU_ManyCulverts(unittest.TestCase):
+    """More culverts than MAX_CULVERTS must work (issue #217).
+
+    MAX_CULVERTS (gpu_domain.h) is only the INITIAL capacity of the culvert
+    arrays -- registration grows them by doubling, so a model may hold any
+    number.  gpu_culverts_apply_all() nevertheless sized its per-step working
+    buffers (inlet data, results, transfers and the MPI exchange buffers) as
+    fixed arrays of MAX_CULVERTS entries, then looped over num_culverts.  A
+    model with more culverts than that wrote past the end of them on every
+    timestep: a 101-culvert model overran ~8.9 kB of stack per step, which
+    showed up as the run wedging at Time = 0 and later segfaulting on a
+    pointer whose bits were a NaN double.
+
+    This test registers comfortably more than MAX_CULVERTS culverts and
+    evolves.  Before the fix that corrupts the stack and typically crashes;
+    no useful assertion can be made about the values, so completing a few
+    steps with finite state is the check.
+    """
+
+    N_CULVERTS = 80          # > MAX_CULVERTS (64), with room to spare
+
+    def test_more_culverts_than_initial_capacity(self):
+        from anuga import Boyd_box_operator
+
+        domain = rectangular_cross_domain(40, 40, len1=200.0, len2=200.0)
+        domain.set_flow_algorithm('DE0')
+        domain.set_name('many_culverts')
+        domain.set_datadir(tempfile.mkdtemp())
+        domain.store = False
+        domain.set_multiprocessor_mode(2)
+
+        # Sloped bed so the culverts actually transfer water rather than idle.
+        domain.set_quantity('elevation', lambda x, y: -x / 20.0)
+        domain.set_quantity('stage', 2.0)
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+
+        # Spread the culverts out so their inlets do not overlap.
+        for i in range(self.N_CULVERTS):
+            y = 5.0 + (190.0 * i) / self.N_CULVERTS
+            Boyd_box_operator(domain,
+                              end_points=[[40.0, y], [160.0, y]],
+                              losses=1.5, width=2.0, height=2.0, apron=0.0,
+                              use_momentum_jet=False, use_velocity_head=False,
+                              manning=0.013, verbose=False)
+
+        for _ in domain.evolve(yieldstep=1.0, finaltime=3.0):
+            pass
+
+        stage = domain.quantities['stage'].centroid_values
+        xmom = domain.quantities['xmomentum'].centroid_values
+        self.assertTrue(np.all(np.isfinite(stage)),
+                        'non-finite stage after evolving %d culverts'
+                        % self.N_CULVERTS)
+        self.assertTrue(np.all(np.isfinite(xmom)),
+                        'non-finite xmomentum after evolving %d culverts'
+                        % self.N_CULVERTS)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

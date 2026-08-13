@@ -321,6 +321,20 @@ struct culvert_operators {
     int initialized;
 
     // ------------------------------------------------------------------
+    // Host-side per-step working buffers, grown to hold num_culverts.
+    // These were once fixed-size stack arrays of MAX_CULVERTS, which
+    // silently overflowed for any model with more culverts than that
+    // (MAX_CULVERTS is only the *initial* capacity — see the note above).
+    // Allocated once and reused, so the hot path stays malloc-free.
+    // ------------------------------------------------------------------
+    int host_scratch_capacity;             // entries allocated below (0 = none)
+    struct inlet_data *host_data0;         // [capacity] inlet 0 gathered data
+    struct inlet_data *host_data1;         // [capacity] inlet 1 gathered data
+    struct culvert_result *host_results;   // [capacity] per-culvert discharge
+    struct culvert_transfer *host_transfers; // [capacity] per-culvert transfer
+    struct culvert_mpi_bufs *host_mpi_bufs;  // MPI exchange buffers (opaque)
+
+    // ------------------------------------------------------------------
     // Device-resident scratch. Everything here is mapped ONCE in
     // gpu_culverts_map() and torn down in gpu_culverts_finalize_all().
     // Constant buffers use map(to:); per-step buffers use map(alloc:) and
