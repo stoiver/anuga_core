@@ -220,6 +220,12 @@ def setup_mesh(project, setup_initial_conditions=None):
         domain.quantities_to_be_stored['elevation'] = 2
     else:
         domain.quantities_to_be_stored['elevation'] = 1
+        # If the user *explicitly* asked for static storage, mark the domain so
+        # an erosion operator created later (setup_erosion) respects that choice
+        # instead of promoting elevation to time-varying. The parser already
+        # warned about the consequence, so initialise_storage() stays quiet too.
+        if getattr(project, '_store_elevation_explicit', False):
+            domain._elevation_static_by_user = True
 
     # Record phase timings for the runner's summary (build on this rank; the
     # rest of the mesh phase — partition/dump/load — counts as distribute).

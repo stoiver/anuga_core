@@ -22,6 +22,13 @@
 # Add --dry-run to validate creds / GPU quota / AMI and print the launch plan
 # without creating or charging anything.
 #
+# Image: defaults to the public GHCR image. Pass --ecr to use the private
+# in-region ECR image <acct>.dkr.ecr.<region>.amazonaws.com/anuga:gpu-slim
+# instead (~459 MB slim GPU build — far faster cold-start than the ~16.7 GB
+# public one). The instance logs in to ECR with its role, and the auto-created
+# role is granted ECR read. Any --image whose URI is an ECR registry is
+# auto-detected and gets the same login. (Push the image first — see docker/README.md.)
+#
 # Robustness: creates a default VPC if the account has none (or pass --subnet-id);
 # on InsufficientInstanceCapacity it falls back across instance types and AZs
 # (--instance takes a single type or a comma list). The run log records timing
@@ -33,6 +40,8 @@ set -euo pipefail
 
 # ---- defaults ---------------------------------------------------------------
 IMAGE="ghcr.io/anuga-community/anuga:develop-gpu"   # pre-release (built from develop)
+USE_ECR=0                          # --ecr: use the private in-region ECR image
+ECR_REPO="anuga:gpu-slim"          # repo:tag used to build the ECR URI for --ecr
 # Comma-separated capacity-fallback chain: the first type with capacity (in any
 # AZ) wins. g5.2xlarge (A10G/cc86, 8 vCPU) -> g5.xlarge -> g4dn.xlarge (T4/cc75,
 # cheap + widely available). Override with --instance (single or comma list).
@@ -52,6 +61,8 @@ usage() {
 while [ $# -gt 0 ]; do
   case "$1" in
     --image)            IMAGE="$2"; shift 2 ;;
+    --ecr)              USE_ECR=1; shift ;;              # use ECR image built from account+region
+    --ecr-repo)         ECR_REPO="$2"; USE_ECR=1; shift 2 ;;  # override repo:tag (implies --ecr)
     --instance)         INSTANCE_TYPES="$2"; shift 2 ;;   # single or comma list
     --subnet-id)        SUBNET_ID="$2"; shift 2 ;;        # else default-VPC subnets
     --region)           REGION="$2"; shift 2 ;;
@@ -79,6 +90,22 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 [ -n "$REGION" ]    || die "no region (pass --region or set AWS_REGION)"
 [ -n "$UPLOAD_DIR" ] && [ -z "$INPUT_S3" ] && die "--upload needs --input to upload to"
 AWS=(aws --region "$REGION")
+
+# ---- resolve ECR image (--ecr) and detect ECR registries --------------------
+# --ecr builds <account>.dkr.ecr.<region>.amazonaws.com/<repo:tag> from the
+# caller's account. Any ECR image (via --ecr or an ECR --image) needs the
+# instance to `docker login` first (private registry) and the role to have ECR
+# read — both handled below.
+if [ "$USE_ECR" = "1" ]; then
+  ACCOUNT=$("${AWS[@]}" sts get-caller-identity --query Account --output text 2>/dev/null) \
+    || die "--ecr: could not resolve AWS account id (is the CLI configured?)"
+  IMAGE="${ACCOUNT}.dkr.ecr.${REGION}.amazonaws.com/${ECR_REPO}"
+  echo ">> --ecr: using image $IMAGE"
+fi
+case "$IMAGE" in
+  *.dkr.ecr.*.amazonaws.com/*) IMAGE_IS_ECR=1 ; ECR_REGISTRY="${IMAGE%%/*}" ;;
+  *)                           IMAGE_IS_ECR=0 ; ECR_REGISTRY="" ;;
+esac
 
 bucket_of() { echo "$1" | sed -E 's#^s3://([^/]+).*#\1#'; }
 
@@ -121,6 +148,17 @@ if [ -z "$INSTANCE_PROFILE" ]; then
     aws iam add-role-to-instance-profile --instance-profile-name "$INSTANCE_PROFILE" --role-name "$ROLE" >/dev/null
     echo ">> waiting for IAM propagation..."; sleep 15
   fi
+  # ECR pulls need the role to read the registry. attach-role-policy is
+  # idempotent, so this also fixes a role first created for an S3-only run.
+  if [ "$IMAGE_IS_ECR" = "1" ]; then
+    if [ "$DRY" = "1" ]; then
+      echo "[dry-run] would attach AmazonEC2ContainerRegistryReadOnly to role '$ROLE'"
+    else
+      echo ">> granting role '$ROLE' ECR read (AmazonEC2ContainerRegistryReadOnly)"
+      aws iam attach-role-policy --role-name "$ROLE" \
+        --policy-arn arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly >/dev/null 2>&1 || true
+    fi
+  fi
 fi
 
 # ---- resolve subnet(s) to launch into ---------------------------------------
@@ -161,6 +199,7 @@ USER_DATA=$(cat <<EOF
 set -x
 exec > /var/log/anuga-run.log 2>&1
 T0=\$(date +%s)
+${ECR_REGISTRY:+aws ecr get-login-password --region ${REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}}
 docker pull "${IMAGE}" || true
 TR=\$(date +%s)
 docker run --rm --gpus all \
@@ -241,7 +280,8 @@ for itype in ${INSTANCE_TYPES//,/ }; do
 done
 [ -z "$IID" ] && die "no capacity for any of [$INSTANCE_TYPES] across ${#SUBNETS[@]} AZ(s); try --spot, --instance <other type>, another --region, or retry later"
 
-echo ">> instance $IID launched ($USED_TYPE${SPOT:+, spot}${USED_SUBNET:+, $USED_SUBNET})."
+SPOT_LABEL="" ; [ "$SPOT" = "1" ] && SPOT_LABEL=", spot"   # ${SPOT:+} misfires: "0" is non-empty
+echo ">> instance $IID launched ($USED_TYPE${SPOT_LABEL}${USED_SUBNET:+, $USED_SUBNET})."
 echo ">> it will run: ${COMMAND}"
 echo ">> results ->   ${OUTPUT_S3}    (+ anuga-run.log with timing)"
 if [ "$KEEP" = "1" ]; then

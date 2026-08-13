@@ -10,6 +10,8 @@ Requires Python 3.11+ (tomllib in stdlib) or the 'tomli' package for older
 Python versions (pip install tomli).
 """
 
+import ast
+import operator
 import os
 import warnings
 import glob as glob_module
@@ -18,6 +20,59 @@ from anuga.utilities import spatialInputUtil as su
 
 # Must track Domain.set_flow_algorithm's accepted list.
 _VALID_FLOW_ALGORITHMS = ('DE0', 'DE1', 'DE2', 'DE0_7', 'DE1_7', 'DE_ader2')
+
+# ---------------------------------------------------------------------------
+# Numeric values with optional arithmetic
+# ---------------------------------------------------------------------------
+# TOML has no arithmetic, so `finaltime = 5*60` is a parse error. As a
+# convenience, numeric fields also accept a *quoted* arithmetic expression,
+# e.g. finaltime = "5*60" -> 300.0. Only numeric literals and + - * / // % **
+# with parentheses are allowed (no names, calls or attribute access), so it is
+# safe to evaluate untrusted config.
+
+_ARITH_BINOPS = {
+    ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
+    ast.Div: operator.truediv, ast.FloorDiv: operator.floordiv,
+    ast.Mod: operator.mod, ast.Pow: operator.pow,
+}
+_ARITH_UNARYOPS = {ast.UAdd: operator.pos, ast.USub: operator.neg}
+
+
+def _eval_arith(node):
+    """Recursively evaluate a whitelisted arithmetic AST node."""
+    if isinstance(node, ast.Expression):
+        return _eval_arith(node.body)
+    if isinstance(node, ast.Constant):
+        # bool is an int subclass — reject so "true"-ish values don't sneak in.
+        if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
+            raise ValueError('only numbers are allowed')
+        return node.value
+    if isinstance(node, ast.BinOp) and type(node.op) in _ARITH_BINOPS:
+        return _ARITH_BINOPS[type(node.op)](
+            _eval_arith(node.left), _eval_arith(node.right))
+    if isinstance(node, ast.UnaryOp) and type(node.op) in _ARITH_UNARYOPS:
+        return _ARITH_UNARYOPS[type(node.op)](_eval_arith(node.operand))
+    raise ValueError('unsupported expression')
+
+
+def _num(value):
+    """Coerce a TOML value to float, allowing a quoted arithmetic string.
+
+    Numbers pass straight through; a string is evaluated as a simple arithmetic
+    expression (``"5*60"`` -> ``300.0``). Raises ``ValueError``/``TypeError`` on
+    anything else so callers can surface it as a configuration error.
+    """
+    if isinstance(value, bool):
+        raise ValueError('expected a number, got a boolean')
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            tree = ast.parse(value, mode='eval')
+        except SyntaxError as exc:
+            raise ValueError('invalid arithmetic expression: %r' % value) from exc
+        return float(_eval_arith(tree))
+    raise TypeError('expected a number or arithmetic string, got %r' % (value,))
 
 # ---------------------------------------------------------------------------
 # Validation helper
@@ -44,16 +99,17 @@ class _Validator:
         return mapping[key]
 
     def to_float(self, mapping, key, section):
-        """Return ``float(mapping[key])``, recording errors for absent or
-        non-numeric values."""
+        """Return ``mapping[key]`` as a float, recording errors for absent or
+        non-numeric values. Accepts a quoted arithmetic string (e.g. "5*60")."""
         val = self.require(mapping, key, section)
         if val is None:
             return None
         try:
-            return float(val)
+            return _num(val)
         except (TypeError, ValueError):
             self.errors.append(
-                f'[{section}] {key!r}: expected a number, got {val!r}')
+                f'[{section}] {key!r}: expected a number or arithmetic '
+                f'string, got {val!r}')
             return None
 
     def positive(self, val, name, section):
@@ -293,7 +349,7 @@ class ProjectDataTOML:
         _v.one_of(raw_alg, _VALID_FLOW_ALGORITHMS, 'flow_algorithm', 'project')
         self.flow_algorithm = str(raw_alg) if raw_alg is not None else 'DE0'
 
-        self.output_tif_cellsize = float(p.get('output_tif_cellsize', 50.0))
+        self.output_tif_cellsize = _num(p.get('output_tif_cellsize', 50.0))
         _v.positive(self.output_tif_cellsize, 'output_tif_cellsize', 'project')
 
         otbp = p.get('output_tif_bounding_polygon', '')
@@ -304,7 +360,7 @@ class ProjectDataTOML:
         _v.positive(self.max_quantity_update_frequency,
                     'max_quantity_update_frequency', 'project')
 
-        self.max_quantity_collection_start_time = float(
+        self.max_quantity_collection_start_time = _num(
             p.get('max_quantity_collection_starttime', 0.0))
         if finaltime is not None and \
                 self.max_quantity_collection_start_time >= self.finaltime:
@@ -313,6 +369,9 @@ class ProjectDataTOML:
                 f' (got {self.max_quantity_collection_start_time}, finaltime={self.finaltime})')
 
         self.store_vertices_uniquely        = bool(p.get('store_vertices_uniquely', False))
+        # Track whether the user set this explicitly: with [[erosion]] present we
+        # default it to true, but still warn if they deliberately chose false.
+        self._store_elevation_explicit      = 'store_elevation_every_timestep' in p
         self.store_elevation_every_timestep = bool(p.get('store_elevation_every_timestep', False))
         self.spatial_text_output_dir        = str(p.get('spatial_text_output_dir', 'SPATIAL_TEXT'))
 
@@ -353,7 +412,7 @@ class ProjectDataTOML:
         # Must be an integer multiple of yieldstep.
         raw_os = p.get('outputstep', None)
         if raw_os is not None:
-            self.outputstep = float(raw_os)
+            self.outputstep = _num(raw_os)
             _v.positive(self.outputstep, 'outputstep', 'project')
             _v.integer_multiple(self.outputstep, yieldstep, 'outputstep', 'project')
         else:
@@ -615,17 +674,21 @@ class ProjectDataTOML:
         # Erosion changes elevation as the run proceeds, but ANUGA stores
         # elevation statically by default — so the .sww shows the initial
         # terrain forever and the erosion is invisible in every downstream
-        # product. Warn rather than override: silently flipping a setting the
-        # user wrote explicitly is worse than telling them.
-        if self.erosion_data and not getattr(
-                self, 'store_elevation_every_timestep', False):
-            warnings.warn(
-                'Scenario defines [[erosion]] operators but '
-                '[project] store_elevation_every_timestep is false: elevation '
-                'will be written once at t=0, so the eroded bed will not appear '
-                'in the .sww or any raster derived from it. Set it true to '
-                'record elevation as it changes.',
-                stacklevel=2)
+        # product. When erosion is present, default to storing elevation every
+        # timestep so the changing bed is recorded. Only warn if the user
+        # explicitly asked for static storage: don't silently override a choice
+        # they wrote deliberately, but do tell them the eroded bed won't appear.
+        if self.erosion_data and not self.store_elevation_every_timestep:
+            if getattr(self, '_store_elevation_explicit', False):
+                warnings.warn(
+                    'Scenario defines [[erosion]] operators but [project] '
+                    'store_elevation_every_timestep is explicitly false: '
+                    'elevation will be written once at t=0, so the eroded bed '
+                    'will not appear in the .sww or any raster derived from it.',
+                    stacklevel=2)
+            else:
+                # Not set by the user: adopt the erosion-appropriate default.
+                self.store_elevation_every_timestep = True
 
     def _parse_rainfall(self, rainfall):
         self.rain_data = []

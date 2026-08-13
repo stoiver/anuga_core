@@ -18,6 +18,12 @@
 #include "gpu_domain.h"
 #include "gpu_culvert_operator.h"
 #include "gpu_omp_macros.h"
+
+// Host-side per-step scratch, sized to the culvert count.  Defined further
+// down, next to struct culvert_mpi_bufs, but freed by gpu_culverts_finalize_all
+// above it.
+struct culvert_operators;
+static void culvert_host_scratch_free(struct culvert_operators *CO);
 #include "gpu_nvtx.h"
 
 #define VELOCITY_PROTECTION 1.0e-6
@@ -657,6 +663,8 @@ void gpu_culverts_finalize_all(struct gpu_domain *GD) {
     if (CO->scratch_slot_start) { free(CO->scratch_slot_start); CO->scratch_slot_start = NULL; }
     if (CO->scratch_slot_count) { free(CO->scratch_slot_count); CO->scratch_slot_count = NULL; }
 
+    culvert_host_scratch_free(CO);
+
     if (CO->params)  { free(CO->params);  CO->params  = NULL; }
     if (CO->indices) { free(CO->indices); CO->indices = NULL; }
     if (CO->state)   { free(CO->state);   CO->state   = NULL; }
@@ -986,18 +994,38 @@ static void gpu_culvert_scatter(struct gpu_domain *GD,
 //   master → inlet_master[i]: 3 doubles (new_depth, new_xmom, new_ymom)  tag_base+4+i
 // ============================================================================
 
-// Maximum MPI requests: 6 per culvert (2 enquiry + 2 inlet + 2 result)
-#define MAX_MPI_REQS (MAX_CULVERTS * 6)
-
-// MPI message buffers for cross-boundary exchange
+// MPI message buffers for cross-boundary exchange.  Sized to the culvert
+// count at allocation time (see culvert_host_scratch_ensure) rather than to
+// MAX_CULVERTS, which is only the initial capacity.  The pointer-to-array
+// types keep the [culvert][inlet][field] indexing of the original arrays.
 struct culvert_mpi_bufs {
-    double enquiry_send[MAX_CULVERTS][2][4];    // [culvert][inlet][stage,xmom,ymom,elev]
-    double enquiry_recv[MAX_CULVERTS][2][4];
-    double inlet_send[MAX_CULVERTS][2][5];      // [culvert][inlet][sum_s,sum_d,sum_xm,sum_ym,area]
-    double inlet_recv[MAX_CULVERTS][2][5];
-    double result_send[MAX_CULVERTS][2][3];     // [culvert][inlet][new_depth,new_xmom,new_ymom]
-    double result_recv[MAX_CULVERTS][2][3];
+    int capacity;                  // culverts these buffers can hold
+    int nreq_capacity;             // entries in requests[]
+    double (*enquiry_send)[2][4];  // [culvert][inlet][stage,xmom,ymom,elev]
+    double (*enquiry_recv)[2][4];
+    double (*inlet_send)[2][5];    // [culvert][inlet][sum_s,sum_d,sum_xm,sum_ym,area]
+    double (*inlet_recv)[2][5];
+    double (*result_send)[2][3];   // [culvert][inlet][new_depth,new_xmom,new_ymom]
+    double (*result_recv)[2][3];
+    MPI_Request *requests;         // 6 per culvert (2 enquiry + 2 inlet + 2 result)
 };
+
+static void culvert_host_scratch_free(struct culvert_operators *CO) {
+    if (CO->host_data0) { free(CO->host_data0); CO->host_data0 = NULL; }
+    if (CO->host_data1) { free(CO->host_data1); CO->host_data1 = NULL; }
+    if (CO->host_results) { free(CO->host_results); CO->host_results = NULL; }
+    if (CO->host_transfers) { free(CO->host_transfers); CO->host_transfers = NULL; }
+    if (CO->host_mpi_bufs) {
+        struct culvert_mpi_bufs *b = CO->host_mpi_bufs;
+        free(b->enquiry_send); free(b->enquiry_recv);
+        free(b->inlet_send);   free(b->inlet_recv);
+        free(b->result_send);  free(b->result_recv);
+        free(b->requests);
+        free(b);
+        CO->host_mpi_bufs = NULL;
+    }
+    CO->host_scratch_capacity = 0;
+}
 
 // Exchange enquiry data: non-blocking sends/recvs, then waitall
 static void mpi_exchange_enquiry(struct gpu_domain *GD,
@@ -1008,7 +1036,7 @@ static void mpi_exchange_enquiry(struct gpu_domain *GD,
     int nc = CO->num_culverts;
     int myrank = GD->rank;
     MPI_Comm comm = GD->comm;
-    MPI_Request requests[MAX_MPI_REQS];
+    MPI_Request *requests = bufs->requests;
     int nreq = 0;
 
     for (int c = 0; c < nc; c++) {
@@ -1069,7 +1097,7 @@ static void mpi_exchange_inlet_averages(struct gpu_domain *GD,
     int nc = CO->num_culverts;
     int myrank = GD->rank;
     MPI_Comm comm = GD->comm;
-    MPI_Request requests[MAX_MPI_REQS];
+    MPI_Request *requests = bufs->requests;
     int nreq = 0;
 
     for (int c = 0; c < nc; c++) {
@@ -1137,7 +1165,7 @@ static void mpi_exchange_results(struct gpu_domain *GD,
     int nc = CO->num_culverts;
     int myrank = GD->rank;
     MPI_Comm comm = GD->comm;
-    MPI_Request requests[MAX_MPI_REQS];
+    MPI_Request *requests = bufs->requests;
     int nreq = 0;
 
     for (int c = 0; c < nc; c++) {
@@ -1566,6 +1594,63 @@ void culvert_gather_inlet_host(int n, const int *indices, const double *areas,
     }
 }
 
+// Make sure the host-side working buffers can hold nc culverts, growing them
+// if not.  Called once per step; allocation only happens when the culvert
+// count first exceeds what is already allocated, so the steady state is
+// malloc-free.  Returns 0 on success, -1 if allocation failed.
+static int culvert_host_scratch_ensure(struct culvert_operators *CO, int nc) {
+    if (CO->host_scratch_capacity >= nc && CO->host_mpi_bufs) {
+        return 0;
+    }
+
+    struct inlet_data *d0 = (struct inlet_data*)
+        realloc(CO->host_data0, nc * sizeof(struct inlet_data));
+    if (d0) CO->host_data0 = d0;
+    struct inlet_data *d1 = (struct inlet_data*)
+        realloc(CO->host_data1, nc * sizeof(struct inlet_data));
+    if (d1) CO->host_data1 = d1;
+    struct culvert_result *rs = (struct culvert_result*)
+        realloc(CO->host_results, nc * sizeof(struct culvert_result));
+    if (rs) CO->host_results = rs;
+    struct culvert_transfer *tr = (struct culvert_transfer*)
+        realloc(CO->host_transfers, nc * sizeof(struct culvert_transfer));
+    if (tr) CO->host_transfers = tr;
+
+    struct culvert_mpi_bufs *b = CO->host_mpi_bufs;
+    if (!b) {
+        b = (struct culvert_mpi_bufs*) calloc(1, sizeof(*b));
+        CO->host_mpi_bufs = b;
+    }
+    if (b) {
+        void *es = realloc(b->enquiry_send, nc * sizeof(double[2][4]));
+        void *er = realloc(b->enquiry_recv, nc * sizeof(double[2][4]));
+        void *is = realloc(b->inlet_send,   nc * sizeof(double[2][5]));
+        void *ir = realloc(b->inlet_recv,   nc * sizeof(double[2][5]));
+        void *rls = realloc(b->result_send, nc * sizeof(double[2][3]));
+        void *rlr = realloc(b->result_recv, nc * sizeof(double[2][3]));
+        void *rq = realloc(b->requests, (size_t)nc * 6 * sizeof(MPI_Request));
+        if (es) b->enquiry_send = (double(*)[2][4]) es;
+        if (er) b->enquiry_recv = (double(*)[2][4]) er;
+        if (is) b->inlet_send   = (double(*)[2][5]) is;
+        if (ir) b->inlet_recv   = (double(*)[2][5]) ir;
+        if (rls) b->result_send = (double(*)[2][3]) rls;
+        if (rlr) b->result_recv = (double(*)[2][3]) rlr;
+        if (rq) b->requests     = (MPI_Request*) rq;
+        if (es && er && is && ir && rls && rlr && rq) {
+            b->capacity = nc;
+            b->nreq_capacity = nc * 6;
+        }
+    }
+
+    if (!d0 || !d1 || !rs || !tr || !b || b->capacity < nc) {
+        fprintf(stderr, "ERROR: failed to allocate host scratch for %d culverts\n", nc);
+        return -1;
+    }
+
+    CO->host_scratch_capacity = nc;
+    return 0;
+}
+
 void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
     NVTX_PUSH("gpu_culverts_apply_all");
     struct culvert_operators *CO = &GD->culvert_ops;
@@ -1585,11 +1670,15 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
         if (!CO->indices[c].is_local) { has_parallel = 1; break; }
     }
 
-    // Stack-allocate per-culvert working data
-    struct inlet_data data0[MAX_CULVERTS];
-    struct inlet_data data1[MAX_CULVERTS];
-    struct culvert_result results[MAX_CULVERTS];
-    struct culvert_transfer transfers[MAX_CULVERTS];
+    // Per-culvert working data, sized to the actual culvert count.
+    if (culvert_host_scratch_ensure(CO, nc) != 0) {
+        NVTX_POP();
+        return;
+    }
+    struct inlet_data *data0 = CO->host_data0;
+    struct inlet_data *data1 = CO->host_data1;
+    struct culvert_result *results = CO->host_results;
+    struct culvert_transfer *transfers = CO->host_transfers;
 
     // ----------------------------------------------------------------
     // PHASE 1: Batched GPU gather (2 target update from's)
@@ -1602,12 +1691,14 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
     // ----------------------------------------------------------------
     // PHASE 1b: MPI exchange for cross-boundary culverts
     // ----------------------------------------------------------------
-    // Static allocation of MPI buffers (MAX_CULVERTS * ~200 bytes = ~12KB)
-    static struct culvert_mpi_bufs mpi_bufs;
+    // MPI buffers live with the domain (grown above), not in a function-local
+    // static: a static would be shared by every domain in the process and
+    // fixed at MAX_CULVERTS entries.
+    struct culvert_mpi_bufs *mpi_bufs = CO->host_mpi_bufs;
 
     if (has_parallel) {
-        mpi_exchange_enquiry(GD, data0, data1, &mpi_bufs);
-        mpi_exchange_inlet_averages(GD, data0, data1, &mpi_bufs);
+        mpi_exchange_enquiry(GD, data0, data1, mpi_bufs);
+        mpi_exchange_inlet_averages(GD, data0, data1, mpi_bufs);
     }
 
     // ----------------------------------------------------------------
@@ -1647,7 +1738,7 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
     // Master sends scatter values to remote inlet procs.
     // ----------------------------------------------------------------
     if (has_parallel) {
-        mpi_exchange_results(GD, transfers, &mpi_bufs);
+        mpi_exchange_results(GD, transfers, mpi_bufs);
 
         // Non-master ranks scatter to their local GPU inlets
         for (int c = 0; c < nc; c++) {
@@ -1660,9 +1751,9 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
 
                 int ntri = (inlet == 0) ? ci->inlet0_num : ci->inlet1_num;
                 int *tri_idx = (inlet == 0) ? ci->inlet0_indices : ci->inlet1_indices;
-                double new_depth = mpi_bufs.result_recv[c][inlet][0];
-                double new_xmom  = mpi_bufs.result_recv[c][inlet][1];
-                double new_ymom  = mpi_bufs.result_recv[c][inlet][2];
+                double new_depth = mpi_bufs->result_recv[c][inlet][0];
+                double new_xmom  = mpi_bufs->result_recv[c][inlet][1];
+                double new_ymom  = mpi_bufs->result_recv[c][inlet][2];
 
                 scatter_single_inlet(GD, tri_idx, ntri, new_depth, new_xmom, new_ymom);
             }

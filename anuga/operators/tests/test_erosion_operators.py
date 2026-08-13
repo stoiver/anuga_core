@@ -280,6 +280,55 @@ class Test_set_quantity_operator_extra(unittest.TestCase):
         self.assertIsNotNone(op)
 
 
+class Test_erosion_elevation_storage(unittest.TestCase):
+    """Erosion operators default elevation to time-varying SWW storage."""
+
+    def _domain(self):
+        domain = rectangular_cross_domain(6, 6)
+        domain.set_boundary(
+            {b: Reflective_boundary(domain) for b in domain.get_boundary_tags()})
+        return domain
+
+    def test_operator_promotes_elevation_to_time_varying(self):
+        from anuga.operators.erosion_operators import Circular_erosion_operator
+        domain = self._domain()
+        # Default is static (1); creating an erosion operator promotes to
+        # dynamic (2) and flags the domain.
+        self.assertEqual(domain.quantities_to_be_stored['elevation'], 1)
+        Circular_erosion_operator(domain, center=(0.5, 0.5), radius=0.2)
+        self.assertEqual(domain.quantities_to_be_stored['elevation'], 2)
+        self.assertTrue(getattr(domain, '_erosion_present', False))
+
+    def test_respects_explicit_static(self):
+        from anuga.operators.erosion_operators import Circular_erosion_operator
+        domain = self._domain()
+        # A deliberate static choice is honoured (not promoted).
+        domain._elevation_static_by_user = True
+        domain.quantities_to_be_stored['elevation'] = 1
+        Circular_erosion_operator(domain, center=(0.5, 0.5), radius=0.2)
+        self.assertEqual(domain.quantities_to_be_stored['elevation'], 1)
+
+    def test_warns_when_reset_to_static_before_storage(self):
+        import tempfile
+        from anuga.operators.erosion_operators import Circular_erosion_operator
+        domain = self._domain()
+        domain.set_name('erosion_storage_warn')
+        Circular_erosion_operator(domain, center=(0.5, 0.5), radius=0.2)
+        # User resets to static AFTER the operator promoted it.
+        domain.quantities_to_be_stored['elevation'] = 1
+        cwd = os.getcwd()
+        tmp = tempfile.mkdtemp()
+        try:
+            os.chdir(tmp)
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter('always')
+                domain.initialise_storage()
+            msgs = ' '.join(str(x.message) for x in w)
+            self.assertIn('eroded bed', msgs)
+        finally:
+            os.chdir(cwd)
+
+
 if __name__ == "__main__":
     suite = unittest.TestLoader().loadTestsFromTestCase(Test_erosion_operators)
     runner = unittest.TextTestRunner(verbosity=1)

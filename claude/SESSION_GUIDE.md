@@ -449,7 +449,96 @@ Findings:
 
 ---
 
-## Recent session summaries (sessions 21–52)
+## Recent session summaries (sessions 21–53)
+
+**Session 54 (2026-08-11):** Portable GPU image proven on AMD, C-level output
+captured in the logfile, and the first GPU scaling numbers at 1.6M triangles.
+- **`-tp=haswell` fix never actually built.** 394b61b8 set `CXXFLAGS=-tp=haswell`
+  too, but only `CC` is nvc — `CXX` stays g++, which rejects `-tp` and kills
+  meson's compiler detection (`Unable to detect linker for compiler c++ …`).
+  That is why the ECR image was still the non-portable AVX-512 build. Fixed in
+  `54b18f69`: **CFLAGS only** (`meson.build:166` already avoids `-march=native`,
+  so the g++-built C++ extensions were always portable).
+- **Portability PROVEN on AMD** — the thing that was outstanding all of session
+  53. Run landed on **g6.xlarge** (AMD EPYC Zen 4 + L4): `rc=0`, no SIGILL,
+  real GPU offload. g5 had zero capacity in Sydney all session; **g6 is the type
+  that actually launches** there.
+- **Logging: the logfile never contained C output.** `TeeStream` tees the
+  `sys.stdout` *object*, so everything the C extensions printf to fd 1 (the GPU
+  domain banner, Triangle, ~99 printf sites in the GPU kernels) reached the
+  terminal but not the file — batch logs had no record of the GPU config used.
+  `set_logfile()` now installs an **fd-level tee** (fd 1 → pipe → terminal +
+  file). Needed `setvbuf`/`reconfigure(line_buffering=True)` (fd 1 is no longer
+  a tty, so libc *and* Python block-buffer), and the logging file handler now
+  writes **through the pipe** so the file has a single writer and exact write
+  order. `file_only()` consequently mutes C output too. Adds `close_logfile()`;
+  `set_logfile()` now **truncates** (logs used to accumulate every run ever).
+  `anuga/utilities/tests/test_log.py` — subprocess-based, because pytest's
+  capture replaces `sys.stdout` with something that never touches fd 1.
+- **`-sc/--scale`** added to `run_small_towradgi.py` (10 = 135237 tri, 1 =
+  256688, 0.1 = 1636238). Deliberately **in the script, not anuga's standard
+  parser**: containerised runs take the script from the staged S3 inputs but
+  anuga from the image, so a parser-level flag needs an image rebuild. First
+  attempt (`c109e65d`) made exactly that mistake and failed on AWS with
+  `unrecognized arguments: -sc 0.1`; reverted in `39e3e429`.
+- **GPU scaling — small meshes flatter slow GPUs.** Same 600 s sim, mode 2:
+
+  | GPU | 257k mesh | 1.64M mesh |
+  |---|---|---|
+  | RTX 5070 laptop (cc120) | 24.77 s / 61.4 M cell-updates/s | 111.52 s / **73.4 M/s** |
+  | L4, g6.2xlarge (cc89) | 31.89 s / 47.7 M/s | 120.32 s / **68.1 M/s** |
+  | T4, g4dn (cc75) | 53.06 s / 28.6 M/s | — |
+
+  At 257k the 5070 looks 1.29× the L4; at 1.64M it is only **1.08×** — both
+  cards are under-saturated at 257k and the L4 recovers more (+43% vs +20%
+  throughput). Expect **g6 ≈ 93% of the laptop** on production-size problems.
+  Memory at 1.64M is only **3.4 GB host / 762 MB GPU** (per-cell cost is small;
+  the 1.6 GB at 257k is mostly fixed overhead — do not extrapolate linearly).
+  Results **bit-identical** across cc120/cc89, native vs container.
+- **towradgi's constant `delta t` is a mesh artifact, not physics** — see
+  KNOWN_ISSUES.
+
+**RESUME STATE (as of 2026-08-11, end of session 54):**
+- `develop` pushed to **`stoiver`**; **PR #218** open to `anuga-community/develop`
+  (14 commits at open; 2 more since — `-sc` flag add + revert/move).
+- ECR `anuga:gpu-slim` is current: portable multi-arch build **including** the
+  logging fixes (`sha256:ed7f18dcde0b…`).
+- Uncommitted working-tree edit: `towradgi.toml` arithmetic *demo*
+  (`finaltime="3600*24"`) — still not for committing.
+- Open follow-ups: PR #218 CI is a **gcc `gpu_offload=false`** build (differs
+  from the local nvc one); the terminal — not the logfile — is only
+  approximately ordered under the fd tee; REDIST trimming in the slim image.
+
+**Session 53 (2026-08-09 – 08-11):** Parallel bug fixes + Docker slim image +
+first real AWS GPU run of towradgi.
+- **MPI deadlock in `update_conserved_quantities`** (negative-cells "loss of
+  conservation" warning called the collective `get_water_volume()` under a
+  per-rank `if num_negative_ids>0` branch → `-np 1` worked, `-np 2` hung;
+  faulthandler pinned it). Fixed: warn **serial-only** (no collective in the hot
+  per-substep path; two earlier attempts — local volume, then unconditional
+  Allreduce — each caused a *new* hang, incl. `test_parallel_boyd_box_operator`).
+  → **PR #216, merged to develop.** Regression test
+  `test_parallel_negative_cells_deadlock.py` added.
+- **anuga_toml_run**: per-rank MPI logs; ranks≠GPUs unified guard (fail fast, not
+  hang); end-of-run water-balance V0 fix (capture at first yieldstep, not before
+  evolve — pre-evolve `get_water_volume` gives a bogus unclamped V0); `--emit-script`
+  (eject an editable standalone run script). *(on branch add-toml-scenario-features / PR #213)*
+- **Erosion**: default elevation to time-varying storage when erosion present —
+  TOML parser (warn only on explicit static) **and** core operators
+  (`_mark_domain_erosion`; `initialise_storage` warns if reset to static).
+- **Riverwall verbose output** condensed to one line per wall.
+- **TOML numeric fields** accept quoted arithmetic (`finaltime = "5*60"`, safe ast eval).
+- **Docker**: slim multi-stage GPU image (CUDA **-base** + NVHPC REDIST + venv) =
+  **2.15 GB / 459 MB compressed, ~37x smaller** to pull; validated locally. `-tp=haswell`
+  portability fix (native nvc build SIGILLs on AWS g5/Zen2 — no AVX-512). `aws_run_gpu.sh`
+  gained **`--ecr`** (private in-region image + role ECR-read + instance login).
+- **AWS**: validated `run_small_towradgi.py` end-to-end via ECR slim image
+  (`aws_run_gpu.sh --ecr --instance g4dn.xlarge`, rc=0, ~2 min). Coords in memory
+  `reference_aws_towradgi_run.md`.
+
+*(Session 53's resume state is superseded by session 54's above: the commits are
+pushed, PR #213 merged, and the ECR image rebuilt portable.)*
+
 
 **Session 52 (2026-07-25):** **Fix the CI unified-compute-mode failure + harden
 `update_conserved_quantities`.** The `github CI` "Test package (unified compute mode,
