@@ -38,27 +38,10 @@
 # looks for an environment the other never created.
 PY=${PY:-"3.12"}
 
-# Detect this machine's GPU rather than assuming one.  nvidia-smi reports the
-# compute capability as e.g. "8.6", which becomes cc86.
-#
-# This used to be hardcoded to cc120 (the author's laptop) and nobody noticed,
-# because -Dgpu_arch was not reaching nvc's device link: nvc fell back to the
-# GPU it found on the build machine, so any value happened to work.  Once that
-# was fixed the hardcoded default started producing sm_120-only builds that
-# crash on every other card.
-detect_gpu_arch() {
-    local cap
-    cap=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null \
-          | head -1 | tr -d ' ')
-    if [[ "$cap" =~ ^[0-9]+\.[0-9]+$ ]]; then
-        echo "cc${cap//./}"
-    else
-        # No usable nvidia-smi (headless build node, driver not loaded, ...):
-        # build for every architecture ANUGA supports rather than guess one.
-        echo "cc70,cc75,cc80,cc86,cc89,cc90,cc120"
-    fi
-}
-GPU_ARCH=${GPU_ARCH:-"$(detect_gpu_arch)"}
+# GPU_ARCH is resolved AFTER nvc is located (see below): choosing it needs to
+# know which CUDA toolkits this HPC SDK actually ships, not just which GPU is
+# present.  "auto" means "work it out".
+GPU_ARCH=${GPU_ARCH:-auto}
 
 set -e
 
@@ -116,6 +99,78 @@ fi
 
 echo "# nvc found: $NVC"
 "$NVC" --version
+echo " "
+
+# ------------------------------------------------------------------
+# Resolve GPU_ARCH=auto, then PROVE the choice compiles before spending
+# several minutes on the real build.
+#
+# Two things constrain the answer, and neither is guessable:
+#   * which GPU is present (nvidia-smi) -- absent on a login node;
+#   * which CUDA toolkits this SDK ships.  cc70 (V100) needs CUDA <= 12.x;
+#     an SDK carrying only CUDA 13 rejects it outright ("A CUDA toolkit
+#     matching the current driver version ... was not installed"), because
+#     CUDA 13's libnvvm dropped Volta.
+# ------------------------------------------------------------------
+NVHPC_DIR=$(dirname "$(dirname "$NVC")")          # .../<version>
+CUDA12=$(ls -d "${NVHPC_DIR}"/cuda/12.* 2>/dev/null | sort -V | tail -1)
+
+arch_compiles() {
+    # Tiny OpenMP-target probe; ~2s. Returns 0 if nvc accepts this -gpu= string.
+    local arch="$1" tmp
+    tmp=$(mktemp -d)
+    printf '#include <stdio.h>\nint main(void){double a[10];\n#pragma omp target teams distribute parallel for map(tofrom:a[0:10])\nfor(int i=0;i<10;i++)a[i]=i;\nprintf("%%f\\n",a[9]);return 0;}\n' > "$tmp/probe.c"
+    "$NVC" -mp=gpu -gpu="$arch" -c "$tmp/probe.c" -o "$tmp/probe.o" >"$tmp/log" 2>&1
+    local rc=$?
+    [ $rc -ne 0 ] && PROBE_ERR=$(head -1 "$tmp/log")
+    rm -rf "$tmp"
+    return $rc
+}
+
+if [ "$GPU_ARCH" = "auto" ]; then
+    CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ')
+    if [[ "$CAP" =~ ^[0-9]+\.[0-9]+$ ]]; then
+        GPU_ARCH="cc${CAP//./}"
+        echo "# GPU_ARCH=auto -> ${GPU_ARCH} (detected: compute capability ${CAP})"
+    else
+        # No GPU visible (login node, driver not loaded).  Build for everything
+        # this SDK can target, so the result runs on the compute nodes.
+        if [ -n "$CUDA12" ]; then
+            GPU_ARCH="cuda$(basename "$CUDA12"),cc70,cc75,cc80,cc86,cc89,cc90,cc120"
+            echo "# GPU_ARCH=auto -> multi-architecture (no GPU visible here)."
+            echo "#   This SDK ships CUDA $(basename "$CUDA12"), so cc70/V100 is included."
+        else
+            GPU_ARCH="cc75,cc80,cc86,cc89,cc90,cc120"
+            echo "# GPU_ARCH=auto -> multi-architecture (no GPU visible here)."
+            echo "#   This SDK ships no CUDA 12.x, so cc70/V100 CANNOT be built:"
+            echo "#   CUDA 13 dropped Volta. Load an SDK with CUDA 12.x if you"
+            echo "#   need V100 support."
+        fi
+    fi
+fi
+
+echo "# Checking that nvc accepts -gpu=${GPU_ARCH} ..."
+if ! arch_compiles "$GPU_ARCH"; then
+    echo "#   rejected: ${PROBE_ERR}"
+    # Much the most common cause is cc70 on a CUDA-13-only SDK. Retry without it
+    # rather than failing a build that would otherwise be fine.
+    GPU_ARCH_NO70=$(echo "$GPU_ARCH" | sed 's/cuda12\.[0-9]*,//; s/cc70,//; s/,cc70//')
+    if [ "$GPU_ARCH_NO70" != "$GPU_ARCH" ] && arch_compiles "$GPU_ARCH_NO70"; then
+        echo "#   retrying without cc70 (V100): ${GPU_ARCH_NO70}"
+        echo "#   NOTE: the result will NOT run on a V100."
+        GPU_ARCH="$GPU_ARCH_NO70"
+    else
+        echo "#====================================================="
+        echo "# ERROR: nvc cannot build for -gpu=${GPU_ARCH}"
+        echo "#        ${PROBE_ERR}"
+        echo "#"
+        echo "# Pick architectures this SDK supports, e.g."
+        echo "#     GPU_ARCH=cc80,cc90 bash ${SCRIPT}"
+        echo "#====================================================="
+        exit 1
+    fi
+fi
+echo "#   ok - building for ${GPU_ARCH}"
 echo " "
 
 # ------------------------------------------------------------------
