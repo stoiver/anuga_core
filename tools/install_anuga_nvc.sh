@@ -134,6 +134,9 @@ arch_compiles() {
     return $rc
 }
 
+GPU_ARCH_EXPLICIT=1
+[ "$GPU_ARCH" = "auto" ] && GPU_ARCH_EXPLICIT=0
+
 if [ "$GPU_ARCH" = "auto" ]; then
     CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ')
     if [[ "$CAP" =~ ^[0-9]+\.[0-9]+$ ]]; then
@@ -186,9 +189,24 @@ fi
 echo "# Checking that nvc accepts -gpu=${GPU_ARCH} ..."
 if ! arch_compiles "$GPU_ARCH"; then
     echo "#   rejected: ${PROBE_ERR}"
-    # Much the most common cause is cc70 on a CUDA-13-only SDK. Retry without it
-    # rather than failing a build that would otherwise be fine.
+    # Dropping an architecture the user asked for by name would hand them a
+    # build that crashes on the very GPU they were targeting, so only the
+    # auto-resolved list is narrowed. An explicit GPU_ARCH is their decision to
+    # correct.
     GPU_ARCH_NO70=$(echo "$GPU_ARCH" | sed 's/cuda12\.[0-9]*,//; s/cc70,//; s/,cc70//')
+    if [ "$GPU_ARCH_EXPLICIT" = "1" ] && [ "$GPU_ARCH_NO70" != "$GPU_ARCH" ]; then
+        echo "#====================================================="
+        echo "# ERROR: you asked for ${GPU_ARCH}, but this nvc cannot build cc70."
+        echo "#        ${PROBE_ERR}"
+        echo "#"
+        echo "# cc70 (V100) needs a CUDA <= 12.x toolkit; CUDA 13 dropped Volta."
+        echo "# Either load an nvhpc module built against CUDA 12.x, or drop"
+        echo "# cc70 yourself and accept that the build will not run on a V100:"
+        echo "#"
+        echo "#     GPU_ARCH=${GPU_ARCH_NO70} bash ${SCRIPT}"
+        echo "#====================================================="
+        exit 1
+    fi
     if [ "$GPU_ARCH_NO70" != "$GPU_ARCH" ] && arch_compiles "$GPU_ARCH_NO70"; then
         echo "#   retrying without cc70 (V100): ${GPU_ARCH_NO70}"
         echo "#   NOTE: the result will NOT run on a V100."
