@@ -30,3 +30,11 @@ claude
 
 # Docker's own runtime mount (not build input)
 docker/data
+
+# The Dockerfiles themselves are read by the builder, never needed *inside* the
+# image, and land in the `COPY . .` layer -- so editing one used to invalidate
+# the cache for the whole ANUGA compile that follows (a ~45 min rebuild for a
+# one-line change). Excluding them keeps iteration on the Dockerfiles cheap.
+# docker/anuga-entrypoint.sh is deliberately NOT excluded: it is installed
+# into the image.
+docker/Dockerfile*
