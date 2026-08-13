@@ -46,12 +46,16 @@ def run_logging_script(body, logfile):
     handle, path = tempfile.mkstemp(suffix='.py', prefix='anuga_log_')
     os.close(handle)
     try:
-        with open(path, 'w') as fid:
+        # encoding='utf-8' explicitly, both here and for the log: on Windows the
+        # default is the locale encoding (cp1252), which would mangle the
+        # non-ASCII characters in the script and fail to decode the log file
+        # (the tee always writes UTF-8).
+        with open(path, 'w', encoding='utf-8') as fid:
             fid.write(script)
         proc = subprocess.run([sys.executable, path], capture_output=True,
-                              text=True, timeout=300)
+                              text=True, encoding='utf-8', timeout=300)
         assert proc.returncode == 0, proc.stderr
-        with open(logfile) as fid:
+        with open(logfile, encoding='utf-8') as fid:
             return fid.read(), proc.stdout
     finally:
         os.remove(path)
