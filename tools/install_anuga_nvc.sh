@@ -22,6 +22,10 @@
 #               architectures asked for, so a mismatched value produces a
 #               package that compiles fine and then crashes on every kernel
 #               launch.
+#   SKIP_TESTS  1 = do not run the GPU test suite at all.
+#   FORCE_TESTS 1 = run it even when no GPU is visible (default: skip, so an
+#               HPC login node does not spend a long time on tests that
+#               cannot pass).
 #   NVHPC_ROOT  Override path to NVIDIA HPC SDK root if auto-detection fails.
 #               e.g. /opt/nvidia/hpc_sdk/Linux_x86_64/26.3
 #
@@ -421,8 +425,36 @@ echo "#   'pip install -e .' does not place on PATH)."
 echo "#============================================================"
 echo " "
 
+# Do not run the GPU tests where there is no GPU.  The usual case is an HPC
+# login node: every test would fail or skip after a long wait, and running a
+# heavy suite there is antisocial (many sites forbid it outright).  The build is
+# still complete and usable -- the tests just have to happen where the GPUs are.
+HAVE_GPU=0
+if nvidia-smi --query-gpu=name --format=csv,noheader >/dev/null 2>&1 && \
+   [ -n "$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null)" ]; then
+    HAVE_GPU=1
+fi
+
 if [ "${SKIP_TESTS:-0}" = "1" ]; then
     echo "SKIP_TESTS=1 - skipping the GPU test suite."
+elif [ "$HAVE_GPU" = "0" ] && [ "${FORCE_TESTS:-0}" != "1" ]; then
+    echo "#=================================================================="
+    echo "# Skipping the GPU test suite: no GPU is visible here."
+    echo "#"
+    echo "# The build itself is complete. These tests need a GPU, and this"
+    echo "# looks like a login node - running them here would take a long"
+    echo "# time, fail anyway, and load a shared machine."
+    echo "#"
+    echo "# Run them where the GPUs are, in a job or interactive session:"
+    echo "#"
+    echo "#   python ${ANUGA_CORE_PATH}/scripts/anuga_run_isolated_tests.py"
+    echo "#"
+    echo "# and check the build suits that node's GPU with:"
+    echo "#"
+    echo "#   python ${ANUGA_CORE_PATH}/tools/anuga_build_report.py --check"
+    echo "#"
+    echo "# FORCE_TESTS=1 runs them here regardless."
+    echo "#=================================================================="
 else
     $CONDA_RUN \
         python "${ANUGA_CORE_PATH}/scripts/anuga_run_isolated_tests.py"
