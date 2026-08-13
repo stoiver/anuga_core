@@ -41,6 +41,56 @@ def _resolve_provider(cx, provider_str):
     return obj
 
 
+def _configure_tile_client(cx):
+    """Identify ANUGA to tile servers and cache tiles between sessions.
+
+    contextily defaults to ``USER_AGENT = "contextily-" + uuid4().hex`` — a
+    fresh random agent every process.  OpenStreetMap's tile usage policy
+    requires a stable User-Agent identifying the *application*, and treats
+    rotating agents as an attempt to evade rate limits, so it blocks the
+    request.  The block arrives as a normal HTTP 200 tile whose *image* reads
+    "Access blocked ... osm.wiki/Blocked", so nothing raises and the notice is
+    simply drawn onto the map.
+
+    Sending a stable agent naming ANUGA and its project page fixes it, and a
+    persistent on-disk cache keeps repeat views (every redraw, every frame of
+    an animation) off the volunteer-run servers, which the policy also asks
+    for.  Both are best-effort: contextily is a third-party package, so an
+    unexpected version just leaves its defaults in place.
+    """
+    try:
+        from anuga import __version__ as _v
+    except Exception:
+        _v = 'unknown'
+
+    ua = ('ANUGA/%s (hydrodynamic modelling; '
+          '+https://github.com/anuga-community/anuga_core)' % _v)
+
+    try:
+        import contextily.tile as _tile
+        if getattr(_tile, 'USER_AGENT', '').startswith('contextily-'):
+            _tile.USER_AGENT = ua
+    except Exception:
+        pass
+
+    global _TILE_CACHE_SET
+    if not _TILE_CACHE_SET:
+        try:
+            cache_dir = os.path.join(
+                os.environ.get('XDG_CACHE_HOME',
+                               os.path.join(os.path.expanduser('~'), '.cache')),
+                'anuga', 'tiles')
+            os.makedirs(cache_dir, exist_ok=True)
+            cx.set_cache_dir(cache_dir)
+        except Exception:
+            pass
+        _TILE_CACHE_SET = True
+
+
+# set_cache_dir() only needs calling once per session
+_TILE_CACHE_SET = False
+
+
 def _add_basemap(ax, epsg, provider=BASEMAP_DEFAULT, cache=None):
     """Overlay a tile basemap on *ax* using contextily.
 
@@ -71,6 +121,8 @@ def _add_basemap(ax, epsg, provider=BASEMAP_DEFAULT, cache=None):
             "Install it with: conda install contextily  or  pip install contextily",
             stacklevel=3)
         return
+
+    _configure_tile_client(cx)
 
     xl, xr = ax.get_xlim()
     yb, yt = ax.get_ylim()
