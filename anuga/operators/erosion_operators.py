@@ -18,6 +18,26 @@ from anuga.operators.base_operator import Operator
 from anuga import Region
 
 
+def _mark_domain_erosion(domain):
+    """Flag *domain* as having an erosion operator and default its elevation
+    storage to time-varying.
+
+    Erosion changes the bed every timestep; if elevation is stored statically
+    the SWW (and any raster derived from it) shows the initial terrain forever.
+    So promote ``quantities_to_be_stored['elevation']`` from static (1) to
+    dynamic (2) — unless the user deliberately forced static
+    (``domain._elevation_static_by_user``). The ``_erosion_present`` flag lets
+    ``Domain.initialise_storage`` warn if elevation still ends up static.
+    """
+    qts = getattr(domain, 'quantities_to_be_stored', None)
+    if not isinstance(qts, dict):
+        return
+    domain._erosion_present = True
+    if qts.get('elevation') != 2 and \
+            not getattr(domain, '_elevation_static_by_user', False):
+        qts['elevation'] = 2
+
+
 class Erosion_operator(Operator, Region):
     """
     Simple erosion operator in a region (careful to maintain continuitiy of elevation)
@@ -45,7 +65,11 @@ class Erosion_operator(Operator, Region):
 
         Operator.__init__(self, domain, description, label, logging, verbose)
 
-
+        # Erosion changes the bed every timestep, so elevation must be stored
+        # time-varying (flag 2) or the SWW records only the initial terrain.
+        # Default to dynamic storage unless the user deliberately chose static;
+        # initialise_storage() warns if it ends up static regardless.
+        _mark_domain_erosion(self.domain)
 
         Region.__init__(self, domain,
                         indices=indices,

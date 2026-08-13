@@ -3314,6 +3314,22 @@ class Domain(Generic_Domain):
 
         nvtxRangePush('SWW_file')
 
+        # Erosion operators promote elevation to time-varying storage when they
+        # are created. If it has since been reset to static (flag != 2), the
+        # eroded bed will not be recorded — warn. Skip when the user
+        # deliberately chose static (they were already told; e.g. the TOML
+        # scenario warns at parse time).
+        if getattr(self, '_erosion_present', False) \
+                and self.quantities_to_be_stored.get('elevation') != 2 \
+                and not getattr(self, '_elevation_static_by_user', False):
+            import warnings
+            warnings.warn(
+                'An erosion operator is active but elevation is stored '
+                'statically, so the eroded bed will not appear in the SWW '
+                "output. Set domain.quantities_to_be_stored['elevation'] = 2 "
+                'to store it time-varying.',
+                stacklevel=2)
+
         # Initialise writer
         self.writer = SWW_file(self)
 
