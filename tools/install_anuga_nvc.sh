@@ -11,7 +11,9 @@
 #
 # Environment variables (all optional):
 #
-#   PY          Python version to use (default: 3.14)
+#   PY          Python version to use (default: 3.12, matching
+#               install_miniforge.sh).  Ignored when a conda environment is
+#               already activated -- that one is used.
 #   GPU_ARCH    GPU compute capability, e.g. cc120 (RTX 5070 Blackwell),
 #               cc86 (RTX 30xx Ampere), cc90 (H100), cc80 (A100), cc70 (V100).
 #               Default: DETECTED from the GPU in this machine via nvidia-smi,
@@ -20,6 +22,18 @@
 #               architectures asked for, so a mismatched value produces a
 #               package that compiles fine and then crashes on every kernel
 #               launch.
+#   GPU_AWARE_MPI  1 = build with -Dgpu_aware_mpi=true (default 0).
+#               Halo buffers are then allocated with omp_target_alloc and staged
+#               with omp_target_memcpy, instead of mapped host buffers moved
+#               with 'target update'.  NOTE this does NOT pass device pointers
+#               to MPI: anuga/shallow_water/gpu/gpu_halo.c stages every halo
+#               through host memory in both paths, because some UCX transports
+#               (uct_mm intra-node shared memory) SIGSEGV on device pointers.
+#               So it needs no CUDA-aware MPI, and gives no GPUDirect.
+#   SKIP_TESTS  1 = do not run the GPU test suite at all.
+#   FORCE_TESTS 1 = run it even when no GPU is visible (default: skip, so an
+#               HPC login node does not spend a long time on tests that
+#               cannot pass).
 #   NVHPC_ROOT  Override path to NVIDIA HPC SDK root if auto-detection fails.
 #               e.g. /opt/nvidia/hpc_sdk/Linux_x86_64/26.3
 #
@@ -31,31 +45,23 @@
 #   - NVIDIA HPC SDK installed (see KNOWN_ISSUES.md for apt install recipe)
 #   - conda environment anuga_env_${PY} created via install_miniforge.sh
 
-PY=${PY:-"3.14"}
+# Keep this default in step with tools/install_miniforge.sh: the documented flow
+# is to run that script and then this one, and if the two disagree this one
+# looks for an environment the other never created.
+PY=${PY:-"3.12"}
 
-# Detect this machine's GPU rather than assuming one.  nvidia-smi reports the
-# compute capability as e.g. "8.6", which becomes cc86.
-#
-# This used to be hardcoded to cc120 (the author's laptop) and nobody noticed,
-# because -Dgpu_arch was not reaching nvc's device link: nvc fell back to the
-# GPU it found on the build machine, so any value happened to work.  Once that
-# was fixed the hardcoded default started producing sm_120-only builds that
-# crash on every other card.
-detect_gpu_arch() {
-    local cap
-    cap=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null \
-          | head -1 | tr -d ' ')
-    if [[ "$cap" =~ ^[0-9]+\.[0-9]+$ ]]; then
-        echo "cc${cap//./}"
-    else
-        # No usable nvidia-smi (headless build node, driver not loaded, ...):
-        # build for every architecture ANUGA supports rather than guess one.
-        echo "cc70,cc75,cc80,cc86,cc89,cc90,cc120"
-    fi
-}
-GPU_ARCH=${GPU_ARCH:-"$(detect_gpu_arch)"}
+# GPU_ARCH is resolved AFTER nvc is located (see below): choosing it needs to
+# know which CUDA toolkits this HPC SDK actually ships, not just which GPU is
+# present.  "auto" means "work it out".
+GPU_ARCH=${GPU_ARCH:-auto}
 
 set -e
+
+# Keep a transcript -- this is the file to ask for when someone reports that a
+# GPU build "installed fine but every test crashes".
+LOGFILE=${LOGFILE:-"$HOME/anuga_gpu_install_$(date +%Y%m%d_%H%M%S).log"}
+exec > >(tee -a "$LOGFILE") 2>&1
+echo "# Logging this installation to: $LOGFILE"
 
 trap 'echo ""; echo "#====================================================="; echo "# Installation failed at line $LINENO"; echo "#====================================================="; exit 1' ERR
 
@@ -73,6 +79,11 @@ echo " "
 # ------------------------------------------------------------------
 if [ -n "$NVHPC_ROOT" ]; then
     NVC="$NVHPC_ROOT/compilers/bin/nvc"
+elif command -v nvc >/dev/null 2>&1; then
+    # An nvc already on PATH is the user's choice -- on HPC systems it comes
+    # from a module and is often a wrapper (e.g. Gadi:
+    # /apps/nvidia-hpc-sdk/wrappers/nvc), not the /opt SDK layout below.
+    NVC=$(command -v nvc)
 else
     # Search /opt/nvidia/hpc_sdk/Linux_x86_64/ for the newest installed version
     NVHPC_BASE="/opt/nvidia/hpc_sdk/Linux_x86_64"
@@ -89,7 +100,12 @@ if [ -z "$NVC" ] || [ ! -x "$NVC" ]; then
     echo "#=====================================================";
     echo "# ERROR: nvc not found."
     echo "#"
-    echo "# Install the NVIDIA HPC SDK first:"
+    echo "# On an HPC system, load it as a module first, e.g.:"
+    echo "#"
+    echo "#   module avail nvhpc          # see what is available"
+    echo "#   module load nvhpc"
+    echo "#"
+    echo "# Otherwise install the NVIDIA HPC SDK:"
     echo "#"
     echo "#   curl -fsSL https://developer.download.nvidia.com/hpc-sdk/ubuntu/DEB-GPG-KEY-NVIDIA-HPC-SDK \\"
     echo "#     | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-hpcsdk-archive-keyring.gpg"
@@ -105,6 +121,120 @@ fi
 
 echo "# nvc found: $NVC"
 "$NVC" --version
+echo " "
+
+# ------------------------------------------------------------------
+# Resolve GPU_ARCH=auto, then PROVE the choice compiles before spending
+# several minutes on the real build.
+#
+# Two things constrain the answer, and neither is guessable:
+#   * which GPU is present (nvidia-smi) -- absent on a login node;
+#   * which CUDA toolkits this SDK ships.  cc70 (V100) needs CUDA <= 12.x;
+#     an SDK carrying only CUDA 13 rejects it outright ("A CUDA toolkit
+#     matching the current driver version ... was not installed"), because
+#     CUDA 13's libnvvm dropped Volta.
+# ------------------------------------------------------------------
+arch_compiles() {
+    # Tiny OpenMP-target probe; ~2s. Returns 0 if nvc accepts this -gpu= string.
+    local arch="$1" tmp rc
+    tmp=$(mktemp -d)
+    printf '#include <stdio.h>\nint main(void){double a[10];\n#pragma omp target teams distribute parallel for map(tofrom:a[0:10])\nfor(int i=0;i<10;i++)a[i]=i;\nprintf("%%f\\n",a[9]);return 0;}\n' > "$tmp/probe.c"
+    "$NVC" -mp=gpu -gpu="$arch" -c "$tmp/probe.c" -o "$tmp/probe.o" >"$tmp/log" 2>&1
+    rc=$?
+    [ $rc -ne 0 ] && PROBE_ERR=$(head -1 "$tmp/log")
+    rm -rf "$tmp"
+    return $rc
+}
+
+GPU_ARCH_EXPLICIT=1
+[ "$GPU_ARCH" = "auto" ] && GPU_ARCH_EXPLICIT=0
+
+if [ "$GPU_ARCH" = "auto" ]; then
+    CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ')
+    if [[ "$CAP" =~ ^[0-9]+\.[0-9]+$ ]]; then
+        GPU_ARCH="cc${CAP//./}"
+        echo "# GPU_ARCH=auto -> ${GPU_ARCH} (detected: compute capability ${CAP})"
+    else
+        # No GPU visible: an HPC login node, or a driver that is not loaded.
+        # Build for everything this SDK can target, so the result runs on the
+        # compute nodes.
+        #
+        # Which architectures those are cannot be read off the filesystem: nvc
+        # may be a module wrapper (Gadi: /apps/nvidia-hpc-sdk/wrappers/nvc) with
+        # no SDK layout beneath it.  cc70 (V100) additionally needs a CUDA <=
+        # 12.x, since CUDA 13's libnvvm dropped Volta -- and when an SDK ships
+        # both, the CUDA 13 default must be overridden explicitly.  So ASK the
+        # compiler: try the widest list first and keep the first that builds.
+        echo "# GPU_ARCH=auto -> no GPU visible here; probing what this nvc can build."
+        ALL="cc75,cc80,cc86,cc89,cc90,cc120"
+        GPU_ARCH=""
+        for CANDIDATE in "cc70,${ALL}" \
+                         "cuda12.9,cc70,${ALL}" \
+                         "cuda12.8,cc70,${ALL}" \
+                         "cuda12.6,cc70,${ALL}" \
+                         "${ALL}"; do
+            printf '#   trying %-34s ... ' "$CANDIDATE"
+            if arch_compiles "$CANDIDATE"; then
+                echo "ok"
+                GPU_ARCH="$CANDIDATE"
+                break
+            fi
+            echo "no"
+        done
+        if [ -z "$GPU_ARCH" ]; then
+            echo "#====================================================="
+            echo "# ERROR: nvc rejected every architecture list tried."
+            echo "#        Last error: ${PROBE_ERR}"
+            echo "#        Set GPU_ARCH explicitly, e.g. GPU_ARCH=cc80"
+            echo "#====================================================="
+            exit 1
+        fi
+        case "$GPU_ARCH" in
+            *cc70*) echo "#   V100 (cc70) IS included - this build covers V100 through Blackwell." ;;
+            *)      echo "#   NOTE: cc70/V100 could not be built with this SDK (CUDA 13 dropped"
+                    echo "#         Volta). This build will NOT run on a V100; load an nvhpc"
+                    echo "#         module with CUDA 12.x if you need one." ;;
+        esac
+    fi
+fi
+
+echo "# Checking that nvc accepts -gpu=${GPU_ARCH} ..."
+if ! arch_compiles "$GPU_ARCH"; then
+    echo "#   rejected: ${PROBE_ERR}"
+    # Dropping an architecture the user asked for by name would hand them a
+    # build that crashes on the very GPU they were targeting, so only the
+    # auto-resolved list is narrowed. An explicit GPU_ARCH is their decision to
+    # correct.
+    GPU_ARCH_NO70=$(echo "$GPU_ARCH" | sed 's/cuda12\.[0-9]*,//; s/cc70,//; s/,cc70//')
+    if [ "$GPU_ARCH_EXPLICIT" = "1" ] && [ "$GPU_ARCH_NO70" != "$GPU_ARCH" ]; then
+        echo "#====================================================="
+        echo "# ERROR: you asked for ${GPU_ARCH}, but this nvc cannot build cc70."
+        echo "#        ${PROBE_ERR}"
+        echo "#"
+        echo "# cc70 (V100) needs a CUDA <= 12.x toolkit; CUDA 13 dropped Volta."
+        echo "# Either load an nvhpc module built against CUDA 12.x, or drop"
+        echo "# cc70 yourself and accept that the build will not run on a V100:"
+        echo "#"
+        echo "#     GPU_ARCH=${GPU_ARCH_NO70} bash ${SCRIPT}"
+        echo "#====================================================="
+        exit 1
+    fi
+    if [ "$GPU_ARCH_NO70" != "$GPU_ARCH" ] && arch_compiles "$GPU_ARCH_NO70"; then
+        echo "#   retrying without cc70 (V100): ${GPU_ARCH_NO70}"
+        echo "#   NOTE: the result will NOT run on a V100."
+        GPU_ARCH="$GPU_ARCH_NO70"
+    else
+        echo "#====================================================="
+        echo "# ERROR: nvc cannot build for -gpu=${GPU_ARCH}"
+        echo "#        ${PROBE_ERR}"
+        echo "#"
+        echo "# Pick architectures this SDK supports, e.g."
+        echo "#     GPU_ARCH=cc80,cc90 bash ${SCRIPT}"
+        echo "#====================================================="
+        exit 1
+    fi
+fi
+echo "#   ok - building for ${GPU_ARCH}"
 echo " "
 
 # ------------------------------------------------------------------
@@ -133,9 +263,17 @@ else
     fi
     ENV_NAME="anuga_env_${PY}"
     if ! "$CONDA_BIN/conda" env list | grep -q "${ENV_NAME}"; then
+        FOUND=$("$CONDA_BIN/conda" env list | awk '/^anuga_env_/ {print $1}' | tr '\n' ' ')
         echo "#=====================================================";
         echo "# ERROR: conda environment '${ENV_NAME}' not found."
-        echo "# Run install_miniforge.sh first (PY=${PY}), or activate your env."
+        if [ -n "$FOUND" ]; then
+            echo "#"
+            echo "# These anuga environments do exist: ${FOUND}"
+            echo "# Activate one, or name it explicitly, e.g."
+            echo "#     PY=<version> bash ${SCRIPT}"
+        else
+            echo "# Run install_miniforge.sh first (PY=${PY}), or activate your env."
+        fi
         echo "#=====================================================";
         exit 1
     fi
@@ -221,7 +359,7 @@ echo " "
 echo "#============================================================"
 echo "# Building ANUGA with GPU offloading"
 echo "#   CC=$NVC"
-echo "#   gpu_offload=true  gpu_arch=${GPU_ARCH}"
+echo "#   gpu_offload=true  gpu_arch=${GPU_ARCH}  gpu_aware_mpi=${GPU_AWARE_MPI:-0}"
 echo "#============================================================"
 echo " "
 
@@ -237,45 +375,66 @@ echo "# Removing any stale meson build directory (build/cp*) for a clean nvc con
 rm -rf "${ANUGA_CORE_PATH}"/build/cp*
 echo " "
 
+# EDITABLE=0 installs a copy into site-packages instead, which survives having
+# the source tree or its build directory removed.  The default stays editable
+# (this script is mostly used on a development checkout), but note the
+# dependency: an editable install imports from ${ANUGA_CORE_PATH} and loads its
+# compiled extensions from build/cp<ver>.  Delete that directory later and
+# `import anuga` fails with a FileNotFoundError naming a missing build path,
+# which does not obviously mean "reinstall".
+if [ "${EDITABLE:-1}" = "1" ]; then
+    PIP_TARGET_ARGS="-e ."
+    echo "# Installing EDITABLE (in place). Keep ${ANUGA_CORE_PATH}/build/cp* -"
+    echo "# removing it breaks 'import anuga'. Use EDITABLE=0 for a standalone copy."
+else
+    PIP_TARGET_ARGS="."
+    echo "# Installing a COPY into site-packages (EDITABLE=0)."
+fi
+echo " "
+
+GPU_AWARE_MPI_ARG=""
+if [ "${GPU_AWARE_MPI:-0}" = "1" ]; then
+    GPU_AWARE_MPI_ARG="-Csetup-args=-Dgpu_aware_mpi=true"
+    echo "# GPU_AWARE_MPI=1: building with -Dgpu_aware_mpi=true"
+    echo "#   (device-allocated halo buffers; MPI itself still receives host"
+    echo "#    pointers - see gpu_halo.c. No CUDA-aware MPI is required.)"
+    if ! $CONDA_RUN python -c "import mpi4py" >/dev/null 2>&1; then
+        echo "#   WARNING: mpi4py is not installed in this environment, so the"
+        echo "#            extension will be built against the single-process"
+        echo "#            stubs and this flag will have no effect. Install"
+        echo "#            mpi4py (and pymetis) first if you want parallel runs."
+    fi
+    echo " "
+fi
+
 $CONDA_RUN bash -c \
-    "CC='$NVC' pip install --no-build-isolation -v -e . \
+    "CC='$NVC' pip install --no-build-isolation -v ${PIP_TARGET_ARGS} \
      -Csetup-args=-Dgpu_offload=true \
-     -Csetup-args=-Dgpu_arch=${GPU_ARCH}"
+     -Csetup-args=-Dgpu_arch=${GPU_ARCH} \
+     ${GPU_AWARE_MPI_ARG}"
 
 echo " "
 # ---------------------------------------------------------------------------
-# Sanity check: does the built extension actually contain code for THIS GPU?
+# Report what was built, and stop if it cannot run on this machine.
 #
-# A mismatch here is the difference between "it works" and every GPU test
-# reporting CRASH: the build succeeds either way, and the kernels only fail
-# when they are launched.  Diagnose it up front rather than leaving the user
-# to interpret a wall of crashes.
+# A build that targets only architectures NEWER than the GPU present compiles
+# cleanly and then fails at every kernel launch -- which surfaces as a wall of
+# CRASH from the tests below, with nothing explaining why.  (The reverse is
+# fine: nvc embeds PTX, which the driver JIT-compiles forward, so a build for an
+# older architecture runs on a newer GPU.)
 # ---------------------------------------------------------------------------
-GPU_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ')
-if [[ "$GPU_CAP" =~ ^[0-9]+\.[0-9]+$ ]]; then
-    WANT_SM="sm_${GPU_CAP//./}"
-    GPU_EXT=$($CONDA_RUN python -c \
-        "import anuga.shallow_water.sw_domain_gpu_ext as m; print(m.__file__)" 2>/dev/null | tail -1)
-    CUOBJDUMP=$(command -v cuobjdump || ls "${NVHPC_ROOT}"/cuda/bin/cuobjdump 2>/dev/null | head -1)
-    if [[ -n "$GPU_EXT" && -n "$CUOBJDUMP" && -f "$GPU_EXT" ]]; then
-        BUILT_SM=$("$CUOBJDUMP" --list-elf "$GPU_EXT" 2>/dev/null \
-                   | grep -oE 'sm_[0-9]+' | sort -uV | tr '\n' ' ')
-        echo "# GPU in this machine : ${WANT_SM} (compute capability ${GPU_CAP})"
-        echo "# Built for           : ${BUILT_SM:-<none found>}"
-        if [[ -n "$BUILT_SM" && " $BUILT_SM " != *" $WANT_SM "* ]]; then
-            echo ""
-            echo "#=================================================================="
-            echo "# WARNING: this build does NOT include ${WANT_SM}, the GPU in this"
-            echo "# machine.  It compiled cleanly, but every GPU kernel launch will"
-            echo "# fail and the tests below will report CRASH."
-            echo "#"
-            echo "# Rebuild for this GPU:"
-            echo "#     GPU_ARCH=cc${GPU_CAP//./} bash ${SCRIPT}"
-            echo "#=================================================================="
-            echo ""
-        fi
-    fi
+echo "#============================================================"
+echo "# Build report"
+echo "#============================================================"
+if ! $CONDA_RUN python "${ANUGA_CORE_PATH}/tools/anuga_build_report.py" --check; then
+    echo ""
+    echo "#====================================================="
+    echo "# Stopping before the tests: the build above cannot run"
+    echo "# on this machine, so every GPU test would report CRASH."
+    echo "#====================================================="
+    exit 1
 fi
+echo " "
 
 echo "#============================================================"
 echo "# Running GPU test suite (isolated runner)"
@@ -290,8 +449,40 @@ echo "#   'pip install -e .' does not place on PATH)."
 echo "#============================================================"
 echo " "
 
-$CONDA_RUN \
-    python "${ANUGA_CORE_PATH}/scripts/anuga_run_isolated_tests.py"
+# Do not run the GPU tests where there is no GPU.  The usual case is an HPC
+# login node: every test would fail or skip after a long wait, and running a
+# heavy suite there is antisocial (many sites forbid it outright).  The build is
+# still complete and usable -- the tests just have to happen where the GPUs are.
+HAVE_GPU=0
+if nvidia-smi --query-gpu=name --format=csv,noheader >/dev/null 2>&1 && \
+   [ -n "$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null)" ]; then
+    HAVE_GPU=1
+fi
+
+if [ "${SKIP_TESTS:-0}" = "1" ]; then
+    echo "SKIP_TESTS=1 - skipping the GPU test suite."
+elif [ "$HAVE_GPU" = "0" ] && [ "${FORCE_TESTS:-0}" != "1" ]; then
+    echo "#=================================================================="
+    echo "# Skipping the GPU test suite: no GPU is visible here."
+    echo "#"
+    echo "# The build itself is complete. These tests need a GPU, and this"
+    echo "# looks like a login node - running them here would take a long"
+    echo "# time, fail anyway, and load a shared machine."
+    echo "#"
+    echo "# Run them where the GPUs are, in a job or interactive session:"
+    echo "#"
+    echo "#   python ${ANUGA_CORE_PATH}/scripts/anuga_run_isolated_tests.py"
+    echo "#"
+    echo "# and check the build suits that node's GPU with:"
+    echo "#"
+    echo "#   python ${ANUGA_CORE_PATH}/tools/anuga_build_report.py --check"
+    echo "#"
+    echo "# FORCE_TESTS=1 runs them here regardless."
+    echo "#=================================================================="
+else
+    $CONDA_RUN \
+        python "${ANUGA_CORE_PATH}/scripts/anuga_run_isolated_tests.py"
+fi
 
 echo " "
 echo "#=================================================================="
