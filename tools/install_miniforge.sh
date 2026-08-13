@@ -18,6 +18,19 @@
 # PY=3.9 bash /path/to/anuga_core/tools/install_miniforge.sh
 #
 # Then the script will install python 3.9 and create the anuga_env_3.9 environment.
+#
+# This builds the CPU (gcc) package, which is the right one for CPU and MPI
+# runs. A GPU build is a SEPARATE build with different trade-offs: it offloads
+# to the GPU, but its CPU fallback is single-threaded and much slower than this
+# one (see docs/source/appendices/install_gpu.rst). The script therefore does
+# NOT switch compilers just because a GPU is present -- it tells you the GPU
+# path exists and leaves the choice to you.
+#
+# To do both in one go, add GPU=1:
+#
+#   GPU=1 bash /path/to/anuga_core/tools/install_miniforge.sh
+#
+# which runs the CPU install, then chains into tools/install_anuga_nvc.sh.
 
 
 PY=${PY:-"3.12"}
@@ -149,6 +162,72 @@ echo "# "
 echo "# source ~/miniforge3/bin/activate anuga_env_${PY}"
 echo "# "
 echo "#=================================================================="
+
+# ---------------------------------------------------------------------------
+# GPU: report what is possible on this machine, and act only if asked.
+#
+# Deliberately NOT automatic. A gpu_offload=true (nvc) build is not a superset
+# of this one: NVHPC's host fallback does not scale with threads, so a GPU
+# build used on the CPU is several times slower than this gcc build (measured;
+# see claude/KNOWN_ISSUES.md). Choosing the compiler from the hardware would
+# silently downgrade anyone whose work is CPU or MPI bound, and would also
+# break the test step above, which must be run per-process on a GPU build.
+# ---------------------------------------------------------------------------
+GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1)
+GPU_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ')
+NVC_PATH=$(command -v nvc 2>/dev/null)
+if [ -z "$NVC_PATH" ]; then
+     NVC_PATH=$(ls -d /opt/nvidia/hpc_sdk/Linux_x86_64/*/compilers/bin/nvc 2>/dev/null | sort -V | tail -1)
+fi
+
+if [ -n "$GPU_NAME" ]; then
+     echo " "
+     echo "#=================================================================="
+     echo "# A CUDA GPU was detected:"
+     echo "#     ${GPU_NAME} (compute capability ${GPU_CAP:-unknown} -> cc${GPU_CAP//./})"
+     echo "#"
+     echo "# What you have just installed is the CPU (gcc) build. Keep it for"
+     echo "# CPU and MPI runs: it is several times faster on the host than a"
+     echo "# GPU build is, because NVHPC's host fallback is single-threaded."
+     if [ -n "$NVC_PATH" ]; then
+          echo "#"
+          echo "# nvc is installed (${NVC_PATH}), so you can also build for the GPU:"
+          echo "#"
+          echo "#     bash ${SCRIPTPATH}/install_anuga_nvc.sh"
+          echo "#"
+          echo "# It detects cc${GPU_CAP//./} automatically. Note it REPLACES this"
+          echo "# build in this environment - the two cannot coexist in one env."
+     else
+          echo "#"
+          echo "# For GPU offload you would also need the NVIDIA HPC SDK (nvc),"
+          echo "# which is not installed. See docs/source/appendices/install_gpu.rst."
+     fi
+     echo "#=================================================================="
+fi
+
+if [ "${GPU:-0}" = "1" ]; then
+     echo " "
+     echo "#=================================================================="
+     echo "# GPU=1 - continuing with the GPU (nvc) build"
+     echo "#=================================================================="
+     if [ -z "$NVC_PATH" ]; then
+          echo "#====================================================="
+          echo "# ERROR: GPU=1 was requested but nvc was not found."
+          echo "#        Install the NVIDIA HPC SDK first, or drop GPU=1."
+          echo "#        See docs/source/appendices/install_gpu.rst"
+          echo "#====================================================="
+          exit 1
+     fi
+     if [ -z "$GPU_NAME" ]; then
+          echo "# NOTE: no GPU detected by nvidia-smi. Building anyway (GPU=1);"
+          echo "#       install_anuga_nvc.sh will build for every supported"
+          echo "#       architecture when it cannot see a GPU."
+     fi
+     # PY targets the environment just created (though the GPU script will
+     # prefer the one this script activated, which is the same one).  LOGFILE is
+     # shared so a GPU=1 run leaves a single transcript rather than two.
+     PY="${PY}" LOGFILE="${LOGFILE}" bash "${SCRIPTPATH}/install_anuga_nvc.sh"
+fi
 
 echo "#=================================================================="
 echo "# NOTE: If you run the command"
