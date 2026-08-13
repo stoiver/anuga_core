@@ -11,7 +11,9 @@
 #
 # Environment variables (all optional):
 #
-#   PY          Python version to use (default: 3.14)
+#   PY          Python version to use (default: 3.12, matching
+#               install_miniforge.sh).  Ignored when a conda environment is
+#               already activated -- that one is used.
 #   GPU_ARCH    GPU compute capability, e.g. cc120 (RTX 5070 Blackwell),
 #               cc86 (RTX 30xx Ampere), cc90 (H100), cc80 (A100), cc70 (V100).
 #               Default: DETECTED from the GPU in this machine via nvidia-smi,
@@ -31,7 +33,10 @@
 #   - NVIDIA HPC SDK installed (see KNOWN_ISSUES.md for apt install recipe)
 #   - conda environment anuga_env_${PY} created via install_miniforge.sh
 
-PY=${PY:-"3.14"}
+# Keep this default in step with tools/install_miniforge.sh: the documented flow
+# is to run that script and then this one, and if the two disagree this one
+# looks for an environment the other never created.
+PY=${PY:-"3.12"}
 
 # Detect this machine's GPU rather than assuming one.  nvidia-smi reports the
 # compute capability as e.g. "8.6", which becomes cc86.
@@ -139,9 +144,17 @@ else
     fi
     ENV_NAME="anuga_env_${PY}"
     if ! "$CONDA_BIN/conda" env list | grep -q "${ENV_NAME}"; then
+        FOUND=$("$CONDA_BIN/conda" env list | awk '/^anuga_env_/ {print $1}' | tr '\n' ' ')
         echo "#=====================================================";
         echo "# ERROR: conda environment '${ENV_NAME}' not found."
-        echo "# Run install_miniforge.sh first (PY=${PY}), or activate your env."
+        if [ -n "$FOUND" ]; then
+            echo "#"
+            echo "# These anuga environments do exist: ${FOUND}"
+            echo "# Activate one, or name it explicitly, e.g."
+            echo "#     PY=<version> bash ${SCRIPT}"
+        else
+            echo "# Run install_miniforge.sh first (PY=${PY}), or activate your env."
+        fi
         echo "#=====================================================";
         exit 1
     fi
