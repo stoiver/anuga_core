@@ -67,6 +67,11 @@ echo " "
 # ------------------------------------------------------------------
 if [ -n "$NVHPC_ROOT" ]; then
     NVC="$NVHPC_ROOT/compilers/bin/nvc"
+elif command -v nvc >/dev/null 2>&1; then
+    # An nvc already on PATH is the user's choice -- on HPC systems it comes
+    # from a module and is often a wrapper (e.g. Gadi:
+    # /apps/nvidia-hpc-sdk/wrappers/nvc), not the /opt SDK layout below.
+    NVC=$(command -v nvc)
 else
     # Search /opt/nvidia/hpc_sdk/Linux_x86_64/ for the newest installed version
     NVHPC_BASE="/opt/nvidia/hpc_sdk/Linux_x86_64"
@@ -83,7 +88,12 @@ if [ -z "$NVC" ] || [ ! -x "$NVC" ]; then
     echo "#=====================================================";
     echo "# ERROR: nvc not found."
     echo "#"
-    echo "# Install the NVIDIA HPC SDK first:"
+    echo "# On an HPC system, load it as a module first, e.g.:"
+    echo "#"
+    echo "#   module avail nvhpc          # see what is available"
+    echo "#   module load nvhpc"
+    echo "#"
+    echo "# Otherwise install the NVIDIA HPC SDK:"
     echo "#"
     echo "#   curl -fsSL https://developer.download.nvidia.com/hpc-sdk/ubuntu/DEB-GPG-KEY-NVIDIA-HPC-SDK \\"
     echo "#     | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-hpcsdk-archive-keyring.gpg"
@@ -112,16 +122,13 @@ echo " "
 #     matching the current driver version ... was not installed"), because
 #     CUDA 13's libnvvm dropped Volta.
 # ------------------------------------------------------------------
-NVHPC_DIR=$(dirname "$(dirname "$NVC")")          # .../<version>
-CUDA12=$(ls -d "${NVHPC_DIR}"/cuda/12.* 2>/dev/null | sort -V | tail -1)
-
 arch_compiles() {
     # Tiny OpenMP-target probe; ~2s. Returns 0 if nvc accepts this -gpu= string.
-    local arch="$1" tmp
+    local arch="$1" tmp rc
     tmp=$(mktemp -d)
     printf '#include <stdio.h>\nint main(void){double a[10];\n#pragma omp target teams distribute parallel for map(tofrom:a[0:10])\nfor(int i=0;i<10;i++)a[i]=i;\nprintf("%%f\\n",a[9]);return 0;}\n' > "$tmp/probe.c"
     "$NVC" -mp=gpu -gpu="$arch" -c "$tmp/probe.c" -o "$tmp/probe.o" >"$tmp/log" 2>&1
-    local rc=$?
+    rc=$?
     [ $rc -ne 0 ] && PROBE_ERR=$(head -1 "$tmp/log")
     rm -rf "$tmp"
     return $rc
@@ -133,19 +140,46 @@ if [ "$GPU_ARCH" = "auto" ]; then
         GPU_ARCH="cc${CAP//./}"
         echo "# GPU_ARCH=auto -> ${GPU_ARCH} (detected: compute capability ${CAP})"
     else
-        # No GPU visible (login node, driver not loaded).  Build for everything
-        # this SDK can target, so the result runs on the compute nodes.
-        if [ -n "$CUDA12" ]; then
-            GPU_ARCH="cuda$(basename "$CUDA12"),cc70,cc75,cc80,cc86,cc89,cc90,cc120"
-            echo "# GPU_ARCH=auto -> multi-architecture (no GPU visible here)."
-            echo "#   This SDK ships CUDA $(basename "$CUDA12"), so cc70/V100 is included."
-        else
-            GPU_ARCH="cc75,cc80,cc86,cc89,cc90,cc120"
-            echo "# GPU_ARCH=auto -> multi-architecture (no GPU visible here)."
-            echo "#   This SDK ships no CUDA 12.x, so cc70/V100 CANNOT be built:"
-            echo "#   CUDA 13 dropped Volta. Load an SDK with CUDA 12.x if you"
-            echo "#   need V100 support."
+        # No GPU visible: an HPC login node, or a driver that is not loaded.
+        # Build for everything this SDK can target, so the result runs on the
+        # compute nodes.
+        #
+        # Which architectures those are cannot be read off the filesystem: nvc
+        # may be a module wrapper (Gadi: /apps/nvidia-hpc-sdk/wrappers/nvc) with
+        # no SDK layout beneath it.  cc70 (V100) additionally needs a CUDA <=
+        # 12.x, since CUDA 13's libnvvm dropped Volta -- and when an SDK ships
+        # both, the CUDA 13 default must be overridden explicitly.  So ASK the
+        # compiler: try the widest list first and keep the first that builds.
+        echo "# GPU_ARCH=auto -> no GPU visible here; probing what this nvc can build."
+        ALL="cc75,cc80,cc86,cc89,cc90,cc120"
+        GPU_ARCH=""
+        for CANDIDATE in "cc70,${ALL}" \
+                         "cuda12.9,cc70,${ALL}" \
+                         "cuda12.8,cc70,${ALL}" \
+                         "cuda12.6,cc70,${ALL}" \
+                         "${ALL}"; do
+            printf '#   trying %-34s ... ' "$CANDIDATE"
+            if arch_compiles "$CANDIDATE"; then
+                echo "ok"
+                GPU_ARCH="$CANDIDATE"
+                break
+            fi
+            echo "no"
+        done
+        if [ -z "$GPU_ARCH" ]; then
+            echo "#====================================================="
+            echo "# ERROR: nvc rejected every architecture list tried."
+            echo "#        Last error: ${PROBE_ERR}"
+            echo "#        Set GPU_ARCH explicitly, e.g. GPU_ARCH=cc80"
+            echo "#====================================================="
+            exit 1
         fi
+        case "$GPU_ARCH" in
+            *cc70*) echo "#   V100 (cc70) IS included - this build covers V100 through Blackwell." ;;
+            *)      echo "#   NOTE: cc70/V100 could not be built with this SDK (CUDA 13 dropped"
+                    echo "#         Volta). This build will NOT run on a V100; load an nvhpc"
+                    echo "#         module with CUDA 12.x if you need one." ;;
+        esac
     fi
 fi
 
