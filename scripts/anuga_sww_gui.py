@@ -675,6 +675,10 @@ class SWWAnimationGUI:
         ttk.Button(ts_ctrl, text='Export CSV',
                    command=self._export_timeseries).pack(side=tk.RIGHT, padx=4)
 
+        # NB: do not set dpi here for the on-screen figures.  matplotlib's Tk
+        # backend already scales the canvas by Tk's points-per-pixel (set from
+        # the UI scale in tk_scaling), so passing a scaled dpi as well makes the
+        # plots twice as large as intended.
         self._ts_fig, self._ts_ax = plt.subplots(figsize=(10, 1.8))
         self._ts_fig.tight_layout(pad=1.5)
         self._ts_canvas = FigureCanvasTkAgg(self._ts_fig, master=self._ts_outer)
@@ -3547,9 +3551,19 @@ def main():
                         metavar='PROVIDER',
                         help=('Basemap tile provider. Choices: '
                               + ', '.join(BASEMAP_PROVIDERS.keys())))
+    parser.add_argument('--ui-scale', type=float, default=None, metavar='FACTOR',
+                        help=('Scale the interface (fonts, spacing and on-screen '
+                              'plots). Default: detected from the display. Use '
+                              'e.g. 3 on a very high-DPI laptop panel, 1 to '
+                              'disable. Equivalent to ANUGA_GUI_SCALE.'))
+
     parser.set_defaults(basemap=None)
 
     args = parser.parse_args()
+
+    # Feed --ui-scale to the detector via the same env var users can export.
+    if args.ui_scale is not None:
+        os.environ['ANUGA_GUI_SCALE'] = str(args.ui_scale)
 
     # Load TOML config (if given); explicit CLI args take precedence.
     cfg = {}
