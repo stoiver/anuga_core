@@ -57,6 +57,12 @@ GPU_ARCH=${GPU_ARCH:-"$(detect_gpu_arch)"}
 
 set -e
 
+# Keep a transcript -- this is the file to ask for when someone reports that a
+# GPU build "installed fine but every test crashes".
+LOGFILE=${LOGFILE:-"$HOME/anuga_gpu_install_$(date +%Y%m%d_%H%M%S).log"}
+exec > >(tee -a "$LOGFILE") 2>&1
+echo "# Logging this installation to: $LOGFILE"
+
 trap 'echo ""; echo "#====================================================="; echo "# Installation failed at line $LINENO"; echo "#====================================================="; exit 1' ERR
 
 SCRIPT=$(realpath "$0")
@@ -237,45 +243,50 @@ echo "# Removing any stale meson build directory (build/cp*) for a clean nvc con
 rm -rf "${ANUGA_CORE_PATH}"/build/cp*
 echo " "
 
+# EDITABLE=0 installs a copy into site-packages instead, which survives having
+# the source tree or its build directory removed.  The default stays editable
+# (this script is mostly used on a development checkout), but note the
+# dependency: an editable install imports from ${ANUGA_CORE_PATH} and loads its
+# compiled extensions from build/cp<ver>.  Delete that directory later and
+# `import anuga` fails with a FileNotFoundError naming a missing build path,
+# which does not obviously mean "reinstall".
+if [ "${EDITABLE:-1}" = "1" ]; then
+    PIP_TARGET_ARGS="-e ."
+    echo "# Installing EDITABLE (in place). Keep ${ANUGA_CORE_PATH}/build/cp* -"
+    echo "# removing it breaks 'import anuga'. Use EDITABLE=0 for a standalone copy."
+else
+    PIP_TARGET_ARGS="."
+    echo "# Installing a COPY into site-packages (EDITABLE=0)."
+fi
+echo " "
+
 $CONDA_RUN bash -c \
-    "CC='$NVC' pip install --no-build-isolation -v -e . \
+    "CC='$NVC' pip install --no-build-isolation -v ${PIP_TARGET_ARGS} \
      -Csetup-args=-Dgpu_offload=true \
      -Csetup-args=-Dgpu_arch=${GPU_ARCH}"
 
 echo " "
 # ---------------------------------------------------------------------------
-# Sanity check: does the built extension actually contain code for THIS GPU?
+# Report what was built, and stop if it cannot run on this machine.
 #
-# A mismatch here is the difference between "it works" and every GPU test
-# reporting CRASH: the build succeeds either way, and the kernels only fail
-# when they are launched.  Diagnose it up front rather than leaving the user
-# to interpret a wall of crashes.
+# A build that targets only architectures NEWER than the GPU present compiles
+# cleanly and then fails at every kernel launch -- which surfaces as a wall of
+# CRASH from the tests below, with nothing explaining why.  (The reverse is
+# fine: nvc embeds PTX, which the driver JIT-compiles forward, so a build for an
+# older architecture runs on a newer GPU.)
 # ---------------------------------------------------------------------------
-GPU_CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ')
-if [[ "$GPU_CAP" =~ ^[0-9]+\.[0-9]+$ ]]; then
-    WANT_SM="sm_${GPU_CAP//./}"
-    GPU_EXT=$($CONDA_RUN python -c \
-        "import anuga.shallow_water.sw_domain_gpu_ext as m; print(m.__file__)" 2>/dev/null | tail -1)
-    CUOBJDUMP=$(command -v cuobjdump || ls "${NVHPC_ROOT}"/cuda/bin/cuobjdump 2>/dev/null | head -1)
-    if [[ -n "$GPU_EXT" && -n "$CUOBJDUMP" && -f "$GPU_EXT" ]]; then
-        BUILT_SM=$("$CUOBJDUMP" --list-elf "$GPU_EXT" 2>/dev/null \
-                   | grep -oE 'sm_[0-9]+' | sort -uV | tr '\n' ' ')
-        echo "# GPU in this machine : ${WANT_SM} (compute capability ${GPU_CAP})"
-        echo "# Built for           : ${BUILT_SM:-<none found>}"
-        if [[ -n "$BUILT_SM" && " $BUILT_SM " != *" $WANT_SM "* ]]; then
-            echo ""
-            echo "#=================================================================="
-            echo "# WARNING: this build does NOT include ${WANT_SM}, the GPU in this"
-            echo "# machine.  It compiled cleanly, but every GPU kernel launch will"
-            echo "# fail and the tests below will report CRASH."
-            echo "#"
-            echo "# Rebuild for this GPU:"
-            echo "#     GPU_ARCH=cc${GPU_CAP//./} bash ${SCRIPT}"
-            echo "#=================================================================="
-            echo ""
-        fi
-    fi
+echo "#============================================================"
+echo "# Build report"
+echo "#============================================================"
+if ! $CONDA_RUN python "${ANUGA_CORE_PATH}/tools/anuga_build_report.py" --check; then
+    echo ""
+    echo "#====================================================="
+    echo "# Stopping before the tests: the build above cannot run"
+    echo "# on this machine, so every GPU test would report CRASH."
+    echo "#====================================================="
+    exit 1
 fi
+echo " "
 
 echo "#============================================================"
 echo "# Running GPU test suite (isolated runner)"
@@ -290,8 +301,12 @@ echo "#   'pip install -e .' does not place on PATH)."
 echo "#============================================================"
 echo " "
 
-$CONDA_RUN \
-    python "${ANUGA_CORE_PATH}/scripts/anuga_run_isolated_tests.py"
+if [ "${SKIP_TESTS:-0}" = "1" ]; then
+    echo "SKIP_TESTS=1 - skipping the GPU test suite."
+else
+    $CONDA_RUN \
+        python "${ANUGA_CORE_PATH}/scripts/anuga_run_isolated_tests.py"
+fi
 
 echo " "
 echo "#=================================================================="

@@ -22,7 +22,14 @@
 
 PY=${PY:-"3.12"}
 
-set -e 
+set -e
+
+# Keep a transcript.  An install that goes wrong is usually reported second-hand
+# ("it failed"), and this is the file to ask for.
+LOGFILE=${LOGFILE:-"$HOME/anuga_install_$(date +%Y%m%d_%H%M%S).log"}
+exec > >(tee -a "$LOGFILE") 2>&1
+echo "# Logging this installation to: $LOGFILE"
+
 
 trap 'echo ""; echo "#====================================================="; echo "# Installation failed at line $LINENO"; echo "#====================================================="; exit 1' ERR
 
@@ -66,7 +73,21 @@ echo "#==============================================="
 echo "# create conda environment anuga_env_${PY}"
 echo "#==============================================="
 echo "..."
-./miniforge3/bin/conda env create --file ${SCRIPTPATH}/../environments/environment_${PY}.yml
+ENV_YML="${SCRIPTPATH}/../environments/environment_${PY}.yml"
+if [ ! -f "$ENV_YML" ]; then
+     echo "ERROR: no environment file for Python ${PY}: $ENV_YML"
+     echo "Available: $(ls ${SCRIPTPATH}/../environments/environment_3.*.yml \
+                        | grep -v intel | sed 's#.*environment_##;s#\.yml##' | tr '\n' ' ')"
+     exit 1
+fi
+# Re-running the script must not fail on an environment that already exists:
+# `conda env create` errors out in that case, so update it in place instead.
+if ./miniforge3/bin/conda env list | grep -qE "^anuga_env_${PY}\s"; then
+     echo "Environment anuga_env_${PY} already exists - updating it in place."
+     ./miniforge3/bin/conda env update --name anuga_env_${PY} --file "$ENV_YML" --prune
+else
+     ./miniforge3/bin/conda env create --file "$ENV_YML"
+fi
 
 echo " "
 echo "#======================================"
@@ -83,17 +104,38 @@ echo "..."
 
 cd ${SCRIPTPATH}
 cd ..
-pip install --no-build-isolation .
+# Non-editable (a copy into site-packages) on purpose: it keeps working no
+# matter what happens to this source tree or its build/ directory.  Developers
+# who want to edit the sources in place can pass EDITABLE=1, but then the
+# build/cp<ver> directory must be kept -- deleting it breaks `import anuga`.
+if [ "${EDITABLE:-0}" = "1" ]; then
+     echo "# EDITABLE=1: installing in place (keep the build/cp* directory!)"
+     pip install --no-build-isolation -e .
+else
+     pip install --no-build-isolation .
+fi
+echo " "
+
+echo "#==========================="
+echo "# Build report"
+echo "#==========================="
+python "${ANUGA_CORE_PATH}/tools/anuga_build_report.py" || true
 echo " "
 
 echo "#==========================="
 echo "# Run unittests"
 echo "#==========================="
+echo "#   Set SKIP_TESTS=1 to skip, or FAST_TESTS=1 for the quick subset."
 echo " "
 
 cd sandpit
-#pytest -q --disable-warnings --pyargs anuga
-pytest --pyargs anuga
+if [ "${SKIP_TESTS:-0}" = "1" ]; then
+     echo "SKIP_TESTS=1 - skipping the test suite."
+elif [ "${FAST_TESTS:-0}" = "1" ]; then
+     pytest --pyargs anuga --run-fast
+else
+     pytest --pyargs anuga
+fi
 
 echo " "
 echo "#=================================================================="
