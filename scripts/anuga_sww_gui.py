@@ -714,6 +714,8 @@ class SWWAnimationGUI:
         self._canvas_frame.pack(fill=tk.BOTH, expand=True)
         self._canvas = FigureCanvasTkAgg(self._fig, master=self._canvas_frame)
         self._canvas.draw()
+        # ... and once more after the window has been laid out for real.
+        self.root.after_idle(self._sync_canvas_sizes)
         self._canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self._hover_cid = self._canvas.mpl_connect(
             'motion_notify_event', self._on_hover)
@@ -1282,6 +1284,38 @@ class SWWAnimationGUI:
         self._update_xs_overlay()
         self._set_status(f'Loaded {n} frames  |  {plot_dir}')
 
+    def _sync_canvas_sizes(self):
+        """Match each embedded figure to its widget's real pixel size.
+
+        matplotlib's Tk backend sizes a figure from the first <Configure> it
+        receives, but on a HiDPI display that arrives before the canvas knows
+        its device-pixel-ratio, so the figure comes out ui_scale times larger
+        than the widget: the image then renders to an oversized canvas and only
+        its corner is visible, un-centred and at the wrong scale.  Any later
+        resize corrects it, which is why nudging the window "fixed" it.
+
+        Re-assert the size once the widget geometry is real.  Safe to call
+        repeatedly; a widget that is not laid out yet (1x1) is skipped.
+        """
+        for fig, canvas in ((self._fig, self._canvas),
+                            (self._ts_fig, self._ts_canvas),
+                            (self._xs_fig, self._xs_fig_canvas)):
+            try:
+                w = canvas.get_tk_widget()
+                wpx, hpx = w.winfo_width(), w.winfo_height()
+                if wpx <= 1 or hpx <= 1:
+                    continue
+                dpi = fig.get_dpi()
+                if dpi <= 0:
+                    continue
+                want_w, want_h = wpx / dpi, hpx / dpi
+                have_w, have_h = fig.get_size_inches()
+                if (abs(want_w - have_w) > 0.01 or abs(want_h - have_h) > 0.01):
+                    fig.set_size_inches(want_w, want_h, forward=False)
+                    canvas.draw_idle()
+            except (tk.TclError, AttributeError):
+                continue
+
     def _show_frame(self, idx):
         if not self._frames:
             return
@@ -1299,6 +1333,9 @@ class SWWAnimationGUI:
         if self._im is None:
             self._im = self._ax.imshow(img, aspect='equal')
             self._im.set_extent([0, img.shape[1], img.shape[0], 0])
+            # First image: the canvas may still be carrying the oversized
+            # figure from its initial <Configure> (see _sync_canvas_sizes).
+            self.root.after_idle(self._sync_canvas_sizes)
         else:
             self._im.set_data(img)
             self._im.set_extent([0, img.shape[1], img.shape[0], 0])
