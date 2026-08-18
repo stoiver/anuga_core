@@ -451,6 +451,67 @@ Findings:
 
 ## Recent session summaries (sessions 21–53)
 
+**Session 55 (2026-08-13):** A regression of our own making, the culvert crash,
+and hardening the installers so neither can happen quietly again.
+
+- **gpu culvert stack overflow (#217, PR merged via #218).** 101 culverts wedged
+  at `Time = 0` then segfaulted on a NaN-bit-pattern pointer.
+  `gpu_culverts_apply_all()` sized its per-step buffers as fixed stack arrays of
+  `MAX_CULVERTS` (64) but looped over `num_culverts`: 24240 bytes into 15360, on
+  every timestep. `MAX_CULVERTS` is only the *initial* capacity — registration
+  grows by doubling. Buffers moved to the heap. Regression test
+  `Test_GPU_ManyCulverts` (80 culverts) hangs on the old code, passes in 1.3 s.
+- **`-Dgpu_arch` never selected anything (PR #220).** nvc device-links at the
+  LINK step and `gpu_link_args` was empty, so it built for the build host's GPU,
+  or — with no GPU visible, as in a container — every arch the CUDA supports.
+  The "multi-arch" images were portable *by accident*. Fixed by repeating
+  `-gpu=<arch>` at link.
+- **…which then broke Petar's RTX 30xx (PR #221).** With the flag working,
+  `install_anuga_nvc.sh`'s hardcoded `GPU_ARCH=cc120` produced sm_120-only
+  builds that compile cleanly and crash at every kernel launch. Now detected
+  from `nvidia-smi`.
+- **Compatibility is ONE-DIRECTIONAL** (measured, not assumed): nvc embeds PTX
+  and the driver JIT-compiles it *forward*, so a cc86 build runs on sm_120;
+  a cc120 build can never run on sm_86. JIT costs +0.38 s at first launch, no
+  throughput difference — matters where the cache is cold (isolated runner,
+  containers, MPI ranks). `cc70`/V100 needs a CUDA ≤ 12.x in the SDK; CUDA 13
+  dropped Volta.
+- **Installers (PR #222, open).** New `tools/anuga_build_report.py` (also for bug
+  reports) prints version/install type/GPU build/MPI/SM archs/GPU present, and
+  `--check` fails a build that cannot run here. Both scripts log a transcript.
+  `GPU_ARCH=auto` probes what the toolchain can build rather than assuming (nvc
+  on Gadi is a module wrapper with no SDK layout beneath it). Explicit arch lists
+  are never silently narrowed. `install_miniforge.sh` is re-runnable, detects a
+  GPU and *advises* (does not switch compilers — the nvc host fallback is
+  several times slower than gcc), `GPU=1` opts in. GPU tests are skipped when no
+  GPU is visible (they were running on a Gadi login node).
+- **`anuga:gpu-mpi` image** (2.69 GB, in ECR): HPC-X OpenMPI 4.1.7a1, CUDA-aware,
+  mpi4py + pymetis, `-Dgpu_aware_mpi=true`. Four container gotchas solved and
+  documented: `OMPI_CC=gcc`, `OPAL_PREFIX`, `OMPI_MCA_ess_singleton_isolated=1`
+  (singleton `MPI_Init` hangs — bites *serial* runs, since `import anuga` pulls
+  in mpi4py), and container transports (`pml=ob1, btl=self,smcuda,tcp`).
+- **`.dockerignore` excludes `docker/Dockerfile*`** — they landed in the
+  `COPY . .` layer, so a one-line Dockerfile edit invalidated the ~45 min ANUGA
+  compile. Now 2.6 s with 14 layers cached.
+- **Issue #223 (open):** `-Dgpu_aware_mpi=true` is not GPU-aware — `gpu_halo.c`
+  stages every halo through host memory in *both* paths (UCX `uct_mm` SIGSEGVs
+  on device pointers). Measure halo cost before implementing real GPUDirect.
+
+**RESUME STATE (as of 2026-08-13):**
+- `develop` = `stoiver/develop`, **8 commits ahead of origin/develop**, all in
+  **PR #222** (installer hardening). CI was green on `5d53d602`; later commits
+  only touch shell scripts, which CI does not exercise.
+- Merged this session: #218, #220, #221. Closed: #219 (superseded — its fix rode
+  in with #218), issue #217.
+- **Open: PR #222, issue #223.**
+- ECR (ap-southeast-2, `067589750115`): `anuga:gpu-slim` 460 MB (cc70–cc120,
+  portable, AMD-verified on g6) and `anuga:gpu-mpi` 599 MB.
+- Uncommitted, deliberately: `towradgi.toml` arithmetic demo. Untracked:
+  `sandpit/culvert_issue/` (48 MB reporter model — do not commit).
+- Gadi: build works from a login node; the open question is whether that
+  `nvhpc` module can build `cc70` — run `tools/anuga_build_report.py --check`
+  on a `gpuvolta` node to find out.
+
 **Session 54 (2026-08-11):** Portable GPU image proven on AMD, C-level output
 captured in the logfile, and the first GPU scaling numbers at 1.6M triangles.
 - **`-tp=haswell` fix never actually built.** 394b61b8 set `CXXFLAGS=-tp=haswell`

@@ -26,6 +26,52 @@ ANUGA was created by Geoscience Australia and the Mathematical Sciences Institut
 at the Australian National University, and is now maintained by a community of
 volunteers.
 
+Key publications
+----------------
+
+Two papers describe the method ANUGA implements, and are the usual citations for
+the model itself. The first develops the finite-volume solution of the
+two-dimensional shallow water equations on unstructured triangular meshes that
+ANUGA is built on; the second describes its application to coastal inundation:
+
+* Zoppou, C. & Roberts, S. (1999). Catastrophic collapse of water supply
+  reservoirs in urban areas. *Journal of Hydraulic Engineering*, 125(7),
+  686–695. https://doi.org/10.1061/(ASCE)0733-9429(1999)125:7(686)
+
+* Nielsen, O., Roberts, S., Gray, D., McPherson, A. & Hitchman, A. (2005).
+  Hydrodynamic modelling of coastal inundation. In A. Zerger & R. M. Argent
+  (Eds.), *MODSIM 2005 International Congress on Modelling and Simulation*
+  (pp. 518–523). Modelling and Simulation Society of Australia and New Zealand.
+  https://www.mssanz.org.au/modsim05/papers/nielsen.pdf
+
+.. code-block:: bibtex
+
+   @article{zoppou1999catastrophic,
+     author  = {Zoppou, Christopher and Roberts, Stephen},
+     title   = {Catastrophic Collapse of Water Supply Reservoirs in Urban Areas},
+     journal = {Journal of Hydraulic Engineering},
+     volume  = {125},
+     number  = {7},
+     pages   = {686--695},
+     year    = {1999},
+     doi     = {10.1061/(ASCE)0733-9429(1999)125:7(686)}
+   }
+
+   @inproceedings{nielsen2005hydrodynamic,
+     author    = {Nielsen, Ole and Roberts, Stephen and Gray, Duncan and
+                  McPherson, Andrew and Hitchman, Adrian},
+     title     = {Hydrodynamic Modelling of Coastal Inundation},
+     booktitle = {MODSIM 2005 International Congress on Modelling and Simulation},
+     editor    = {Zerger, Andre and Argent, Robert M.},
+     pages     = {518--523},
+     year      = {2005},
+     publisher = {Modelling and Simulation Society of Australia and New Zealand},
+     url       = {https://www.mssanz.org.au/modsim05/papers/nielsen.pdf}
+   }
+
+Both are also cited from :doc:`mathematical_background`, where the numerical
+method is described.
+
 User manual
 -----------
 

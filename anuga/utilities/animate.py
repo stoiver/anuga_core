@@ -216,22 +216,44 @@ class Domain_plotter:
 
         self.friction = domain.quantities['friction'].centroid_values
 
-        self.depth = self.stage - self.elev
-
-        with np.errstate(invalid='ignore'):
-            self.xvel = np.where(self.depth > self.min_depth,
-                             self.xmom / self.depth, 0.0)
-            self.yvel = np.where(self.depth > self.min_depth,
-                             self.ymom / self.depth, 0.0)
-
-        self.speed = np.sqrt(self.xvel**2 + self.yvel**2)
-
-        self.speed_depth = self.speed*self.depth
-
         self.domain = domain
         self._depth_frame_count = 0
         self._stage_frame_count = 0
         self._speed_frame_count = 0
+
+    # ------------------------------------------------------------------
+    # Derived quantities.
+    #
+    # self.stage/elev/xmom/ymom are references into the domain's centroid
+    # arrays, so they follow the evolution.  These are computed on access so
+    # they follow it too -- caching them in __init__ froze them at t = 0, and
+    # anything sampling e.g. plotter.speed inside an evolve loop silently
+    # recorded the initial value at every yieldstep.
+    # ------------------------------------------------------------------
+
+    @property
+    def depth(self):
+        return self.stage - self.elev
+
+    @property
+    def xvel(self):
+        depth = self.depth
+        with np.errstate(invalid='ignore'):
+            return np.where(depth > self.min_depth, self.xmom / depth, 0.0)
+
+    @property
+    def yvel(self):
+        depth = self.depth
+        with np.errstate(invalid='ignore'):
+            return np.where(depth > self.min_depth, self.ymom / depth, 0.0)
+
+    @property
+    def speed(self):
+        return np.sqrt(self.xvel**2 + self.yvel**2)
+
+    @property
+    def speed_depth(self):
+        return self.speed * self.depth
 
 
     #------------------------------------------
@@ -261,8 +283,6 @@ class Domain_plotter:
 
         name = os.path.basename(self.domain.get_name())
         time = self.domain.get_time()
-
-        self.depth[:] = self.stage - self.elev
 
         md = self.min_depth
 
@@ -376,8 +396,6 @@ class Domain_plotter:
 
         name = os.path.basename(self.domain.get_name())
         time = self.domain.get_time()
-
-        self.depth[:] = self.stage - self.elev
 
         md = self.min_depth
 
@@ -495,16 +513,6 @@ class Domain_plotter:
         time = self.domain.get_time()
 
         md = self.min_depth
-
-        self.depth[:] = self.stage - self.elev
-
-        with np.errstate(invalid='ignore'):
-            self.xvel = np.where(self.depth > self.min_depth,
-                             self.xmom / self.depth, 0.0)
-            self.yvel = np.where(self.depth > self.min_depth,
-                             self.ymom / self.depth, 0.0)
-
-        self.speed = np.sqrt(self.xvel**2 + self.yvel**2)
 
         fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
 
@@ -777,8 +785,6 @@ class SWW_plotter:
         vols1 = self.triangles[:, 1]
         vols2 = self.triangles[:, 2]
 
-        self.triang = tri.Triangulation(self.x, self.y, self.triangles)
-
         self.xc = (self.x[vols0]+self.x[vols1]+self.x[vols2])/3.0
         self.yc = (self.y[vols0]+self.y[vols1]+self.y[vols2])/3.0
 
@@ -799,6 +805,11 @@ class SWW_plotter:
 
             self.xc[:] = self.xc + self.xllcorner
             self.yc[:] = self.yc + self.yllcorner
+
+        # Built after the absolute shift above: Triangulation copies the
+        # coordinate arrays it is given, so constructing it first would leave
+        # self.triang in relative coordinates while self.x/self.xc are absolute.
+        self.triang = tri.Triangulation(self.x, self.y, self.triangles)
 
         # Absolute-coordinate triangulation used when drawing a basemap
         if self.epsg is not None and not absolute:
