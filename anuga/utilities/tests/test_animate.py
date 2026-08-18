@@ -306,6 +306,15 @@ class TestSWWPlotter(unittest.TestCase):
         np.testing.assert_allclose(sp_abs.x, sp_rel.x + sp_rel.xllcorner, atol=1.0)
         np.testing.assert_allclose(sp_abs.y, sp_rel.y + sp_rel.yllcorner, atol=1.0)
 
+    def test_init_absolute_mode_triangulation_is_absolute(self):
+        # Regression: triang was built before the absolute shift, and
+        # Triangulation copies its coordinate arrays, so triang.x stayed
+        # relative while x/xc were absolute -- anything plotted against
+        # absolute axes landed off the map.
+        sp = self._make(absolute=True)
+        np.testing.assert_allclose(sp.triang.x, sp.x)
+        np.testing.assert_allclose(sp.triang.y, sp.y)
+
     def test_name_attribute(self):
         sp = self._make()
         self.assertEqual(sp.name, 'test')
@@ -633,6 +642,25 @@ class TestDomainPlotter(unittest.TestCase):
         self.assertEqual(dp._depth_frame_count, 0)
         self.assertEqual(dp._stage_frame_count, 0)
         self.assertEqual(dp._speed_frame_count, 0)
+
+    def test_derived_quantities_track_domain(self):
+        # Regression: depth/xvel/yvel/speed/speed_depth were cached in
+        # __init__, so sampling them inside an evolve loop returned the t = 0
+        # values for the whole run.
+        domain = _make_mock_domain(self.tmpdir)
+        dp = Domain_plotter(domain, plot_dir=self.plot_dir)
+
+        np.testing.assert_allclose(dp.depth, [1.5, 0.8])
+
+        # Advance the domain the way evolve() does: in place, on the centroids.
+        domain.quantities['stage'].centroid_values[:] = [2.5, 1.3]
+        domain.quantities['xmomentum'].centroid_values[:] = [7.0, 0.0]
+        domain.quantities['ymomentum'].centroid_values[:] = [0.0, 0.0]
+
+        np.testing.assert_allclose(dp.depth, [3.5, 1.8])
+        np.testing.assert_allclose(dp.xvel[0], 2.0)
+        np.testing.assert_allclose(dp.speed[0], 2.0)
+        np.testing.assert_allclose(dp.speed_depth[0], 7.0)
 
     def test_init_absolute_mode(self):
         domain = _make_mock_domain(self.tmpdir)
