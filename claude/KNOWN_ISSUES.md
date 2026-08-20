@@ -5,6 +5,36 @@ or require caution when working in specific areas.
 
 ---
 
+## Structures
+
+### A culvert in still water amplifies roundoff (not a mode-1 vs mode-2 problem)
+
+A Boyd structure whose inlets sit in near-still water is an unstable configuration: the
+operator reads the enquiry cells and writes the inlet cells, and the two are close enough
+to close a feedback loop. With no head across the structure the discharge is decided by
+roundoff, and the perturbation grows exponentially — from 1 ULP to ~1e-2 m of stage in a
+few seconds on a 200 m x 50 m test domain.
+
+**It is not a GPU port problem.** Perturbing a single enquiry cell by 1e-15 in mode 1
+diverges from unperturbed mode 1 exactly as fast as mode 2 does (measured: 5.4e-06 at
+t=0.25 s, 5.3e-03 at t=1 s — the same as |mode1 - mode2| over the same run). A CPU/GPU
+comparison over such a configuration measures the instability, not the port.
+
+Consequences when writing tests:
+
+* A GPU-vs-CPU culvert test needs a **genuine driving head**, so the discharge is
+  deterministic and dominant. `Test_GPU_LargeInlet` in `test_DE_gpu_omp.py` does this
+  (ponded upstream, low downstream) and then agrees to ~1e-14. An earlier version of it
+  used still water and was hostage to this effect.
+* A well-balancedness test (issue #229) must be kept **short** (~1 s) or use enquiry
+  points well clear of the inlets, or the instability grows into the measurement.
+
+Today the effect is largely masked: the inlet write-back sets a uniform depth, which on a
+sloping bed injects a much larger deterministic perturbation that dominates it (that is
+issue #229). Fixing #229 will unmask this, so expect it to matter then.
+
+---
+
 ## Build
 
 ### Building with GPU offloading (NVIDIA HPC SDK / nvc)
