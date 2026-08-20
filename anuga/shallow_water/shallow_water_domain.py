@@ -2753,6 +2753,39 @@ class Domain(Generic_Domain):
                 "Wind_stress_operator, Barometric_pressure_operator.",
                 stacklevel=2)
 
+    def _warn_mode2_degenerate_protection(self):
+        """Warn (once) that mode 2 does not run the degenerate-timestep protection.
+
+        `apply_protection_against_isolated_degenerate_timesteps()` damps the
+        momentum of triangles whose timestep is anomalously small. It is reached
+        only from `update_timestep()`, and mode 2 ('unified') never gets there:
+        the C step loops return before it, and the Python-orchestrated GPU loops
+        that do call it find a host `max_speed` that the device never syncs back
+        (the flux kernel writes the device copy), so the routine's own
+        `max(max_speed) < 10` guard returns immediately.
+
+        The feature is default-off (`config.protect_against_isolated_degenerate_timesteps`),
+        so the sharp edge is a user who turns it on under GPU offload and gets no
+        protection AND no warning. This makes it visible, as mode 2 already does
+        for unsupported forcing terms.
+        """
+        if getattr(self, '_warned_mode2_degenerate_protection', False):
+            return
+        if not self.protect_against_isolated_degenerate_timesteps:
+            return
+        if self.multiprocessor_mode != MULTIPROCESSOR_GPU:
+            return
+
+        self._warned_mode2_degenerate_protection = True
+        import warnings
+        warnings.warn(
+            "protect_against_isolated_degenerate_timesteps is True, but "
+            "multiprocessor_mode=2 ('unified') does not implement it: no "
+            "isolated-degenerate-triangle damping will be applied. Use "
+            "domain.set_multiprocessor_mode(1) ('legacy') if you need this "
+            "protection.",
+            stacklevel=2)
+
     def set_boundary(self, boundary_map):
         """Associate boundary objects with tagged segments (see base class).
 
@@ -2947,6 +2980,15 @@ class Domain(Generic_Domain):
     def apply_protection_against_isolated_degenerate_timesteps(self):
 
         if self.protect_against_isolated_degenerate_timesteps is False:
+            return
+
+        # Not implemented in mode 2: max_speed is computed on the device and
+        # never synced back, so the histogram below would be built from a stale
+        # host array. Say so and skip, rather than silently damping nothing (or
+        # damping on the strength of stale values) — see
+        # _warn_mode2_degenerate_protection().
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU:
+            self._warn_mode2_degenerate_protection()
             return
 
         # FIXME (Ole): Make this configurable
@@ -3284,6 +3326,7 @@ class Domain(Generic_Domain):
         if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
             self._has_cpu_only_fractional_operators()
             self._warn_unsupported_mode2_forcing()
+            self._warn_mode2_degenerate_protection()
 
         # Any riverwall change made before evolve() (or between two evolve()
         # calls) reaches the device here, before the first step.
