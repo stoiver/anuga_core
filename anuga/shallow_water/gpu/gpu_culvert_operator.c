@@ -510,6 +510,38 @@ static void compute_enquiry_values(const struct inlet_data *data,
 // GPU Culvert Manager: Init / Finalize
 // ============================================================================
 
+// Free the host-side inlet staging arrays owned by one culvert slot.
+static void culvert_free_inlet_staging(struct culvert_indices *ci) {
+    if (ci->inlet0_indices) { free(ci->inlet0_indices); ci->inlet0_indices = NULL; }
+    if (ci->inlet0_areas)   { free(ci->inlet0_areas);   ci->inlet0_areas   = NULL; }
+    if (ci->inlet1_indices) { free(ci->inlet1_indices); ci->inlet1_indices = NULL; }
+    if (ci->inlet1_areas)   { free(ci->inlet1_areas);   ci->inlet1_areas   = NULL; }
+    ci->inlet0_num = 0;
+    ci->inlet1_num = 0;
+}
+
+// Copy one inlet's triangle indices/areas into freshly allocated arrays.
+// Returns 0 on success, -1 on allocation failure (leaving both outputs NULL).
+static int culvert_copy_inlet_staging(int num, const int *indices, const double *areas,
+                                      int **out_indices, double **out_areas) {
+    *out_indices = NULL;
+    *out_areas = NULL;
+    if (num <= 0) return 0;
+
+    int *idx = (int*)malloc(num * sizeof(int));
+    double *ar = (double*)malloc(num * sizeof(double));
+    if (!idx || !ar) {
+        free(idx);
+        free(ar);
+        return -1;
+    }
+    memcpy(idx, indices, num * sizeof(int));
+    memcpy(ar, areas, num * sizeof(double));
+    *out_indices = idx;
+    *out_areas = ar;
+    return 0;
+}
+
 int gpu_culvert_init(struct gpu_domain *GD,
                      const struct culvert_params *params,
                      int enquiry_index_0, int enquiry_index_1,
@@ -522,12 +554,6 @@ int gpu_culvert_init(struct gpu_domain *GD,
 
     struct culvert_operators *CO = &GD->culvert_ops;
 
-    if (inlet0_num > MAX_INLET_TRIANGLES || inlet1_num > MAX_INLET_TRIANGLES) {
-        fprintf(stderr, "ERROR: Inlet has %d/%d triangles (max %d)\n",
-                inlet0_num, inlet1_num, MAX_INLET_TRIANGLES);
-        return -1;
-    }
-
     // Grow params/indices/state arrays if full
     if (CO->num_culverts >= CO->capacity) {
         int new_cap = CO->capacity == 0 ? MAX_CULVERTS : CO->capacity * 2;
@@ -539,6 +565,13 @@ int gpu_culvert_init(struct gpu_domain *GD,
             realloc(CO->state, new_cap * sizeof(struct culvert_state));
         if (!np || !ni || !ns) {
             fprintf(stderr, "ERROR: Failed to grow culvert_operators to %d slots\n", new_cap);
+            // The realloc that DID succeed owns the surviving copy of the inlet
+            // staging pointers; free them through whichever array that is, so the
+            // teardown below does not leak them.
+            struct culvert_indices *live = ni ? ni : CO->indices;
+            if (live) {
+                for (int c = 0; c < CO->num_culverts; c++) culvert_free_inlet_staging(&live[c]);
+            }
             if (np) free(np); else if (CO->params) free(CO->params);
             if (ni) free(ni); else if (CO->indices) free(CO->indices);
             if (ns) free(ns); else if (CO->state) free(CO->state);
@@ -568,19 +601,25 @@ int gpu_culvert_init(struct gpu_domain *GD,
     ci->enquiry_index_0 = enquiry_index_0;
     ci->enquiry_index_1 = enquiry_index_1;
 
-    ci->inlet0_num = inlet0_num;
-    if (inlet0_num > 0) {
-        memcpy(ci->inlet0_indices, inlet0_indices, inlet0_num * sizeof(int));
-        memcpy(ci->inlet0_areas, inlet0_areas, inlet0_num * sizeof(double));
+    // Re-registering into a slot that already holds staging (possible only if a
+    // caller reuses a slot) would leak, so clear it first.
+    culvert_free_inlet_staging(ci);
+
+    if (culvert_copy_inlet_staging(inlet0_num, inlet0_indices, inlet0_areas,
+                                   &ci->inlet0_indices, &ci->inlet0_areas) != 0 ||
+        culvert_copy_inlet_staging(inlet1_num, inlet1_indices, inlet1_areas,
+                                   &ci->inlet1_indices, &ci->inlet1_areas) != 0) {
+        fprintf(stderr, "ERROR: Failed to allocate inlet staging for %d/%d triangles\n",
+                inlet0_num, inlet1_num);
+        culvert_free_inlet_staging(ci);
+        return -1;
     }
+
+    ci->inlet0_num = inlet0_num;
     ci->inlet0_total_area = 0.0;
     for (int k = 0; k < inlet0_num; k++) ci->inlet0_total_area += inlet0_areas[k];
 
     ci->inlet1_num = inlet1_num;
-    if (inlet1_num > 0) {
-        memcpy(ci->inlet1_indices, inlet1_indices, inlet1_num * sizeof(int));
-        memcpy(ci->inlet1_areas, inlet1_areas, inlet1_num * sizeof(double));
-    }
     ci->inlet1_total_area = 0.0;
     for (int k = 0; k < inlet1_num; k++) ci->inlet1_total_area += inlet1_areas[k];
 
@@ -604,7 +643,10 @@ int gpu_culvert_init(struct gpu_domain *GD,
 }
 
 void gpu_culvert_finalize(struct gpu_domain *GD, int culvert_id) {
-    // Individual culvert cleanup if needed (static arrays, nothing to free)
+    // Deliberately a no-op. The slot's inlet staging arrays are freed by
+    // gpu_culverts_finalize_all(); releasing them here would leave a slot that
+    // is still counted in num_culverts — and still visited by the batched
+    // gather/scatter — holding freed pointers.
     (void)GD;
     (void)culvert_id;
 }
@@ -666,7 +708,12 @@ void gpu_culverts_finalize_all(struct gpu_domain *GD) {
     culvert_host_scratch_free(CO);
 
     if (CO->params)  { free(CO->params);  CO->params  = NULL; }
-    if (CO->indices) { free(CO->indices); CO->indices = NULL; }
+    if (CO->indices) {
+        for (int c = 0; c < CO->num_culverts; c++) {
+            culvert_free_inlet_staging(&CO->indices[c]);
+        }
+        free(CO->indices); CO->indices = NULL;
+    }
     if (CO->state)   { free(CO->state);   CO->state   = NULL; }
     CO->num_culverts = 0;
     CO->capacity = 0;

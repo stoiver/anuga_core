@@ -3451,5 +3451,67 @@ class Test_GPU_DegenerateTimestepProtection(unittest.TestCase):
         self.assertEqual(len(self._degenerate_warnings(caught)), 1)
 
 
+class Test_GPU_LargeInlet(unittest.TestCase):
+    """A culvert inlet may cover any number of triangles (issue #225).
+
+    The GPU culvert path used to cap one inlet at MAX_INLET_TRIANGLES (64) —
+    fixed-size arrays inside `struct culvert_indices`, unlike the sibling
+    operator structs, which hold heap pointers. Registering a wider inlet failed
+    outright ("Failed to register culvert ... on GPU"). The device side was
+    already fully dynamic: the metadata is flattened into heap arrays sized by
+    the actual total at map time, so the cap only ever constrained the host-side
+    staging.
+
+    The geometry below gives 79 triangles per inlet — comfortably over the old
+    cap. apron=5.0 keeps the enquiry points clear of the (wide) inlet regions.
+    """
+
+    def _run(self, mode):
+        from anuga import Boyd_box_operator
+
+        domain = rectangular_cross_domain(60, 30, len1=200.0, len2=50.0)
+        domain.set_flow_algorithm('DE0')
+        domain.set_name('big_inlet')
+        domain.set_datadir(tempfile.mkdtemp())
+        domain.store = False
+        domain.set_quantity('elevation', lambda x, y: -5.0 + x / 200.0)
+        domain.set_quantity('stage', 1.0)
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+
+        culvert = Boyd_box_operator(
+            domain, end_points=[[60.0, 25.0], [140.0, 25.0]],
+            losses=1.5, width=20.0, height=3.0, apron=5.0,
+            use_momentum_jet=False, use_velocity_head=False,
+            manning=0.013, verbose=False)
+        domain.set_multiprocessor_mode(mode)
+
+        inlet_sizes = [len(inlet.triangle_indices) for inlet in culvert.inlets]
+
+        for _ in domain.evolve(yieldstep=2.0, finaltime=10.0):
+            pass
+
+        return (inlet_sizes,
+                domain.quantities['stage'].centroid_values.copy(),
+                float(culvert.discharge))
+
+    def test_inlet_larger_than_the_old_cap(self):
+        """An inlet of 79 triangles must register and give the mode-1 answer."""
+        sizes_1, stage_1, q_1 = self._run(1)
+        sizes_2, stage_2, q_2 = self._run(2)
+
+        self.assertEqual(sizes_1, sizes_2)
+        self.assertGreater(min(sizes_1), 64,
+                           'this test is only meaningful with inlets larger than '
+                           'the old MAX_INLET_TRIANGLES cap of 64; got %s' % sizes_1)
+
+        np.testing.assert_allclose(
+            stage_2, stage_1, rtol=0, atol=1e-6,
+            err_msg='mode-2 culvert with a >64-triangle inlet does not match mode 1')
+        self.assertAlmostEqual(q_2, q_1, places=6)
+        self.assertGreater(abs(q_1), 1.0,
+                           'the culvert should actually be passing flow')
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

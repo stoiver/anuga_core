@@ -239,8 +239,11 @@ struct inlet_operators {
 };
 
 // Culvert operator types
+// MAX_CULVERTS, like MAX_RATE_OPERATORS / MAX_INLET_OPERATORS above, is the
+// *initial* heap allocation size; the array grows by doubling, so there is no
+// hard limit on the number of culverts. There is likewise no limit on the
+// number of triangles in an inlet — see struct culvert_indices.
 #define MAX_CULVERTS 64
-#define MAX_INLET_TRIANGLES 64
 #define CULVERT_TYPE_BOX              0
 #define CULVERT_TYPE_PIPE             1
 #define CULVERT_TYPE_WEIR_TRAPEZOID   2
@@ -277,13 +280,20 @@ struct culvert_params {
 struct culvert_indices {
     int enquiry_index_0;         // -1 if not on this rank
     int enquiry_index_1;         // -1 if not on this rank
+    // Host-side staging for the inlet triangles of each end, between
+    // registration (gpu_culvert_init) and the flattening done by
+    // gpu_culverts_map(), which is what the device actually sees. Heap arrays
+    // sized by the actual triangle count — as in rate_operator_info and
+    // inlet_operator_info — so an inlet region may cover any number of
+    // triangles. NULL when the corresponding *_num is 0. Owned here and freed
+    // by gpu_culverts_finalize_all().
     int inlet0_num;              // 0 if no local triangles
-    int inlet0_indices[MAX_INLET_TRIANGLES];
-    double inlet0_areas[MAX_INLET_TRIANGLES];
+    int *inlet0_indices;         // [inlet0_num]
+    double *inlet0_areas;        // [inlet0_num]
     double inlet0_total_area;    // LOCAL area (partial if cross-boundary)
     int inlet1_num;
-    int inlet1_indices[MAX_INLET_TRIANGLES];
-    double inlet1_areas[MAX_INLET_TRIANGLES];
+    int *inlet1_indices;         // [inlet1_num]
+    double *inlet1_areas;        // [inlet1_num]
     double inlet1_total_area;
 
     // MPI topology (for cross-boundary culverts)
