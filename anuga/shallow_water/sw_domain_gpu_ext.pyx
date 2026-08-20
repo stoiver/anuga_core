@@ -185,6 +185,7 @@ cdef extern from "gpu_domain.h" nogil:
     void gpu_domain_sync_from_device(gpu_domain *GD)
     void gpu_domain_sync_all_from_device(gpu_domain *GD)
     void gpu_sync_boundary_values(gpu_domain *GD)
+    void gpu_sync_riverwall_to_device(gpu_domain *GD)
     void gpu_sync_edge_values_from_device(gpu_domain *GD)
     int gpu_boundary_edge_sync_init(gpu_domain *GD, int num_boundary_cells, int *boundary_cell_ids)
     void gpu_boundary_edge_sync_finalize(gpu_domain *GD)
@@ -1234,6 +1235,17 @@ def sync_boundary_values(GPUDomain gpu_dom):
     Call this after Python updates boundary conditions.
     """
     gpu_sync_boundary_values(&gpu_dom.GD)
+
+
+def sync_riverwall_to_device(GPUDomain gpu_dom):
+    """
+    Sync riverwall crest elevations and hydraulic properties from host to device.
+
+    Call this after Python changes a riverwall at runtime (RiverWall.set_elevation(),
+    set_elevation_offset(), set_hydraulic_parameter()). No-op when the domain has no
+    riverwalls.
+    """
+    gpu_sync_riverwall_to_device(&gpu_dom.GD)
 
 
 def sync_edge_values_from_device(GPUDomain gpu_dom):

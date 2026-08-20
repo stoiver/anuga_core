@@ -3221,5 +3221,127 @@ class Test_GPU_ManyCulverts(unittest.TestCase):
                         % self.N_CULVERTS)
 
 
+class Test_GPU_RiverwallCrestUpdate(unittest.TestCase):
+    """A riverwall crest changed mid-run must reach the device (issue #224).
+
+    `domain.riverwallData.set_elevation()` writes only the host array. In mode 2
+    the riverwall arrays are mapped to the device once, when the interface is
+    built, and are never written there — so operating a gate part-way through a
+    run used to be silently dropped: the run completed normally and produced
+    plausible output computed with the ORIGINAL crest. The fix pushes the host
+    arrays across at yieldstep boundaries (Domain._sync_riverwall_to_device()).
+
+    NOTE ON WHAT THIS CATCHES WHERE. On a CPU build the `omp target` regions run
+    on the host and the "device" arrays ARE the host arrays, so the physics
+    comparison below cannot fail there — it is a real guard only on a GPU-offload
+    build. test_sync_is_issued_at_the_yieldstep is the white-box half that fails
+    everywhere if the push is dropped or moved off the yieldstep boundary.
+    """
+
+    WALL_X = 500.0
+    OPEN = -3.0      # crest below the ponded water: gate open
+    SHUT = 5.0       # crest above it: gate shut
+
+    def _build(self, mode):
+        domain = rectangular_cross_domain(40, 8, len1=1000.0, len2=200.0)
+        domain.set_name('rw_gate')
+        domain.set_datadir(tempfile.mkdtemp())
+        domain.store = False
+        domain.set_flow_algorithm('DE0')
+        domain.set_quantity('elevation', lambda x, y: -x / 100.0)
+        domain.set_quantity('friction', 0.03)
+        # Pond water upstream of the wall only.
+        domain.set_quantity(
+            'stage', lambda x, y: np.where(x < self.WALL_X, 0.0, -x / 100.0))
+        domain.riverwallData.create_riverwalls(
+            {'gate': [[self.WALL_X, 0.0, self.OPEN],
+                      [self.WALL_X, 200.0, self.OPEN]]}, verbose=False)
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+        domain.set_multiprocessor_mode(mode)
+        return domain
+
+    def _downstream_volume(self, domain):
+        centroids = domain.get_centroid_coordinates(absolute=True)
+        downstream = centroids[:, 0] > self.WALL_X
+        h = (domain.quantities['stage'].centroid_values
+             - domain.quantities['elevation'].centroid_values)
+        return float(np.sum(np.maximum(h[downstream], 0.0)
+                            * domain.areas[downstream]))
+
+    def _run(self, mode, shut_gate):
+        """Water ponded upstream drains over an open wall; optionally shut it."""
+        domain = self._build(mode)
+        shut_done = False
+        for t in domain.evolve(yieldstep=20.0, finaltime=200.0):
+            if shut_gate and not shut_done and t >= 100.0:
+                domain.riverwallData.set_elevation('gate', self.SHUT)
+                shut_done = True
+        return self._downstream_volume(domain)
+
+    def test_shut_gate_changes_the_answer(self):
+        """Shutting the gate must hold water back — in mode 2 as in mode 1."""
+        open_1, shut_1 = self._run(1, False), self._run(1, True)
+        open_2, shut_2 = self._run(2, False), self._run(2, True)
+
+        # Sanity: the gate has a large, unambiguous effect on the reference path.
+        self.assertLess(shut_1, 0.9 * open_1,
+                        'test setup is not sensitive to the crest change')
+
+        np.testing.assert_allclose(
+            shut_2, shut_1, rtol=1e-10,
+            err_msg='mode-2 ignored a mid-run riverwall crest change (the device '
+                    'kept the original crest elevations)')
+        np.testing.assert_allclose(open_2, open_1, rtol=1e-10)
+
+    def test_sync_is_issued_at_the_yieldstep(self):
+        """The push happens on resuming from the yield, and only when needed."""
+        domain = self._build(2)
+        domain._ensure_gpu_interface()
+        self.assertIsNotNone(domain.gpu_interface)
+
+        calls = []
+        real = domain.gpu_interface.sync_riverwall_to_device
+
+        def spy():
+            calls.append(domain.get_time())
+            real()
+
+        domain.gpu_interface.sync_riverwall_to_device = spy
+
+        for t in domain.evolve(yieldstep=20.0, finaltime=100.0):
+            if t >= 40.0 and not calls:
+                domain.riverwallData.set_elevation('gate', self.SHUT)
+                # Not pushed yet: the yield body runs before evolve() resumes.
+                self.assertEqual(calls, [])
+
+        self.assertEqual(len(calls), 1,
+                         'expected exactly one device push — one per change, at '
+                         'the yieldstep boundary, got %d' % len(calls))
+        # It fired on the yieldstep at which the change was made, not later.
+        self.assertAlmostEqual(calls[0], 40.0, places=6)
+        self.assertFalse(domain.riverwallData.device_data_dirty)
+
+    def test_no_riverwalls_is_harmless(self):
+        """A domain with no riverwalls must not be disturbed by the new hook."""
+        domain = rectangular_cross_domain(10, 10)
+        domain.set_flow_algorithm('DE0')
+        domain.set_name('rw_none')
+        domain.set_datadir(tempfile.mkdtemp())
+        domain.store = False
+        domain.set_quantity('elevation', -10.0)
+        domain.set_quantity('stage', 2.0)
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+        domain.set_multiprocessor_mode(2)
+
+        for _ in domain.evolve(yieldstep=0.5, finaltime=1.0):
+            pass
+
+        stage = domain.quantities['stage'].centroid_values
+        self.assertTrue(np.all(np.isfinite(stage)))
+        np.testing.assert_allclose(stage, 2.0, atol=1e-8)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -154,6 +154,15 @@ class RiverWall:
         self.input_riverwall_geo=None
         self.input_riverwallPar=None
 
+        # Set when riverwall_elevation / hydraulic_properties are changed from
+        # Python after they may already have been copied to a GPU device. The
+        # device holds its own copy (mapped once when the mode-2 interface is
+        # built) and never writes these arrays, so a host-side change has to be
+        # pushed across. Domain.evolve() does that at yieldstep boundaries — see
+        # Domain._sync_riverwall_to_device(). Harmless (and ignored) on the CPU
+        # paths, where the kernels read these host arrays directly.
+        self.device_data_dirty = False
+
 
     def create_riverwalls(self, riverwalls, riverwallPar=None,
                           default_riverwallPar=None,
@@ -286,6 +295,11 @@ class RiverWall:
         connectedness = self.check_riverwall_connectedness(verbose=verbose)
         self.export_riverwalls_to_text(output_dir=output_dir)
 
+        # These are freshly allocated arrays. A mode-2 device interface built
+        # earlier holds pointers to the *previous* ones, so the riverwalls
+        # created here would never reach the GPU kernels.
+        self._warn_if_device_interface_already_built()
+
         if verbose:
             printInfo = edge_printInfo + hydro_printInfo
             if domain.parallel:
@@ -302,6 +316,30 @@ class RiverWall:
                 if domain.parallel:
                     barrier()
         return
+
+    def _warn_if_device_interface_already_built(self):
+        """Warn if riverwalls are (re)created after the GPU interface exists.
+
+        In mode 2 ('unified') the device copy of the riverwall arrays is mapped
+        when the interface is built, from the array objects that existed then.
+        create_riverwalls() replaces those arrays, so anything created afterwards
+        is invisible to the device kernels. Create riverwalls before switching to
+        mode 2 (or before anything that builds the interface, such as
+        set_boundary() / distribute_to_vertices_and_edges() on a domain that is
+        already in mode 2).
+        """
+        domain = self.domain
+        if getattr(domain, 'gpu_interface', None) is None:
+            return
+        if getattr(domain, 'multiprocessor_mode', 1) != 2:
+            return
+        import warnings
+        warnings.warn(
+            'create_riverwalls() was called after the mode-2 (GPU) device '
+            'interface was built; the riverwalls just created are NOT on the '
+            'device and will be ignored by the GPU flux computation. Create '
+            'riverwalls before calling set_multiprocessor_mode(2) or evolve().',
+            stacklevel=3)
 
     def _validate_riverwall_inputs(self, riverwalls, riverwallPar,
                                    default_riverwallPar, verbose):
@@ -527,6 +565,15 @@ class RiverWall:
         elevation : float or array-like of length n
             Scalar applied uniformly to all edges, or array matching the
             number of edges exactly.
+
+        Notes
+        -----
+        In GPU mode (``set_multiprocessor_mode(2)``) the device holds its own
+        copy of the crest elevations, refreshed by ``evolve()`` at yieldstep
+        boundaries. So a change made from inside an evolve loop takes effect on
+        the *next* yieldstep, not part-way through the current one — which is
+        where a script can observe it anyway. On the CPU paths the change is
+        immediate.
         """
         idx = self._name_to_index(name)
         mask = self.hydraulic_properties_rowIndex == idx
@@ -540,12 +587,17 @@ class RiverWall:
             raise ValueError(
                 "elevation length {} does not match {} edges for "
                 "riverwall '{}'".format(len(elev), n, name))
+        self.device_data_dirty = True
 
     def set_elevation_offset(self, name, offset):
-        """Add *offset* (m) to the current crest elevation of riverwall *name*."""
+        """Add *offset* (m) to the current crest elevation of riverwall *name*.
+
+        See :meth:`set_elevation` for when the change reaches a GPU device.
+        """
         idx = self._name_to_index(name)
         mask = self.hydraulic_properties_rowIndex == idx
         self.riverwall_elevation[mask] += float(offset)
+        self.device_data_dirty = True
 
     def get_hydraulic_parameter(self, name, param):
         """Return the hydraulic parameter *param* for riverwall *name*.
@@ -562,10 +614,13 @@ class RiverWall:
 
         Valid parameter names: ``Qfactor``, ``s1``, ``s2``, ``h1``, ``h2``,
         ``Cd_through``.
+
+        See :meth:`set_elevation` for when the change reaches a GPU device.
         """
         idx = self._name_to_index(name)
         col = self._param_to_col(param)
         self.hydraulic_properties[idx, col] = float(value)
+        self.device_data_dirty = True
 
     #####################################################################################
 

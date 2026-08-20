@@ -1278,6 +1278,32 @@ void gpu_sync_boundary_values(struct gpu_domain *GD) {
                                  bed_bv[0:nb], height_bv[0:nb])
 }
 
+void gpu_sync_riverwall_to_device(struct gpu_domain *GD) {
+    // Sync riverwall crest elevations and hydraulic properties TO GPU.
+    //
+    // These arrays are mapped once at setup and are never written on the device,
+    // so a host-side change — RiverWall.set_elevation() / set_elevation_offset()
+    // / set_hydraulic_parameter(), e.g. operating a gate mid-run — is invisible
+    // to the kernels until it is pushed back across. Cheap: sized by the number
+    // of riverwall edges, not by the mesh.
+    if (!GD->gpu_initialized) return;
+
+    anuga_int n_rw_edges = GD->D.number_of_riverwall_edges;
+    if (n_rw_edges <= 0) return;
+
+    double *riverwall_elevation = GD->D.riverwall_elevation;
+    if (riverwall_elevation != NULL) {
+        #pragma omp target update to(riverwall_elevation[0:n_rw_edges])
+    }
+
+    double *riverwall_hydraulic_properties = GD->D.riverwall_hydraulic_properties;
+    anuga_int ncol_hp = GD->D.ncol_riverwall_hydraulic_properties;
+    anuga_int nrow_hp = GD->D.nrow_riverwall_hydraulic_properties;
+    if (riverwall_hydraulic_properties != NULL && ncol_hp > 0 && nrow_hp > 0) {
+        #pragma omp target update to(riverwall_hydraulic_properties[0:nrow_hp*ncol_hp])
+    }
+}
+
 void gpu_sync_edge_values_from_device(struct gpu_domain *GD) {
     // Sync ALL edge values FROM GPU - expensive, use sparse version if possible
     if (!GD->gpu_initialized) return;
