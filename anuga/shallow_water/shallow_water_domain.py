@@ -1473,6 +1473,35 @@ class Domain(Generic_Domain):
             self.gpu_interface.sync_to_device()
 
 
+    def _sync_riverwall_to_device(self) -> None:
+        """Push pending host-side riverwall changes out to the device (mode 2).
+
+        The riverwall crest elevations and hydraulic properties are mapped to the
+        device once, when the mode-2 interface is built, and are never written
+        there. A host-side change — RiverWall.set_elevation() to operate a gate,
+        say — therefore has no effect on the device until it is pushed across,
+        which is what this does.
+
+        Called by evolve() at yieldstep boundaries only: that is where a script
+        can make such a change (in the body of the evolve loop) and where the
+        host and device are already in step, so the crest never changes part-way
+        through a timestep or between RK substeps.
+        """
+
+        riverwall_data = getattr(self, 'riverwallData', None)
+        if riverwall_data is None:
+            return
+        if not getattr(riverwall_data, 'device_data_dirty', False):
+            return
+
+        if (self.multiprocessor_mode == MULTIPROCESSOR_GPU
+                and getattr(self, 'gpu_interface', None) is not None):
+            self.gpu_interface.sync_riverwall_to_device()
+
+        # Cleared unconditionally: on the CPU paths the kernels read the host
+        # arrays directly, and a later mode-2 setup maps their current values.
+        riverwall_data.device_data_dirty = False
+
     def set_timezone(self, tz: str | ZoneInfoType | None = None) -> None:
         """Set timezone for domain
 
@@ -3256,6 +3285,10 @@ class Domain(Generic_Domain):
             self._has_cpu_only_fractional_operators()
             self._warn_unsupported_mode2_forcing()
 
+        # Any riverwall change made before evolve() (or between two evolve()
+        # calls) reaches the device here, before the first step.
+        self._sync_riverwall_to_device()
+
         #nvtx marker
         nvtxRangePush('_evolve_base')
 
@@ -3300,6 +3333,11 @@ class Domain(Generic_Domain):
 
             # Pass control on to outer loop for more specific actions
             yield(t)
+
+            # The outer loop may have operated a riverwall (set_elevation() and
+            # friends). In mode 2 the device copy is stale until pushed; do it
+            # here so the change takes effect from the next timestep on.
+            self._sync_riverwall_to_device()
 
             self.yieldstep_counter += 1
 
