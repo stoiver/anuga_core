@@ -3343,5 +3343,175 @@ class Test_GPU_RiverwallCrestUpdate(unittest.TestCase):
         np.testing.assert_allclose(stage, 2.0, atol=1e-8)
 
 
+class Test_GPU_DegenerateTimestepProtection(unittest.TestCase):
+    """Mode 2 must SAY it does not run the degenerate-timestep protection (issue #189).
+
+    `apply_protection_against_isolated_degenerate_timesteps()` is reached only via
+    `update_timestep()`. The mode-2 C step loops return before that, and the
+    Python-orchestrated GPU loops that do call it hit a host `max_speed` the device
+    never syncs back — so under GPU offload the protection does nothing either way.
+    It is default-off, so the sharp edge is the user who turns it on and gets no
+    protection and no warning.
+    """
+
+    def _domain(self, mode, protect):
+        domain = rectangular_cross_domain(10, 10)
+        domain.set_flow_algorithm('DE0')
+        domain.set_name('degen')
+        domain.set_datadir(tempfile.mkdtemp())
+        domain.store = False
+        domain.set_quantity('elevation', -10.0)
+        domain.set_quantity('stage', 2.0)
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+        domain.set_multiprocessor_mode(mode)
+        domain.protect_against_isolated_degenerate_timesteps = protect
+        return domain
+
+    @staticmethod
+    def _degenerate_warnings(caught):
+        return [w for w in caught
+                if 'isolated-degenerate' in str(w.message)
+                or 'protect_against_isolated_degenerate_timesteps' in str(w.message)]
+
+    def test_warns_when_enabled_in_mode2(self):
+        """Turning the protection on under GPU offload must not be silent."""
+        domain = self._domain(2, protect=True)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            for _ in domain.evolve(yieldstep=0.5, finaltime=1.0):
+                pass
+        found = self._degenerate_warnings(caught)
+        self.assertEqual(len(found), 1,
+                         'expected exactly one warning that mode 2 does not run the '
+                         'degenerate-timestep protection, got %d' % len(found))
+        self.assertIn('legacy', str(found[0].message))
+
+    def test_quiet_when_disabled(self):
+        """The default (off) must stay silent — the gap only matters if asked for."""
+        domain = self._domain(2, protect=False)
+        self.assertFalse(domain.protect_against_isolated_degenerate_timesteps,
+                         'this test assumes the feature is default-off')
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            for _ in domain.evolve(yieldstep=0.5, finaltime=1.0):
+                pass
+        self.assertEqual(self._degenerate_warnings(caught), [])
+
+    def test_quiet_in_mode1(self):
+        """Mode 1 implements the protection, so it must not warn."""
+        domain = self._domain(1, protect=True)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            for _ in domain.evolve(yieldstep=0.5, finaltime=1.0):
+                pass
+        self.assertEqual(self._degenerate_warnings(caught), [])
+
+    def test_routine_skips_rather_than_acting_on_stale_max_speed(self):
+        """Called directly in mode 2, the routine must warn and do nothing.
+
+        The host `max_speed` here carries the exact signature the routine looks
+        for (one isolated fast triangle, empty middle bins). In mode 1 that damps
+        the triangle's momentum; in mode 2 the same host array is stale by
+        construction, so the routine must decline to act on it.
+        """
+        for mode in (1, 2):
+            domain = self._domain(mode, protect=True)
+            domain.set_quantity('xmomentum', 1.0)
+            domain.max_speed = np.zeros(domain.number_of_triangles, dtype=float)
+            domain.max_speed[0] = 100.0     # isolated degenerate triangle
+
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter('always')
+                domain.apply_protection_against_isolated_degenerate_timesteps()
+            found = self._degenerate_warnings(caught)
+
+            xmom = domain.quantities['xmomentum'].centroid_values
+            if mode == 1:
+                self.assertEqual(found, [], 'mode 1 implements this; it must not warn')
+                self.assertEqual(float(xmom[0]), 0.0,
+                                 'mode 1 must damp the isolated triangle')
+                self.assertEqual(float(domain.max_speed[0]), 0.0)
+            else:
+                self.assertEqual(len(found), 1,
+                                 'mode 2 must warn that the protection is not applied')
+                self.assertEqual(float(xmom[0]), 1.0,
+                                 'mode 2 must not damp on the strength of a stale '
+                                 'host max_speed')
+                self.assertEqual(float(domain.max_speed[0]), 100.0)
+
+    def test_warning_is_issued_once(self):
+        """One warning per domain, not one per timestep."""
+        domain = self._domain(2, protect=True)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            for _ in domain.evolve(yieldstep=0.2, finaltime=1.0):
+                pass
+            domain.apply_protection_against_isolated_degenerate_timesteps()
+        self.assertEqual(len(self._degenerate_warnings(caught)), 1)
+
+
+class Test_GPU_LargeInlet(unittest.TestCase):
+    """A culvert inlet may cover any number of triangles (issue #225).
+
+    The GPU culvert path used to cap one inlet at MAX_INLET_TRIANGLES (64) —
+    fixed-size arrays inside `struct culvert_indices`, unlike the sibling
+    operator structs, which hold heap pointers. Registering a wider inlet failed
+    outright ("Failed to register culvert ... on GPU"). The device side was
+    already fully dynamic: the metadata is flattened into heap arrays sized by
+    the actual total at map time, so the cap only ever constrained the host-side
+    staging.
+
+    The geometry below gives 79 triangles per inlet — comfortably over the old
+    cap. apron=5.0 keeps the enquiry points clear of the (wide) inlet regions.
+    """
+
+    def _run(self, mode):
+        from anuga import Boyd_box_operator
+
+        domain = rectangular_cross_domain(60, 30, len1=200.0, len2=50.0)
+        domain.set_flow_algorithm('DE0')
+        domain.set_name('big_inlet')
+        domain.set_datadir(tempfile.mkdtemp())
+        domain.store = False
+        domain.set_quantity('elevation', lambda x, y: -5.0 + x / 200.0)
+        domain.set_quantity('stage', 1.0)
+        Br = Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+
+        culvert = Boyd_box_operator(
+            domain, end_points=[[60.0, 25.0], [140.0, 25.0]],
+            losses=1.5, width=20.0, height=3.0, apron=5.0,
+            use_momentum_jet=False, use_velocity_head=False,
+            manning=0.013, verbose=False)
+        domain.set_multiprocessor_mode(mode)
+
+        inlet_sizes = [len(inlet.triangle_indices) for inlet in culvert.inlets]
+
+        for _ in domain.evolve(yieldstep=2.0, finaltime=10.0):
+            pass
+
+        return (inlet_sizes,
+                domain.quantities['stage'].centroid_values.copy(),
+                float(culvert.discharge))
+
+    def test_inlet_larger_than_the_old_cap(self):
+        """An inlet of 79 triangles must register and give the mode-1 answer."""
+        sizes_1, stage_1, q_1 = self._run(1)
+        sizes_2, stage_2, q_2 = self._run(2)
+
+        self.assertEqual(sizes_1, sizes_2)
+        self.assertGreater(min(sizes_1), 64,
+                           'this test is only meaningful with inlets larger than '
+                           'the old MAX_INLET_TRIANGLES cap of 64; got %s' % sizes_1)
+
+        np.testing.assert_allclose(
+            stage_2, stage_1, rtol=0, atol=1e-6,
+            err_msg='mode-2 culvert with a >64-triangle inlet does not match mode 1')
+        self.assertAlmostEqual(q_2, q_1, places=6)
+        self.assertGreater(abs(q_1), 1.0,
+                           'the culvert should actually be passing flow')
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
