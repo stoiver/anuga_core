@@ -419,7 +419,7 @@ int gpu_domain_init(struct gpu_domain *GD, MPI_Comm comm, int rank, int nprocs) 
     GD->culvert_ops.scratch_avg_depth = NULL;
     GD->culvert_ops.scratch_avg_xmom = NULL;
     GD->culvert_ops.scratch_avg_ymom = NULL;
-    GD->culvert_ops.scratch_slot_depth = NULL;
+    GD->culvert_ops.scratch_slot_shift = NULL;
     GD->culvert_ops.scratch_slot_xmom = NULL;
     GD->culvert_ops.scratch_slot_ymom = NULL;
 

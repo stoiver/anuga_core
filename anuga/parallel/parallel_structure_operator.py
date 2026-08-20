@@ -374,7 +374,12 @@ class Parallel_Structure_operator(anuga.Operator):
 
         # Inflow inlet procs sets new attributes
         if self.myid in self.inlet_procs[self.inflow_index]:
-            self.inlets[self.inflow_index].set_depths(new_inflow_depth)
+            # old_inflow_depth is the GLOBAL average over the whole inlet (every
+            # inflow-inlet rank computed it collectively above), which is what
+            # new_inflow_depth was derived from; the surface shift it implies is
+            # then applied to this rank's share of the cells.
+            self.inlets[self.inflow_index].set_average_depth(
+                new_inflow_depth, old_inflow_depth)
             self.inlets[self.inflow_index].set_xmoms(new_inflow_xmom)
             self.inlets[self.inflow_index].set_ymoms(new_inflow_ymom)
 
@@ -474,7 +479,8 @@ class Parallel_Structure_operator(anuga.Operator):
 
         # outflow inlet procs sets new outflow attributes
         if self.myid in self.inlet_procs[self.outflow_index]:
-            self.inlets[self.outflow_index].set_depths(new_outflow_depth)
+            self.inlets[self.outflow_index].set_average_depth(
+                new_outflow_depth, outflow_average_depth)
             self.inlets[self.outflow_index].set_xmoms(new_outflow_xmom)
             self.inlets[self.outflow_index].set_ymoms(new_outflow_ymom)
 

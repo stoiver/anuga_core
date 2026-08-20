@@ -7,6 +7,7 @@ import numpy
 import anuga
 from anuga.abstract_2d_finite_volumes.mesh_factory import rectangular_cross
 from anuga.shallow_water.shallow_water_domain import Domain
+from anuga.structures.inlet import shift_depths_to_average
 from anuga.structures.inlet_enquiry import Inlet_enquiry
 
 
@@ -306,8 +307,134 @@ class Test_Inlet_enquiry(unittest.TestCase):
         self.assertLess(inlet.enquiry_index, num_triangles)
 
 
+class Test_shift_depths_to_average(unittest.TestCase):
+    """The inlet write-back kernel behind Inlet.set_average_depth() (issue #229)."""
+
+    def test_level_surface_stays_level(self):
+        """A flat surface over a sloping bed must shift, not flatten."""
+        beds = numpy.array([0.0, 1.0, 2.0, 3.0])
+        stages = numpy.full(4, 5.0)
+        depths = stages - beds                      # 5, 4, 3, 2 — surface is level
+        areas = numpy.ones(4)
+
+        new_depths = shift_depths_to_average(depths, areas, depths.mean(),
+                                             depths.mean() - 0.5)
+
+        numpy.testing.assert_allclose(new_depths + beds, 4.5,
+                                      err_msg='surface should stay level')
+
+    def test_zero_change_is_a_no_op(self):
+        """No transfer must mean no change — the well-balanced case."""
+        depths = numpy.array([5.0, 4.0, 3.0, 2.0])
+        areas = numpy.array([1.0, 2.0, 1.0, 2.0])
+        average = float(numpy.dot(depths, areas) / areas.sum())
+
+        new_depths = shift_depths_to_average(depths, areas, average, average)
+
+        numpy.testing.assert_array_equal(new_depths, depths)
+
+    def test_volume_change_is_exact(self):
+        """The volume moved is exactly what the caller asked for."""
+        depths = numpy.array([5.0, 4.0, 3.0, 2.0])
+        areas = numpy.array([1.0, 2.0, 1.0, 2.0])
+        total_area = areas.sum()
+        average = float(numpy.dot(depths, areas) / total_area)
+
+        for delta in (-0.75, -0.1, 0.0, 0.3, 2.0):
+            new_depths = shift_depths_to_average(depths, areas, average,
+                                                 average + delta)
+            moved = float(numpy.dot(new_depths - depths, areas))
+            self.assertAlmostEqual(moved, delta * total_area, places=12)
+
+    def test_wet_dry_clamp_redistributes(self):
+        """Cells that would go dry are clamped, and the rest give up the water."""
+        depths = numpy.array([0.1, 0.2, 5.0, 5.0])
+        areas = numpy.ones(4)
+        average = float(depths.mean())
+
+        # Drain 2 m of average depth: the two shallow cells cannot supply their
+        # share (they hold 0.1 and 0.2), so the deep pair must supply the rest.
+        new_depths = shift_depths_to_average(depths, areas, average, average - 2.0)
+
+        self.assertTrue(numpy.all(new_depths >= 0.0),
+                        'no cell may be left with negative depth')
+        self.assertEqual(new_depths[0], 0.0)
+        self.assertEqual(new_depths[1], 0.0)
+        moved = float(numpy.dot(new_depths - depths, areas))
+        self.assertAlmostEqual(moved, -2.0 * areas.sum(), places=12,
+                               msg='clamping must not change the volume moved')
+        # The still-wet cells keep a level surface between them (equal beds here).
+        self.assertAlmostEqual(new_depths[2], new_depths[3], places=12)
+
+    def test_draining_everything_leaves_it_dry(self):
+        """Asking for more water than the inlet holds empties it, no further."""
+        depths = numpy.array([1.0, 2.0])
+        areas = numpy.ones(2)
+        average = float(depths.mean())
+
+        new_depths = shift_depths_to_average(depths, areas, average, -10.0)
+
+        numpy.testing.assert_array_equal(new_depths, numpy.zeros(2))
+
+
+class Test_Structure_well_balanced(unittest.TestCase):
+    """A structure must not disturb a lake at rest (issue #229).
+
+    The inlet write-back used to set a uniform DEPTH, which on a sloping bed
+    tilts the water surface onto the bed — a lake at rest picked up an error of
+    about half the bed elevation range across the inlet, every timestep, with no
+    flow through the structure at all.
+    """
+
+    def _lake_at_rest(self, slope_denominator, with_culvert=True):
+        domain = anuga.rectangular_cross_domain(30, 15, len1=200.0, len2=50.0)
+        domain.set_flow_algorithm('DE0')
+        domain.set_name('well_balanced')
+        domain.store = False
+        domain.set_quantity('elevation',
+                            lambda x, y: -5.0 + x / slope_denominator)
+        domain.set_quantity('stage', 1.0)       # level surface: nothing to drive
+        Br = anuga.Reflective_boundary(domain)
+        domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+
+        if with_culvert:
+            anuga.Boyd_box_operator(
+                domain, end_points=[[60.0, 25.0], [140.0, 25.0]],
+                # Enquiry points well clear of the inlet regions: an enquiry
+                # cell just outside a wide inlet is strongly coupled to what the
+                # operator writes, which makes the run amplify roundoff and
+                # measures something other than well-balancedness.
+                enquiry_points=[[40.0, 25.0], [160.0, 25.0]],
+                losses=1.5, width=20.0, height=3.0, apron=5.0,
+                use_momentum_jet=False, use_velocity_head=False,
+                manning=0.013, verbose=False)
+
+        for _ in domain.evolve(yieldstep=0.5, finaltime=1.0):
+            pass
+
+        stage = domain.quantities['stage'].centroid_values
+        return float(numpy.abs(stage - 1.0).max())
+
+    def test_lake_at_rest_on_a_sloping_bed(self):
+        """The steeper the bed, the worse the old behaviour was; now: nothing."""
+        for slope_denominator in (50.0, 200.0):
+            deviation = self._lake_at_rest(slope_denominator)
+            # Was 6.8e-02 (1/50) and 1.8e-02 (1/200) with the uniform-depth
+            # write; both are now at roundoff level over this interval.
+            self.assertLess(
+                deviation, 1e-5,
+                'a culvert passing no flow disturbed a lake at rest by %.3e m '
+                'on a 1/%g bed' % (deviation, slope_denominator))
+
+    def test_matches_a_domain_without_the_structure(self):
+        """The structure should be as quiet as not having one at all."""
+        self.assertLess(self._lake_at_rest(50.0, with_culvert=False), 1e-12)
+
+
 if __name__ == "__main__":
     suite = unittest.TestLoader().loadTestsFromTestCase(Test_Structure_operator)
     suite.addTests(unittest.TestLoader().loadTestsFromTestCase(Test_Inlet_enquiry))
+    suite.addTests(unittest.TestLoader().loadTestsFromTestCase(Test_shift_depths_to_average))
+    suite.addTests(unittest.TestLoader().loadTestsFromTestCase(Test_Structure_well_balanced))
     runner = unittest.TextTestRunner(verbosity=2)
     runner.run(suite)

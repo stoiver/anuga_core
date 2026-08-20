@@ -471,3 +471,39 @@ inline array, so legacy multi-file dumps still load and `single_file=False` rest
 old layout. (2) Pickle is Python-only and version-fragile; that is acceptable for a
 regenerable internal cache, but is precisely why the *mesh* artifact — which users may
 inspect, archive and share — was kept on NetCDF.
+
+---
+
+## Structure inlets: shift the water surface, don't flatten it (issue #229)
+
+`Structure_operator` wrote its transfer back as a **uniform depth** across each inlet
+region (`Inlet.set_depths()` → `stage = elevation + d̄`). Volume was exact, but on a
+sloping bed that converts a level water surface into one parallel to the bed, so a lake
+at rest picked up an error of about **half the bed elevation range across the inlet**,
+every timestep, with no flow through the structure at all. Measured: 3.4e-02 m on a 1/50
+bed, 8.4e-03 m on 1/200, 1.7e-03 m on 1/1000 — i.e. exactly half the inlet bed range,
+mode-independent.
+
+The write-back now **shifts** the surface by `new_average_depth - old_average_depth`
+(`Inlet.set_average_depth()` → `shift_depths_to_average()`), with a wet/dry clamp: cells
+the shift would take below their bed are clamped to zero depth and the water that could
+not come from them is taken from the cells still wet, repeating until every cell is
+non-negative. Volume moved stays exactly `shift * area` unless the inlet runs dry.
+
+**Why shift, not level.** The alternative is a flat-surface ("water finds its level")
+target, which is what `Inlet_operator` already uses for *adding* volume
+(`Inlet.set_stages_evenly()`). Both are well balanced. Shift was chosen because it is the
+smaller behavioural change — it preserves any real surface gradient across the inlet
+during genuine flow rather than flattening it — and because the same iterative clamp can
+be written identically on the host (numpy) and inside one GPU team, keeping mode 1 and
+mode 2 in step without a sort or a per-iteration kernel launch.
+
+**Where it lives:** `shift_depths_to_average()` in `anuga/structures/inlet.py` (host,
+used by both mode-1 paths and the MPI path) and `culvert_shift_inlet_surface()` in
+`anuga/shallow_water/gpu/gpu_culvert_operator.c` (device). The two must be changed
+together.
+
+**Non-idempotence.** The old write was `stage = bed + depth` — writing it twice was
+harmless. A shift is not, which is why the mode-2 MPI path no longer scatters in
+PHASE 3b: the batched PHASE 4 scatter already covers a non-master rank's own inlet, and
+doing both would apply the shift twice.

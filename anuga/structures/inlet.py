@@ -9,6 +9,64 @@ import math
 
 import numpy as num
 
+def shift_depths_to_average(depths, areas, old_average_depth, new_average_depth):
+    """Shift an inlet's water surface to a new average depth, keeping its shape.
+
+    Returns the new per-cell depths. The surface is moved by a single uniform
+    offset (``new_average_depth - old_average_depth``) rather than being
+    flattened to a uniform depth, so a level surface stays level: on a sloping
+    bed, writing a uniform DEPTH tilts the water surface to follow the bed and
+    disturbs a lake at rest by half the bed elevation range across the inlet
+    (issue #229).
+
+    Wet/dry clamp: cells the offset would drive below their bed are clamped to
+    zero depth, and the water that could not be taken from them is taken from
+    the cells that are still wet instead, repeatedly until every cell is
+    non-negative. So the total volume change is exactly
+    ``(new_average_depth - old_average_depth) * total_area`` whenever the inlet
+    holds enough water to supply it, and the whole inlet goes dry only when it
+    does not.
+
+    Parameters
+    ----------
+    depths, areas : array
+        Current per-cell depth and area.
+    old_average_depth : float
+        The average depth the caller's `new_average_depth` was derived from. In
+        parallel this is the GLOBAL average over the whole inlet, while `depths`
+        and `areas` are this rank's share, so it is passed in rather than
+        recomputed here.
+    new_average_depth : float
+        Target average depth.
+    """
+
+    depths = num.asarray(depths, dtype=float)
+    areas = num.asarray(areas, dtype=float)
+
+    shift = new_average_depth - old_average_depth
+    new_depths = depths + shift
+    if new_depths.min() >= 0.0:
+        return new_depths
+
+    # Draining more than some cells hold. Take the shortfall from the cells that
+    # are still wet; that may dry out more of them, so repeat. Each pass dries at
+    # least one cell, so this terminates in at most len(depths) passes.
+    for _ in range(len(depths)):
+        dry = new_depths < 0.0
+        # Volume we failed to remove by clamping those cells at their bed.
+        deficit = -float(num.dot(new_depths[dry], areas[dry]))
+        new_depths[dry] = 0.0
+        wet = new_depths > 0.0
+        wet_area = float(areas[wet].sum())
+        if deficit <= 0.0 or wet_area <= 0.0:
+            break
+        new_depths[wet] -= deficit / wet_area
+        if new_depths.min() >= 0.0:
+            break
+
+    return num.maximum(new_depths, 0.0)
+
+
 class Inlet:
     """Contains information associated with each inlet
     """
@@ -173,6 +231,23 @@ class Inlet:
     def set_stages(self,stage):
 
         self.domain.quantities['stage'].centroid_values.put(self.triangle_indices, stage)
+
+    def set_average_depth(self, new_average_depth, old_average_depth=None):
+        """Move the water surface to give `new_average_depth`, keeping its shape.
+
+        The structure operators' way of writing back a transfer. Unlike
+        set_depths(), this shifts the surface instead of flattening it, so it is
+        well balanced on a sloping bed, and it clamps cells at their bed rather
+        than driving them to negative depth. See shift_depths_to_average().
+        """
+
+        if old_average_depth is None:
+            old_average_depth = self.get_average_depth()
+
+        new_depths = shift_depths_to_average(
+            self.get_depths(), self.get_areas(),
+            old_average_depth, new_average_depth)
+        self.set_stages(self.get_elevations() + new_depths)
 
 
     def set_xmoms(self,xmom):

@@ -516,6 +516,25 @@ class Parallel_Inlet(Inlet):
         stages = self.get_stages()
         stages_order = stages.argsort()
 
+    def set_average_depth(self, new_average_depth, old_average_depth=None):
+        """Shift this rank's share of the surface (see Inlet.set_average_depth).
+
+        `old_average_depth` must be the GLOBAL average over the whole inlet, so
+        that every rank applies the same surface shift; the default (recomputing
+        it) would use this rank's local average and tear the surface at a
+        partition boundary.
+
+        The wet/dry clamp redistributes locally: water that cannot be taken from
+        a cell this rank owns is taken from this rank's other wet cells. A rank
+        whose share of the inlet dries out completely cannot push the remainder
+        to another rank, so in that corner an inlet straddling a partition can
+        transfer slightly less than asked.
+        """
+
+        if old_average_depth is None:
+            old_average_depth = self.get_global_average_depth()
+        Inlet.set_average_depth(self, new_average_depth, old_average_depth)
+
     def set_depths_evenly(self,volume):
         """ Distribute volume over all exchange
         cells with equal depth of water
