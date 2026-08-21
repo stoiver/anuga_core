@@ -57,7 +57,12 @@ jobs:
       - name: Install compilers (Windows)
         if: runner.os == 'Windows'
         shell: bash -el {0}
-        run: conda install -c conda-forge -n anuga_env libpython gcc_win-64 gxx_win-64
+        # libwinpthread: the mingw runtime DLL (libwinpthread-1.dll) that a
+        # mingw-built executable needs to run. conda-forge split it into its own
+        # package on 2026-08-20 (m2w64-sysroot-feedstock PR #21), after which
+        # meson's compiler sanity check fails here exactly as it does in
+        # conda-setup.yml. Keep both workflows' install lines in step.
+        run: conda install -c conda-forge -n anuga_env libpython libwinpthread gcc_win-64 gxx_win-64
 
       - name: Install compilers (macOS)
         if: runner.os == 'macOS'
