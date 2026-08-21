@@ -471,3 +471,51 @@ inline array, so legacy multi-file dumps still load and `single_file=False` rest
 old layout. (2) Pickle is Python-only and version-fragile; that is acceptable for a
 regenerable internal cache, but is precisely why the *mesh* artifact — which users may
 inspect, archive and share — was kept on NetCDF.
+
+---
+
+## Structure inlets: level the stage, don't flatten the depth (issue #229)
+
+`Structure_operator` wrote its transfer back as a **uniform depth** across each inlet
+(`Inlet.set_depths()` → `stage = elevation + d̄`). Volume was exact, but on a sloping bed
+that tilts a level water surface onto the bed, disturbing a lake at rest by half the bed
+elevation range across the inlet, every timestep, at zero discharge (3.4e-02 m on a 1/50
+bed) — in every compute mode.
+
+**Two models were tried:**
+
+1. **Surface shift** (`e899973f`, reverted in `f4e2ab11`): move every stage by
+   `new_avg_depth − old_avg_depth`, clamp at the bed. Well balanced, but it removed the
+   smoothing the culvert feedback loop relies on: discharging into an initially **dry**
+   inlet, the shallow-water dynamics inside the inlet build a ridge, the enquiry reading
+   swings, and the discharge oscillates and stalls
+   (`test_pipe_culvert_cpu_gpu_velocity_match` failed on every CI platform; with the
+   momentum write it even collapsed the global timestep).
+
+2. **Stage leveling** (this decision): apply the volume change with the "well-mixed
+   reservoir" model the operators assume — water finds its level. Adding volume raises
+   the *lowest* stages to a common level; removing volume lowers the *highest* stages to
+   a common level, clamping each cell at its bed. Exactly zero transfer is a bit-exact
+   no-op (the lake-at-rest case). On a **flat bed** filling a level or dry inlet
+   reproduces the old uniform-depth write exactly, which is why the flat-bed culvert
+   tests are untouched by construction — the property attempt 1 lacked. This is the same
+   model `Inlet.set_stages_evenly()` already uses for inlet-operator inflow.
+
+**Momentum**: the physics produces ONE momentum per inlet. The old uniform write was
+consistent with uniform depth; over leveled (non-uniform) depths a uniform momentum
+gives a nearly-dry cell an enormous velocity and collapses the timestep. So
+`Inlet.set_average_momenta()` writes it **depth-weighted** (`m·dᵢ/d̄`): the area-weighted
+average momentum is exactly `m`, and the *velocity* field is uniform (`m/d̄`). On uniform
+depth it reduces to the old write.
+
+**Level-finding is bisection** (100 iterations → last bit of a double) on the monotone
+volume(L) function — no sort, so the same loop runs in numpy
+(`level_stages_to_average()`, `anuga/structures/inlet.py`) and inside one GPU team
+(`culvert_level_inlet_surface()`, `gpu_culvert_operator.c`). The two must change
+together. In parallel each rank levels its own share by the same per-area volume change
+(global average passed in); the seam across a partitioned inlet is the same order as the
+old write's.
+
+**Non-idempotence**: the old `stage = bed + depth` write could be applied twice
+harmlessly; leveling cannot. The mode-2 MPI path therefore does not scatter in PHASE 3b —
+the batched PHASE 4 scatter already covers a non-master rank's own inlet.

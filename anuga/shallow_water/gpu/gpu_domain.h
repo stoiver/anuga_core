@@ -378,7 +378,7 @@ struct culvert_operators {
     double *scratch_avg_ymom;
 
     // Per-inlet scatter values, pushed H2D each step then written on-device.
-    double *scratch_slot_depth;     // [2*nc] new water depth per inlet
+    double *scratch_slot_shift;     // [2*nc] delta average depth per inlet (new - old)
     double *scratch_slot_xmom;      // [2*nc]
     double *scratch_slot_ymom;      // [2*nc]
 

@@ -105,6 +105,10 @@ def _call_c_culvert(op):
 
     g0 = gather(i0)
     g1 = gather(i1)
+    # Index 5 of a gather tuple is that inlet's average depth — the value the C
+    # kernel derived its new depths from, and so the one the write-back levels
+    # the surface from (see Inlet.set_average_depth).
+    average_depths = (g0[5], g1[5])
     res = apply_fn(
         ctype, d.g,
         float(getattr(op, 'culvert_width', 0.0)),
@@ -134,12 +138,10 @@ def _call_c_culvert(op):
     op.inflow = inflow
     op.outflow = outflow
 
-    inflow.set_depths(nid)
-    inflow.set_xmoms(nix)
-    inflow.set_ymoms(niy)
-    outflow.set_depths(nod)
-    outflow.set_xmoms(nox)
-    outflow.set_ymoms(noy)
+    inflow.set_average_depth(nid, average_depths[inflow_idx])
+    inflow.set_average_momenta(nix, niy)
+    outflow.set_average_depth(nod, average_depths[1 - inflow_idx])
+    outflow.set_average_momenta(nox, noy)
 
     # Reporting (matches the Python discharge routine and the mode-2 readback)
     op.accumulated_flow += rg
@@ -445,13 +447,12 @@ class Structure_operator(anuga.Operator):
             new_inflow_xmom = old_inflow_xmom*factor2
             new_inflow_ymom = old_inflow_ymom*factor2
 
-        self.inflow.set_depths(new_inflow_depth)
+        self.inflow.set_average_depth(new_inflow_depth, old_inflow_depth)
 
         #inflow.set_xmoms(Q/inflow.get_area())
         #inflow.set_ymoms(0.0)
 
-        self.inflow.set_xmoms(new_inflow_xmom)
-        self.inflow.set_ymoms(new_inflow_ymom)
+        self.inflow.set_average_momenta(new_inflow_xmom, new_inflow_ymom)
 
         loss = (old_inflow_depth - new_inflow_depth)*self.inflow.get_area()
         xmom_loss = (old_inflow_xmom - new_inflow_xmom)*self.inflow.get_area()
@@ -478,9 +479,10 @@ class Structure_operator(anuga.Operator):
         self.outlet_depth = outlet_depth
 
 
-        new_outflow_depth = self.outflow.get_average_depth() + outflow_extra_depth
+        old_outflow_depth = self.outflow.get_average_depth()
+        new_outflow_depth = old_outflow_depth + outflow_extra_depth
 
-        self.outflow.set_depths(new_outflow_depth)
+        self.outflow.set_average_depth(new_outflow_depth, old_outflow_depth)
 
         if self.use_momentum_jet:
             # FIXME (SR) Review momentum to account for possible hydraulic jumps at outlet
@@ -505,8 +507,7 @@ class Structure_operator(anuga.Operator):
             new_outflow_xmom = self.outflow.get_average_xmom() + xmom_loss/self.outflow.get_area()
             new_outflow_ymom = self.outflow.get_average_ymom() + ymom_loss/self.outflow.get_area()
 
-        self.outflow.set_xmoms(new_outflow_xmom)
-        self.outflow.set_ymoms(new_outflow_ymom)
+        self.outflow.set_average_momenta(new_outflow_xmom, new_outflow_ymom)
 
 
 
