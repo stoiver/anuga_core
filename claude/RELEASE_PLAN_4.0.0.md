@@ -81,6 +81,51 @@ Each gate is a named command with a recorded result; a red gate blocks the tag.
       `pip install --no-build-isolation -e .`, run an example.
 - [ ] **Docs build** clean; add `docs/source/reference/generated/` to `.gitignore`.
 
+## BLOCKED: Windows CI (as of 2026-08-21) — Phase 2 is on hold
+
+**Decision: do not start Phase 2 until Windows CI is green.** Drafting release
+notes against a moving target is waste, and a 4.0.0 with no working Windows
+wheels is not shippable.
+
+Every Windows job in **both** workflows (`conda-setup.yml` and
+`python-publish-pypi.yml` — they share an install line) has failed since
+2026-08-20 at meson's compiler sanity check, before any ANUGA code compiles:
+
+```
+meson.build:9:0: ERROR: Executables created by c compiler
+  .../x86_64-w64-mingw32-cc are not runnable.
+```
+
+**Established by measurement:**
+
+* Not our code — commits touching only markdown fail identically.
+* Last green 08-20T13:04; first red 08-21T00:50; red on every run since.
+* `gcc_win-64` 16.1.0, `binutils_win-64` 2.46.1 and the runner image
+  (`windows-2025-vs2026`, 20260729.566) are **identical** either side of the break.
+* A full package diff shows **exactly four** differences, same version,
+  build 10 -> 11: `m2w64-sysroot_win-64`,
+  `mingw-w64-ucrt-x86_64-{crt,headers,winpthreads}-git`.
+* Those come from conda-forge `m2w64-sysroot-feedstock` PR #21 ("finish v1
+  transition"), merged 2026-08-20 — the same day.
+
+**Falsified:** that the newly split-out `libwinpthread` (the package holding
+`libwinpthread-1.dll`) was missing from the env and caused it. Installing it
+explicitly changes nothing; the error is byte-identical. Do not re-try this.
+
+**Open:** why the produced executable will not run. A temporary diagnostic step
+on the PR branch compiles and runs a trivial program by hand and dumps the
+imported DLLs, the runtime DLLs present, and the installed toolchain packages.
+
+**Tracking:** PR #233 (draft, ours) · conda-forge/m2w64-sysroot-feedstock#23
+(upstream). Fallback if the cause stays unclear: pin the sysroot chain to
+build 10 (`m2w64-sysroot_win-64=*=*_10`) as a temporary hold.
+
+**Effect on Phase 1:** gate 7 ("wheel smoke — green by CI") is retroactively
+**not** satisfied on Windows. Linux/macOS remain green. Phase 1's other eight
+gates stand.
+
+---
+
 ## Phase 2 — Release candidate (Day 5–9)
 
 - [ ] **Release notes** (`docs/` + GitHub Release body). Method: walk
