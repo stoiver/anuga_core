@@ -9,7 +9,7 @@ Machine: local dev box (Ubuntu 26.04, RTX 5070, nvc GPU build) unless noted.
 | 2 | Unified-mode suite, CPU build, one process | **GREEN** | FULL suite, unified default, one process, gcc build: 2947 passed/105 skipped. GPU test file 106/106 after 55ef856d |
 | 3 | GPU build, isolated runners | **GREEN local** / cloud **BLOCKED** | local: all 25 classes green + `-cm unified` sweep 465 pass/2 skip. Cloud: see "Cloud gate blocked" below |
 | 4 | Validation suite | **GREEN** | 120 passed / 0 failed (1895.9 s). NOTE: the structure regression baselines passed *unchanged* — the existing validation set is blind to #229 (flat beds at every inlet) |
-| 5 | Towradgi mode 1 vs mode 2 | in progress | 1 h smoke chosen; mode-1 arm running at handoff (bg task bufcxqa3g), then mode 2, then stage compare |
+| 5 | Towradgi mode 1 vs mode 2 | **INVALID — must rerun** | ran to completion but the comparison is not trustworthy; see "Gate 5 is invalid" below |
 | 6 | MPI smoke | **GREEN** | parallel MPI tests (mpirun subprocess spawns) ran inside gate 1's 2937 |
 | 7 | Wheel smoke (3 OSes) | **GREEN by CI** | 20 wheel builds + sdist green on PR #230 (2026-08-21); linux from-source venv install verified locally |
 | 8 | Fresh conda installs (3.10, 3.14) | **GREEN** | env create + `pip install --no-build-isolation` + evolve smoke: py3.10.20/numpy 2.2.6 and py3.14.7/numpy 2.5.2, both at `55ef856d` |
@@ -106,3 +106,44 @@ State of the investigation at handoff:
 
 This blocks only the *cloud* half of gate 3; the local GPU gate is green, so it
 is not a release blocker. Costs so far: two g4dn instances, ~1 min each.
+
+
+---
+
+## Gate 5 is invalid (ran, but do not use the number)
+
+The run completed (mode 1 13.6 min at 16 threads, mode 2 3.5 min on the 5070)
+and printed `final-stage max|d| = 3.52e-02 m`. **Do not quote that number.**
+The two SWW files do not have comparable time axes:
+
+```
+mode1  ntimes 9  times [0, 60, 600, 120, 1200, 1800, 2400, 3000, 3600]   <-- non-monotonic
+mode2  ntimes 7  times [0, 600, 1200, 1800, 2400, 3000, 3600]
+```
+
+The mode-1 series is two interleaved sequences — (0, 60, 120) spliced into the
+expected 600 s yieldstep series. Both arrays happen to end at 3600, so the
+`final` figure compares like-for-like *times*, but the mode-1 file plainly
+contains data it should not, and `peak-stage` (a max over axis 0) is
+contaminated by the stray frames outright. Cause not yet identified —
+`sww_merge(delete_old=True)` at run_small_towradgi.py:1083 and the
+pre-existing `MODEL_OUTPUTS/` (which holds 600 MB June artifacts under
+*different* names) are the two things to look at first.
+
+**Rerun requirement:** point `--datadir` at a clean, empty directory per arm,
+and assert monotonic `time` before differencing.
+
+## Towradgi #229 delta — not obtained (harness bug, one-line fix)
+
+The chained old-write arm died immediately:
+
+```
+File "run_small_towradgi.py", line 12: from project import *
+ModuleNotFoundError: No module named 'project'
+```
+
+`runpy.run_path()` does not put the script's own directory on `sys.path`. The
+four HEC-RAS cases were unaffected because they import no local module. Fix:
+`sys.path.insert(0, case_dir)` in `scratchpad/towradgi_runner.py` (and
+`delta_runner.py`, which has the same latent bug). So the Towradgi row of the
+#229 delta table is **still missing** — the four validation cases above stand.
