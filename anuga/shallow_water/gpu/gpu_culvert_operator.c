@@ -667,7 +667,7 @@ void gpu_culverts_finalize_all(struct gpu_domain *GD) {
         double *ad = CO->scratch_avg_depth;
         double *ax = CO->scratch_avg_xmom;
         double *ay = CO->scratch_avg_ymom;
-        double *nd = CO->scratch_slot_depth;
+        double *nd = CO->scratch_slot_shift;
         double *nx = CO->scratch_slot_xmom;
         double *ny = CO->scratch_slot_ymom;
         int *sst = CO->scratch_slot_start;
@@ -697,7 +697,7 @@ void gpu_culverts_finalize_all(struct gpu_domain *GD) {
     if (CO->scratch_avg_depth) { free(CO->scratch_avg_depth); CO->scratch_avg_depth = NULL; }
     if (CO->scratch_avg_xmom) { free(CO->scratch_avg_xmom); CO->scratch_avg_xmom = NULL; }
     if (CO->scratch_avg_ymom) { free(CO->scratch_avg_ymom); CO->scratch_avg_ymom = NULL; }
-    if (CO->scratch_slot_depth) { free(CO->scratch_slot_depth); CO->scratch_slot_depth = NULL; }
+    if (CO->scratch_slot_shift) { free(CO->scratch_slot_shift); CO->scratch_slot_shift = NULL; }
     if (CO->scratch_slot_xmom) { free(CO->scratch_slot_xmom); CO->scratch_slot_xmom = NULL; }
     if (CO->scratch_slot_ymom) { free(CO->scratch_slot_ymom); CO->scratch_slot_ymom = NULL; }
     if (CO->scratch_inlet_indices) { free(CO->scratch_inlet_indices); CO->scratch_inlet_indices = NULL; }
@@ -758,7 +758,7 @@ void gpu_culverts_map(struct gpu_domain *GD) {
     CO->scratch_avg_depth = (double*)calloc(ne, sizeof(double));
     CO->scratch_avg_xmom  = (double*)calloc(ne, sizeof(double));
     CO->scratch_avg_ymom  = (double*)calloc(ne, sizeof(double));
-    CO->scratch_slot_depth = (double*)calloc(ne, sizeof(double));
+    CO->scratch_slot_shift = (double*)calloc(ne, sizeof(double));
     CO->scratch_slot_xmom  = (double*)calloc(ne, sizeof(double));
     CO->scratch_slot_ymom  = (double*)calloc(ne, sizeof(double));
 
@@ -806,7 +806,7 @@ void gpu_culverts_map(struct gpu_domain *GD) {
     double *ad = CO->scratch_avg_depth;
     double *ax = CO->scratch_avg_xmom;
     double *ay = CO->scratch_avg_ymom;
-    double *nd = CO->scratch_slot_depth;
+    double *nd = CO->scratch_slot_shift;
     double *nx = CO->scratch_slot_xmom;
     double *ny = CO->scratch_slot_ymom;
     int *sst = CO->scratch_slot_start;
@@ -969,6 +969,130 @@ static void gpu_culvert_gather_inlets(struct gpu_domain *GD,
 // Batched Scatter: write updated depths/momenta back to GPU
 // ============================================================================
 
+// Level one inlet to a new average depth — water finds its level (issue #229).
+//
+// The single implementation of the structure write-back on the device, matching
+// level_stages_to_average() + Inlet.set_average_momenta() on the host path.
+//
+// Stage: adding volume raises the LOWEST stages to a common level; removing
+// volume lowers the HIGHEST stages to a common level, clamping each cell at its
+// bed (if the inlet holds less than asked for, it is drained dry and no more).
+// A zero transfer leaves the stages untouched, which is what makes the update
+// well balanced: a lake at rest on a sloping bed is not disturbed. Writing a
+// uniform DEPTH (the old behaviour) tilted the surface onto the bed; a shape-
+// preserving SHIFT (tried first) destabilised discharge into an initially dry
+// inlet. The level is found by bisection on the monotone volume(L) function;
+// 100 iterations pins it to the last bit of a double.
+//
+// Momentum: the physics produces ONE momentum value per inlet. It is written
+// depth-weighted — cell i gets m * depth_i / average_depth — so the VELOCITY
+// field is uniform and the area-weighted average momentum is exactly m. A
+// uniform-momentum write over the now non-uniform depths would give a nearly
+// dry cell an enormous velocity and collapse the global timestep.
+#pragma omp declare target
+static void culvert_level_inlet_surface(const int * restrict idx,
+                                        const double * restrict areas,
+                                        int ntri, double delta_avg_depth,
+                                        double new_xmom, double new_ymom,
+                                        double * restrict stage_c,
+                                        const double * restrict bed_c,
+                                        double * restrict xmom_c,
+                                        double * restrict ymom_c) {
+    if (ntri <= 0) return;
+
+    double total_area = 0.0;
+    for (int j = 0; j < ntri; j++) total_area += areas[j];
+    double volume = delta_avg_depth * total_area;
+
+    if (volume > 0.0 && total_area > 0.0) {
+        // Fill: find L with  A(L) = sum a_i * max(L - s_i, 0) == volume.
+        // A(max_s + volume/total_area) >= volume, so L lies in [lo, hi].
+        double lo = stage_c[idx[0]];
+        double hi = stage_c[idx[0]];
+        for (int j = 1; j < ntri; j++) {
+            double sj = stage_c[idx[j]];
+            if (sj < lo) lo = sj;
+            if (sj > hi) hi = sj;
+        }
+        hi += volume / total_area;
+        for (int it = 0; it < 100; it++) {
+            double mid = 0.5 * (lo + hi);
+            double added = 0.0;
+            for (int j = 0; j < ntri; j++) {
+                double a = mid - stage_c[idx[j]];
+                if (a > 0.0) added += a * areas[j];
+            }
+            if (added < volume) lo = mid; else hi = mid;
+        }
+        for (int j = 0; j < ntri; j++) {
+            int i = idx[j];
+            if (stage_c[i] < hi) stage_c[i] = hi;
+        }
+    } else if (volume < 0.0 && total_area > 0.0) {
+        // Drawdown: find L with
+        //   R(L) = sum a_i * min(depth_i, max(s_i - L, 0)) == -volume,
+        // then s_i' = max(bed_i, min(s_i, L)).
+        double to_remove = -volume;
+        double water = 0.0;
+        double lo = bed_c[idx[0]];
+        double hi = stage_c[idx[0]];
+        for (int j = 0; j < ntri; j++) {
+            int i = idx[j];
+            double d = stage_c[i] - bed_c[i];
+            if (d > 0.0) water += d * areas[j];
+            if (bed_c[i] < lo) lo = bed_c[i];
+            if (stage_c[i] > hi) hi = stage_c[i];
+        }
+        if (to_remove >= water) {
+            // Asked for more than the inlet holds: drain it dry, no further.
+            for (int j = 0; j < ntri; j++) {
+                int i = idx[j];
+                if (stage_c[i] > bed_c[i]) stage_c[i] = bed_c[i];
+            }
+        } else {
+            for (int it = 0; it < 100; it++) {
+                double mid = 0.5 * (lo + hi);
+                double removed = 0.0;
+                for (int j = 0; j < ntri; j++) {
+                    int i = idx[j];
+                    double d = stage_c[i] - bed_c[i];
+                    if (d < 0.0) d = 0.0;
+                    double r = stage_c[i] - mid;
+                    if (r < 0.0) r = 0.0;
+                    if (r > d) r = d;
+                    removed += r * areas[j];
+                }
+                if (removed > to_remove) lo = mid; else hi = mid;
+            }
+            for (int j = 0; j < ntri; j++) {
+                int i = idx[j];
+                double s_new = stage_c[i] < lo ? stage_c[i] : lo;
+                if (s_new < bed_c[i]) s_new = bed_c[i];
+                stage_c[i] = s_new;
+            }
+        }
+    }
+    // volume == 0: stages untouched (the exact lake-at-rest no-op).
+
+    // Depth-weighted momentum over the post-level depths.
+    double avg_depth = 0.0;
+    for (int j = 0; j < ntri; j++) {
+        int i = idx[j];
+        double d = stage_c[i] - bed_c[i];
+        if (d > 0.0) avg_depth += d * areas[j];
+    }
+    avg_depth = (total_area > 0.0) ? avg_depth / total_area : 0.0;
+    for (int j = 0; j < ntri; j++) {
+        int i = idx[j];
+        double d = stage_c[i] - bed_c[i];
+        double w = (avg_depth > 0.0 && d > 0.0) ? d / avg_depth : 0.0;
+        xmom_c[i] = new_xmom * w;
+        ymom_c[i] = new_ymom * w;
+    }
+}
+#pragma omp end declare target
+
+
 static void gpu_culvert_scatter(struct gpu_domain *GD,
                                 struct culvert_transfer *transfers) {
     struct culvert_operators *CO = &GD->culvert_ops;
@@ -978,22 +1102,30 @@ static void gpu_culvert_scatter(struct gpu_domain *GD,
 
     if (nt == 0) return;
 
-    // Build ONE (depth, xmom, ymom) triple per inlet on the host — the physics
-    // already produced these as a single value per inlet region. Inlet
-    // inlet_local is the inflow when inlet_local == inflow_idx, else the outflow.
-    double *nd = CO->scratch_slot_depth;
+    // Build ONE (delta average depth, xmom, ymom) triple per inlet on the host —
+    // the physics already produced these as a single value per inlet region.
+    // Inlet inlet_local is the inflow when inlet_local == inflow_idx, else the
+    // outflow.
+    //
+    // The delta is (new average depth - the average depth the physics started
+    // from); the kernel levels the inlet to absorb exactly that volume change.
+    // Writing the new average depth to every cell instead would flatten the
+    // water surface onto the bed and tilt a lake at rest (issue #229).
+    double *nd = CO->scratch_slot_shift;
     double *nx = CO->scratch_slot_xmom;
     double *ny = CO->scratch_slot_ymom;
     for (int c = 0; c < nc; c++) {
         struct culvert_transfer *t = &transfers[c];
         for (int inlet = 0; inlet < 2; inlet++) {
             int s = 2 * c + inlet;
+            double old_avg_depth = (inlet == 0) ? CO->host_data0[c].avg_depth
+                                                : CO->host_data1[c].avg_depth;
             if (inlet == t->inflow_idx) {
-                nd[s] = t->new_inflow_depth;
+                nd[s] = t->new_inflow_depth - old_avg_depth;
                 nx[s] = t->new_inflow_xmom;
                 ny[s] = t->new_inflow_ymom;
             } else {
-                nd[s] = t->new_outflow_depth;
+                nd[s] = t->new_outflow_depth - old_avg_depth;
                 nx[s] = t->new_outflow_xmom;
                 ny[s] = t->new_outflow_ymom;
             }
@@ -1014,19 +1146,13 @@ static void gpu_culvert_scatter(struct gpu_domain *GD,
     double * restrict ymom_c = GD->D.ymom_centroid_values;
     double * restrict bed_c = GD->D.bed_centroid_values;
 
+    double *sa = CO->scratch_inlet_areas;
+
     #pragma omp target teams distribute parallel for
     for (int s = 0; s < ne; s++) {
-        double depth = nd[s];
-        double new_xmom = nx[s];
-        double new_ymom = ny[s];
-        int start = sst[s];
-        int cnt = scn[s];
-        for (int j = 0; j < cnt; j++) {
-            int i = si[start + j];
-            stage_c[i] = bed_c[i] + depth;
-            xmom_c[i] = new_xmom;
-            ymom_c[i] = new_ymom;
-        }
+        culvert_level_inlet_surface(si + sst[s], sa + sst[s], scn[s],
+                                    nd[s], nx[s], ny[s],
+                                    stage_c, bed_c, xmom_c, ymom_c);
     }
 }
 
@@ -1295,27 +1421,6 @@ static void mpi_exchange_results(struct gpu_domain *GD,
 // per call; stage = bed + depth is computed entirely on-device.
 // ============================================================================
 
-static void scatter_single_inlet(struct gpu_domain *GD,
-                                  int *tri_indices, int ntri,
-                                  double new_depth, double new_xmom, double new_ymom) {
-    if (ntri == 0) return;
-
-    double * restrict stage_c = GD->D.stage_centroid_values;
-    double * restrict xmom_c = GD->D.xmom_centroid_values;
-    double * restrict ymom_c = GD->D.ymom_centroid_values;
-    double * restrict bed_c = GD->D.bed_centroid_values;
-
-    // Single fused device kernel: read bed, write stage/xmom/ymom. No host
-    // loop, no stack staging arrays.
-    int *idx = tri_indices;
-    #pragma omp target teams distribute parallel for map(to: idx[0:ntri])
-    for (int k = 0; k < ntri; k++) {
-        int i = idx[k];
-        stage_c[i] = bed_c[i] + new_depth;
-        xmom_c[i] = new_xmom;
-        ymom_c[i] = new_ymom;
-    }
-}
 
 // ============================================================================
 // Main entry point: execute ALL culverts in one batched cycle
@@ -1787,24 +1892,12 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
     if (has_parallel) {
         mpi_exchange_results(GD, transfers, mpi_bufs);
 
-        // Non-master ranks scatter to their local GPU inlets
-        for (int c = 0; c < nc; c++) {
-            struct culvert_indices *ci = &CO->indices[c];
-            if (ci->is_local) continue;
-            if (myrank == ci->master_proc) continue;
-
-            for (int inlet = 0; inlet < 2; inlet++) {
-                if (myrank != ci->inlet_master_proc[inlet]) continue;
-
-                int ntri = (inlet == 0) ? ci->inlet0_num : ci->inlet1_num;
-                int *tri_idx = (inlet == 0) ? ci->inlet0_indices : ci->inlet1_indices;
-                double new_depth = mpi_bufs->result_recv[c][inlet][0];
-                double new_xmom  = mpi_bufs->result_recv[c][inlet][1];
-                double new_ymom  = mpi_bufs->result_recv[c][inlet][2];
-
-                scatter_single_inlet(GD, tri_idx, ntri, new_depth, new_xmom, new_ymom);
-            }
-        }
+        // No scatter here: a non-master rank that owns an inlet received the
+        // master's values into its transfers[c] above, and PHASE 4's batched
+        // scatter writes every slot this rank holds triangles for — including
+        // that one. Scattering here as well used to be harmless because the
+        // write was an idempotent "stage = bed + depth"; now that the write is
+        // a surface SHIFT (issue #229), applying it twice would double it.
     }
 
     // ----------------------------------------------------------------

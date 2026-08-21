@@ -29,9 +29,9 @@ Consequences when writing tests:
 * A well-balancedness test (issue #229) must be kept **short** (~1 s) or use enquiry
   points well clear of the inlets, or the instability grows into the measurement.
 
-Today the effect is largely masked: the inlet write-back sets a uniform depth, which on a
-sloping bed injects a much larger deterministic perturbation that dominates it (that is
-issue #229). Fixing #229 will unmask this, so expect it to matter then.
+With the #229 fix (stage leveling) the old uniform-depth perturbation is gone, so this
+effect is no longer masked — it is now the dominant behaviour of a structure in still
+water, and the constraints above apply to any test touching one.
 
 ---
 

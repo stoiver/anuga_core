@@ -374,9 +374,15 @@ class Parallel_Structure_operator(anuga.Operator):
 
         # Inflow inlet procs sets new attributes
         if self.myid in self.inlet_procs[self.inflow_index]:
-            self.inlets[self.inflow_index].set_depths(new_inflow_depth)
-            self.inlets[self.inflow_index].set_xmoms(new_inflow_xmom)
-            self.inlets[self.inflow_index].set_ymoms(new_inflow_ymom)
+            # old_inflow_depth is the GLOBAL average over the whole inlet (every
+            # inflow-inlet rank computed it collectively above), which is what
+            # new_inflow_depth was derived from. Each rank levels its own share
+            # of the inlet by that per-area change — see
+            # Parallel_Inlet.set_average_depth.
+            self.inlets[self.inflow_index].set_average_depth(
+                new_inflow_depth, old_inflow_depth)
+            self.inlets[self.inflow_index].set_average_momenta(
+                new_inflow_xmom, new_inflow_ymom)
 
         # Get outflow inlet attributes, all processors associated with outflow inlet must call
         if self.myid in self.inlet_procs[self.outflow_index]:
@@ -474,9 +480,10 @@ class Parallel_Structure_operator(anuga.Operator):
 
         # outflow inlet procs sets new outflow attributes
         if self.myid in self.inlet_procs[self.outflow_index]:
-            self.inlets[self.outflow_index].set_depths(new_outflow_depth)
-            self.inlets[self.outflow_index].set_xmoms(new_outflow_xmom)
-            self.inlets[self.outflow_index].set_ymoms(new_outflow_ymom)
+            self.inlets[self.outflow_index].set_average_depth(
+                new_outflow_depth, outflow_average_depth)
+            self.inlets[self.outflow_index].set_average_momenta(
+                new_outflow_xmom, new_outflow_ymom)
 
     def __process_non_skew_culvert(self):
         """Create lines at the end of a culvert inlet and outlet.
