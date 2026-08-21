@@ -126,33 +126,6 @@ jobs:
           echo "=== mpi4py location ==="
           python -c "import mpi4py, os; print(os.path.dirname(mpi4py.__file__))"
 
-      # TEMPORARY (PR #233): meson only reports "Executables created by c
-      # compiler ... are not runnable" without saying why. Compile and run a
-      # trivial program ourselves and print the toolchain state, so the actual
-      # cause is visible instead of inferred. Remove once Windows CI is green.
-      - name: Diagnose mingw toolchain (Windows)
-        if: runner.os == 'Windows'
-        shell: bash -el {0}
-        continue-on-error: true
-        run: |
-          conda activate anuga_env
-          echo "=== compiler ==="
-          which x86_64-w64-mingw32-cc || echo "cc not on PATH"
-          x86_64-w64-mingw32-cc --version 2>&1 | head -2
-          echo "=== compile a trivial program ==="
-          printf 'int main(void){return 0;}\n' > sanity.c
-          x86_64-w64-mingw32-cc sanity.c -o sanity.exe && echo "compile: OK" || echo "compile: FAILED"
-          echo "=== run it ==="
-          ./sanity.exe; echo "exit code: $?"
-          echo "=== DLLs it imports ==="
-          x86_64-w64-mingw32-objdump -p sanity.exe 2>/dev/null | grep -i "DLL Name" || echo "(objdump unavailable)"
-          echo "=== runtime DLLs present in the env ==="
-          ls "$CONDA_PREFIX/Library/bin/" 2>/dev/null | grep -iE "winpthread|libgcc|libstdc|gomp" || echo "(none found)"
-          echo "=== mingw sysroot bin ==="
-          ls "$CONDA_PREFIX/Library/x86_64-w64-mingw32/sysroot/usr/bin/" 2>/dev/null | head -10 || echo "(no sysroot bin)"
-          echo "=== relevant packages ==="
-          conda list -n anuga_env 2>/dev/null | grep -iE "winpthread|gcc|sysroot|crt-git|ucrt|libstdcxx" || true
-
       - name: Install anuga package
         shell: bash -el {0}
         run: |
