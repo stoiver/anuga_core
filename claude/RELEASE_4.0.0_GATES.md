@@ -7,7 +7,7 @@ Machine: local dev box (Ubuntu 26.04, RTX 5070, nvc GPU build) unless noted.
 |---|------|--------|--------|
 | 1 | Full suite (as CI runs it) | **GREEN** both builds | nvc: 2937 passed/10 skipped, 74 s. gcc venv: 2948 passed/104 skipped (no mpi4py in venv; MPI covered by the nvc run) |
 | 2 | Unified-mode suite, CPU build, one process | **GREEN** | FULL suite, unified default, one process, gcc build: 2947 passed/105 skipped. GPU test file 106/106 after 55ef856d |
-| 3 | GPU build, isolated runners | **GREEN local** / cloud **BLOCKED** | local: all 25 classes green + `-cm unified` sweep 465 pass/2 skip. Cloud: see "Cloud gate blocked" below |
+| 3 | GPU build, isolated runners | **GREEN** (local + cloud) | local RTX 5070 (cc120): 25 classes + unified sweep 465 pass/2 skip. Cloud **g6.xlarge (Ada L4)**: 106/106 GPU file, then 465 pass/2 skip unified — identical counts on a second GPU architecture. rc=0, container 723 s |
 | 4 | Validation suite | **GREEN** | 120 passed / 0 failed (1895.9 s). NOTE: the structure regression baselines passed *unchanged* — the existing validation set is blind to #229 (flat beds at every inlet) |
 | 5 | Towradgi mode 1 vs mode 2 | **GREEN** (rerun) | isolated dirs, monotonic axes asserted: final max\|Δ\|=3.52e-02 m, localised (9/128539 cells >1 cm), mass agrees 3.4e-06 rel. See "Gate 5 rerun" |
 | 6 | MPI smoke | **GREEN** | parallel MPI tests (mpirun subprocess spawns) ran inside gate 1's 2937 |
@@ -121,8 +121,31 @@ State of the investigation at handoff:
   keeps it in `run_one`'s return) rather than inferring — e.g. run the runner
   with a single `-k` selection in the container and dump the output.
 
-This blocks only the *cloud* half of gate 3; the local GPU gate is green, so it
-is not a release blocker. Costs so far: two g4dn instances, ~1 min each.
+**RESOLVED — fixed in `69c586f6`.** Not the T4, not CUDA, not the NVHPC
+runtime. `-v` showed the children were handed unrunnable node ids
+(`file or directory not found: test_DE_gpu_omp.py::Test::test_flux_kernel`):
+pytest emits ids relative to *its own* rootdir (the common ancestor of the
+targets), while the runner resolved them against its own cwd-derived `ROOTDIR`.
+In a checkout the two coincide — which is exactly why this never showed up
+locally; against an installed anuga they do not, so every child failed to find
+its test and `classify()` mapped the result to CRASH. (`--rootdir` is not the
+fix: it makes pytest emit ids with an *empty* path component.)
+
+The runner now resolves ids against target-derived base directories (a file
+target's parent, a directory target itself, a `--pyargs` module/package via
+importlib), trying `ROOTDIR` first so in-checkout behaviour is bit-identical,
+and accepting only candidates that name a real file. It also now **errors
+loudly** — naming the id and the directories searched — when an id resolves to
+no file, instead of spawning N children that each report the same thing as a
+test CRASH.
+
+**Second, separate gap: the slim image ships no test dependencies.** Run 1 died
+on `No module named pytest`; run 3 also needed `pytest-regressions` or the
+snapshot tests error at fixture setup (`fixture 'num_regression' not found`).
+Worth a `[test]` extra in the image or a documented line in `docker/README.md`,
+so the image can verify itself.
+
+Cost: four instances, ~15 min of GPU time total.
 
 
 ---
