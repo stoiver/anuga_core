@@ -449,7 +449,71 @@ Findings:
 
 ---
 
-## Recent session summaries (sessions 21–53)
+## Recent session summaries (sessions 21–56)
+
+**Session 56 (2026-08-20/21):** **Issue triage sweep → five issues closed**, one
+of them the long-standing well-balancedness defect in every structure operator.
+
+- **Triage of all 24 open issues** against the code. #214 (TOML interior holes +
+  erosion) was already implemented on develop — closed citing the commits. #25
+  got a comment pointing at the docker/ images + GHCR workflow (PPA half stays
+  open). #143 awaits samcom12's re-run. The rest confirmed still open.
+- **#224 riverwall crest → device (PR #227, merged).** `set_elevation()` wrote
+  only the host array; mode-2 kernels kept the crest they were mapped with — a
+  gate operated mid-run was silently ignored. New `gpu_sync_riverwall_to_device()`
+  pushed by `evolve()` **at yieldstep boundaries only** (the user asked for
+  that timing): once before the loop, once on resuming from each yield, gated by
+  a `device_data_dirty` flag set by the three RiverWall setters. Also warns if
+  `create_riverwalls()` runs after the interface exists (fresh arrays — the
+  device still points at the old ones; not fixable by a push).
+- **#189 degenerate-timestep protection (PR #228, merged).** Mode 2 never runs
+  it: the C loops return before `update_timestep()`, and the Python-orchestrated
+  GPU loops reach it but the stale host `max_speed` (device never syncs it back)
+  makes its `<10` guard return — absent on every path, one of them by accident.
+  Option 1 from the issue: warn once per domain, and the routine itself now
+  warns-and-returns in mode 2 so the absence is a decision.
+- **#225 MAX_INLET_TRIANGLES (PR #228, merged).** The 64-triangle inlet cap was
+  fixed arrays in `culvert_indices` — host-side staging only; the device side
+  was already dynamic. Now heap arrays sized by the real count, cap deleted.
+  `Test_GPU_LargeInlet`: 79 triangles/inlet, modes agree ~1e-14.
+- **#229 structure well-balancedness (PR #230, merged) — took two attempts.**
+  Filed first: `Inlet.set_depths()` writes a uniform DEPTH, which on a sloping
+  bed tilts a lake at rest by half the inlet's bed range per step at zero Q.
+  **Attempt 1 (surface shift, e899973f) reverted** (f4e2ab11): broke the pipe
+  culvert on all 15 CI jobs — flattening is the smoothing the culvert feedback
+  loop needs; a dry receiving inlet grew a ridge and Q stalled to 0.
+  **Attempt 2 (stage leveling): water finds its level** — fills raise the
+  lowest stages, drawdowns lower the highest, clamped at the bed, bisection (no
+  sort, same loop in numpy and one GPU team). Flat bed reproduces the old write
+  **exactly**, so the pipe test passes by construction; zero transfer is
+  bit-exact (lake at rest 6.8e-02 → 3.7e-09). Second trap: one momentum value
+  written uniformly over leveled depths gave a near-dry cell 1.7e6 m/s and
+  collapsed the timestep — `set_average_momenta()` now writes it depth-weighted
+  (uniform VELOCITY). Full details in DECISIONS.md.
+- **`run_gpu_tests_isolated.sh` lied (8662239c).** `rc=$?` after a pipeline read
+  `tail`'s status — every failing class reported "ok", which is how attempt 1's
+  failure reached CI instead of this desk. Fixed + verified against a deliberate
+  failure. Lesson applied: attempt 2 was validated with the full suite exactly
+  as CI runs it (2937 passed), not the fast subset.
+- **New gotcha (KNOWN_ISSUES):** a structure in near-still water amplifies
+  roundoff exponentially (1 ULP → ~1e-2 m stage in seconds) via the
+  enquiry↔inlet feedback. NOT mode-related — a 1-ULP mode-1 perturbation
+  diverges as fast as mode 2. Un-masked now #229 is fixed: CPU/GPU culvert
+  comparisons need a driven head; well-balancedness tests stay short.
+- **Process:** merges to `develop` don't fire `Fixes #N` (default branch is
+  `main`) — #189/#224/#225/#229 all closed by hand with commit citations.
+
+**RESUME STATE (as of 2026-08-21):**
+- `develop` == `origin/develop` == `stoiver/develop` at `7f98999a` (merge of
+  PR #230). Topic branch `fix/229-well-balanced-inlets` deleted after merge.
+- Merged this session: PRs #227, #228, #230. Closed: issues #189, #214, #224,
+  #225, #229.
+- **Still open from the triage:** #223 (gpu-aware MPI is host-staged), #170
+  (per-substep boundaries in the C RK loop), #190 (blocked on draft PR #188),
+  #143 (awaiting samcom12 re-run), #77, #141, and the older wishlist items.
+- Uncommitted, deliberately: `towradgi.toml` arithmetic demo. Untracked:
+  `sandpit/culvert_issue/` (48 MB reporter model — do not commit),
+  `docs/source/reference/generated/`.
 
 **Session 55 (2026-08-13):** A regression of our own making, the culvert crash,
 and hardening the installers so neither can happen quietly again.
@@ -496,6 +560,9 @@ and hardening the installers so neither can happen quietly again.
 - **Issue #223 (open):** `-Dgpu_aware_mpi=true` is not GPU-aware — `gpu_halo.c`
   stages every halo through host memory in *both* paths (UCX `uct_mm` SIGSEGVs
   on device pointers). Measure halo cost before implementing real GPUDirect.
+
+*(Session 55's resume state below is superseded by session 56's above — PR #222
+merged, and the issue landscape has moved.)*
 
 **RESUME STATE (as of 2026-08-13):**
 - `develop` = `stoiver/develop`, **8 commits ahead of origin/develop**, all in
