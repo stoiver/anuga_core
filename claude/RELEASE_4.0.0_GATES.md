@@ -9,7 +9,7 @@ Machine: local dev box (Ubuntu 26.04, RTX 5070, nvc GPU build) unless noted.
 | 2 | Unified-mode suite, CPU build, one process | **GREEN** | FULL suite, unified default, one process, gcc build: 2947 passed/105 skipped. GPU test file 106/106 after 55ef856d |
 | 3 | GPU build, isolated runners | **GREEN local** / cloud **BLOCKED** | local: all 25 classes green + `-cm unified` sweep 465 pass/2 skip. Cloud: see "Cloud gate blocked" below |
 | 4 | Validation suite | **GREEN** | 120 passed / 0 failed (1895.9 s). NOTE: the structure regression baselines passed *unchanged* — the existing validation set is blind to #229 (flat beds at every inlet) |
-| 5 | Towradgi mode 1 vs mode 2 | **INVALID — must rerun** | ran to completion but the comparison is not trustworthy; see "Gate 5 is invalid" below |
+| 5 | Towradgi mode 1 vs mode 2 | **GREEN** (rerun) | isolated dirs, monotonic axes asserted: final max\|Δ\|=3.52e-02 m, localised (9/128539 cells >1 cm), mass agrees 3.4e-06 rel. See "Gate 5 rerun" |
 | 6 | MPI smoke | **GREEN** | parallel MPI tests (mpirun subprocess spawns) ran inside gate 1's 2937 |
 | 7 | Wheel smoke (3 OSes) | **GREEN by CI** | 20 wheel builds + sdist green on PR #230 (2026-08-21); linux from-source venv install verified locally |
 | 8 | Fresh conda installs (3.10, 3.14) | **GREEN** | env create + `pip install --no-build-isolation` + evolve smoke: py3.10.20/numpy 2.2.6 and py3.14.7/numpy 2.5.2, both at `55ef856d` |
@@ -60,8 +60,25 @@ the leveling write reproduces the old uniform-depth write exactly. Only
 differs from `bridge_hecras2` before writing the notes (likely a sloping or
 non-uniform bed under one inlet; **not yet confirmed**).
 
-**3. Towradgi** (22 Boyd culverts on real terrain): old-write arm chained to
-start when gate 5 finishes (bg task bbs2100xv) — **incomplete at handoff**.
+**3. Towradgi** (22 Boyd culverts on real terrain, 1 h, 128 539 points):
+
+| metric | value |
+|---|---|
+| final max\|Δ\| | **3.1817e-01 m** |
+| 99th percentile | 1.5450e-03 m |
+| cells >1 mm | 2340 / 128539 |
+
+**Why so much larger than the validation cases:** the towradgi inlets sit on
+real terrain. Bed-elevation spread across the 44 inlets of its 22 structures:
+**median 0.774 m, max 4.954 m, and 41 of 44 inlets exceed 1 cm** (worst:
+Branch_5_Collins_St_Culverts inlet 1, 4.95 m across 12 triangles). Since the
+old write-back tilted a level surface by ~half the bed range across an inlet,
+the predicted worst-case tilt is ~2.48 m; the observed 0.32 m is well inside
+that, as expected when only some of those steep inlets carry water in a 1 h run.
+
+This is the release-notes headline: the synthetic flat-bed validation cases were
+**blind** to #229 (3 of 4 bit-identical), while a real-terrain model moves by
+decimetres. Analysis script: `scratchpad/inlet_slopes.py`.
 
 ---
 
@@ -147,3 +164,30 @@ four HEC-RAS cases were unaffected because they import no local module. Fix:
 `sys.path.insert(0, case_dir)` in `scratchpad/towradgi_runner.py` (and
 `delta_runner.py`, which has the same latent bug). So the Towradgi row of the
 #229 delta table is **still missing** — the four validation cases above stand.
+
+
+---
+
+## Gate 5 rerun (clean) — 2026-08-21 19:18-19:44
+
+Three arms, each forced into its own datadir (`Domain.set_datadir` patched),
+with monotonic-time and matching-axes assertions before differencing.
+
+| arm | wall time |
+|---|---|
+| mode 1 (CPU, 16 threads) | 11.9 min |
+| mode 2 (GPU, RTX 5070) | 3.6 min — **3.3x faster** |
+| old write-back (mode 1) | 11.1 min |
+
+`GATE5 mode1-vs-mode2 final max|Δ| = 3.5246e-02 m` — **identical to the number
+the corrupted file produced.** The original figure was in fact correct; the
+corrupt file simply was not valid evidence for it. Rejecting it was still right.
+
+Character of that 3.5 cm: 9 of 128 539 cells exceed 1 cm (0.007%), 99th pct
+0.54 mm, total water agrees to 3.4e-06 relative, worst cell in 16 cm of water
+(shallow flow, not a dry cell). Consistent with the accepted mode-1/mode-2
+divergence documented in FUTURE_WORK (chaos amplification of a 1-ULP wet/dry
+seed). **Caveat kept for the record:** FUTURE_WORK records an earlier towradgi
+figure of 2.5e-3; this max is ~14x larger, but the configurations differ
+(duration, mesh scale, yieldstep) so it is not a like-for-like comparison and
+should not be read as a regression without one.
