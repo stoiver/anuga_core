@@ -121,14 +121,14 @@ mode1  ntimes 9  times [0, 60, 600, 120, 1200, 1800, 2400, 3000, 3600]   <-- non
 mode2  ntimes 7  times [0, 600, 1200, 1800, 2400, 3000, 3600]
 ```
 
-The mode-1 series is two interleaved sequences — (0, 60, 120) spliced into the
-expected 600 s yieldstep series. Both arrays happen to end at 3600, so the
-`final` figure compares like-for-like *times*, but the mode-1 file plainly
-contains data it should not, and `peak-stage` (a max over axis 0) is
-contaminated by the stray frames outright. Cause not yet identified —
-`sww_merge(delete_old=True)` at run_small_towradgi.py:1083 and the
-pre-existing `MODEL_OUTPUTS/` (which holds 600 MB June artifacts under
-*different* names) are the two things to look at first.
+**Root cause identified — filed as #232.** The frame indices show two writers
+alternating on the shared unlimited dimension: my run occupies indices
+0,2,4,5,6,7,8 and a second writer (yieldstep=60) occupies 1,3. The towradgi
+script hardcodes `domain_name` (line 129) and `MODEL_OUTPUTS` (line 382), so
+*every* run of that case study writes the same path; gate 5's mode-1 arm
+(18:19-18:33) overlapped the validation suite, still writing at 18:28.
+`sww_merge` is NOT involved (it only runs when `numproc > 1`; these were
+serial) — an early guess of mine that the index pattern disproved.
 
 **Rerun requirement:** point `--datadir` at a clean, empty directory per arm,
 and assert monotonic `time` before differencing.
