@@ -21,9 +21,21 @@ on:
         options:
           - none          # build only, upload nothing (default: safe to run anytime)
           - testpypi      # upload to TestPyPI (release candidates)
+      version:
+        description: 'Version for this build, e.g. 4.0.0rc1. Required when publish_to=testpypi. Empty = derive from git describe.'
+        type: string
+        default: ''
 
 permissions:
   contents: read
+
+# Overrides the version that meson derives from `git describe` (see
+# _git_version.py). Empty for push/PR/release events -- `inputs` is null there,
+# so this expands to '' and the normal git-describe path is used. Set only by a
+# manual dispatch, which is how a release candidate gets a real version
+# (4.0.0rc1) without putting an rc tag on develop.
+env:
+  ANUGA_VERSION: ${{ inputs.version }}
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -279,6 +291,14 @@ jobs:
       id-token: write  # required for trusted publishing (OIDC)
 
     steps:
+      - name: Require an explicit version
+        if: inputs.version == ''
+        run: |
+          echo "publish_to=testpypi needs an explicit 'version' input (e.g. 4.0.0rc1)." >&2
+          echo "Without it the artifacts carry a git-describe dev version such as" >&2
+          echo "3.3.10.dev1004+gabc1234, which is not what you want on TestPyPI." >&2
+          exit 1
+
       - name: Download all wheel artifacts
         uses: actions/download-artifact@v8
         with:
