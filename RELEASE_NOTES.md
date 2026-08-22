@@ -9,24 +9,38 @@ to a GPU, with mode-1 and mode-2 agreeing bit-for-bit on the paths that matter.
 Alongside that are a decade-old correctness fix in the structure operators, a
 substantial set of parallel and wet/dry fixes, and container images.
 
-**Existing scripts keep working.** The default compute path is unchanged
-(`legacy`); GPU offload is opt-in. What makes this a major version is the
+**Existing scripts keep working.** The default compute mode is unchanged
+(`'legacy'`), and both the unified mode and GPU offload are opt-in. What makes this a major version is the
 removal of long-deprecated code, not a change in day-to-day behaviour.
 
 ---
 
 ## Highlights
 
-### GPU / unified compute (`multiprocessor_mode=2`)
+### The unified compute mode
 
-* OpenMP-target offload for the shallow-water solver: fluxes, extrapolation,
-  boundaries, riverwalls, culverts and operators all run on device.
-* **One implementation of the physics.** `culvert_compute_one()` is shared by the
-  CPU and GPU paths, so mode 1 and mode 2 produce bit-identical culvert results.
-* Opt in per domain with `domain.set_multiprocessor_mode(2)`, or process-wide
-  with `ANUGA_DEFAULT_COMPUTE_MODE=unified`. New controls: `anuga.set_gpu_offload()`,
-  `gpu_offload_enabled()`, `gpu_offload_supported()`, `set_omp_num_threads()`.
-* Multi-GPU via MPI, with device-side halo exchange.
+The solver and its operators now have a single C implementation that runs
+CPU-multicore, and can offload to a GPU on a suitably built install.
+
+```python
+domain.set_compute_mode('unified')     # per domain; CPU-multicore by default
+```
+
+or process-wide with `ANUGA_DEFAULT_COMPUTE_MODE=unified`.
+
+* **No GPU required.** 'unified' is a compute mode, not a GPU switch: on an
+  ordinary build it runs the same unified C kernels on the CPU. GPU offload is a
+  separate, process-wide opt-in — `anuga.set_gpu_offload(True)` on a build made
+  with the NVIDIA HPC SDK. `gpu_offload_supported()` reports whether a build can.
+* **One implementation of the physics.** `culvert_compute_one()` is shared by
+  both paths, so 'legacy' and 'unified' give bit-identical culvert results.
+* On GPU: fluxes, extrapolation, boundaries, riverwalls, culverts and operators
+  all execute on device, with multi-GPU via MPI and device-side halo exchange.
+* New controls: `set_gpu_offload()`, `gpu_offload_enabled()`,
+  `gpu_offload_supported()`, `set_omp_num_threads()`, `get_omp_num_threads()`.
+
+`set_multiprocessor_mode(1|2)` still works as a thin wrapper, but
+`set_compute_mode('legacy'|'unified')` is the preferred API for new code.
 
 ### New timestepping method
 
@@ -117,9 +131,9 @@ The legacy forcing classes in `anuga.shallow_water.forcing` now all emit
 | `Wind_stress`, `Wind_stress_fast` | `Wind_stress_operator` |
 | `Barometric_pressure`, `Barometric_pressure_fast` | `Barometric_pressure_operator` |
 
-These are **silently skipped** under `multiprocessor_mode=2`, which applies
+These are **silently skipped** in the `'unified'` compute mode, which applies
 forcing in C and handles only Manning friction; a warning is issued when that
-happens. Migrating to the operators is required to use them with GPU offload.
+happens. Migrating to the operators is required to use them with 'unified'.
 
 `manning_friction_semi_implicit` is *not* deprecated — it is an in-step
 semi-implicit term, not an operator.
@@ -133,12 +147,12 @@ semi-implicit term, not an operator.
 * **Culvert stack overflow** with more than 64 culverts (#217) — buffers were
   sized by a constant that was only the initial capacity.
 * **GPU culvert inlet cap** (#225) — an inlet was limited to 64 triangles.
-* **Riverwall crest changes reached the device** (#224) — runtime
+* **Riverwall crest changes reach the device** (#224) — runtime
   `set_elevation()` was silently ignored under GPU offload.
 * **DE0 non-GPU boundary fallback** — Euler steps silently ignored
-  Python-evaluated boundary types under mode 2.
+  Python-evaluated boundary types in the 'unified' mode.
 * Degenerate-timestep protection now warns rather than silently not running
-  under mode 2 (#189).
+  in the 'unified' mode (#189).
 
 ---
 

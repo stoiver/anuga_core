@@ -30,7 +30,7 @@ Pipes use `Boyd_pipe_operator(..., diameter=...)`; weirs use
 ## 2. Forcing classes are deprecated (removal in 4.1)
 
 They still work in 4.0.0 but emit `DeprecationWarning`, and they are **silently
-skipped under GPU offload** — migrate before enabling `multiprocessor_mode=2`.
+skipped in the `'unified'` compute mode** — migrate before enabling it.
 
 ```python
 # before
@@ -82,12 +82,12 @@ A range near zero means this change does not affect that structure.
 
 ---
 
-## Optional: trying GPU / unified compute
+## Optional: trying the unified compute mode
 
 Nothing below is required to run 4.0.0.
 
 ```python
-domain.set_multiprocessor_mode(2)      # per domain
+domain.set_compute_mode('unified')     # per domain
 ```
 
 or process-wide:
@@ -96,14 +96,26 @@ or process-wide:
 export ANUGA_DEFAULT_COMPUTE_MODE=unified
 ```
 
-Requirements and caveats:
+**This is not a GPU switch.** `'unified'` selects the unified C kernels, which
+run CPU-multicore on an ordinary build. Offloading to a GPU is a separate,
+process-wide decision:
 
-* Actual GPU offload needs a build made with the NVIDIA HPC SDK (`nvc`). On a
-  standard build, mode 2 runs the same unified C kernels on the CPU.
-* The deprecated forcing classes are not applied in mode 2 (a warning is issued).
-* `protect_against_isolated_degenerate_timesteps` is not implemented in mode 2
-  (default-off; a warning is issued if enabled).
-* Under MPI, the number of ranks must match the number of visible GPUs.
+```python
+anuga.set_gpu_offload(True)            # needs a build made with nvc
+print(anuga.gpu_offload_supported())   # whether this build can offload at all
+```
+
+Caveats:
+
+* The deprecated forcing classes are not applied in 'unified' (a warning is
+  issued) — use the operators.
+* `protect_against_isolated_degenerate_timesteps` is not implemented in
+  'unified' (default-off; a warning is issued if enabled).
+* Under MPI with GPU offload, the number of ranks must match the number of
+  visible GPUs.
+
+`domain.set_multiprocessor_mode(2)` remains as a thin wrapper over
+`set_compute_mode('unified')`, but new code should prefer the named form.
 
 Container images with a working GPU toolchain are published to GHCR — see
 `docker/README.md`.
