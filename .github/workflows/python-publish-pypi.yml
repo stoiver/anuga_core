@@ -1,5 +1,7 @@
 # Build wheels on every push / PR for early feedback.
 # On a GitHub Release publish, build wheels then upload to PyPI.
+# On manual dispatch with publish_to=testpypi, upload to TestPyPI instead --
+# used for release candidates, which should never touch real PyPI.
 
 name: Build and Publish to PyPI
 
@@ -10,9 +12,30 @@ on:
     branches: [main, develop]
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      publish_to:
+        description: 'Where to upload the built distributions'
+        type: choice
+        default: none
+        options:
+          - none          # build only, upload nothing (default: safe to run anytime)
+          - testpypi      # upload to TestPyPI (release candidates)
+      version:
+        description: 'Version for this build, e.g. 4.0.0rc1. Required when publish_to=testpypi. Empty = derive from git describe.'
+        type: string
+        default: ''
 
 permissions:
   contents: read
+
+# Overrides the version that meson derives from `git describe` (see
+# _git_version.py). Empty for push/PR/release events -- `inputs` is null there,
+# so this expands to '' and the normal git-describe path is used. Set only by a
+# manual dispatch, which is how a release candidate gets a real version
+# (4.0.0rc1) without putting an rc tag on develop.
+env:
+  ANUGA_VERSION: ${{ inputs.version }}
 
 jobs:
   # ---------------------------------------------------------------------------
@@ -244,6 +267,62 @@ jobs:
   # Publish to PyPI — only runs when a GitHub Release is published.
   # Requires all wheel builds and the sdist to succeed first.
   # ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # Publish to TestPyPI. Manual only, and only when explicitly asked for:
+  # `gh workflow run python-publish-pypi.yml -f publish_to=testpypi`.
+  #
+  # Deliberately separate from the PyPI job rather than a parameter on it, so no
+  # combination of inputs can send a release candidate to real PyPI. Uses its own
+  # environment (`testpypi`), which must match the trusted publisher configured
+  # at https://test.pypi.org/manage/project/anuga/settings/publishing/ --
+  # owner anuga-community, repo anuga_core, workflow python-publish-pypi.yml.
+  # ---------------------------------------------------------------------------
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: [build-wheels, build-wheels-osx64, build-sdist]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_to == 'testpypi'
+
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/anuga
+
+    permissions:
+      id-token: write  # required for trusted publishing (OIDC)
+
+    steps:
+      - name: Require an explicit version
+        if: inputs.version == ''
+        run: |
+          echo "publish_to=testpypi needs an explicit 'version' input (e.g. 4.0.0rc1)." >&2
+          echo "Without it the artifacts carry a git-describe dev version such as" >&2
+          echo "3.3.10.dev1004+gabc1234, which is not what you want on TestPyPI." >&2
+          exit 1
+
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download sdist artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: sdist
+          path: dist
+
+      - name: List distributions to upload
+        run: ls -lh dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          verify-metadata: false
+          verbose: true
+          packages-dir: dist/
+
   publish:
     name: Publish to PyPI
     needs: [build-wheels, build-wheels-osx64, build-sdist]
