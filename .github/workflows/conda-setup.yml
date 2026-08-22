@@ -54,15 +54,29 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash -el {0}
         run: |
-           # NOTE: the mingw sysroot chain was pinned to build 10 here between
-           # 2026-08-21 and 08-22, because build 11 (m2w64-sysroot-feedstock PR #21)
-           # was ABI-incompatible with the then-current gcc and every binary aborted
-           # in the stack protector. conda-forge has since rebuilt the compilers
-           # (gcc_impl_win-64 build 2 -> 3, *-devel _102 -> _103), so the pin then held
-           # the OLD sysroot against the NEW compiler and broke again. Unpinned: the
-           # intended combination is build-11 sysroot with the rebuilt compilers.
-           # See conda-forge/m2w64-sysroot-feedstock#23.
-           conda install -c conda-forge -n anuga_env libpython gcc_win-64 gxx_win-64
+           # TEMPORARY: pin the Windows mingw toolchain to the one combination known
+           # to work. conda-forge is mid-transition and BOTH halves have moved:
+           #
+           #   sysroot 11 + gcc build 2  -> stack smashing on every binary
+           #   sysroot 10 + gcc build 2  -> GREEN   <-- pinned here
+           #   sysroot 10 + gcc build 3  -> stack smashing
+           #   sysroot 11 + gcc build 3  -> stack smashing
+           #
+           # The symptom is that meson's sanity binary aborts:
+           #   printf 'int main(void){return 0;}' | cc -   ->  compiles, then
+           #   *** stack smashing detected ***: terminated
+           # i.e. __stack_chk_fail on a function with no locals -- a stack-protector ABI
+           # mismatch, nothing to do with ANUGA.
+           #
+           # Remove this whole pin once upstream settles; do not pin one half only.
+           # Tracking: conda-forge/m2w64-sysroot-feedstock#23
+           conda install -c conda-forge -n anuga_env libpython gcc_win-64 gxx_win-64 \
+               "gcc_impl_win-64=16.1.0=h0942c35_2" \
+               "gxx_impl_win-64=16.1.0=he3d2c83_2" \
+               "m2w64-sysroot_win-64=*=*_10" \
+               "mingw-w64-ucrt-x86_64-crt-git=*=*_10" \
+               "mingw-w64-ucrt-x86_64-headers-git=*=*_10" \
+               "mingw-w64-ucrt-x86_64-winpthreads-git=*=*_10"
            # msmpi: Microsoft MPI — standard Windows MPI on conda-forge; provides
            # mpi.h under Library/include and is picked up by meson.build automatically.
            conda install -c conda-forge -n anuga_env msmpi mpi4py
