@@ -129,7 +129,28 @@ jobs:
         shell: bash -el {0}
         run: |
           conda activate anuga_env
-          pip install --no-build-isolation -v .
+          pip install --no-build-isolation -v .      # TEMPORARY (PR #234): the pytest step exits 127 with no output on
+      # Windows. Find out what is actually missing before guessing again.
+      - name: Diagnose test environment (Windows)
+        if: runner.os == 'Windows'
+        shell: bash -el {0}
+        continue-on-error: true
+        run: |
+          conda activate anuga_env
+          echo "=== which python / pytest ==="
+          which python || echo "python NOT on PATH"
+          which pytest || echo "pytest NOT on PATH"
+          python -c "import sys; print('python', sys.version)"
+          echo "=== pytest importable as a module? ==="
+          python -c "import pytest; print('pytest', pytest.__version__)" || echo "pytest NOT importable"
+          echo "=== anuga importable? ==="
+          python -c "import anuga; print('anuga', anuga.__version__)" || echo "anuga NOT importable"
+          echo "=== sandpit present? ==="
+          ls -d sandpit && ls sandpit | head -3
+          echo "=== conda list (test deps) ==="
+          conda list -n anuga_env | grep -iE "^pytest|^python |libstdcxx|libgcc" || true
+
+
 
       - name: Test package (fast — PR feedback)
         if: github.event_name == 'pull_request'
