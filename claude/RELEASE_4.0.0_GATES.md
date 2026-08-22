@@ -11,7 +11,7 @@ Machine: local dev box (Ubuntu 26.04, RTX 5070, nvc GPU build) unless noted.
 | 4 | Validation suite | **GREEN** | 120 passed / 0 failed (1895.9 s). NOTE: the structure regression baselines passed *unchanged* — the existing validation set is blind to #229 (flat beds at every inlet) |
 | 5 | Towradgi mode 1 vs mode 2 | **GREEN** (rerun) | isolated dirs, monotonic axes asserted: final max\|Δ\|=3.52e-02 m, localised (9/128539 cells >1 cm), mass agrees 3.4e-06 rel. See "Gate 5 rerun" |
 | 6 | MPI smoke | **GREEN** | parallel MPI tests (mpirun subprocess spawns) ran inside gate 1's 2937 |
-| 7 | Wheel smoke (3 OSes) | **linux/macOS green · WINDOWS RED** | was green on PR #230; all 5 Windows wheel builds have failed since 2026-08-20 on the mingw toolchain — see the Windows block in RELEASE_PLAN_4.0.0.md. **Phase 2 is on hold.** |
+| 7 | Wheel smoke (3 OSes) | **GREEN** (all 3) | Windows was red 08-20 → 08-22 on a conda-forge mingw toolchain regression (stack-protector ABI vs the build-11 CRT); fixed by pinning the sysroot chain to build 10, PR #233 / `6d5e7c4b`. 20 wheel builds + sdist green |
 | 8 | Fresh conda installs (3.10, 3.14) | **GREEN** | env create + `pip install --no-build-isolation` + evolve smoke: py3.10.20/numpy 2.2.6 and py3.14.7/numpy 2.5.2, both at `55ef856d` |
 | 9 | Docs build clean | **GREEN** | `make html` build succeeded, 0 warnings/errors; `generated/` now gitignored |
 

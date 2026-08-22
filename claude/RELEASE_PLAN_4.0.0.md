@@ -81,11 +81,10 @@ Each gate is a named command with a recorded result; a red gate blocks the tag.
       `pip install --no-build-isolation -e .`, run an example.
 - [ ] **Docs build** clean; add `docs/source/reference/generated/` to `.gitignore`.
 
-## BLOCKED: Windows CI (as of 2026-08-21) — Phase 2 is on hold
+## RESOLVED: Windows CI (2026-08-21/22) — Phase 2 hold LIFTED
 
-**Decision: do not start Phase 2 until Windows CI is green.** Drafting release
-notes against a moving target is waste, and a 4.0.0 with no working Windows
-wheels is not shippable.
+Fixed in PR #233, merged as `6d5e7c4b`. All 37 checks green (1 skip: Publish to
+PyPI, releases only). The hold below is kept as the record of what happened.
 
 Every Windows job in **both** workflows (`conda-setup.yml` and
 `python-publish-pypi.yml` — they share an install line) has failed since
@@ -110,19 +109,33 @@ meson.build:9:0: ERROR: Executables created by c compiler
 
 **Falsified:** that the newly split-out `libwinpthread` (the package holding
 `libwinpthread-1.dll`) was missing from the env and caused it. Installing it
-explicitly changes nothing; the error is byte-identical. Do not re-try this.
+explicitly changed nothing; the error was byte-identical. Do not re-try this.
 
-**Open:** why the produced executable will not run. A temporary diagnostic step
-on the PR branch compiles and runs a trivial program by hand and dumps the
-imported DLLs, the runtime DLLs present, and the installed toolchain packages.
+**Actual cause**, found by running meson's sanity check by hand:
+
+```
+printf 'int main(void){return 0;}' > sanity.c
+x86_64-w64-mingw32-cc sanity.c -o sanity.exe   ->  compile: OK
+./sanity.exe   ->  *** stack smashing detected ***: terminated  (exit 127)
+```
+
+`__stack_chk_fail` fires on a function with no locals and no buffers: the
+stack-protector ABI between `gcc_impl_win-64` 16.1.0 and the build-11 CRT does
+not line up, so *any* mingw-built binary in that env aborts on startup.
+
+**Fix shipped:** pin those four packages to build 10 in both workflows, marked
+TEMPORARY with a link to conda-forge/m2w64-sysroot-feedstock#23.
 
 **Tracking:** PR #233 (draft, ours) · conda-forge/m2w64-sysroot-feedstock#23
 (upstream). Fallback if the cause stays unclear: pin the sysroot chain to
 build 10 (`m2w64-sysroot_win-64=*=*_10`) as a temporary hold.
 
-**Effect on Phase 1:** gate 7 ("wheel smoke — green by CI") is retroactively
-**not** satisfied on Windows. Linux/macOS remain green. Phase 1's other eight
-gates stand.
+**Effect on Phase 1:** gate 7 is satisfied again — all 5 Windows wheel builds
+and all 5 Example jobs pass. Phase 1 is complete, nine gates green.
+
+**Carry into the release notes:** while the pin stands, Windows CI holds the
+mingw sysroot at build 10. It pins only the CI environment, not anything a user
+receives in a wheel. Remove it when upstream fixes build 11.
 
 ---
 
