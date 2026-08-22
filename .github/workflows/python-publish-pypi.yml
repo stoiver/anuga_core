@@ -1,5 +1,7 @@
 # Build wheels on every push / PR for early feedback.
 # On a GitHub Release publish, build wheels then upload to PyPI.
+# On manual dispatch with publish_to=testpypi, upload to TestPyPI instead --
+# used for release candidates, which should never touch real PyPI.
 
 name: Build and Publish to PyPI
 
@@ -10,6 +12,15 @@ on:
     branches: [main, develop]
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      publish_to:
+        description: 'Where to upload the built distributions'
+        type: choice
+        default: none
+        options:
+          - none          # build only, upload nothing (default: safe to run anytime)
+          - testpypi      # upload to TestPyPI (release candidates)
 
 permissions:
   contents: read
@@ -244,6 +255,54 @@ jobs:
   # Publish to PyPI — only runs when a GitHub Release is published.
   # Requires all wheel builds and the sdist to succeed first.
   # ---------------------------------------------------------------------------
+  # ---------------------------------------------------------------------------
+  # Publish to TestPyPI. Manual only, and only when explicitly asked for:
+  # `gh workflow run python-publish-pypi.yml -f publish_to=testpypi`.
+  #
+  # Deliberately separate from the PyPI job rather than a parameter on it, so no
+  # combination of inputs can send a release candidate to real PyPI. Uses its own
+  # environment (`testpypi`), which must match the trusted publisher configured
+  # at https://test.pypi.org/manage/project/anuga/settings/publishing/ --
+  # owner anuga-community, repo anuga_core, workflow python-publish-pypi.yml.
+  # ---------------------------------------------------------------------------
+  publish-testpypi:
+    name: Publish to TestPyPI
+    needs: [build-wheels, build-wheels-osx64, build-sdist]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_to == 'testpypi'
+
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/anuga
+
+    permissions:
+      id-token: write  # required for trusted publishing (OIDC)
+
+    steps:
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: wheel-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download sdist artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: sdist
+          path: dist
+
+      - name: List distributions to upload
+        run: ls -lh dist/
+
+      - name: Publish to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          verify-metadata: false
+          verbose: true
+          packages-dir: dist/
+
   publish:
     name: Publish to PyPI
     needs: [build-wheels, build-wheels-osx64, build-sdist]
