@@ -1,0 +1,142 @@
+# ANUGA 4.0.0 — Release Plan
+
+Drafted 2026-08-21 (session 57), expanding R1 of the engineering review.
+Owner: Stephen Roberts. Target: **tag within 2 weeks of the go decision.**
+
+---
+
+## The decision, and why 4.0.0 directly (no 3.4 bridge)
+
+`main` is at **3.3.10**; `develop` is **976 commits ahead** (933 files, +400k/−173k
+lines). The review's R1 offered two routes; the facts point at one:
+
+- **Both branches already share the same foundation** — meson-python, numpy ≥ 2,
+  Python 3.10–3.14, the same wheel workflow. There is no packaging cliff to bridge.
+- **develop still defaults to `legacy` compute mode** (mode 1;
+  `shallow_water_domain.py:643` — `unified` is opt-in via
+  `ANUGA_DEFAULT_COMPUTE_MODE`). Existing user scripts run unchanged on develop.
+  The scary flag-day (mode-2 by default) is NOT part of this release.
+- What makes it a major version is **removal and architecture**, not behaviour:
+  `culvert_flows/` deleted, local-timestepping infrastructure deleted, forcing
+  classes deprecated (removal in 4.1), and the GPU/mode-2 solver as the headline.
+- A 3.4 bridge would mean curating ~976 commits into a partial cherry-pick — weeks
+  of work to ship *less*, with a second release to follow anyway.
+
+**Precondition check (from ROADMAP.md):** "SC26 paper submitted / merge sp26" — done;
+sp26 has been merged into develop since 2026-04-01. The stated gate is met.
+
+---
+
+## Scope
+
+**In (everything on develop at the freeze commit), headlines for the notes:**
+
+| Theme | Items |
+|---|---|
+| New solver capability | GPU/mode-2 (`multiprocessor_mode=2`, OpenMP target offload); `DE_ader2` algorithm (1.75× DE1); unified CPU/GPU culvert kernel (mode-1 == mode-2 bit-for-bit) |
+| Correctness fixes | parallel-inlet mass balance (#193), startup mass loss (#200), culvert stack overflow (#217), riverwall crest→device (#224), inlet cap (#225), structure well-balancedness (#229), DE0 non-GPU-boundary fallback |
+| New interfaces | TOML scenario system (`anuga_run_toml`, incl. interior holes + erosion, #214); `RiverWall.set_elevation()` runtime API; `Rate_operator.rainfall()/inflow()` factories; type hints on the public API |
+| Performance/memory | ~58% quantity-memory reduction; OpenMP tuning; benchmark suite |
+| Removals (BREAKING) | `anuga/culvert_flows/` (migration: `Boyd_box_operator` — example in `run_open_slot_wide_bridge.py`); local-timestepping dead attrs (`flux_update_frequency` etc.) |
+| Deprecations (warn, remove in 4.1) | `Inflow`, `Rainfall`, `Wind_stress`, `Barometric_pressure` forcing classes → operators |
+| Tooling | Docker images (CPU/GPU/GPU-MPI) + GHCR publishing; hardened installers; `anuga_run_isolated_tests`; SWW GUI improvements |
+
+**Explicitly out (deferred to 4.1+):**
+- Flipping the default compute mode to `unified` (PLAN_default_mode2_cpu.md)
+- Removing the deprecated forcing classes (P2.10 — one release of warning first)
+- cibuildwheel migration (#141), OpenACC backend (#188)
+
+---
+
+## Phase 0 — Freeze & decision (Day 0–1)
+
+- [ ] Team says **go** (this plan is the proposal).
+- [ ] Freeze commit chosen on `develop`; only release-blocking fixes land after.
+- [ ] Merge-window discipline: hold open PRs (#148 etc.) until after the tag.
+- [ ] Decide the branch-protection question **before** the release PR: either
+      enforce review on `main`/`develop` or remove the rule. The release itself
+      should not need `--admin`.
+
+## Phase 1 — Pre-flight verification (Day 1–5)
+
+Each gate is a named command with a recorded result; a red gate blocks the tag.
+
+- [ ] **Full suite, CPU build** (as CI runs it):
+      `cd sandpit && OMP_NUM_THREADS=1 pytest -rs --pyargs anuga` — expect ~2 937 pass.
+- [ ] **Unified-mode suite, CPU build** (one process, documented all-green config):
+      `ANUGA_DEFAULT_COMPUTE_MODE=unified pytest --pyargs anuga --run-fast`.
+- [ ] **GPU build, isolated runner** (local RTX 5070 + one AWS g6):
+      `bash anuga/shallow_water/tests/run_gpu_tests_isolated.sh` and
+      `anuga_run_isolated_tests --pyargs anuga.shallow_water -cm unified`.
+- [ ] **Validation suite**: `python validation_tests/run_auto_validation_tests.py`.
+      **Expected delta:** #229 moves results for structures on sloping beds —
+      record before/after for the affected cases and put the numbers in the
+      release notes rather than being surprised by a user report.
+- [ ] **Towradgi case study**, mode 1 vs mode 2, archived to S3 with the build report.
+- [ ] **MPI smoke**: `pytest anuga/parallel/tests/` (auto-slow) on 2 and 4 ranks.
+- [ ] **Wheel smoke**: install the CI-built wheel in a fresh venv on
+      linux/macos/windows (the 37-check matrix on PR #230 is recent evidence this
+      is green); `import anuga; anuga.test()` + one example script.
+- [ ] **Fresh-environment install**: `environments/environment_3.10.yml` and 3.14,
+      `pip install --no-build-isolation -e .`, run an example.
+- [ ] **Docs build** clean; add `docs/source/reference/generated/` to `.gitignore`.
+
+## Phase 2 — Release candidate (Day 5–9)
+
+- [ ] **Release notes** (`docs/` + GitHub Release body). Method: walk
+      `git log 3.3.10..HEAD` segmented by the session summaries in
+      `claude/SESSION_GUIDE.md` §21–56 — they are already a categorised changelog.
+      Structure: Highlights / Breaking changes / Deprecations / Fixes / Thanks.
+- [ ] **Upgrade guide** (one page): `culvert_flows` → `Boyd_box_operator` mapping;
+      forcing classes → operators table; note that mode 2 is opt-in and how to try it
+      (`domain.set_multiprocessor_mode(2)` / `ANUGA_DEFAULT_COMPUTE_MODE=unified`).
+- [ ] **Version/citation hygiene**: CITATION file, docs version strings, README badges.
+- [ ] **RC on TestPyPI** (optional but cheap): `4.0.0rc1` tag, workflow_dispatch the
+      wheel build, `pip install --index-url test.pypi.org` smoke.
+- [ ] Announce the RC on the anuga-community list/discussions for a 3–4 day
+      soak; Hydrata and samcom12 are the two downstream users to ping directly.
+
+## Phase 3 — Ship (Day 10–12)
+
+Procedure per the 3.3.8 runbook (SESSION_GUIDE §"Release procedure"):
+
+```bash
+# 1. Release PR: develop → main (review per the Phase-0 policy decision)
+gh pr create --repo anuga-community/anuga_core --base main --head develop \
+  --title "Release 4.0.0"
+# 2. After merge — annotated tag, BARE version (no v prefix), on the merge commit
+git checkout main && git pull origin main
+git tag -a 4.0.0 -m "ANUGA 4.0.0"
+git push origin 4.0.0
+# 3. The GitHub Release is what triggers PyPI upload (a bare tag does NOT)
+gh release create 4.0.0 --verify-tag --title "ANUGA 4.0.0" --notes-file RELEASE_NOTES.md
+```
+
+- [ ] Watch `python-publish-pypi.yml` → wheels + sdist on PyPI; `pip install anuga==4.0.0` smoke.
+- [ ] `docker-publish.yml` fires on the Release → CPU image to GHCR automatically;
+      trigger the GPU image via `workflow_dispatch` (`build_gpu=true`).
+- [ ] conda-forge: feedstock bot opens the PR automatically; review it (new
+      build deps are unlikely — meson stack unchanged since 3.3.2) and merge.
+- [ ] Close the shipped issues milestone; announce (list, README news, Hydrata).
+
+## Phase 4 — After (Day 12+)
+
+- [ ] `main` becomes the 4.0.x patch base (same cherry-pick model as 3.3.x).
+- [ ] Retire the "no develop→main" rule from ROADMAP.md/CLAUDE.md; normal cadence
+      resumes — aim for a release every 2–3 months so a backlog like this cannot
+      re-form.
+- [ ] Open the 4.1 milestone seeded with: forcing-class removal (P2.10),
+      default-mode decision (PLAN_default_mode2_cpu.md), cibuildwheel (#141),
+      C-audit P1 items (review R3).
+
+---
+
+## Risks
+
+| Risk | Likelihood | Mitigation |
+|---|---|---|
+| #229 moves sloping-bed structure results; users see changed numbers | certain (it's the fix) | Measure in Phase 1, publish the deltas in the notes with the physics rationale |
+| conda-forge feedstock friction | low | Build stack unchanged since 3.3.2; review the bot PR same-day |
+| GPU build regressions invisible to CI | medium | Phase-1 manual GPU gates on two architectures; known limitation, R2 of the review is the durable fix |
+| A 976-commit release has an unknown regression | medium | RC soak + downstream pings; 4.0.1 within days is cheap once the patch line exists |
+| Release stalls again on perfection | medium | The gates above are the complete list; nothing else blocks the tag |

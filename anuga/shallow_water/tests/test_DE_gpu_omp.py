@@ -3586,8 +3586,13 @@ class Test_GPU_StructureSurfaceLevel(unittest.TestCase):
                                            np.maximum(bed(x, y), -0.66), -5.0))
         Br = Reflective_boundary(domain)
         domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
+        # End points deliberately OFF the 5 m grid lines: an exchange line lying
+        # exactly on mesh edges is a degenerate intersection whose triangle
+        # selection is compiler-dependent (gcc and nvc resolve it differently —
+        # 32 vs 54 triangles for x=60.0 on this mesh), which made this test's
+        # dried-cell threshold build-dependent.
         culvert = Boyd_box_operator(
-            domain, end_points=[[60.0, 25.0], [140.0, 25.0]],
+            domain, end_points=[[61.3, 25.0], [138.7, 25.0]],
             enquiry_points=[[40.0, 25.0], [170.0, 25.0]],
             losses=1.5, width=10.0, height=3.0, apron=5.0,
             use_momentum_jet=False, use_velocity_head=False,
