@@ -148,7 +148,10 @@ receives in a wheel. Remove it when upstream fixes build 11.
 - [ ] **Upgrade guide** (one page): `culvert_flows` → `Boyd_box_operator` mapping;
       forcing classes → operators table; note that mode 2 is opt-in and how to try it
       (`domain.set_multiprocessor_mode(2)` / `ANUGA_DEFAULT_COMPUTE_MODE=unified`).
-- [ ] **Version/citation hygiene**: CITATION file, docs version strings, README badges.
+- [x] **Version/citation hygiene**: CITATION.cff bumped to 4.0.0; the stale
+      2022 `commit:` pin dropped and `date-released` omitted rather than left
+      wrong. Docs take the version from `anuga.__version__` (no hardcoding) and
+      README badges are version-agnostic, so neither needs a change.
 - [ ] **RC on TestPyPI** (optional but cheap): `4.0.0rc1` tag, workflow_dispatch the
       wheel build, `pip install --index-url test.pypi.org` smoke.
 - [ ] Announce the RC on the anuga-community list/discussions for a 3–4 day
@@ -162,8 +165,12 @@ Procedure per the 3.3.8 runbook (SESSION_GUIDE §"Release procedure"):
 # 1. Release PR: develop → main (review per the Phase-0 policy decision)
 gh pr create --repo anuga-community/anuga_core --base main --head develop \
   --title "Release 4.0.0"
-# 2. After merge — annotated tag, BARE version (no v prefix), on the merge commit
+# 2. Set the release date in CITATION.cff, then tag.
+#    (version is already 4.0.0; date-released is deliberately absent until now)
 git checkout main && git pull origin main
+sed -i "s/^version: 4.0.0$/version: 4.0.0\ndate-released: '$(date +%F)'/" CITATION.cff
+git commit -am "CITATION.cff: record the 4.0.0 release date"
+#    annotated tag, BARE version (no v prefix), on the merge commit
 git tag -a 4.0.0 -m "ANUGA 4.0.0"
 git push origin 4.0.0
 # 3. The GitHub Release is what triggers PyPI upload (a bare tag does NOT)
