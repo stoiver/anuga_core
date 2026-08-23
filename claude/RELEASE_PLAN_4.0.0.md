@@ -166,6 +166,20 @@ receives in a wheel. Remove it when upstream fixes build 11.
       the changed result looks wrong for that catchment the physics decision
       reopens rather than the wording.
 
+### Commits after 4.0.0rc1
+
+The RC is not byte-identical to what 4.0.0 will be. Anything landing after it
+goes here so the difference is deliberate and reviewable, rather than
+discovered at tag time:
+
+| commit | change | in the RC? |
+|---|---|---|
+| `32577739` | #237 — explain the missing `anuga/_version.py` instead of a bare ModuleNotFoundError | no |
+
+Judgement: an import-time error message, no solver or API change, so it does
+not invalidate the soak. If anything else lands that *could* change results,
+rebuild the RC rather than adding a row here.
+
 ## Phase 3 — Ship (Day 10–12)
 
 Procedure per the 3.3.8 runbook (SESSION_GUIDE §"Release procedure"):

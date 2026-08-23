@@ -156,6 +156,16 @@ semi-implicit term, not an operator.
 
 ---
 
+## Smaller improvements
+
+* Importing anuga from an unbuilt source tree now explains itself. It used to
+  fail with a bare `ModuleNotFoundError: No module named 'anuga._version'`,
+  which pointed at neither cause: `_version.py` is generated at build time, and
+  because Python searches the working directory first, an unbuilt tree also
+  shadows a correctly installed anuga whenever you run from the repository
+  root. The error now names the directory it imported from and says how to fix
+  it (#237).
+
 ## Requirements
 
 * Python 3.10 – 3.14, numpy ≥ 2.0
