@@ -154,8 +154,31 @@ receives in a wheel. Remove it when upstream fixes build 11.
       README badges are version-agnostic, so neither needs a change.
 - [ ] **RC on TestPyPI** (optional but cheap): `4.0.0rc1` tag, workflow_dispatch the
       wheel build, `pip install --index-url test.pypi.org` smoke.
-- [ ] Announce the RC on the anuga-community list/discussions for a 3–4 day
-      soak; Hydrata and samcom12 are the two downstream users to ping directly.
+- [x] **RC published**: `4.0.0rc1` on TestPyPI (21 artifacts, cp310–cp314,
+      Linux/macOS arm64+x86_64/Windows, plus sdist), built via the
+      `ANUGA_VERSION` override with no rc tag. Dispatch:
+      `gh workflow run python-publish-pypi.yml -f publish_to=testpypi -f version=4.0.0rc1`
+- [ ] **Send the announcement** — draft ready at
+      `claude/RELEASE_4.0.0rc1_ANNOUNCEMENT.md`, addressed to Ole, Rudy, Petar
+      and Jorge, with a specific ask for each. Then 3–4 days of soak.
+      **Wait for Petar on Towradgi before Phase 3**: it is his case study, it is
+      the evidence behind the #229 numbers in the release notes, and if he says
+      the changed result looks wrong for that catchment the physics decision
+      reopens rather than the wording.
+
+### Commits after 4.0.0rc1
+
+The RC is not byte-identical to what 4.0.0 will be. Anything landing after it
+goes here so the difference is deliberate and reviewable, rather than
+discovered at tag time:
+
+| commit | change | in the RC? |
+|---|---|---|
+| `32577739` | #237 — explain the missing `anuga/_version.py` instead of a bare ModuleNotFoundError | no |
+
+Judgement: an import-time error message, no solver or API change, so it does
+not invalidate the soak. If anything else lands that *could* change results,
+rebuild the RC rather than adding a row here.
 
 ## Phase 3 — Ship (Day 10–12)
 
