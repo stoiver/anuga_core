@@ -238,11 +238,16 @@ if [ "$DRY" = "1" ]; then
   echo "================= DRY RUN — nothing launched, nothing charged ================="
   echo "-- identity --"
   aws sts get-caller-identity --output text 2>&1 | sed 's/^/  /' || echo "  (could not verify creds — is the CLI configured?)"
-  echo "-- GPU on-demand vCPU quota (needs >= this instance's vCPUs) --"
-  q=$("${AWS[@]}" service-quotas get-service-quota --service-code ec2 --quota-code L-DB2E81BA \
-        --query 'Quota.Value' --output text 2>/dev/null) \
-    && echo "  current 'Running On-Demand G and P instances' = ${q} vCPUs" \
-    || echo "  (could not read quota — check Service Quotas; new accounts start at 0, see AWS_SETUP.md step 6)"
+  echo "-- GPU vCPU quotas (each needs >= this instance's vCPUs) --"
+  for qq in "L-DB2E81BA:G/VT on-demand" "L-417A185B:P on-demand" \
+            "L-3819A6DF:G/VT spot" "L-7212CCBC:P spot"; do
+    qcode=${qq%%:*}; qname=${qq##*:}
+    q=$("${AWS[@]}" service-quotas get-service-quota --service-code ec2 --quota-code "$qcode" \
+          --query 'Quota.Value' --output text 2>/dev/null) \
+      && printf '  %-16s %s vCPUs\n' "$qname" "$q" \
+      || printf '  %-16s (could not read — see AWS_SETUP.md step 6)\n' "$qname"
+  done
+  [ "$SPOT" = "1" ] && echo "  (--spot: tries the spot quota first, then falls back to on-demand)"
   echo "-- plan --"
   printf '  %-16s %s\n' image "$IMAGE" instances "$INSTANCE_TYPES (spot=$SPOT, disk=${DISK_GB}GB)" \
     region "$REGION" ami "$AMI" profile "$INSTANCE_PROFILE" subnets "${SUBNETS[*]}" \
@@ -261,26 +266,40 @@ if [ "$DRY" = "1" ]; then
   exit 0
 fi
 
-echo ">> launching (types: $INSTANCE_TYPES; ${#SUBNETS[@]} AZ subnet(s))..."
-IID="" ; USED_TYPE="" ; USED_SUBNET=""
-for itype in ${INSTANCE_TYPES//,/ }; do
-  for subnet in "${SUBNETS[@]}"; do
-    ATTEMPT=( "${RUN_ARGS[@]}" --instance-type "$itype" )
-    [ "$subnet" != "<none>" ] && ATTEMPT+=( --subnet-id "$subnet" )
-    if out=$("${AWS[@]}" ec2 run-instances "${ATTEMPT[@]}" \
-               --query 'Instances[0].InstanceId' --output text 2>&1); then
-      IID="$out" ; USED_TYPE="$itype" ; USED_SUBNET="$subnet" ; break 2
-    elif echo "$out" | grep -qE "InsufficientInstanceCapacity|Unsupported|InvalidParameterValue"; then
-      echo "   $itype${subnet:+ / $subnet}: unavailable — trying next"
-      continue
-    else
-      die "run-instances failed: $out"
-    fi
-  done
-done
-[ -z "$IID" ] && die "no capacity for any of [$INSTANCE_TYPES] across ${#SUBNETS[@]} AZ(s); try --spot, --instance <other type>, another --region, or retry later"
+# With --spot we try the spot market first and fall back to on-demand, rather
+# than failing outright: spot is much cheaper but its capacity pools are
+# separate and often empty, and for these short jobs an on-demand run is far
+# better than no run. Without --spot only on-demand is attempted.
+MARKETS=("on-demand")
+[ "$SPOT" = "1" ] && MARKETS=("spot" "on-demand")
 
-SPOT_LABEL="" ; [ "$SPOT" = "1" ] && SPOT_LABEL=", spot"   # ${SPOT:+} misfires: "0" is non-empty
+echo ">> launching (types: $INSTANCE_TYPES; ${#SUBNETS[@]} AZ subnet(s); markets: ${MARKETS[*]})..."
+IID="" ; USED_TYPE="" ; USED_SUBNET="" ; USED_MARKET=""
+for market in "${MARKETS[@]}"; do
+  MARKET_ARGS=()
+  [ "$market" = "spot" ] && MARKET_ARGS=(--instance-market-options "MarketType=spot")
+  for itype in ${INSTANCE_TYPES//,/ }; do
+    for subnet in "${SUBNETS[@]}"; do
+      ATTEMPT=( "${RUN_ARGS[@]}" "${MARKET_ARGS[@]}" --instance-type "$itype" )
+      [ "$subnet" != "<none>" ] && ATTEMPT+=( --subnet-id "$subnet" )
+      if out=$("${AWS[@]}" ec2 run-instances "${ATTEMPT[@]}" \
+                 --query 'Instances[0].InstanceId' --output text 2>&1); then
+        IID="$out" ; USED_TYPE="$itype" ; USED_SUBNET="$subnet" ; USED_MARKET="$market" ; break 3
+      elif echo "$out" | grep -qE "InsufficientInstanceCapacity|Unsupported|InvalidParameterValue|MaxSpotInstanceCountExceeded"; then
+        echo "   $itype${subnet:+ / $subnet} [$market]: unavailable — trying next"
+        continue
+      else
+        die "run-instances failed: $out"
+      fi
+    done
+  done
+  [ "$market" = "spot" ] && echo ">> no spot capacity/quota — falling back to on-demand"
+done
+[ -z "$IID" ] && die "no capacity for any of [$INSTANCE_TYPES] across ${#SUBNETS[@]} AZ(s) in ${MARKETS[*]}; try --instance <other type>, another --region, or retry later"
+
+# Report the market we ACTUALLY got, not the one requested: with --spot the
+# launch may have fallen back to on-demand, and the price difference matters.
+SPOT_LABEL="" ; [ "$USED_MARKET" = "spot" ] && SPOT_LABEL=", spot"
 echo ">> instance $IID launched ($USED_TYPE${SPOT_LABEL}${USED_SUBNET:+, $USED_SUBNET})."
 echo ">> it will run: ${COMMAND}"
 echo ">> results ->   ${OUTPUT_S3}    (+ anuga-run.log with timing)"
