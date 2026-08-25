@@ -20,6 +20,10 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		anuga_int boundary_length
 		anuga_int number_of_riverwall_edges
 		anuga_int number_of_tracers
+		double* tracer_centroid_values
+		double* tracer_edge_values
+		double* tracer_boundary_values
+		double* tracer_explicit_update
 		anuga_int optimise_dry_cells
 		anuga_int extrapolate_velocity_second_order
 		anuga_int low_froude
@@ -311,6 +315,24 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 	#------------------------------------------------------
 	# Quantity structures
 	#------------------------------------------------------
+	# SPIKE: generic tracer arrays. Owned by the Python Domain as C-contiguous
+	# (ns, ...) float64 arrays; NULL when no tracers are registered.
+	cdef double[:, ::1] tr2
+	if getattr(domain_py_object, 'number_of_tracers', 0) > 0:
+		tr2 = domain_py_object.tracer_centroid_values
+		D.tracer_centroid_values = &tr2[0, 0]
+		tr2 = domain_py_object.tracer_edge_values
+		D.tracer_edge_values = &tr2[0, 0]
+		tr2 = domain_py_object.tracer_boundary_values
+		D.tracer_boundary_values = &tr2[0, 0]
+		tr2 = domain_py_object.tracer_explicit_update
+		D.tracer_explicit_update = &tr2[0, 0]
+	else:
+		D.tracer_centroid_values = NULL
+		D.tracer_edge_values = NULL
+		D.tracer_boundary_values = NULL
+		D.tracer_explicit_update = NULL
+
 	quantities = domain_py_object.quantities
 	stage = quantities["stage"]
 	xmomentum = quantities["xmomentum"]
