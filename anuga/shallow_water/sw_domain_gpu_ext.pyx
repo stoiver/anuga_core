@@ -102,6 +102,7 @@ cdef extern from "gpu_domain.h" nogil:
         # Riverwall arrays
         int64_t number_of_riverwall_edges
         int64_t number_of_tracers
+        double beta_tracer
         double* tracer_centroid_values
         double* tracer_edge_values
         double* tracer_boundary_values
@@ -809,6 +810,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     # reliably zeroed, and a garbage value makes the flux-kernel guard fire on the
     # device and dereference unmapped pointers (CUDA_ERROR_ILLEGAL_ADDRESS).
     D.number_of_tracers = getattr(domain_object, 'number_of_tracers', 0)
+    D.beta_tracer = getattr(domain_object, 'beta_tracer', 1.0)
     D.tracer_centroid_values = NULL
     D.tracer_edge_values = NULL
     D.tracer_boundary_values = NULL

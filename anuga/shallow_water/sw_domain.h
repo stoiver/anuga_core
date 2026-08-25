@@ -140,6 +140,10 @@ struct domain {
     double* tracer_edge_values;
     double* tracer_boundary_values;
     double* tracer_explicit_update;
+    /* Reconstruction aggressiveness for tracers, analogous to beta_w for stage.
+     * 0.0 => first order; >0 => limited second order. Appended at the very end
+     * so no previously-existing field offset moves. */
+    double beta_tracer;
 
 };
 

@@ -58,6 +58,11 @@ void core_extrapolate_second_order_edge(struct domain *D) {
 
     anuga_int * restrict surrogate_neighbours = D->surrogate_neighbours;
     anuga_int * restrict number_of_boundaries = D->number_of_boundaries;
+
+    // Generic passive tracers. n_tracers == 0 in every ordinary run; keep only
+    // the loop-invariant count live in the common path (see SPIKE notes).
+    const anuga_int n_tracers = D->number_of_tracers;
+    const double beta_tracer = D->beta_tracer;
     double * restrict x_centroid_work = D->x_centroid_work;
     double * restrict y_centroid_work = D->y_centroid_work;
 
@@ -157,6 +162,17 @@ void core_extrapolate_second_order_edge(struct domain *D) {
                 bed_ev[k3 + i] = bed_c;
             }
 
+            if (n_tracers > 0) {
+                double * restrict t_cv = D->tracer_centroid_values;
+                double * restrict t_ev = D->tracer_edge_values;
+                for (anuga_int sidx = 0; sidx < n_tracers; sidx++) {
+                    double tc = t_cv[sidx * n + k];
+                    t_ev[sidx * 3 * n + k3 + 0] = tc;
+                    t_ev[sidx * 3 * n + k3 + 1] = tc;
+                    t_ev[sidx * 3 * n + k3 + 2] = tc;
+                }
+            }
+
         } else if (num_boundaries <= 1) {
             double hc = height_cv[k];
             double h0 = height_cv[k0];
@@ -231,6 +247,30 @@ void core_extrapolate_second_order_edge(struct domain *D) {
             ymom_ev[k3 + 1] = edge_vals[1];
             ymom_ev[k3 + 2] = edge_vals[2];
 
+            // Tracers. Reconstruct c (the intensive variable) rather than the
+            // conserved h*c: the limiter then bounds each edge value by the
+            // cell-and-neighbour range of c, which is what preserves positivity
+            // and prevents spurious extrema where h varies sharply.
+            if (n_tracers > 0) {
+                double * restrict t_cv = D->tracer_centroid_values;
+                double * restrict t_ev = D->tracer_edge_values;
+                double beta_t = beta_tracer * hfactor;
+                for (anuga_int sidx = 0; sidx < n_tracers; sidx++) {
+                    anuga_int off = sidx * n;
+                    if (beta_t > 0.0) {
+                        gpu_calc_edge_values_with_gradient(
+                            t_cv[off + k], t_cv[off + k0], t_cv[off + k1], t_cv[off + sn2],
+                            dxv0, dxv1, dxv2, dyv0, dyv1, dyv2,
+                            dx1, dx2, dy1, dy2, inv_area2, beta_t, edge_vals);
+                    } else {
+                        gpu_set_constant_edge_values(t_cv[off + k], edge_vals);
+                    }
+                    t_ev[sidx * 3 * n + k3 + 0] = edge_vals[0];
+                    t_ev[sidx * 3 * n + k3 + 1] = edge_vals[1];
+                    t_ev[sidx * 3 * n + k3 + 2] = edge_vals[2];
+                }
+            }
+
         } else {
             // Number of boundaries == 2
             // One internal neighbour, gradient is in direction of neighbour's centroid
@@ -295,6 +335,28 @@ void core_extrapolate_second_order_edge(struct domain *D) {
             ymom_ev[k3 + 0] = ymom_cv[k] + dqv[0];
             ymom_ev[k3 + 1] = ymom_cv[k] + dqv[1];
             ymom_ev[k3 + 2] = ymom_cv[k] + dqv[2];
+
+            // Tracers, 1D gradient toward the one internal neighbour
+            if (n_tracers > 0) {
+                double * restrict t_cv = D->tracer_centroid_values;
+                double * restrict t_ev = D->tracer_edge_values;
+                for (anuga_int sidx = 0; sidx < n_tracers; sidx++) {
+                    anuga_int off = sidx * n;
+                    double tk = t_cv[off + k];
+                    if (beta_tracer > 0.0) {
+                        dq1 = t_cv[off + kn] - tk;
+                        gpu_compute_dqv_from_gradient(dq1, grad_dx2, grad_dy2,
+                                                      dxv0, dxv1, dxv2, dyv0, dyv1, dyv2, dqv);
+                        gpu_compute_qmin_qmax_from_dq1(dq1, &qmin, &qmax);
+                        gpu_limit_gradient(dqv, qmin, qmax, beta_tracer);
+                    } else {
+                        dqv[0] = 0.0; dqv[1] = 0.0; dqv[2] = 0.0;
+                    }
+                    t_ev[sidx * 3 * n + k3 + 0] = tk + dqv[0];
+                    t_ev[sidx * 3 * n + k3 + 1] = tk + dqv[1];
+                    t_ev[sidx * 3 * n + k3 + 2] = tk + dqv[2];
+                }
+            }
         }
 
         // Convert velocity edge values back to momentum if needed
