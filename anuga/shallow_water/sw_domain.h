@@ -118,6 +118,29 @@ struct domain {
     double* xmom_backup_values;
     double* ymom_backup_values;
 
+    /* ------------------------------------------------------------------
+     * Generic passive tracers (sediment concentration, salinity, ...).
+     *
+     * SPIKE: prototype for the sediment add-on.  Appended at the END of the
+     * struct on purpose so every pre-existing field keeps its offset and the
+     * cache layout of the hot arrays is untouched.
+     *
+     * number_of_tracers == 0 is the ordinary case and must cost nothing:
+     * the flux kernel guards all tracer work behind a single test on this
+     * loop-invariant integer.
+     *
+     * Layout is tracer-major:
+     *   centroid[s*n + k]          n = number_of_elements
+     *   edge    [s*3n + 3k + i]
+     *   boundary[s*boundary_length + m]
+     *   explicit_update[s*n + k]
+     * ------------------------------------------------------------------ */
+    anuga_int number_of_tracers;
+    double* tracer_centroid_values;
+    double* tracer_edge_values;
+    double* tracer_boundary_values;
+    double* tracer_explicit_update;
+
 };
 
 

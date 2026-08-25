@@ -101,6 +101,11 @@ cdef extern from "gpu_domain.h" nogil:
         int64_t* tri_full_flag
         # Riverwall arrays
         int64_t number_of_riverwall_edges
+        int64_t number_of_tracers
+        double* tracer_centroid_values
+        double* tracer_edge_values
+        double* tracer_boundary_values
+        double* tracer_explicit_update
         int64_t ncol_riverwall_hydraulic_properties
         int64_t nrow_riverwall_hydraulic_properties
         int64_t* edge_flux_type
@@ -799,6 +804,15 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.edge_flux_type = &edge_flux_type[0]
     else:
         D.edge_flux_type = NULL
+
+    # SPIKE: generic tracers. MUST be set explicitly -- the mode-2 struct is not
+    # reliably zeroed, and a garbage value makes the flux-kernel guard fire on the
+    # device and dereference unmapped pointers (CUDA_ERROR_ILLEGAL_ADDRESS).
+    D.number_of_tracers = getattr(domain_object, 'number_of_tracers', 0)
+    D.tracer_centroid_values = NULL
+    D.tracer_edge_values = NULL
+    D.tracer_boundary_values = NULL
+    D.tracer_explicit_update = NULL
 
     # Extract riverwall arrays (may be empty if no riverwalls)
     D.number_of_riverwall_edges = getattr(domain_object, 'number_of_riverwall_edges', 0)

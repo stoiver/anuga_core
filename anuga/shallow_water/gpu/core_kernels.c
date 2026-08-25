@@ -962,6 +962,10 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
     anuga_int * restrict riverwall_rowIndex = D->riverwall_rowIndex;
     double * restrict riverwall_hydraulic_properties = D->riverwall_hydraulic_properties;
 
+    // Generic passive tracers (SPIKE).  n_tracers == 0 in every ordinary run;
+    // all tracer work below is guarded on this loop-invariant integer.
+    const anuga_int n_tracers = D->number_of_tracers;
+
     // Reduction variables
     double local_timestep = 1.0e+100;
     double boundary_flux_sum_substep = 0.0;
@@ -981,6 +985,10 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
         stage_eu[k] = 0.0;
         xmom_eu[k] = 0.0;
         ymom_eu[k] = 0.0;
+        if (n_tracers > 0) {
+            double * restrict t_eu = D->tracer_explicit_update;
+            for (anuga_int s = 0; s < n_tracers; s++) t_eu[s * n + k] = 0.0;
+        }
 
         // Get centroid values for this element
         double hc = height_cv[k];
@@ -1129,6 +1137,34 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
             xmom_eu[k] += edgeflux[1];
             ymom_eu[k] += edgeflux[2];
 
+            // --- Passive tracer advection (SPIKE) -------------------------
+            // edgeflux[0] is the water mass flux through this edge, already
+            // multiplied by -length.  Sign convention after that negation:
+            //     edgeflux[0] < 0  ->  OUTflow from k, donor is k
+            //     edgeflux[0] > 0  ->  INflow  to   k, donor is the neighbour
+            // Using the same edgeflux[0] for both cells sharing the edge makes
+            // tracer mass conservation structural, independent of cell sizes.
+            if (n_tracers > 0) {
+                double * restrict t_ev = D->tracer_edge_values;
+                double * restrict t_bv = D->tracer_boundary_values;
+                double * restrict t_eu = D->tracer_explicit_update;
+                const anuga_int t_bl = D->boundary_length;
+                const double wflux = edgeflux[0];
+                const int    inflow = (wflux > 0.0);
+                for (anuga_int s = 0; s < n_tracers; s++) {
+                    double c_up;
+                    if (inflow) {
+                        c_up = is_boundary
+                             ? t_bv[s * t_bl + (-neighbour - 1)]
+                             : t_ev[s * 3 * n + neighbour * 3 + neighbour_edges[ki]];
+                    } else {
+                        c_up = t_ev[s * 3 * n + ki];
+                    }
+                    t_eu[s * n + k] += wflux * c_up;
+                }
+            }
+            // -------------------------------------------------------------
+
             // Boundary flux tracking: if this cell is not a ghost, and the neighbour
             // is a boundary condition OR a ghost cell, add the flux to boundary integral
             if (tri_full_flag != NULL) {
@@ -1163,6 +1199,10 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
         stage_eu[k] *= inv_area;
         xmom_eu[k] *= inv_area;
         ymom_eu[k] *= inv_area;
+        if (n_tracers > 0) {
+            double * restrict t_eu = D->tracer_explicit_update;
+            for (anuga_int s = 0; s < n_tracers; s++) t_eu[s * n + k] *= inv_area;
+        }
 
     } // End element loop
 

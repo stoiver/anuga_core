@@ -19,6 +19,7 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		anuga_int number_of_elements
 		anuga_int boundary_length
 		anuga_int number_of_riverwall_edges
+		anuga_int number_of_tracers
 		anuga_int optimise_dry_cells
 		anuga_int extrapolate_velocity_second_order
 		anuga_int low_froude
@@ -152,6 +153,9 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.number_of_elements = domain_py_object.number_of_elements
 	D.boundary_length = domain_py_object.boundary_length
 	D.number_of_riverwall_edges = domain_py_object.number_of_riverwall_edges
+	# SPIKE: generic tracers. The struct is PyMem_Malloc'd (not zeroed), so this
+	# MUST be set on every fill or the flux kernel guard reads garbage.
+	D.number_of_tracers = getattr(domain_py_object, 'number_of_tracers', 0)
 	D.optimise_dry_cells = domain_py_object.optimise_dry_cells
 	D.extrapolate_velocity_second_order = domain_py_object.extrapolate_velocity_second_order
 	D.low_froude = domain_py_object.low_froude
