@@ -25,6 +25,8 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double* tracer_edge_values
 		double* tracer_boundary_values
 		double* tracer_explicit_update
+		double* tracer_conserved_values
+		double* tracer_backup_values
 		anuga_int optimise_dry_cells
 		anuga_int extrapolate_velocity_second_order
 		anuga_int low_froude
@@ -330,11 +332,17 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 		D.tracer_boundary_values = &tr2[0, 0]
 		tr2 = domain_py_object.tracer_explicit_update
 		D.tracer_explicit_update = &tr2[0, 0]
+		tr2 = domain_py_object.tracer_conserved_values
+		D.tracer_conserved_values = &tr2[0, 0]
+		tr2 = domain_py_object.tracer_backup_values
+		D.tracer_backup_values = &tr2[0, 0]
 	else:
 		D.tracer_centroid_values = NULL
 		D.tracer_edge_values = NULL
 		D.tracer_boundary_values = NULL
 		D.tracer_explicit_update = NULL
+		D.tracer_conserved_values = NULL
+		D.tracer_backup_values = NULL
 
 	quantities = domain_py_object.quantities
 	stage = quantities["stage"]

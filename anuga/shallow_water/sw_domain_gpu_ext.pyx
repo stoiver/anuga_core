@@ -107,6 +107,8 @@ cdef extern from "gpu_domain.h" nogil:
         double* tracer_edge_values
         double* tracer_boundary_values
         double* tracer_explicit_update
+        double* tracer_conserved_values
+        double* tracer_backup_values
         int64_t ncol_riverwall_hydraulic_properties
         int64_t nrow_riverwall_hydraulic_properties
         int64_t* edge_flux_type
@@ -815,6 +817,8 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     D.tracer_edge_values = NULL
     D.tracer_boundary_values = NULL
     D.tracer_explicit_update = NULL
+    D.tracer_conserved_values = NULL
+    D.tracer_backup_values = NULL
 
     # Extract riverwall arrays (may be empty if no riverwalls)
     D.number_of_riverwall_edges = getattr(domain_object, 'number_of_riverwall_edges', 0)

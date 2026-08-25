@@ -140,6 +140,11 @@ struct domain {
     double* tracer_edge_values;
     double* tracer_boundary_values;
     double* tracer_explicit_update;
+    /* m = h*c, the CONSERVED tracer variable. Integrated by
+     * update/backup/saxpy exactly like stage; tracer_centroid_values (c) is
+     * DERIVED from it each substep, exactly as height is derived from stage. */
+    double* tracer_conserved_values;
+    double* tracer_backup_values;
     /* Reconstruction aggressiveness for tracers, analogous to beta_w for stage.
      * 0.0 => first order; >0 => limited second order. Appended at the very end
      * so no previously-existing field offset moves. */

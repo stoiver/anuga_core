@@ -27,6 +27,8 @@ void core_extrapolate_second_order_edge(struct domain *D) {
     anuga_int extrapolate_velocity_second_order = D->extrapolate_velocity_second_order;
 
     // Parameters for hfactor computation (wet-dry limiting)
+    const anuga_int n_tracers_x = D->number_of_tracers;
+
     double a_tmp = 0.3;
     double b_tmp = 0.1;
     double c_tmp = 1.0 / (a_tmp - b_tmp);
@@ -90,6 +92,17 @@ void core_extrapolate_second_order_edge(struct domain *D) {
 
         xmom_cv[k] = xmom_out * inv_dk;
         ymom_cv[k] = ymom_out * inv_dk;
+
+        // Derive tracer concentration c = m/h from the conserved m, exactly as
+        // height is derived from stage above. Dry cells carry no concentration.
+        if (n_tracers_x > 0) {
+            double * restrict t_cons = D->tracer_conserved_values;
+            double * restrict t_cv   = D->tracer_centroid_values;
+            double inv_h = is_dry ? 0.0 : (1.0 / dk);
+            for (anuga_int s = 0; s < n_tracers_x; s++) {
+                t_cv[s * n + k] = t_cons[s * n + k] * inv_h;
+            }
+        }
     }
 
     // Step 2: Main extrapolation loop
@@ -439,6 +452,7 @@ void core_distribute_edges_to_vertices(struct domain *D) {
 
 void core_update_conserved_quantities(struct domain *D, double timestep) {
     anuga_int n = D->number_of_elements;
+    const anuga_int n_tracers = D->number_of_tracers;
 
     double * restrict stage_cv = D->stage_centroid_values;
     double * restrict xmom_cv = D->xmom_centroid_values;
@@ -491,6 +505,18 @@ void core_update_conserved_quantities(struct domain *D, double timestep) {
         stage_siu[k] = 0.0;
         xmom_siu[k] = 0.0;
         ymom_siu[k] = 0.0;
+
+        // Tracers: integrate the conserved m = h*c. No semi-implicit term and
+        // deliberately NO clamping -- clamping would break exact conservation.
+        // Positivity is instead a property of the upwind flux under CFL, and is
+        // asserted by the tests rather than enforced here.
+        if (n_tracers > 0) {
+            double * restrict t_cons = D->tracer_conserved_values;
+            double * restrict t_eu   = D->tracer_explicit_update;
+            for (anuga_int s = 0; s < n_tracers; s++) {
+                t_cons[s * n + k] += timestep * t_eu[s * n + k];
+            }
+        }
     }
 }
 
@@ -500,6 +526,7 @@ void core_update_conserved_quantities(struct domain *D, double timestep) {
 
 void core_backup_conserved_quantities(struct domain *D) {
     anuga_int n = D->number_of_elements;
+    const anuga_int n_tracers = D->number_of_tracers;
 
     double * restrict stage_cv = D->stage_centroid_values;
     double * restrict xmom_cv = D->xmom_centroid_values;
@@ -514,6 +541,14 @@ void core_backup_conserved_quantities(struct domain *D) {
         stage_bk[k] = stage_cv[k];
         xmom_bk[k] = xmom_cv[k];
         ymom_bk[k] = ymom_cv[k];
+
+        if (n_tracers > 0) {
+            double * restrict t_cons = D->tracer_conserved_values;
+            double * restrict t_bk   = D->tracer_backup_values;
+            for (anuga_int s = 0; s < n_tracers; s++) {
+                t_bk[s * n + k] = t_cons[s * n + k];
+            }
+        }
     }
 }
 
@@ -523,6 +558,7 @@ void core_backup_conserved_quantities(struct domain *D) {
 
 void core_saxpy_conserved_quantities(struct domain *D, double a, double b, double c) {
     anuga_int n = D->number_of_elements;
+    const anuga_int n_tracers = D->number_of_tracers;
 
     double * restrict stage_cv = D->stage_centroid_values;
     double * restrict xmom_cv = D->xmom_centroid_values;
@@ -538,6 +574,16 @@ void core_saxpy_conserved_quantities(struct domain *D, double a, double b, doubl
         stage_cv[k] = a * stage_cv[k] + b * stage_bk[k];
         xmom_cv[k] = a * xmom_cv[k] + b * xmom_bk[k];
         ymom_cv[k] = a * ymom_cv[k] + b * ymom_bk[k];
+
+        // SAXPY must act on the CONSERVED m, not on c: h differs between RK
+        // stages, so averaging c would not average the transported mass.
+        if (n_tracers > 0) {
+            double * restrict t_cons = D->tracer_conserved_values;
+            double * restrict t_bk   = D->tracer_backup_values;
+            for (anuga_int s = 0; s < n_tracers; s++) {
+                t_cons[s * n + k] = a * t_cons[s * n + k] + b * t_bk[s * n + k];
+            }
+        }
     }
 
     // Apply c scaling if needed: Q = Q / c
@@ -550,6 +596,10 @@ void core_saxpy_conserved_quantities(struct domain *D, double a, double b, doubl
             stage_cv[k] *= c_inv;
             xmom_cv[k] *= c_inv;
             ymom_cv[k] *= c_inv;
+            if (n_tracers > 0) {
+                double * restrict t_cons = D->tracer_conserved_values;
+                for (anuga_int s = 0; s < n_tracers; s++) t_cons[s * n + k] *= c_inv;
+            }
         }
     }
 }
