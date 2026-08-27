@@ -4,11 +4,6 @@ This is the free oracle the plan calls for -- the CPU path is already verified
 (test_recon / test_tracer_ns1 / test_ns2 / test_time_int), so mode 2 only has
 to agree with it.
 
-UNTIL PHASE 2 MAPPING LANDS THIS SCRIPT IS EXPECTED TO FAIL at check 0, with
-"mode 2 did not engage". That is the point: the mode-2 tracer arrays are not
-mapped to the device, so sw_domain_gpu_ext refuses (NotImplementedError) and
-the GPU interface falls back to mode 1.
-
 Check 0 exists because WITHOUT IT THIS TEST PASSES FALSELY. The fallback is
 silent enough that a naive mode-1-vs-mode-2 diff would be comparing mode 1
 against mode 1 and reporting a green agreement to 0.0.
@@ -77,11 +72,25 @@ if not engaged:
     print('  are mapped to the device.')
     raise SystemExit(1)
 
-from anuga.shallow_water.sw_domain_gpu_ext import sync_to_device, sync_from_device
+from anuga.shallow_water.sw_domain_gpu_ext import sync_to_device
 sync_to_device(gpu.gpu_interface.gpu_dom)
 for _ in gpu.evolve(yieldstep=2.0, finaltime=FINALTIME):
     pass
-sync_from_device(gpu.gpu_interface.gpu_dom)
+
+# DELIBERATELY no sync_from_device() here.
+#
+# In mode 2 distribute_to_vertices_and_edges() is the OUTPUT path: it syncs the
+# device centroids to the host and then runs the host protect + extrapolate,
+# which re-derives every DERIVED quantity -- height, and c from m. evolve()
+# already calls it before yielding, so the domain is correct and self-consistent
+# on return.
+#
+# Calling sync_from_device() afterwards UNDOES that: it copies raw device
+# centroids back over the freshly derived host values, leaving derived
+# quantities one substep behind the conserved ones. Conserved quantities
+# (stage, xmomentum, ymomentum, m) are identical either way, which is why
+# test_rk3_mode1_vs_mode2_dam_break can sync after evolve safely -- it compares
+# only conserved quantities. Derived quantities are not safe that way.
 
 # Device fp evaluation order differs (fma, reduction order), so agreement is
 # ~1e-9 on a real GPU build rather than machine precision.
@@ -97,30 +106,17 @@ for q in ('stage', 'xmomentum', 'ymomentum'):
 # ---------------------------------------------------------------------------
 # 2. Derived concentration c.
 #
-# KNOWN PRE-EXISTING DIVERGENCE, not a tracer bug. Mode 1 and mode 2 return
-# state from DIFFERENT POINTS in the substep sequence. Each substep runs
-#   distribute (derives height and c)  ->  fluxes  ->  update (changes stage, m)
-# and mode 1's evolve ends after a distribute while mode 2's ends after an
-# update. So mode 2's DERIVED quantities lag its CONSERVED ones by one substep.
-#
-# This is reproducible with NO TRACERS AT ALL: an Ns=0 mode-2 run returns
-# height_cv inconsistent with its own stage by the same magnitude. Check 5
-# below asserts exactly that, so the c difference is attributed correctly.
-#
-# The conserved variable m is the real test and it is exact (check 3), as is
-# total mass (check 4). c is reported here but does not fail the suite.
+# c is DERIVED (c = m/h), so unlike m it is only correct where the derived
+# quantities have been refreshed. In mode 2 that refresh is
+# distribute_to_vertices_and_edges(), which evolve() calls before yielding --
+# see the note above about not calling sync_from_device() afterwards.
 # ---------------------------------------------------------------------------
 for name in ('uniform', 'wedge'):
     a = gpu.get_tracer(name)
     b = cpu.get_tracer(name)
-    d = np.abs(a - b).max()
-    if np.allclose(a, b, rtol=0, atol=atol):
-        print('  [PASS] 2. tracer concentration agrees: %r' % name)
-        print('         max|diff| = %.3e' % d)
-    else:
-        print('  [KNOWN] 2. tracer concentration differs: %r' % name)
-        print('         max|diff| = %.3e -- derived-quantity lag, see check 5'
-              % d)
+    check('2. tracer concentration agrees: %r' % name,
+          np.allclose(a, b, rtol=0, atol=atol),
+          'max|diff| = %.3e' % np.abs(a - b).max())
 
 for i, name in enumerate(('uniform', 'wedge')):
     a = gpu.tracer_conserved_values[i]
@@ -137,23 +133,23 @@ for i, name in enumerate(('uniform', 'wedge')):
           'mode2 %.10e vs mode1 %.10e' % (ma, mb))
 
 # ---------------------------------------------------------------------------
-# 5. Attribution: the derived-quantity lag is pre-existing and tracer-free.
+# 5. Self-consistency of the DERIVED quantities in each mode.
+#
+# Guards the trap that produced a spurious 7e-2 disagreement in check 2 while m
+# agreed to 6.7e-16: an explicit sync_from_device() after evolve copies raw
+# device centroids over the host values that mode 2's output path had already
+# derived, leaving height and c one substep behind stage and m. Conserved
+# quantities survive that; derived ones do not. If this check fails, suspect a
+# stray sync before suspecting the physics.
 # ---------------------------------------------------------------------------
 for nm, d in (('mode 1', cpu), ('mode 2', gpu)):
     hcv = d.quantities['height'].centroid_values
-    st = (d.quantities['stage'].centroid_values
-          - d.quantities['elevation'].centroid_values)
-    lag = np.abs(hcv - np.maximum(st, 0.0)).max()
-    print('  [INFO] 5. %s height_cv vs stage-bed: %.3e' % (nm, lag))
+    st = np.maximum(d.quantities['stage'].centroid_values
+                    - d.quantities['elevation'].centroid_values, 0.0)
+    check('5. %s: height is consistent with stage' % nm,
+          np.allclose(hcv, st, rtol=0, atol=atol),
+          'max|height_cv - (stage-bed)| = %.3e' % np.abs(hcv - st).max())
 
-hcv = gpu.quantities['height'].centroid_values
-st = (gpu.quantities['stage'].centroid_values
-      - gpu.quantities['elevation'].centroid_values)
-check('5. mode 2 lags on DERIVED quantities independently of tracers',
-      np.abs(hcv - np.maximum(st, 0.0)).max() > atol,
-      'height_cv is stale in mode 2 with Ns=0 too, so the c difference in '
-      'check 2 is this same pre-existing lag, not the tracer transport')
-
-n = 1 + 3 + 2 + 2 + 1
-print('\n  %d/%d passed  (check 2 reported separately)' % (n - _fail[0], n))
+n = 1 + 3 + 2 + 2 + 2 + 2
+print('\n  %d/%d passed' % (n - _fail[0], n))
 raise SystemExit(1 if _fail[0] else 0)
