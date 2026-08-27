@@ -708,6 +708,12 @@ class Domain(Generic_Domain):
         # rate diverge as shear vanishes. Same constant that bounds E* in
         # [E-1]. Inactive when d* = 1, since c <= c_max = 0.3 < 0.65.
         self.sediment_c_pack = 0.65
+        # Friction closure for the sediment kernel (spec 3.3). 'constant' is
+        # the right default for ordinary flood work; see set_sediment_friction.
+        self.sediment_friction_mode = 0
+        self.sediment_manning_ll = 0.065
+        self.sediment_wilson_bed = 0
+        self.sediment_wilson_D = 1.0e-3
 
         #-------------------------------
         # If environment variable OMP_NUM_THREADS is not set,
@@ -1082,6 +1088,78 @@ class Domain(Generic_Domain):
             del self._gpu_boundary_info_initialized
 
         return index
+
+    def set_sediment_friction(self, mode='constant', k_s=None, r_d=2.0,
+                              r_br=2.0, sigma_br=None, bed='sand',
+                              grain_size=None):
+        """Select the friction closure used by the sediment kernel (spec 3.3).
+
+        This affects only `tau_b` in the sediment source term; the
+        hydrodynamic friction operator is untouched.
+
+        `mode='constant'` (default)
+            `f_c = g n^2 h^(-1/3)` `[T-6]` with `n` from the domain's own
+            friction quantity.
+
+        `mode='larsen_lamb'`
+            Manning-Strickler `[T-13]`-`[T-15]`: `k_s = r_d r_br sigma_br` and
+            `n = k_s^(1/6) / (8.1 sqrt(g))`, uniform in space and time. Pass
+            either `k_s` directly or `sigma_br` (one standard deviation of
+            bedrock elevation). LL16 measured `sigma_br ~ 5 m` at Moses Coulee,
+            giving `k_s = 20 m` and `n = 0.065` -- a **site-measured** quantity,
+            not a universal default.
+
+        `mode='wilson'`
+            `f_c` from bed type and relative submergence `[T-8]`-`[T-10]`.
+            `bed` is 'sand' (uses D50), 'gravel' or 'boulder' (both use D84);
+            pass the percentile as `grain_size`.
+
+        Notes
+        -----
+        **`larsen_lamb` and `wilson` are megaflood/planetary parameterisations,
+        not general-purpose flood closures.** W04 is a *Mars outflow channel*
+        study under Martian gravity; LL16 is the Channeled Scablands. Neither is
+        calibrated for ordinary river or urban flood modelling, which is ANUGA's
+        main use. For standard flood work keep `constant` with an `n` from
+        conventional tables.
+        """
+        import math
+        from anuga.config import g as _g
+
+        modes = {'constant': 0, 'larsen_lamb': 1, 'wilson': 2}
+        if mode not in modes:
+            raise ValueError('unknown friction mode %r; expected one of %r'
+                             % (mode, sorted(modes)))
+        self.sediment_friction_mode = modes[mode]
+
+        if mode == 'larsen_lamb':
+            if k_s is None:
+                if sigma_br is None:
+                    raise ValueError(
+                        "larsen_lamb needs either k_s or sigma_br; sigma_br is "
+                        "site-measured (LL16 report ~5 m at Moses Coulee) and "
+                        "has no universal default")
+                k_s = r_d * r_br * sigma_br            # [T-15]
+            if k_s <= 0.0:
+                raise ValueError('k_s must be > 0, got %g' % k_s)
+            self.sediment_manning_ll = k_s**(1.0 / 6.0) / (8.1 * math.sqrt(_g))
+
+        elif mode == 'wilson':
+            beds = {'sand': 0, 'gravel': 1, 'boulder': 2}
+            if bed not in beds:
+                raise ValueError('unknown bed type %r; expected one of %r'
+                                 % (bed, sorted(beds)))
+            if grain_size is None or grain_size <= 0.0:
+                raise ValueError(
+                    "wilson needs grain_size > 0 (D50 for sand, D84 for "
+                    "gravel/boulder)")
+            self.sediment_wilson_bed = beds[bed]
+            self.sediment_wilson_D = float(grain_size)
+
+        self._Domain_C_struct = None
+        self.gpu_interface = None
+        if hasattr(self, '_gpu_boundary_info_initialized'):
+            del self._gpu_boundary_info_initialized
 
     def get_sediment_names(self):
         """Return the registered sediment class names, in index order."""

@@ -212,6 +212,24 @@ struct domain {
      * c_b = d* c. Same constant that bounds E* in [E-1]. */
     double sediment_c_pack;
 
+    /* Friction closure for the sediment kernel, spec 3.3.
+     *   0 = constant     n from friction_centroid_values (default)
+     *   1 = larsen_lamb  n uniform, from [T-14]/[T-15]; sediment_manning_ll
+     *   2 = wilson       f_c per cell from bed type, [T-8]..[T-10]
+     * In ALL modes f_c still varies per cell per timestep, because [T-6]
+     * depends on h. Spec 3.3 calls that the coupling most easily missed.
+     *
+     * NOTE ON THE FACTOR OF 8. W04 write their equations as (8/f_c)^1/2, but
+     * THEIR f_c is the Darcy-Weisbach f (their Eq 4: U = [(8gRS)/f_c]^1/2),
+     * whereas f_c in this struct is the spec's f_c = f/8. The two collide on
+     * the same symbol. Working it through, f_c(ours) = f/8 = 1/X^2 where X is
+     * the right-hand side of [T-8]..[T-10] -- the eights cancel. Using W04's
+     * value directly would make tau_b 8x too large. */
+    anuga_int sediment_friction_mode;
+    double sediment_manning_ll;     /* [T-14] uniform n for larsen_lamb */
+    anuga_int sediment_wilson_bed;  /* 0 sand [T-8], 1 gravel [T-9], 2 boulder [T-10] */
+    double sediment_wilson_D;       /* D50 for sand, D84 for gravel/boulder [m] */
+
 };
 
 

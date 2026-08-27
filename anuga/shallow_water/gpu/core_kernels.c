@@ -598,6 +598,10 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     const anuga_int d_star_mode = D->sediment_d_star_mode;
     const double a_h_floor = D->sediment_a_h_floor;
     const double c_pack = D->sediment_c_pack;
+    const anuga_int fric_mode = D->sediment_friction_mode;
+    const double n_ll = D->sediment_manning_ll;
+    const anuga_int wbed = D->sediment_wilson_bed;
+    const double wD = D->sediment_wilson_D;
 
     // Hoisted for the same reason as in the update/backup/saxpy kernels: on a
     // GPU build the loop below is an 'omp target' region and D is NOT mapped to
@@ -626,12 +630,39 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
         const double v = (denom > 0.0) ? (ymom_cv[k] * h / denom) : 0.0;
         const double vel2 = u * u + v * v;
 
-        // f_c = g n^2 h^(-1/3)  [T-6] == RDy26 A5. This is the 'constant'
-        // closure: n is user-supplied, but f_c STILL varies per cell per
-        // timestep through h. Spec 3.3 calls that the coupling most easily
-        // missed, so it is recomputed here rather than cached.
-        const double nman = friction_cv[k];
-        const double f_c = grav * nman * nman / cbrt(h);
+        // Friction closure, spec 3.3. In EVERY mode f_c varies per cell per
+        // timestep -- through h in [T-6] for the Manning-based modes, and
+        // through the relative submergence h/D for wilson. Recomputed here
+        // rather than cached, which spec 3.3 calls the coupling most easily
+        // missed.
+        double f_c;
+        if (fric_mode == 2) {
+            // wilson [T-8]..[T-10]. W04's equations give X = (8/f_W04)^1/2
+            // with f_W04 the Darcy-Weisbach f; ours is f/8, so f_c = 1/X^2.
+            // See the note in sw_domain.h: taking W04's f_c literally as ours
+            // would make tau_b 8x too large.
+            //
+            // The relations assume the clasts are submerged. Below h = D the
+            // logarithms go to zero or negative and the power law leaves its
+            // calibration, so relative submergence is floored at 1.
+            double rel = h / wD;
+            if (!(rel > 1.0)) rel = 1.0;
+            double X;
+            if (wbed == 0) {
+                X = 8.46 * pow(rel, 0.1005);           /* sand,    [T-8]  */
+            } else if (wbed == 1) {
+                X = 5.75 * log10(rel) + 3.514;         /* gravel,  [T-9]  */
+            } else {
+                X = 5.62 * log10(rel) + 4.0;           /* boulder, [T-10] */
+            }
+            f_c = 1.0 / (X * X);
+        } else {
+            // [T-6] f_c = g n^2 h^(-1/3) == RDy26 A5, with n either the
+            // per-cell user field (constant mode) or the uniform Manning-
+            // Strickler value of [T-14] (larsen_lamb).
+            const double nman = (fric_mode == 1) ? n_ll : friction_cv[k];
+            f_c = grav * nman * nman / cbrt(h);
+        }
 
         for (anuga_int s = 0; s < n_classes; s++) {
             const anuga_int idx = s * n + k;
