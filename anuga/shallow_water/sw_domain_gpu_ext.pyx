@@ -813,6 +813,22 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     # device and dereference unmapped pointers (CUDA_ERROR_ILLEGAL_ADDRESS).
     D.number_of_tracers = getattr(domain_object, 'number_of_tracers', 0)
     D.beta_tracer = getattr(domain_object, 'beta_tracer', 1.0)
+    # PHASE 2 SCAFFOLDING -- remove once the six arrays below are mapped to the
+    # device. The pointers are NULL here while number_of_tracers is read from
+    # the domain, so the kernels' n_tracers > 0 guard fires and dereferences
+    # NULL on the device: 'CUDA_ERROR_ILLEGAL_ADDRESS ...
+    # core_extrapolate_second_order_edge'. That is a fatal accelerator abort,
+    # not a Python exception -- it kills the process and gives no usable
+    # traceback. Refuse in Python instead, where the message can say why.
+    if D.number_of_tracers > 0:
+        raise NotImplementedError(
+            'tracers are not yet available in compute mode 2 (unified/GPU): '
+            '%d tracer(s) are registered on this domain, but the tracer arrays '
+            'are not mapped to the device yet (Phase 2). Running anyway would '
+            'abort with CUDA_ERROR_ILLEGAL_ADDRESS. Use '
+            "domain.set_multiprocessor_mode(1) / set_compute_mode('legacy') "
+            'for tracer work until Phase 2 lands.'
+            % D.number_of_tracers)
     D.tracer_centroid_values = NULL
     D.tracer_edge_values = NULL
     D.tracer_boundary_values = NULL
