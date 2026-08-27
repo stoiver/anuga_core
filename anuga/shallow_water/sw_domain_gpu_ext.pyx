@@ -808,33 +808,36 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     else:
         D.edge_flux_type = NULL
 
-    # SPIKE: generic tracers. MUST be set explicitly -- the mode-2 struct is not
-    # reliably zeroed, and a garbage value makes the flux-kernel guard fire on the
-    # device and dereference unmapped pointers (CUDA_ERROR_ILLEGAL_ADDRESS).
+    # Generic tracers. number_of_tracers MUST be set explicitly -- the mode-2
+    # struct is PyMem_Malloc'd and not reliably zeroed, and a garbage count makes
+    # the kernel guard fire on the device (CUDA_ERROR_ILLEGAL_ADDRESS).
     D.number_of_tracers = getattr(domain_object, 'number_of_tracers', 0)
     D.beta_tracer = getattr(domain_object, 'beta_tracer', 1.0)
-    # PHASE 2 SCAFFOLDING -- remove once the six arrays below are mapped to the
-    # device. The pointers are NULL here while number_of_tracers is read from
-    # the domain, so the kernels' n_tracers > 0 guard fires and dereferences
-    # NULL on the device: 'CUDA_ERROR_ILLEGAL_ADDRESS ...
-    # core_extrapolate_second_order_edge'. That is a fatal accelerator abort,
-    # not a Python exception -- it kills the process and gives no usable
-    # traceback. Refuse in Python instead, where the message can say why.
+    # Phase 2: wire the tracer arrays for the device. The pointers must be set
+    # whenever number_of_tracers > 0 -- the shared kernels guard on that count
+    # and dereference all six, so a NULL here is CUDA_ERROR_ILLEGAL_ADDRESS on
+    # the device, not a degraded result. gpu_domain_core.c maps them.
+    cdef double[:, ::1] tr2
     if D.number_of_tracers > 0:
-        raise NotImplementedError(
-            'tracers are not yet available in compute mode 2 (unified/GPU): '
-            '%d tracer(s) are registered on this domain, but the tracer arrays '
-            'are not mapped to the device yet (Phase 2). Running anyway would '
-            'abort with CUDA_ERROR_ILLEGAL_ADDRESS. Use '
-            "domain.set_multiprocessor_mode(1) / set_compute_mode('legacy') "
-            'for tracer work until Phase 2 lands.'
-            % D.number_of_tracers)
-    D.tracer_centroid_values = NULL
-    D.tracer_edge_values = NULL
-    D.tracer_boundary_values = NULL
-    D.tracer_explicit_update = NULL
-    D.tracer_conserved_values = NULL
-    D.tracer_backup_values = NULL
+        tr2 = domain_object.tracer_centroid_values
+        D.tracer_centroid_values = &tr2[0, 0]
+        tr2 = domain_object.tracer_edge_values
+        D.tracer_edge_values = &tr2[0, 0]
+        tr2 = domain_object.tracer_boundary_values
+        D.tracer_boundary_values = &tr2[0, 0]
+        tr2 = domain_object.tracer_explicit_update
+        D.tracer_explicit_update = &tr2[0, 0]
+        tr2 = domain_object.tracer_conserved_values
+        D.tracer_conserved_values = &tr2[0, 0]
+        tr2 = domain_object.tracer_backup_values
+        D.tracer_backup_values = &tr2[0, 0]
+    else:
+        D.tracer_centroid_values = NULL
+        D.tracer_edge_values = NULL
+        D.tracer_boundary_values = NULL
+        D.tracer_explicit_update = NULL
+        D.tracer_conserved_values = NULL
+        D.tracer_backup_values = NULL
 
     # Extract riverwall arrays (may be empty if no riverwalls)
     D.number_of_riverwall_edges = getattr(domain_object, 'number_of_riverwall_edges', 0)

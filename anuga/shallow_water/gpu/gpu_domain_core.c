@@ -770,6 +770,39 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
         GD->backup_arrays_mapped = 1;
     }
 
+    // Map generic tracer arrays if any tracers are registered.
+    //
+    // Layout is tracer-major and C-contiguous, matching the indexing the shared
+    // kernels use: centroid[s*n + k], edge[s*3n + 3k + i], boundary[s*nb + m].
+    // All six must be mapped together: the kernels' n_tracers > 0 guard reads
+    // all of them, so a partial mapping is an illegal device address, not a
+    // degraded result.
+    if (GD->D.number_of_tracers > 0) {
+        anuga_int ns = GD->D.number_of_tracers;
+        double *tr_cv = GD->D.tracer_centroid_values;
+        double *tr_ev = GD->D.tracer_edge_values;
+        double *tr_eu = GD->D.tracer_explicit_update;
+        double *tr_qv = GD->D.tracer_conserved_values;
+        double *tr_bk = GD->D.tracer_backup_values;
+        #pragma omp target enter data map(to: \
+            tr_cv[0:ns*n], tr_ev[0:ns*3*n], \
+            tr_eu[0:ns*n], tr_qv[0:ns*n], tr_bk[0:ns*n])
+
+        // Boundary values are sized by boundary_length, which is zero on a
+        // domain with no boundary edges -- mapping a zero-length array is not
+        // meaningful, so follow the same nb > 0 guard the other bv arrays use.
+        if (nb > 0) {
+            double *tr_bv = GD->D.tracer_boundary_values;
+            #pragma omp target enter data map(to: tr_bv[0:ns*nb])
+        }
+        // Deliberately NOT recording a 'tracer_arrays_mapped' flag in
+        // struct gpu_domain: that struct embeds struct domain D, so adding a
+        // member risks the silent offset-aliasing failure documented in
+        // HANDOVER.md 2.1. number_of_tracers cannot change over the lifetime
+        // of a mapped domain (add_tracer tears the GPU interface down), so the
+        // unmap path re-tests the same condition instead.
+    }
+
     // Map halo exchange arrays if we have neighbors
     if (H->num_neighbors > 0) {
         int send_size = H->total_send_size;
@@ -1158,6 +1191,24 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
             stage_backup[0:n], xmom_backup[0:n], ymom_backup[0:n])
     }
 
+    // Unmap tracer arrays. Same condition as the map path above -- see the note
+    // there on why this is re-tested rather than recorded in a struct flag.
+    if (GD->D.number_of_tracers > 0) {
+        anuga_int ns = GD->D.number_of_tracers;
+        double *tr_cv = GD->D.tracer_centroid_values;
+        double *tr_ev = GD->D.tracer_edge_values;
+        double *tr_eu = GD->D.tracer_explicit_update;
+        double *tr_qv = GD->D.tracer_conserved_values;
+        double *tr_bk = GD->D.tracer_backup_values;
+        #pragma omp target exit data map(delete: \
+            tr_cv[0:ns*n], tr_ev[0:ns*3*n], \
+            tr_eu[0:ns*n], tr_qv[0:ns*n], tr_bk[0:ns*n])
+        if (nb > 0) {
+            double *tr_bv = GD->D.tracer_boundary_values;
+            #pragma omp target exit data map(delete: tr_bv[0:ns*nb])
+        }
+    }
+
     // Unmap halo arrays
     if (H->num_neighbors > 0) {
         int send_size = H->total_send_size;
@@ -1186,6 +1237,21 @@ void gpu_domain_sync_to_device(struct gpu_domain *GD) {
     double *height_cv = GD->D.height_centroid_values;
 
     #pragma omp target update to(stage_cv[0:n], xmom_cv[0:n], ymom_cv[0:n], height_cv[0:n])
+
+    // Tracers: the conserved variable m = h*c is what the device integrates,
+    // and c is what Python seeds via set_tracer, so both have to go across.
+    // Boundary values too -- they are set on the host by boundary conditions.
+    if (GD->D.number_of_tracers > 0) {
+        anuga_int ns = GD->D.number_of_tracers;
+        anuga_int nb = GD->D.boundary_length;
+        double *tr_cv = GD->D.tracer_centroid_values;
+        double *tr_qv = GD->D.tracer_conserved_values;
+        #pragma omp target update to(tr_cv[0:ns*n], tr_qv[0:ns*n])
+        if (nb > 0) {
+            double *tr_bv = GD->D.tracer_boundary_values;
+            #pragma omp target update to(tr_bv[0:ns*nb])
+        }
+    }
 }
 
 void gpu_domain_sync_from_device(struct gpu_domain *GD) {
@@ -1199,6 +1265,16 @@ void gpu_domain_sync_from_device(struct gpu_domain *GD) {
     double *height_cv = GD->D.height_centroid_values;
 
     #pragma omp target update from(stage_cv[0:n], xmom_cv[0:n], ymom_cv[0:n], height_cv[0:n])
+
+    // Tracers: bring back both the conserved m and the derived c. Python reads
+    // c via get_tracer and computes mass from m, so returning only one of them
+    // would hand back a domain whose c and m disagree.
+    if (GD->D.number_of_tracers > 0) {
+        anuga_int ns = GD->D.number_of_tracers;
+        double *tr_cv = GD->D.tracer_centroid_values;
+        double *tr_qv = GD->D.tracer_conserved_values;
+        #pragma omp target update from(tr_cv[0:ns*n], tr_qv[0:ns*n])
+    }
 }
 
 void gpu_domain_sync_all_from_device(struct gpu_domain *GD) {

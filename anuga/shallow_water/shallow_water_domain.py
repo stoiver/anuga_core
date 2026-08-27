@@ -917,6 +917,18 @@ class Domain(Generic_Domain):
         # rebuilds it against the new arrays.
         self._Domain_C_struct = None
 
+        # Same argument on the device side: the GPU interface has the OLD
+        # tracer arrays mapped (or none at all, if it was built at Ns=0), and
+        # the arrays it points at have just been freed. Tear it down so it is
+        # rebuilt and re-mapped against the new ones. _ensure_gpu_interface()
+        # recreates it on demand.
+        self.gpu_interface = None
+        # NB: this flag is tested with hasattr, not for truthiness (see
+        # update_boundary), so it must be DELETED, not set False -- setting it
+        # False would skip the re-initialisation that defines _gpu_all_on_gpu.
+        if hasattr(self, '_gpu_boundary_info_initialized'):
+            del self._gpu_boundary_info_initialized
+
         if initial_value is not None:
             self.set_tracer(name, initial_value)
 
