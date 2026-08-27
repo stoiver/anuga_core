@@ -196,6 +196,15 @@ struct domain {
     double* sediment_tau_c_star;    /* (ncl) critical Shields stress; FG21 0.04 */
     double sediment_gamma0;         /* [E-1] empirical, FG21 0.0024 */
 
+    /* Near-bed concentration ratio d*(Z), spec 4.3 / open item S1a.
+     *   0 = constant, use sediment_d_star (the P14/P13 d* = 1 limiting case)
+     *   1 = Rouse, evaluate the fitted form of [S-4] per cell
+     * sediment_reference_height is 'a' in [S-4], the near-bed reference height
+     * that aSM16 requires but never states. Exposed rather than hidden: d*
+     * varies by up to 13x across plausible a/h at high Z. */
+    anuga_int sediment_d_star_mode;
+    double* sediment_reference_height;   /* (ncl) a [m] */
+
 };
 
 

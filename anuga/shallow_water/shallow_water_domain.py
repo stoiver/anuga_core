@@ -695,6 +695,8 @@ class Domain(Generic_Domain):
         self.sediment_diameter = None           # d_g   [m]  (ncl,)
         self.sediment_R = None                  # R          (ncl,)
         self.sediment_tau_c_star = None         # tau_c*     (ncl,)
+        self.sediment_reference_height = None   # a     [m]  (ncl,)
+        self.sediment_d_star_mode = 0           # 0 constant, 1 Rouse [S-4]
 
         #-------------------------------
         # If environment variable OMP_NUM_THREADS is not set,
@@ -975,7 +977,8 @@ class Domain(Generic_Domain):
 
     def add_sediment_class(self, name, diameter, d_star=1.0, beta=None,
                            initial_concentration=0.0, rho_s=2650.0,
-                           rho_w=1000.0, tau_c_star=0.04, **settling_kwargs):
+                           rho_w=1000.0, tau_c_star=0.04,
+                           reference_height=None, **settling_kwargs):
         """Register a suspended sediment class and return its index.
 
         A sediment class is a tracer -- so it is transported by the machinery of
@@ -1003,6 +1006,14 @@ class Domain(Generic_Domain):
             Critical Shields stress for entrainment `[E-1]`. Default 0.04,
             FG21's choice for suspension. Setting it to 0 disables entrainment
             for this class, leaving deposition only.
+        reference_height : float, optional
+            `a` in `[S-4]`, the near-bed reference height at which `c_b` is
+            evaluated, in metres. Only used when `sediment_d_star_mode = 1`.
+            Defaults to `2*diameter`. **This is a first-order choice, not a
+            detail**: `d*` varies by up to 13x across plausible `a/h` at high
+            Rouse number. aSM16 requires `a` but never states it, so the default
+            here is ours, not recovered from them. The kernel additionally
+            applies the standard van Rijn floor `a >= 0.01 h`.
         initial_concentration : float or array-like, optional
             Initial `c_s`; seeds `m = h*c` consistently.
 
@@ -1037,7 +1048,10 @@ class Domain(Generic_Domain):
                             ('sediment_d_star', float(d_star)),
                             ('sediment_diameter', float(diameter)),
                             ('sediment_R', rho_s / rho_w - 1.0),
-                            ('sediment_tau_c_star', float(tau_c_star))):
+                            ('sediment_tau_c_star', float(tau_c_star)),
+                            ('sediment_reference_height',
+                             float(reference_height) if reference_height
+                             is not None else 2.0 * float(diameter))):
             new = num.zeros(ncl, dtype=num.float64)
             if self.n_sediment_classes > 0:
                 new[:self.n_sediment_classes] = getattr(self, attr)

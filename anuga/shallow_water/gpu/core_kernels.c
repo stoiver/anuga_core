@@ -463,6 +463,70 @@ void core_distribute_edges_to_vertices(struct domain *D) {
 
 
 // ============================================================================
+// Near-bed concentration ratio d*(Z)   -- spec 4.3, open item S1a
+// ============================================================================
+//
+// [S-4] is a 1-D quadrature per cell, far too expensive to run inside a kernel
+// every step, so the spec calls for a fitted form. This is that fit.
+//
+// CORRECTION TO [S-4] AS PRINTED. The spec writes the Rouse profile factor as
+// ((z-a)/(h-a) . a/z)^Z, which is ZERO at the reference height z = a -- but
+// c(a) = c_a by definition. The standard Rouse-Vanoni profile
+// [(h-z)/z . a/(h-a)]^Z rearranges exactly to ((h-z)/(h-a) . a/z)^Z, so (z-a)
+// should read (h-z). The printed form also disagrees with DL09's own
+// characterisation: it gives d* = 480 at Z = 2 where the corrected form gives
+// 29.9, and DL09 report d* between 1 and 3 for Z < 0.1 (corrected: 1.37).
+// The fit below is to the CORRECTED integral.
+//
+// FITTED FORM. Near the bed the Rouse profile behaves like z^(-Z), so d*
+// diverges roughly as (a/h)^(-Z). Factoring that out first,
+//
+//     ln d* = -Z ln(a/h) + P(Z, ln(a/h))
+//
+// leaves a mild remainder a low-order polynomial captures well: 15 terms for
+// 0.84 percent max / 0.08 percent mean error, against 18 terms and 3.1 percent
+// for a direct polynomial in (ln Z, ln(a/h)). The structure buys the accuracy.
+//
+// RANGE. Fitted for Z in [0.01, 2.5] and a/h in [0.01, 0.15],
+// covering suspension. Beyond Z ~ 2.5 transport is essentially bedload and this
+// ratio is not the right model. OUT-OF-RANGE INPUTS ARE CLAMPED, NOT
+// EXTRAPOLATED -- the spec asks for that explicitly, because a polynomial taken
+// outside its fitted range goes wrong quietly.
+#define ANUGA_ROUSE_Z_LO   0.01
+#define ANUGA_ROUSE_Z_HI   2.5
+#define ANUGA_ROUSE_AH_LO  0.01
+#define ANUGA_ROUSE_AH_HI  0.15
+
+static inline double core_rouse_d_star(double Z, double a_h) {
+    /* P(Z, L) = sum_i Z^i (c_i0 + c_i1 L + c_i2 L^2), L = ln(a/h) */
+    const double C[5][3] = {
+    {+2.306890923104e-03, +5.606481357574e-04, -4.897777864543e-05},
+    {+7.042720278528e-01, +2.244402505072e-01, +2.703035950300e-02},
+    {-9.355857013099e-02, +5.146253344659e-01, +4.827583655360e-02},
+    {-2.841021627072e-02, -2.156016507835e-01, -4.038240894830e-02},
+    {+8.964125426227e-03, +3.436460835262e-02, +7.878690568298e-03},
+    };
+
+    if (Z < ANUGA_ROUSE_Z_LO) Z = ANUGA_ROUSE_Z_LO;
+    else if (Z > ANUGA_ROUSE_Z_HI) Z = ANUGA_ROUSE_Z_HI;
+    if (a_h < ANUGA_ROUSE_AH_LO) a_h = ANUGA_ROUSE_AH_LO;
+    else if (a_h > ANUGA_ROUSE_AH_HI) a_h = ANUGA_ROUSE_AH_HI;
+
+    const double L = log(a_h);
+    const double L2 = L * L;
+
+    /* Horner in Z over coefficients that are quadratics in L. */
+    double P = 0.0;
+    for (int i = 4; i >= 0; i--) {
+        P = P * Z + (C[i][0] + C[i][1] * L + C[i][2] * L2);
+    }
+
+    const double d = exp(-Z * L + P);
+    /* DL09: d* is always > 1. Guard the fit against dipping below it. */
+    return (d < 1.0) ? 1.0 : d;
+}
+
+// ============================================================================
 // Suspended sediment source terms  (Phase 3)
 // ============================================================================
 
@@ -513,6 +577,8 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     double * restrict diam = D->sediment_diameter;
     double * restrict sedR = D->sediment_R;
     double * restrict tau_c_star = D->sediment_tau_c_star;
+    double * restrict a_ref = D->sediment_reference_height;
+    const anuga_int d_star_mode = D->sediment_d_star_mode;
 
     // Hoisted for the same reason as in the update/backup/saxpy kernels: on a
     // GPU build the loop below is an 'omp target' region and D is NOT mapped to
@@ -554,8 +620,24 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             const double m = t_cons[idx];
             const double c = m * inv_h;
 
-            // [D-1] deposition.
-            const double deposition = d_star[s] * c * v_s[s];
+            // [D-1] deposition. d* is either the constant (P14's d* = 1
+            // limiting case) or the Rouse ratio evaluated per cell.
+            double ds;
+            if (d_star_mode == 0) {
+                ds = d_star[s];
+            } else {
+                // [T-2] u* = |v| sqrt(f_c);  [S-2] Z = v_s / (kappa u*)
+                const double ustar = sqrt(f_c * vel2);
+                const double Z = (ustar > 0.0)
+                               ? v_s[s] / (0.41 * ustar)
+                               : ANUGA_ROUSE_Z_HI;   /* no shear: fully settled */
+                // a/h with the standard van Rijn floor a >= 0.01 h, which also
+                // keeps the ratio inside the fitted range from below.
+                double a_h = a_ref[s] * inv_h;
+                if (a_h < 0.01) a_h = 0.01;
+                ds = core_rouse_d_star(Z, a_h);
+            }
+            const double deposition = ds * c * v_s[s];
 
             // [E-1]/[E-2] entrainment, non-cohesive (Shields) route.
             //
