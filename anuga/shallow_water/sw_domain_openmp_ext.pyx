@@ -25,6 +25,10 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double* sediment_settling_velocity
 		double* sediment_d_star
 		double sediment_c_max
+		double* sediment_diameter
+		double* sediment_R
+		double* sediment_tau_c_star
+		double sediment_gamma0
 		double* tracer_centroid_values
 		double* tracer_edge_values
 		double* tracer_boundary_values
@@ -171,6 +175,7 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	# the source kernel walk unmapped pointers (HANDOVER.md 2.4).
 	D.n_sediment_classes = getattr(domain_py_object, 'n_sediment_classes', 0)
 	D.sediment_c_max = getattr(domain_py_object, 'sediment_c_max', 0.3)
+	D.sediment_gamma0 = getattr(domain_py_object, 'sediment_gamma0', 0.0024)
 	D.number_of_tracers = getattr(domain_py_object, 'number_of_tracers', 0)
 	# 0.0 => first order; >0 => limited second order (see sw_domain.h)
 	D.beta_tracer = getattr(domain_py_object, 'beta_tracer', 1.0)
@@ -351,12 +356,24 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 			D.sediment_settling_velocity = &sed1[0]
 			sed1 = domain_py_object.sediment_d_star
 			D.sediment_d_star = &sed1[0]
+			sed1 = domain_py_object.sediment_diameter
+			D.sediment_diameter = &sed1[0]
+			sed1 = domain_py_object.sediment_R
+			D.sediment_R = &sed1[0]
+			sed1 = domain_py_object.sediment_tau_c_star
+			D.sediment_tau_c_star = &sed1[0]
 		else:
 			D.sediment_settling_velocity = NULL
 			D.sediment_d_star = NULL
+			D.sediment_diameter = NULL
+			D.sediment_R = NULL
+			D.sediment_tau_c_star = NULL
 	else:
 		D.sediment_settling_velocity = NULL
 		D.sediment_d_star = NULL
+		D.sediment_diameter = NULL
+		D.sediment_R = NULL
+		D.sediment_tau_c_star = NULL
 		D.tracer_centroid_values = NULL
 		D.tracer_edge_values = NULL
 		D.tracer_boundary_values = NULL

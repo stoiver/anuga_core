@@ -810,7 +810,11 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
         anuga_int ncl = GD->D.n_sediment_classes;
         double *sed_vs = GD->D.sediment_settling_velocity;
         double *sed_ds = GD->D.sediment_d_star;
-        #pragma omp target enter data map(to: sed_vs[0:ncl], sed_ds[0:ncl])
+        double *sed_dm = GD->D.sediment_diameter;
+        double *sed_rr = GD->D.sediment_R;
+        double *sed_tc = GD->D.sediment_tau_c_star;
+        #pragma omp target enter data map(to: sed_vs[0:ncl], sed_ds[0:ncl], \
+            sed_dm[0:ncl], sed_rr[0:ncl], sed_tc[0:ncl])
     }
 
     // Map halo exchange arrays if we have neighbors
@@ -1228,7 +1232,11 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
         anuga_int ncl = GD->D.n_sediment_classes;
         double *sed_vs = GD->D.sediment_settling_velocity;
         double *sed_ds = GD->D.sediment_d_star;
-        #pragma omp target exit data map(delete: sed_vs[0:ncl], sed_ds[0:ncl])
+        double *sed_dm = GD->D.sediment_diameter;
+        double *sed_rr = GD->D.sediment_R;
+        double *sed_tc = GD->D.sediment_tau_c_star;
+        #pragma omp target exit data map(delete: sed_vs[0:ncl], sed_ds[0:ncl], \
+            sed_dm[0:ncl], sed_rr[0:ncl], sed_tc[0:ncl])
     }
 
     // Unmap halo arrays

@@ -177,6 +177,25 @@ struct domain {
     /* [L-2] maximum volumetric concentration. FG21 use 0.30, aS16 0.20. */
     double sediment_c_max;
 
+    /* Phase 3b: entrainment, non-cohesive route [E-1]/[E-2].
+     *
+     *   tau_star  = f_c |v|^2 / (R g d)      [T-3], f_c = g n^2 h^(-1/3)
+     *   S         = tau_star / tau_c_star - 1
+     *   E_star    = 0.65 gamma0 S / (1 + gamma0 S)  for S > 0, else 0  [E-1]
+     *   E         = v_s E_star                                        [E-2]
+     *
+     * (Written with _star spelled out: the natural notation tau-star-slash
+     * would close this comment.)
+     *
+     * Water density cancels in tau*, so only the SUBMERGED specific gravity
+     * R = rho_s/rho - 1 is needed, not the two densities separately. 0.65 is
+     * the maximum packing fraction, so E* saturates rather than growing without
+     * bound. */
+    double* sediment_diameter;      /* (ncl) grain diameter d_g   [m] */
+    double* sediment_R;             /* (ncl) submerged specific gravity */
+    double* sediment_tau_c_star;    /* (ncl) critical Shields stress; FG21 0.04 */
+    double sediment_gamma0;         /* [E-1] empirical, FG21 0.0024 */
+
 };
 
 

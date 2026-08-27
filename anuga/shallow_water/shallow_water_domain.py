@@ -689,8 +689,12 @@ class Domain(Generic_Domain):
         self.n_sediment_classes = 0
         self.sediment_c_max = 0.30              # [L-2]; FG21 0.30, aS16 0.20
         self._sediment_names = []
-        self.sediment_settling_velocity = None  # v_s   (ncl,)
-        self.sediment_d_star = None             # d*(Z) (ncl,)
+        self.sediment_gamma0 = 0.0024           # [E-1] empirical, FG21
+        self.sediment_settling_velocity = None  # v_s        (ncl,)
+        self.sediment_d_star = None             # d*(Z)      (ncl,)
+        self.sediment_diameter = None           # d_g   [m]  (ncl,)
+        self.sediment_R = None                  # R          (ncl,)
+        self.sediment_tau_c_star = None         # tau_c*     (ncl,)
 
         #-------------------------------
         # If environment variable OMP_NUM_THREADS is not set,
@@ -970,7 +974,8 @@ class Domain(Generic_Domain):
         return (R * _g * d * d) / (C1 * nu + math.sqrt(0.75 * C2 * R * _g * d**3))
 
     def add_sediment_class(self, name, diameter, d_star=1.0, beta=None,
-                           initial_concentration=0.0, **settling_kwargs):
+                           initial_concentration=0.0, rho_s=2650.0,
+                           rho_w=1000.0, tau_c_star=0.04, **settling_kwargs):
         """Register a suspended sediment class and return its index.
 
         A sediment class is a tracer -- so it is transported by the machinery of
@@ -988,16 +993,30 @@ class Domain(Generic_Domain):
             here via `settling_velocity` (`[S-1]`) rather than per cell.
         d_star : float, optional
             Ratio of near-bed to depth-averaged concentration in `[D-1]`.
-            Default 1.0, the well-mixed limit. Phase 3b replaces this constant
-            with the Rouse profile of spec 4.3.
+            Default 1.0, the well-mixed limit. The Rouse profile of spec 4.3
+            replaces this constant later.
+        rho_s, rho_w : float, optional
+            Sediment and water densities. Only their ratio matters: the
+            submerged specific gravity `R = rho_s/rho_w - 1` is what enters the
+            Shields stress, where water density cancels.
+        tau_c_star : float, optional
+            Critical Shields stress for entrainment `[E-1]`. Default 0.04,
+            FG21's choice for suspension. Setting it to 0 disables entrainment
+            for this class, leaving deposition only.
         initial_concentration : float or array-like, optional
             Initial `c_s`; seeds `m = h*c` consistently.
 
         Notes
         -----
-        Phase 3 is the FIXED-BED stage (spec 2.4): deposited mass leaves
-        suspension and the bed does not evolve. Erosion is Phase 3b, so a class
-        registered now can only deposit.
+        Phase 3 is the FIXED-BED stage (spec 2.4): the bed does not evolve, and
+        there is no bed->flow or sediment->momentum feedback. Entrainment draws
+        from an inexhaustible bed and deposited mass leaves the system; the
+        Exner bookkeeping of `[G-4]` is Phase 4.
+
+        Entrainment uses the NON-COHESIVE Shields route `[E-1]`/`[E-2]`, which
+        is a statement about the bed material (sand/gravel), not a numerical
+        preference -- see spec 4.1.1. The cohesive Hanson & Simon route
+        `[E-3]` is for silt and clay and is not implemented here.
         """
         if self.number_of_tracers != self.n_sediment_classes:
             raise ValueError(
@@ -1006,13 +1025,19 @@ class Domain(Generic_Domain):
                 'classes. Do not mix add_tracer() and add_sediment_class().'
                 % (self.number_of_tracers, self.n_sediment_classes))
 
-        v_s = self.settling_velocity(diameter, **settling_kwargs)
+        if tau_c_star < 0.0:
+            raise ValueError('tau_c_star must be >= 0, got %g' % tau_c_star)
+        v_s = self.settling_velocity(diameter, rho_s=rho_s, rho_w=rho_w,
+                                     **settling_kwargs)
         index = self.add_tracer(name, beta=beta,
                                 initial_value=initial_concentration)
 
         ncl = self.n_sediment_classes + 1
         for attr, value in (('sediment_settling_velocity', v_s),
-                            ('sediment_d_star', float(d_star))):
+                            ('sediment_d_star', float(d_star)),
+                            ('sediment_diameter', float(diameter)),
+                            ('sediment_R', rho_s / rho_w - 1.0),
+                            ('sediment_tau_c_star', float(tau_c_star))):
             new = num.zeros(ncl, dtype=num.float64)
             if self.n_sediment_classes > 0:
                 new[:self.n_sediment_classes] = getattr(self, attr)

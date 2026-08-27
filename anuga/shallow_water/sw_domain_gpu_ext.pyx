@@ -107,6 +107,10 @@ cdef extern from "gpu_domain.h" nogil:
         double* sediment_settling_velocity
         double* sediment_d_star
         double sediment_c_max
+        double* sediment_diameter
+        double* sediment_R
+        double* sediment_tau_c_star
+        double sediment_gamma0
         double* tracer_centroid_values
         double* tracer_edge_values
         double* tracer_boundary_values
@@ -822,15 +826,25 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     # number_of_tracers previously produced CUDA_ERROR_ILLEGAL_ADDRESS.
     D.n_sediment_classes = getattr(domain_object, 'n_sediment_classes', 0)
     D.sediment_c_max = getattr(domain_object, 'sediment_c_max', 0.3)
+    D.sediment_gamma0 = getattr(domain_object, 'sediment_gamma0', 0.0024)
     cdef double[::1] sed1
     if D.n_sediment_classes > 0:
         sed1 = domain_object.sediment_settling_velocity
         D.sediment_settling_velocity = &sed1[0]
         sed1 = domain_object.sediment_d_star
         D.sediment_d_star = &sed1[0]
+        sed1 = domain_object.sediment_diameter
+        D.sediment_diameter = &sed1[0]
+        sed1 = domain_object.sediment_R
+        D.sediment_R = &sed1[0]
+        sed1 = domain_object.sediment_tau_c_star
+        D.sediment_tau_c_star = &sed1[0]
     else:
         D.sediment_settling_velocity = NULL
         D.sediment_d_star = NULL
+        D.sediment_diameter = NULL
+        D.sediment_R = NULL
+        D.sediment_tau_c_star = NULL
     # Phase 2: wire the tracer arrays for the device. The pointers must be set
     # whenever number_of_tracers > 0 -- the shared kernels guard on that count
     # and dereference all six, so a NULL here is CUDA_ERROR_ILLEGAL_ADDRESS on

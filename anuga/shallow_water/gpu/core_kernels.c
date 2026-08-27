@@ -499,10 +499,20 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     const double c_max = D->sediment_c_max;
     const double minimum_allowed_height = D->minimum_allowed_height;
 
+    const double gamma0 = D->sediment_gamma0;
+    const double h_eps = D->epsilon;
+    const double grav = D->g;
+
     double * restrict stage_cv = D->stage_centroid_values;
     double * restrict bed_cv = D->bed_centroid_values;
+    double * restrict xmom_cv = D->xmom_centroid_values;
+    double * restrict ymom_cv = D->ymom_centroid_values;
+    double * restrict friction_cv = D->friction_centroid_values;
     double * restrict v_s = D->sediment_settling_velocity;
     double * restrict d_star = D->sediment_d_star;
+    double * restrict diam = D->sediment_diameter;
+    double * restrict sedR = D->sediment_R;
+    double * restrict tau_c_star = D->sediment_tau_c_star;
 
     // Hoisted for the same reason as in the update/backup/saxpy kernels: on a
     // GPU build the loop below is an 'omp target' region and D is NOT mapped to
@@ -524,16 +534,50 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
         const double inv_h = 1.0 / h;
         const double m_max = c_max * h;
 
+        // Velocity by the ANUGA depth-limiting form [T-5], the same
+        // regularisation RDy26 A22-A23 adopt. Never a bare (uh)/h.
+        const double denom = h * h + h_eps * h_eps;
+        const double u = (denom > 0.0) ? (xmom_cv[k] * h / denom) : 0.0;
+        const double v = (denom > 0.0) ? (ymom_cv[k] * h / denom) : 0.0;
+        const double vel2 = u * u + v * v;
+
+        // f_c = g n^2 h^(-1/3)  [T-6] == RDy26 A5. This is the 'constant'
+        // closure: n is user-supplied, but f_c STILL varies per cell per
+        // timestep through h. Spec 3.3 calls that the coupling most easily
+        // missed, so it is recomputed here rather than cached.
+        const double nman = friction_cv[k];
+        const double f_c = grav * nman * nman / cbrt(h);
+
         for (anuga_int s = 0; s < n_classes; s++) {
             const anuga_int idx = s * n + k;
 
             const double m = t_cons[idx];
             const double c = m * inv_h;
 
-            // [D-1]. Erosion is Phase 3b; net exchange is deposition only, and
-            // deposition REMOVES suspended sediment, hence the sign.
+            // [D-1] deposition.
             const double deposition = d_star[s] * c * v_s[s];
-            double source = -deposition;
+
+            // [E-1]/[E-2] entrainment, non-cohesive (Shields) route.
+            //
+            //   tau* = f_c |v|^2 / (R g d)   [T-3] -- rho cancels
+            //   S    = tau*/tau_c* - 1
+            //   E*   = 0.65 gamma0 S / (1 + gamma0 S)   saturating
+            //
+            // Below threshold (S <= 0) there is no entrainment at all; this is
+            // a genuine threshold, not a smooth roll-off.
+            double erosion = 0.0;
+            const double Rgd = sedR[s] * grav * diam[s];
+            if (Rgd > 0.0 && tau_c_star[s] > 0.0) {
+                const double tau_star = f_c * vel2 / Rgd;
+                const double S = tau_star / tau_c_star[s] - 1.0;
+                if (S > 0.0) {
+                    const double gS = gamma0 * S;
+                    erosion = v_s[s] * (0.65 * gS / (1.0 + gS));
+                }
+            }
+
+            // Net exchange of [G-3]. Deposition removes, erosion adds.
+            double source = erosion - deposition;
 
             // [L-1] positivity. The most this term may remove over the step is
             // exactly the sediment present, so the state can reach zero but
