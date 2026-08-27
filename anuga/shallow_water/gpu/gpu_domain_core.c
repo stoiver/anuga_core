@@ -811,9 +811,13 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
         int *flat_recv = H->flat_recv_indices;
         double *send_buf = H->send_buffer;
         double *recv_buf = H->recv_buffer;
+        // Must match gpu_halo_stride() in gpu_halo.c: 3 conserved hydro
+        // quantities plus one m slot per tracer. A mismatch here maps a buffer
+        // shorter than the exchange writes.
+        const int halo_stride = 3 + (int)GD->D.number_of_tracers;
 
         #pragma omp target enter data map(to: flat_send[0:send_size], flat_recv[0:recv_size]) \
-            map(alloc: send_buf[0:3*send_size], recv_buf[0:3*recv_size])
+            map(alloc: send_buf[0:halo_stride*send_size], recv_buf[0:halo_stride*recv_size])
     }
 
     GD->gpu_initialized = 1;
@@ -1217,10 +1221,14 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
         int *flat_recv = H->flat_recv_indices;
         double *send_buf = H->send_buffer;
         double *recv_buf = H->recv_buffer;
+        // Must match gpu_halo_stride() in gpu_halo.c: 3 conserved hydro
+        // quantities plus one m slot per tracer. A mismatch here maps a buffer
+        // shorter than the exchange writes.
+        const int halo_stride = 3 + (int)GD->D.number_of_tracers;
 
         #pragma omp target exit data map(delete: \
             flat_send[0:send_size], flat_recv[0:recv_size], \
-            send_buf[0:3*send_size], recv_buf[0:3*recv_size])
+            send_buf[0:halo_stride*send_size], recv_buf[0:halo_stride*recv_size])
     }
 
     GD->gpu_initialized = 0;
