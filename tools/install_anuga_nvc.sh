@@ -423,6 +423,59 @@ echo " "
 # fine: nvc embeds PTX, which the driver JIT-compiles forward, so a build for an
 # older architecture runs on a newer GPU.)
 # ---------------------------------------------------------------------------
+
+# ------------------------------------------------------------------
+# Post-build check: does this toolchain track header dependencies?
+#
+# On NVHPC, meson's PGI compiler mixin does not implement
+# get_dependency_gen_args(), so the compile line never gets -MD/-MF even though
+# meson still writes "deps = gcc" and a depfile into the ninja rule. Ninja then
+# records ZERO dependencies for every object and NO header change ever triggers
+# a rebuild.
+#
+# That is a silent-wrong-binary bug, not a slow-build bug. struct gpu_domain
+# embeds struct domain, so when only some translation units are rebuilt they
+# disagree about member offsets: observed as fixed_flux_timestep aliasing
+# evolve_max_timestep, which made mode 2 print "Using a fixed timestep!" and
+# hang, with no compile error. Editing a header does it; so does merely
+# switching to a branch whose headers differ, which is easier to hit because
+# nobody edited anything.
+#
+# This script always does a clean configure, so THIS build is correct either
+# way. The check exists to say whether a plain incremental
+# `pip install -e .` is safe afterwards.
+# ------------------------------------------------------------------
+BUILD_DIR=$(ls -d "${ANUGA_CORE_PATH}"/build/cp* 2>/dev/null | head -1)
+if [ -n "$BUILD_DIR" ] && command -v ninja >/dev/null 2>&1; then
+    DEP_TOTAL=$(ninja -C "$BUILD_DIR" -t deps 2>/dev/null \
+                | grep -cE '^[^ ]+\.o: #deps [1-9]' || true)
+    if [ "${DEP_TOTAL:-0}" -eq 0 ]; then
+        echo "#=================================================================="
+        echo "# WARNING: this build has NO header dependency tracking."
+        echo "#"
+        echo "#   ninja recorded zero header dependencies for every object, so a"
+        echo "#   changed header will NOT trigger a rebuild. An incremental"
+        echo "#   'pip install --no-build-isolation -e .' can then produce a"
+        echo "#   SILENTLY WRONG binary whose translation units disagree about"
+        echo "#   struct layout - no compile error, no crash, wrong answers or"
+        echo "#   a hang."
+        echo "#"
+        echo "#   Cause: meson's PGI/NVHPC compiler mixin does not implement"
+        echo "#   get_dependency_gen_args(), so -MD/-MF is never passed. nvc"
+        echo "#   supports the flags; meson simply does not ask for them."
+        echo "#"
+        echo "#   UNTIL THAT IS FIXED UPSTREAM: after ANY header edit or branch"
+        echo "#   switch, re-run this script. Never a plain incremental"
+        echo "#   'pip install -e .'."
+        echo "#=================================================================="
+        echo " "
+    else
+        echo "# Header dependency tracking: OK (${DEP_TOTAL} objects with recorded deps)."
+        echo "#   Incremental 'pip install -e .' is safe after a header change."
+        echo " "
+    fi
+fi
+
 echo "#============================================================"
 echo "# Build report"
 echo "#============================================================"
