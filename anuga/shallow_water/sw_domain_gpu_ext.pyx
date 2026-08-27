@@ -113,6 +113,7 @@ cdef extern from "gpu_domain.h" nogil:
         double sediment_gamma0
         int64_t sediment_d_star_mode
         double* sediment_reference_height
+        double sediment_a_h_floor
         double* tracer_centroid_values
         double* tracer_edge_values
         double* tracer_boundary_values
@@ -830,6 +831,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     D.sediment_c_max = getattr(domain_object, 'sediment_c_max', 0.3)
     D.sediment_gamma0 = getattr(domain_object, 'sediment_gamma0', 0.0024)
     D.sediment_d_star_mode = getattr(domain_object, 'sediment_d_star_mode', 0)
+    D.sediment_a_h_floor = getattr(domain_object, 'sediment_a_h_floor', 0.01)
     cdef double[::1] sed1
     if D.n_sediment_classes > 0:
         sed1 = domain_object.sediment_settling_velocity

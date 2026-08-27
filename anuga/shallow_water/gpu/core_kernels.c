@@ -490,28 +490,38 @@ void core_distribute_edges_to_vertices(struct domain *D) {
 //
 //     ln d* = -Z ln(a/h) + P(Z, ln(a/h))
 //
-// leaves a mild remainder a low-order polynomial captures well: 15 terms for
-// 0.84 percent max / 0.08 percent mean error, against 18 terms and 3.1 percent
-// for a direct polynomial in (ln Z, ln(a/h)). The structure buys the accuracy.
+// leaves a mild remainder a low-order polynomial captures well: 28 terms for
+// 0.82 percent max / 0.05 percent mean error. A direct polynomial in
+// (ln Z, ln(a/h)) needs far more terms for far worse accuracy. The structure is
+// what buys it.
 //
-// RANGE. Fitted for Z in [0.01, 2.5] and a/h in [0.01, 0.15],
-// covering suspension. Beyond Z ~ 2.5 transport is essentially bedload and this
-// ratio is not the right model. OUT-OF-RANGE INPUTS ARE CLAMPED, NOT
-// EXTRAPOLATED -- the spec asks for that explicitly, because a polynomial taken
-// outside its fitted range goes wrong quietly.
+// RANGE. Fitted for Z in [0.01, 2.5] and a/h in [1e-3, 0.15]. Beyond Z ~ 2.5
+// transport is essentially bedload and this ratio is not the right model. The
+// a/h range reaches down to 1e-3 deliberately: the shipped anugaSed operator
+// implies a/h ~ 9.3e-4 (spec 12, D4b), so its regime is reachable when the
+// a >= floor*h floor is relaxed. (9.3e-4 itself clamps to 1e-3, ~7 percent in
+// a/h and so ~7 percent in d* at Z = 1.)
+//
+// OUT-OF-RANGE INPUTS ARE CLAMPED, NOT EXTRAPOLATED -- the spec asks for that
+// explicitly, because a polynomial taken outside its fitted range goes wrong
+// quietly. anugaSed's own 8th-degree fit is extrapolated freely and reaches
+// p(6) = 282088 (spec 12, D4c); this one cannot.
+#define ANUGA_MAX_PACKING   0.65
 #define ANUGA_ROUSE_Z_LO   0.01
 #define ANUGA_ROUSE_Z_HI   2.5
-#define ANUGA_ROUSE_AH_LO  0.01
+#define ANUGA_ROUSE_AH_LO  1e-3
 #define ANUGA_ROUSE_AH_HI  0.15
 
 static inline double core_rouse_d_star(double Z, double a_h) {
-    /* P(Z, L) = sum_i Z^i (c_i0 + c_i1 L + c_i2 L^2), L = ln(a/h) */
-    const double C[5][3] = {
-    {+2.306890923104e-03, +5.606481357574e-04, -4.897777864543e-05},
-    {+7.042720278528e-01, +2.244402505072e-01, +2.703035950300e-02},
-    {-9.355857013099e-02, +5.146253344659e-01, +4.827583655360e-02},
-    {-2.841021627072e-02, -2.156016507835e-01, -4.038240894830e-02},
-    {+8.964125426227e-03, +3.436460835262e-02, +7.878690568298e-03},
+    /* P(Z, L) = sum_i Z^i (c_i0 + c_i1 L + c_i2 L^2 + c_i3 L^3), L = ln(a/h) */
+    const double C[7][4] = {
+    {+1.097192252266e-03, +9.816426876103e-04, +2.816550608693e-04, +2.216981593577e-05},
+    {+8.152552738643e-01, +2.984288438662e-01, +4.717126357513e-02, +2.488390592718e-03},
+    {-3.858022145865e-02, +7.497943739332e-01, +1.494530687071e-01, +1.016829763599e-02},
+    {-1.416163484237e-01, -6.145585548869e-01, -2.181478641118e-01, -1.989085090511e-02},
+    {+2.441798567588e-02, +2.477861105262e-01, +1.172562489413e-01, +1.380260943049e-02},
+    {+1.714535144604e-02, -4.453006825886e-02, -2.922351673152e-02, -4.300807416335e-03},
+    {-4.557991043496e-03, +2.511784955218e-03, +2.810236330103e-03, +5.048472261972e-04},
     };
 
     if (Z < ANUGA_ROUSE_Z_LO) Z = ANUGA_ROUSE_Z_LO;
@@ -522,10 +532,11 @@ static inline double core_rouse_d_star(double Z, double a_h) {
     const double L = log(a_h);
     const double L2 = L * L;
 
-    /* Horner in Z over coefficients that are quadratics in L. */
+    /* Horner in Z over coefficients that are cubics in L. */
+    const double L3 = L2 * L;
     double P = 0.0;
-    for (int i = 4; i >= 0; i--) {
-        P = P * Z + (C[i][0] + C[i][1] * L + C[i][2] * L2);
+    for (int i = 6; i >= 0; i--) {
+        P = P * Z + (C[i][0] + C[i][1] * L + C[i][2] * L2 + C[i][3] * L3);
     }
 
     const double d = exp(-Z * L + P);
@@ -586,6 +597,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     double * restrict tau_c_star = D->sediment_tau_c_star;
     double * restrict a_ref = D->sediment_reference_height;
     const anuga_int d_star_mode = D->sediment_d_star_mode;
+    const double a_h_floor = D->sediment_a_h_floor;
 
     // Hoisted for the same reason as in the update/backup/saxpy kernels: on a
     // GPU build the loop below is an 'omp target' region and D is NOT mapped to
@@ -627,6 +639,19 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             const double m = t_cons[idx];
             const double c = m * inv_h;
 
+            // Deposition is computed from a NON-NEGATIVE concentration.
+            //
+            // m can go slightly negative through the ADVECTIVE tendency (the
+            // transport scheme guarantees positivity only under CFL, and the
+            // source is added to a tendency it does not control). Fed through
+            // unguarded, deposition = d* c v_s flips sign and starts ADDING
+            // sediment -- and [L-1] below compounds it, because -m/dt is a
+            // POSITIVE lower bound when m < 0, which forces the source
+            // positive. Together they created 957% of the initial mass in a
+            // deposition-only run. Both paths are guarded here.
+            const double m_pos = (m > 0.0) ? m : 0.0;
+            const double c_pos = m_pos * inv_h;
+
             // [D-1] deposition. d* is either the constant (P14's d* = 1
             // limiting case) or the Rouse ratio evaluated per cell.
             double ds;
@@ -638,13 +663,36 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                 const double Z = (ustar > 0.0)
                                ? v_s[s] / (0.41 * ustar)
                                : ANUGA_ROUSE_Z_HI;   /* no shear: fully settled */
-                // a/h with the standard van Rijn floor a >= 0.01 h, which also
-                // keeps the ratio inside the fitted range from below.
+                // a/h with the van Rijn-style floor a >= floor*h. The floor is
+                // standard practice and stays on by default, but it is exposed:
+                // it is the single largest divergence from anugaSed, which uses
+                // no floor and so an ~10x smaller a at h = 1 m, giving roughly
+                // 8x more deposition (spec 12, D4b). Set it to 0 to reach that
+                // regime; the fit now covers a/h down to 1e-3.
                 double a_h = a_ref[s] * inv_h;
-                if (a_h < 0.01) a_h = 0.01;
+                if (a_h < a_h_floor) a_h = a_h_floor;
                 ds = core_rouse_d_star(Z, a_h);
             }
-            const double deposition = ds * c * v_s[s];
+            // NEAR-BED CONCENTRATION IS BOUNDED BY PACKING.
+            //
+            // [D-1] is D = c_b v_s with c_b = d* c, and nothing in the spec
+            // bounds c_b. It needs bounding. d* comes from the EQUILIBRIUM
+            // Rouse profile, which is not valid as shear vanishes: at rest
+            // u* -> 0, so Z -> infinity and d* -> its clamp (~250 at
+            // a/h = 0.01), making the deposition rate enormous. A lake at rest
+            // then deposits its entire suspended load in under a second,
+            // instead of over the physical h/v_s.
+            //
+            // c_b is a concentration and cannot exceed maximum packing, the
+            // same 0.65 that bounds E* in [E-1]. Capping c_b there keeps the
+            // still-water limit sane while leaving the well-mixed and
+            // moderate-Z regimes untouched, where d* c is far below packing.
+            //
+            // NOTE this bound is NOT in PHYSICS_SPEC 4.4/4.5; it is an addition
+            // required by using an equilibrium profile in a transient solver.
+            double c_bed = ds * c_pos;
+            if (c_bed > ANUGA_MAX_PACKING) c_bed = ANUGA_MAX_PACKING;
+            const double deposition = c_bed * v_s[s];
 
             // [E-1]/[E-2] entrainment, non-cohesive (Shields) route.
             //
@@ -669,9 +717,13 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             double source = erosion - deposition;
 
             // [L-1] positivity. The most this term may remove over the step is
-            // exactly the sediment present, so the state can reach zero but
+            // exactly the sediment PRESENT, so the state can reach zero but
             // never go below it. Applied to the SOURCE, not to m.
-            const double min_source = -m / timestep;
+            //
+            // m_pos, not m: with m < 0 the bound -m/dt is POSITIVE and would
+            // force the source to inject sediment. The limiter must only ever
+            // restrain removal, never mandate addition.
+            const double min_source = -m_pos / timestep;
             if (source < min_source) {
                 source = min_source;
             }

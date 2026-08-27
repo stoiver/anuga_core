@@ -38,8 +38,8 @@ def dstar_ref(Z, a_h, z0_h=1e-4, h=1.0):
 # COEFFICIENTS, not merely a reimplementation of the same idea.
 import re
 src = open('../../anuga/shallow_water/gpu/core_kernels.c').read()
-rows = re.findall(r'\{([-+0-9.e]+), ([-+0-9.e]+), ([-+0-9.e]+)\},', src)
-C = np.array([[float(v) for v in r] for r in rows[:5]])
+rows = re.findall(r'\{([-+0-9.e]+), ([-+0-9.e]+), ([-+0-9.e]+), ([-+0-9.e]+)\},', src)
+C = np.array([[float(v) for v in r] for r in rows[:7]])
 lim = {k: float(re.search(r'#define ANUGA_ROUSE_%s\s+([0-9.e+-]+)' % k, src).group(1))
        for k in ('Z_LO', 'Z_HI', 'AH_LO', 'AH_HI')}
 
@@ -49,8 +49,8 @@ def dstar_fit(Z, a_h):
     a_h = min(max(a_h, lim['AH_LO']), lim['AH_HI'])
     L = np.log(a_h)
     P = 0.0
-    for i in range(4, -1, -1):
-        P = P * Z + (C[i][0] + C[i][1] * L + C[i][2] * L * L)
+    for i in range(6, -1, -1):
+        P = P * Z + (C[i][0] + C[i][1] * L + C[i][2] * L**2 + C[i][3] * L**3)
     return max(np.exp(-Z * L + P), 1.0)
 
 
@@ -91,6 +91,19 @@ check('C2. a/h below range is clamped',
       dstar_fit(1.0, 1e-6) == dstar_fit(1.0, lim['AH_LO']))
 check('C3. clamped values stay finite and physical',
       np.isfinite(dstar_fit(1e6, 1e-9)) and dstar_fit(1e6, 1e-9) >= 1.0)
+
+
+check('C4. the anugaSed regime (a/h ~ 9.3e-4) is now within one clamp of range',
+      lim['AH_LO'] <= 1e-3 + 1e-12,
+      'fitted a/h floor is %.3g; anugaSed implies 9.3e-4, which clamps to it '
+      '(~7%% in a/h, so ~7%% in d* at Z=1)' % lim['AH_LO'])
+errs_wide = []
+for Z in np.geomspace(lim['Z_LO'], lim['Z_HI'], 13):
+    for ah in np.geomspace(1e-3, 0.01, 5):
+        errs_wide.append(abs(dstar_fit(Z, ah) / dstar_ref(Z, ah) - 1.0))
+check('C5. accuracy holds in the newly added a/h band [1e-3, 0.01]',
+      max(errs_wide) < 0.015,
+      'max rel err %.3f%% over %d points' % (100 * max(errs_wide), len(errs_wide)))
 
 
 def lake(mode=1, dt=1.0, d_star_mode=0):
@@ -134,6 +147,6 @@ check('E3. Rouse d* >= 1 deposits at least as fast as the well-mixed limit',
       'Rouse mean c = %.6e  vs  d*=1 mean c = %.6e'
       % (res[1][0].mean(), a.get_tracer('s').mean()))
 
-n = 1 + 4 + 3 + 1 + 3
+n = 1 + 4 + 5 + 1 + 3
 print('\n  %d/%d passed' % (n - _fail[0], n))
 raise SystemExit(1 if _fail[0] else 0)

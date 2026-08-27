@@ -204,6 +204,10 @@ struct domain {
      * varies by up to 13x across plausible a/h at high Z. */
     anuga_int sediment_d_star_mode;
     double* sediment_reference_height;   /* (ncl) a [m] */
+    /* van Rijn-style floor a >= sediment_a_h_floor * h. Standard practice and
+     * on by default (0.01), but exposed: it is the largest single divergence
+     * from anugaSed, which applies no floor. See PHYSICS_SPEC 12, D4b. */
+    double sediment_a_h_floor;
 
 };
 

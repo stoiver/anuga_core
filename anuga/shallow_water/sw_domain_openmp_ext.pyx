@@ -31,6 +31,7 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double sediment_gamma0
 		anuga_int sediment_d_star_mode
 		double* sediment_reference_height
+		double sediment_a_h_floor
 		double* tracer_centroid_values
 		double* tracer_edge_values
 		double* tracer_boundary_values
@@ -179,6 +180,7 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.sediment_c_max = getattr(domain_py_object, 'sediment_c_max', 0.3)
 	D.sediment_gamma0 = getattr(domain_py_object, 'sediment_gamma0', 0.0024)
 	D.sediment_d_star_mode = getattr(domain_py_object, 'sediment_d_star_mode', 0)
+	D.sediment_a_h_floor = getattr(domain_py_object, 'sediment_a_h_floor', 0.01)
 	D.number_of_tracers = getattr(domain_py_object, 'number_of_tracers', 0)
 	# 0.0 => first order; >0 => limited second order (see sw_domain.h)
 	D.beta_tracer = getattr(domain_py_object, 'beta_tracer', 1.0)

@@ -250,6 +250,57 @@ check('H7. mode 1 and mode 2 entrain identically',
       np.allclose(ent[1][0], ent[2][0], rtol=0, atol=1e-8),
       'max|diff| = %.3e' % np.abs(ent[1][0] - ent[2][0]).max())
 
-n = 3 + 2 + 1 + 2 + 1 + 2 + 4 + 7
+# --- I. regressions for two bugs the Rouse extension exposed -----------------
+# I1. DEPOSITION MUST NEVER CREATE MASS. m can go slightly negative through the
+# ADVECTIVE tendency, which the source does not control. Feeding that through
+# unguarded made deposition = d* c v_s flip sign, while [L-1]'s bound -m/dt
+# turned POSITIVE and forced the source to inject: 957% of the initial mass was
+# created in a deposition-only run.
+def tilted(d_star_mode=1, floor=0.01):
+    d = rectangular_cross_domain(10, 10, len1=LEN, len2=LEN)
+    d.set_flow_algorithm('DE0')
+    d.set_low_froude(0)
+    d.store = False
+    d.set_quantity('elevation', lambda x, y: -0.01 * x)
+    d.set_quantity('stage', lambda x, y: -0.01 * x + 1.0)
+    d.set_quantity('friction', 0.03)
+    d.set_boundary({t: Reflective_boundary(d) for t in d.get_boundary_tags()})
+    d.evolve_max_timestep = 1.0
+    d.sediment_d_star_mode = d_star_mode
+    d.sediment_a_h_floor = floor
+    return d
+
+
+t = tilted()
+t.add_sediment_class('s', diameter=1e-4, tau_c_star=0.0,
+                     initial_concentration=0.02)
+m0 = float((t.tracer_conserved_values[0] * t.areas).sum())
+t.evolve_to_end(finaltime=15.0)
+m1 = float((t.tracer_conserved_values[0] * t.areas).sum())
+check('I1. deposition-only never creates sediment mass', m1 <= m0 * (1 + 1e-9),
+      'mass %.4e -> %.4e (%+.2f%%); deposition may only remove'
+      % (m0, m1, 100 * (m1 - m0) / m0))
+check('I2. and does not overshoot into a large negative mass',
+      m1 >= -0.01 * m0,
+      'final mass %.4e vs initial %.4e' % (m1, m0))
+
+# I3. NEAR-BED CONCENTRATION IS BOUNDED BY PACKING. At rest u* -> 0 so Z -> inf
+# and the equilibrium Rouse d* -> its clamp (~250), which without a bound
+# deposits an entire suspended load in under a second instead of over h/v_s.
+q = tilted()
+q.add_sediment_class('s', diameter=1e-4, tau_c_star=0.0,
+                     initial_concentration=0.02)
+mq0 = float((q.tracer_conserved_values[0] * q.areas).sum())
+q.evolve_to_end(finaltime=1.0)
+mq1 = float((q.tracer_conserved_values[0] * q.areas).sum())
+frac = 1.0 - mq1 / mq0
+# packing-limited rate is 0.65*v_s/m per unit time; anything near 100% in 1 s
+# means the bound is not being applied.
+check('I3. a near-still start does not deposit everything in one second',
+      frac < 0.6,
+      'removed %.1f%% in 1 s (unbounded d* removed 100%%; packing-limited '
+      'prediction is ~26%%)' % (100 * frac))
+
+n = 3 + 2 + 1 + 2 + 1 + 2 + 4 + 7 + 3
 print('\n  %d/%d passed' % (n - _fail[0], n))
 raise SystemExit(1 if _fail[0] else 0)

@@ -697,6 +697,12 @@ class Domain(Generic_Domain):
         self.sediment_tau_c_star = None         # tau_c*     (ncl,)
         self.sediment_reference_height = None   # a     [m]  (ncl,)
         self.sediment_d_star_mode = 0           # 0 constant, 1 Rouse [S-4]
+        # van Rijn-style floor a >= sediment_a_h_floor * h, applied when
+        # sediment_d_star_mode = 1. Standard practice, on by default. Set to 0
+        # to reach anugaSed's regime (they use no floor); the d* fit covers
+        # a/h down to 1e-3. This is the largest single divergence from
+        # anugaSed -- roughly 8x less deposition at h = 1 m. See spec 12, D4b.
+        self.sediment_a_h_floor = 0.01
 
         #-------------------------------
         # If environment variable OMP_NUM_THREADS is not set,
@@ -1012,8 +1018,10 @@ class Domain(Generic_Domain):
             Defaults to `2*diameter`. **This is a first-order choice, not a
             detail**: `d*` varies by up to 13x across plausible `a/h` at high
             Rouse number. aSM16 requires `a` but never states it, so the default
-            here is ours, not recovered from them. The kernel additionally
-            applies the standard van Rijn floor `a >= 0.01 h`.
+            here is `2*diameter`, which the D4b audit of `anugaSed` independently
+            corroborates as their convention too. The kernel additionally applies
+            the floor `a >= domain.sediment_a_h_floor * h` (default 0.01); set
+            that to 0 to match `anugaSed`, which applies no floor.
         initial_concentration : float or array-like, optional
             Initial `c_s`; seeds `m = h*c` consistently.
 
