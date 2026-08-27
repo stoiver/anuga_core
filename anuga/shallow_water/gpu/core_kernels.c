@@ -506,7 +506,6 @@ void core_distribute_edges_to_vertices(struct domain *D) {
 // explicitly, because a polynomial taken outside its fitted range goes wrong
 // quietly. anugaSed's own 8th-degree fit is extrapolated freely and reaches
 // p(6) = 282088 (spec 12, D4c); this one cannot.
-#define ANUGA_MAX_PACKING   0.65
 #define ANUGA_ROUSE_Z_LO   0.01
 #define ANUGA_ROUSE_Z_HI   2.5
 #define ANUGA_ROUSE_AH_LO  1e-3
@@ -598,6 +597,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     double * restrict a_ref = D->sediment_reference_height;
     const anuga_int d_star_mode = D->sediment_d_star_mode;
     const double a_h_floor = D->sediment_a_h_floor;
+    const double c_pack = D->sediment_c_pack;
 
     // Hoisted for the same reason as in the update/backup/saxpy kernels: on a
     // GPU build the loop below is an 'omp target' region and D is NOT mapped to
@@ -673,7 +673,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                 if (a_h < a_h_floor) a_h = a_h_floor;
                 ds = core_rouse_d_star(Z, a_h);
             }
-            // NEAR-BED CONCENTRATION IS BOUNDED BY PACKING.
+            // [L-4] NEAR-BED CONCENTRATION IS BOUNDED BY PACKING.
             //
             // [D-1] is D = c_b v_s with c_b = d* c, and nothing in the spec
             // bounds c_b. It needs bounding. d* comes from the EQUILIBRIUM
@@ -688,10 +688,11 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             // still-water limit sane while leaving the well-mixed and
             // moderate-Z regimes untouched, where d* c is far below packing.
             //
-            // NOTE this bound is NOT in PHYSICS_SPEC 4.4/4.5; it is an addition
-            // required by using an equilibrium profile in a transient solver.
+            // Added in PHYSICS_SPEC Draft 5 as [L-4]; it has no counterpart in
+            // P14, FG21, RDy26, DL09 or aSM16, being required by combining an
+            // equilibrium profile with a transient solver.
             double c_bed = ds * c_pos;
-            if (c_bed > ANUGA_MAX_PACKING) c_bed = ANUGA_MAX_PACKING;
+            if (c_bed > c_pack) c_bed = c_pack;
             const double deposition = c_bed * v_s[s];
 
             // [E-1]/[E-2] entrainment, non-cohesive (Shields) route.

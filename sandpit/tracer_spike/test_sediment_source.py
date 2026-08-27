@@ -301,6 +301,22 @@ check('I3. a near-still start does not deposit everything in one second',
       'removed %.1f%% in 1 s (unbounded d* removed 100%%; packing-limited '
       'prediction is ~26%%)' % (100 * frac))
 
-n = 3 + 2 + 1 + 2 + 1 + 2 + 4 + 7 + 3
+# I4. [L-4] c_pack is exposed and actually binds. Lowering it must slow
+# deposition in the high-Z regime where c_b would otherwise exceed it.
+rates = {}
+for cp in (0.65, 0.05):
+    z = tilted()
+    z.sediment_c_pack = cp
+    z.add_sediment_class('s', diameter=1e-4, tau_c_star=0.0,
+                         initial_concentration=0.02)
+    mz0 = float((z.tracer_conserved_values[0] * z.areas).sum())
+    z.evolve_to_end(finaltime=1.0)
+    rates[cp] = 1.0 - float((z.tracer_conserved_values[0] * z.areas).sum()) / mz0
+check('I4. [L-4] c_pack is exposed and binds in the high-Z regime',
+      rates[0.05] < rates[0.65],
+      'removed in 1 s: %.1f%% at c_pack=0.65, %.1f%% at c_pack=0.05'
+      % (100 * rates[0.65], 100 * rates[0.05]))
+
+n = 3 + 2 + 1 + 2 + 1 + 2 + 4 + 7 + 4
 print('\n  %d/%d passed' % (n - _fail[0], n))
 raise SystemExit(1 if _fail[0] else 0)

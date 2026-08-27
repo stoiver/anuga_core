@@ -703,6 +703,11 @@ class Domain(Generic_Domain):
         # a/h down to 1e-3. This is the largest single divergence from
         # anugaSed -- roughly 8x less deposition at h = 1 m. See spec 12, D4b.
         self.sediment_a_h_floor = 0.01
+        # [L-4] maximum packing fraction bounding the near-bed concentration
+        # c_b = d* c. Without it the equilibrium Rouse d* makes the deposition
+        # rate diverge as shear vanishes. Same constant that bounds E* in
+        # [E-1]. Inactive when d* = 1, since c <= c_max = 0.3 < 0.65.
+        self.sediment_c_pack = 0.65
 
         #-------------------------------
         # If environment variable OMP_NUM_THREADS is not set,

@@ -208,6 +208,9 @@ struct domain {
      * on by default (0.01), but exposed: it is the largest single divergence
      * from anugaSed, which applies no floor. See PHYSICS_SPEC 12, D4b. */
     double sediment_a_h_floor;
+    /* [L-4] maximum packing fraction bounding the near-bed concentration
+     * c_b = d* c. Same constant that bounds E* in [E-1]. */
+    double sediment_c_pack;
 
 };
 
