@@ -469,14 +469,21 @@ void core_distribute_edges_to_vertices(struct domain *D) {
 // [S-4] is a 1-D quadrature per cell, far too expensive to run inside a kernel
 // every step, so the spec calls for a fitted form. This is that fit.
 //
-// CORRECTION TO [S-4] AS PRINTED. The spec writes the Rouse profile factor as
-// ((z-a)/(h-a) . a/z)^Z, which is ZERO at the reference height z = a -- but
-// c(a) = c_a by definition. The standard Rouse-Vanoni profile
-// [(h-z)/z . a/(h-a)]^Z rearranges exactly to ((h-z)/(h-a) . a/z)^Z, so (z-a)
-// should read (h-z). The printed form also disagrees with DL09's own
-// characterisation: it gives d* = 480 at Z = 2 where the corrected form gives
-// 29.9, and DL09 report d* between 1 and 3 for Z < 0.1 (corrected: 1.37).
-// The fit below is to the CORRECTED integral.
+// CORRECTION TO [S-4] -- THE TYPO IS IN DL09 AS PUBLISHED, not in PHYSICS_SPEC,
+// which transcribed them faithfully. DL09 Eq 19 gives the Rouse profile factor
+// as ((z-a)/(h-a) . a/z)^Z, which is ZERO at the reference height z = a.
+//
+// Their own paper disproves it: immediately above Eq 19 they write the flux as
+// q_S = c_S(a) * integral( [...]^Z u(z) dz ). Factoring c_S(a) out REQUIRES the
+// bracket to be 1 at z = a; the printed factor is 0 there, giving c_s(a) = 0.
+//
+// The Rouse-Vanoni profile [(h-z)/z . a/(h-a)]^Z rearranges exactly to
+// ((h-z)/(h-a) . a/z)^Z, which is 1 at z = a and 0 at z = h. One glyph: (z-a)
+// is a slip for (h-z). At Z = 2, a/h = 0.005 the printed form gives d* = 41227
+// against 356 corrected -- not a value that appears on their Figure 4, so that
+// figure was evidently computed with the correct profile.
+//
+// The fit below is to the CORRECTED integral. See PHYSICS_SPEC 4.3, Draft 5.
 //
 // FITTED FORM. Near the bed the Rouse profile behaves like z^(-Z), so d*
 // diverges roughly as (a/h)^(-Z). Factoring that out first,
