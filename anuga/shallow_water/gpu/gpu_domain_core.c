@@ -803,6 +803,16 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
         // unmap path re-tests the same condition instead.
     }
 
+    // Map the per-class sediment parameter arrays (Phase 3). Tiny -- one
+    // double per class -- but they are read inside a target region, so they
+    // must be present on the device like everything else.
+    if (GD->D.n_sediment_classes > 0) {
+        anuga_int ncl = GD->D.n_sediment_classes;
+        double *sed_vs = GD->D.sediment_settling_velocity;
+        double *sed_ds = GD->D.sediment_d_star;
+        #pragma omp target enter data map(to: sed_vs[0:ncl], sed_ds[0:ncl])
+    }
+
     // Map halo exchange arrays if we have neighbors
     if (H->num_neighbors > 0) {
         int send_size = H->total_send_size;
@@ -1211,6 +1221,14 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
             double *tr_bv = GD->D.tracer_boundary_values;
             #pragma omp target exit data map(delete: tr_bv[0:ns*nb])
         }
+    }
+
+    // Unmap the sediment parameter arrays. Same condition as the map path.
+    if (GD->D.n_sediment_classes > 0) {
+        anuga_int ncl = GD->D.n_sediment_classes;
+        double *sed_vs = GD->D.sediment_settling_velocity;
+        double *sed_ds = GD->D.sediment_d_star;
+        #pragma omp target exit data map(delete: sed_vs[0:ncl], sed_ds[0:ncl])
     }
 
     // Unmap halo arrays

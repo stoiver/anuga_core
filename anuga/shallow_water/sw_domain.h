@@ -150,6 +150,33 @@ struct domain {
      * so no previously-existing field offset moves. */
     double beta_tracer;
 
+    /* ------------------------------------------------------------------
+     * Phase 3: suspended sediment source terms.
+     *
+     * Appended at the very END of the struct, after the tracer block, so no
+     * previously-existing field offset moves. See HANDOVER.md 2.1: a shifted
+     * offset here aliases members silently, with no compile error.
+     *
+     * All arrays are (n_sediment_classes,) and indexed by TRACER index, so
+     * sediment class s occupies tracer slot s. Classes are registered through
+     * Domain.add_sediment_class(), which registers the tracer first.
+     *
+     * n_sediment_classes == 0 is the ordinary case and must cost nothing: the
+     * source kernel returns immediately on a single test, exactly as the flux
+     * kernel does for number_of_tracers.
+     * ------------------------------------------------------------------ */
+    anuga_int n_sediment_classes;
+    /* Settling velocity v_s, [S-1] Ferguson & Church (2004), precomputed on
+     * the host: it depends only on grain size and fluid properties, so there
+     * is no reason to evaluate a square root per cell per step. [m/s] */
+    double* sediment_settling_velocity;
+    /* d*(Z): ratio of near-bed to depth-averaged concentration, [D-1].
+     * 1.0 is the well-mixed limit. Phase 3b replaces this constant with the
+     * Rouse profile of spec 4.3. */
+    double* sediment_d_star;
+    /* [L-2] maximum volumetric concentration. FG21 use 0.30, aS16 0.20. */
+    double sediment_c_max;
+
 };
 
 

@@ -18,6 +18,7 @@ void core_extrapolate_second_order_edge(struct domain *D);
 void core_distribute_edges_to_vertices(struct domain *D);
 
 // Update conserved quantities with explicit/semi-implicit updates
+void core_apply_sediment_source(struct domain *D, double timestep);
 void core_update_conserved_quantities(struct domain *D, double timestep);
 
 // Backup conserved quantities for RK2 timestepping

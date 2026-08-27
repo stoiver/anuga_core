@@ -463,10 +463,112 @@ void core_distribute_edges_to_vertices(struct domain *D) {
 
 
 // ============================================================================
+// Suspended sediment source terms  (Phase 3)
+// ============================================================================
+
+// Add the sediment exchange term  E_s - D_s  of [G-3] to the tracer explicit
+// update, for every registered sediment class.
+//
+// Phase 3 is the FIXED-BED stage of spec 2.4: the bed does not evolve, there is
+// no bed -> flow feedback and no sediment -> momentum feedback. Deposited mass
+// simply leaves suspension.
+//
+// Deposition is [D-1]:      D_s = d*(Z) . c_s . v_s
+// with d* the near-bed to depth-averaged concentration ratio (1.0 = well
+// mixed). Erosion E_s is Phase 3b and is zero here.
+//
+// TWO LIMITERS, both from spec 4.5, and both applied to the SOURCE TERM rather
+// than by clamping the state -- clamping m would break the exact conservation
+// the transport scheme provides:
+//
+//   [L-1] positivity, mandatory:  F_s^net >= -m_s / dt
+//         deposition can never remove more sediment than is present.
+//   [L-2] concentration ceiling:  c_s <= c_max
+//         applied as a cap on how much a cell may GAIN this step.
+//
+// Called after the flux kernel has filled tracer_explicit_update and before the
+// time integration consumes it, so the source lands in the same dm/dt the
+// integrator already applies.
+void core_apply_sediment_source(struct domain *D, double timestep) {
+    const anuga_int n_classes = D->n_sediment_classes;
+    if (n_classes <= 0 || timestep <= 0.0) {
+        return;
+    }
+
+    const anuga_int n = D->number_of_elements;
+    const double c_max = D->sediment_c_max;
+    const double minimum_allowed_height = D->minimum_allowed_height;
+
+    double * restrict stage_cv = D->stage_centroid_values;
+    double * restrict bed_cv = D->bed_centroid_values;
+    double * restrict v_s = D->sediment_settling_velocity;
+    double * restrict d_star = D->sediment_d_star;
+
+    // Hoisted for the same reason as in the update/backup/saxpy kernels: on a
+    // GPU build the loop below is an 'omp target' region and D is NOT mapped to
+    // the device, so a D->member load inside it reads a host address and the
+    // work silently does not happen. See HANDOVER.md 2.4.
+    double * restrict t_cons = D->tracer_conserved_values;
+    double * restrict t_eu = D->tracer_explicit_update;
+
+    OMP_PARALLEL_LOOP
+    for (anuga_int k = 0; k < n; k++) {
+        const double h = fmax(stage_cv[k] - bed_cv[k], 0.0);
+
+        // Dry cells carry no sediment: spec 9.4 sets c_s = 0 below the wet/dry
+        // threshold. Leave the advective tendency untouched and add nothing.
+        if (h <= minimum_allowed_height) {
+            continue;
+        }
+
+        const double inv_h = 1.0 / h;
+        const double m_max = c_max * h;
+
+        for (anuga_int s = 0; s < n_classes; s++) {
+            const anuga_int idx = s * n + k;
+
+            const double m = t_cons[idx];
+            const double c = m * inv_h;
+
+            // [D-1]. Erosion is Phase 3b; net exchange is deposition only, and
+            // deposition REMOVES suspended sediment, hence the sign.
+            const double deposition = d_star[s] * c * v_s[s];
+            double source = -deposition;
+
+            // [L-1] positivity. The most this term may remove over the step is
+            // exactly the sediment present, so the state can reach zero but
+            // never go below it. Applied to the SOURCE, not to m.
+            const double min_source = -m / timestep;
+            if (source < min_source) {
+                source = min_source;
+            }
+
+            // [L-2] ceiling. Only ever restrains a GAIN, so it cannot fight
+            // [L-1] above: the two act on opposite signs of the source.
+            if (source > 0.0) {
+                const double max_source = (m_max - m) / timestep;
+                if (source > max_source) {
+                    source = (max_source > 0.0) ? max_source : 0.0;
+                }
+            }
+
+            t_eu[idx] += source;
+        }
+    }
+}
+
+// ============================================================================
 // Update conserved quantities
 // ============================================================================
 
 void core_update_conserved_quantities(struct domain *D, double timestep) {
+    // Sediment exchange is part of dm/dt, so it must be added to
+    // tracer_explicit_update BEFORE the integration below consumes it. Hooking
+    // it here rather than at the call sites means legacy and unified get the
+    // same ordering for free -- both delegate to this function. Returns
+    // immediately when no sediment classes are registered.
+    core_apply_sediment_source(D, timestep);
+
     anuga_int n = D->number_of_elements;
     const anuga_int n_tracers = D->number_of_tracers;
 

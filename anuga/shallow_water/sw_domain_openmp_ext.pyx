@@ -21,6 +21,10 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		anuga_int number_of_riverwall_edges
 		anuga_int number_of_tracers
 		double beta_tracer
+		anuga_int n_sediment_classes
+		double* sediment_settling_velocity
+		double* sediment_d_star
+		double sediment_c_max
 		double* tracer_centroid_values
 		double* tracer_edge_values
 		double* tracer_boundary_values
@@ -162,6 +166,11 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.number_of_riverwall_edges = domain_py_object.number_of_riverwall_edges
 	# SPIKE: generic tracers. The struct is PyMem_Malloc'd (not zeroed), so this
 	# MUST be set on every fill or the flux kernel guard reads garbage.
+	# Sediment: MUST be set explicitly in BOTH pyx files. struct domain is
+	# PyMem_Malloc'd and never zeroed, and a garbage n_sediment_classes makes
+	# the source kernel walk unmapped pointers (HANDOVER.md 2.4).
+	D.n_sediment_classes = getattr(domain_py_object, 'n_sediment_classes', 0)
+	D.sediment_c_max = getattr(domain_py_object, 'sediment_c_max', 0.3)
 	D.number_of_tracers = getattr(domain_py_object, 'number_of_tracers', 0)
 	# 0.0 => first order; >0 => limited second order (see sw_domain.h)
 	D.beta_tracer = getattr(domain_py_object, 'beta_tracer', 1.0)
@@ -323,6 +332,7 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 	# SPIKE: generic tracer arrays. Owned by the Python Domain as C-contiguous
 	# (ns, ...) float64 arrays; NULL when no tracers are registered.
 	cdef double[:, ::1] tr2
+	cdef double[::1] sed1
 	if getattr(domain_py_object, 'number_of_tracers', 0) > 0:
 		tr2 = domain_py_object.tracer_centroid_values
 		D.tracer_centroid_values = &tr2[0, 0]
@@ -336,7 +346,17 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 		D.tracer_conserved_values = &tr2[0, 0]
 		tr2 = domain_py_object.tracer_backup_values
 		D.tracer_backup_values = &tr2[0, 0]
+		if D.n_sediment_classes > 0:
+			sed1 = domain_py_object.sediment_settling_velocity
+			D.sediment_settling_velocity = &sed1[0]
+			sed1 = domain_py_object.sediment_d_star
+			D.sediment_d_star = &sed1[0]
+		else:
+			D.sediment_settling_velocity = NULL
+			D.sediment_d_star = NULL
 	else:
+		D.sediment_settling_velocity = NULL
+		D.sediment_d_star = NULL
 		D.tracer_centroid_values = NULL
 		D.tracer_edge_values = NULL
 		D.tracer_boundary_values = NULL

@@ -682,6 +682,17 @@ class Domain(Generic_Domain):
         self.tracer_backup_values = None        # m backup     (ns, N)
 
         #-------------------------------
+        # Phase 3: suspended sediment. A sediment class IS a tracer -- class s
+        # occupies tracer slot s -- with per-class settling parameters. Zero
+        # classes costs nothing: the source kernel returns on one test.
+        #-------------------------------
+        self.n_sediment_classes = 0
+        self.sediment_c_max = 0.30              # [L-2]; FG21 0.30, aS16 0.20
+        self._sediment_names = []
+        self.sediment_settling_velocity = None  # v_s   (ncl,)
+        self.sediment_d_star = None             # d*(Z) (ncl,)
+
+        #-------------------------------
         # If environment variable OMP_NUM_THREADS is not set,
         # then set to default (1 thread). If a value is given to
         # the method, then it will override the default.
@@ -933,6 +944,96 @@ class Domain(Generic_Domain):
             self.set_tracer(name, initial_value)
 
         return index
+
+    def settling_velocity(self, diameter, rho_s=2650.0, rho_w=1000.0,
+                          nu=1.0e-6, C1=18.0, C2=0.4):
+        """Settling velocity `v_s` from Ferguson & Church (2004), spec `[S-1]`.
+
+            v_s = R g d^2 / ( C1 nu + sqrt(0.75 C2 R g d^3) )
+
+        Smooth across the Stokes/turbulent transition and branch-free, which is
+        why the spec prefers it over the Dietrich (1982) polynomial fit.
+
+        `C1 = 18, C2 = 0.4` are the smooth-sphere constants; use `1.0, 1.1` for
+        natural irregular grains. `R = rho_s/rho_w - 1` is submerged specific
+        gravity.
+
+        Verified against the spec: d = 4.5e-5 m quartz gives 1.75e-3 m/s,
+        the value P13 report for Ferguson & Church.
+        """
+        import math
+        from anuga.config import g as _g
+        R = rho_s / rho_w - 1.0
+        d = float(diameter)
+        if d <= 0.0:
+            raise ValueError('grain diameter must be > 0, got %g' % d)
+        return (R * _g * d * d) / (C1 * nu + math.sqrt(0.75 * C2 * R * _g * d**3))
+
+    def add_sediment_class(self, name, diameter, d_star=1.0, beta=None,
+                           initial_concentration=0.0, **settling_kwargs):
+        """Register a suspended sediment class and return its index.
+
+        A sediment class is a tracer -- so it is transported by the machinery of
+        Phases 1-2 -- plus the settling parameters the source term needs. The
+        tracer is registered first, so class `s` always occupies tracer slot
+        `s`; `add_tracer` and `add_sediment_class` must not be interleaved on
+        the same domain if you rely on that.
+
+        Parameters
+        ----------
+        name : str
+            Class identifier, e.g. 'sand'. Also the tracer name.
+        diameter : float
+            Grain diameter `d_g` in metres. Settling velocity is computed once
+            here via `settling_velocity` (`[S-1]`) rather than per cell.
+        d_star : float, optional
+            Ratio of near-bed to depth-averaged concentration in `[D-1]`.
+            Default 1.0, the well-mixed limit. Phase 3b replaces this constant
+            with the Rouse profile of spec 4.3.
+        initial_concentration : float or array-like, optional
+            Initial `c_s`; seeds `m = h*c` consistently.
+
+        Notes
+        -----
+        Phase 3 is the FIXED-BED stage (spec 2.4): deposited mass leaves
+        suspension and the bed does not evolve. Erosion is Phase 3b, so a class
+        registered now can only deposit.
+        """
+        if self.number_of_tracers != self.n_sediment_classes:
+            raise ValueError(
+                'add_sediment_class requires sediment class s to occupy tracer '
+                'slot s, but this domain already has %d tracers and %d sediment '
+                'classes. Do not mix add_tracer() and add_sediment_class().'
+                % (self.number_of_tracers, self.n_sediment_classes))
+
+        v_s = self.settling_velocity(diameter, **settling_kwargs)
+        index = self.add_tracer(name, beta=beta,
+                                initial_value=initial_concentration)
+
+        ncl = self.n_sediment_classes + 1
+        for attr, value in (('sediment_settling_velocity', v_s),
+                            ('sediment_d_star', float(d_star))):
+            new = num.zeros(ncl, dtype=num.float64)
+            if self.n_sediment_classes > 0:
+                new[:self.n_sediment_classes] = getattr(self, attr)
+            new[index] = value
+            setattr(self, attr, new)
+
+        self._sediment_names.append(name)
+        self.n_sediment_classes = ncl
+
+        # add_tracer already invalidated both caches, but it did so BEFORE the
+        # arrays above existed. Invalidate again so the rebuilt struct sees them.
+        self._Domain_C_struct = None
+        self.gpu_interface = None
+        if hasattr(self, '_gpu_boundary_info_initialized'):
+            del self._gpu_boundary_info_initialized
+
+        return index
+
+    def get_sediment_names(self):
+        """Return the registered sediment class names, in index order."""
+        return list(self._sediment_names)
 
     def get_tracer_index(self, name):
         """Return the row index of tracer `name`."""

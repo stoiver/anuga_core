@@ -103,6 +103,10 @@ cdef extern from "gpu_domain.h" nogil:
         int64_t number_of_riverwall_edges
         int64_t number_of_tracers
         double beta_tracer
+        int64_t n_sediment_classes
+        double* sediment_settling_velocity
+        double* sediment_d_star
+        double sediment_c_max
         double* tracer_centroid_values
         double* tracer_edge_values
         double* tracer_boundary_values
@@ -813,6 +817,20 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     # the kernel guard fire on the device (CUDA_ERROR_ILLEGAL_ADDRESS).
     D.number_of_tracers = getattr(domain_object, 'number_of_tracers', 0)
     D.beta_tracer = getattr(domain_object, 'beta_tracer', 1.0)
+    # Sediment: set explicitly here too -- see the note in
+    # sw_domain_openmp_ext.pyx. Missing the mode-2 initialisation of
+    # number_of_tracers previously produced CUDA_ERROR_ILLEGAL_ADDRESS.
+    D.n_sediment_classes = getattr(domain_object, 'n_sediment_classes', 0)
+    D.sediment_c_max = getattr(domain_object, 'sediment_c_max', 0.3)
+    cdef double[::1] sed1
+    if D.n_sediment_classes > 0:
+        sed1 = domain_object.sediment_settling_velocity
+        D.sediment_settling_velocity = &sed1[0]
+        sed1 = domain_object.sediment_d_star
+        D.sediment_d_star = &sed1[0]
+    else:
+        D.sediment_settling_velocity = NULL
+        D.sediment_d_star = NULL
     # Phase 2: wire the tracer arrays for the device. The pointers must be set
     # whenever number_of_tracers > 0 -- the shared kernels guard on that count
     # and dereference all six, so a NULL here is CUDA_ERROR_ILLEGAL_ADDRESS on
