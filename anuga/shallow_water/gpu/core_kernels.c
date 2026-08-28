@@ -547,8 +547,24 @@ static inline double core_rouse_d_star(double Z, double a_h) {
 // Suspended sediment source terms  (Phase 3)
 // ============================================================================
 
-// Add the sediment exchange term  E_s - D_s  of [G-3] to the tracer explicit
-// update, for every registered sediment class.
+// Apply the sediment exchange term E_s - D_s of [G-3], and the resulting bed
+// change [G-4], for every registered sediment class.
+//
+// THIS IS A FRACTIONAL STEP. It is called ONCE PER TIMESTEP with the full dt,
+// after the hydrodynamic step, not inside the RK substep loop. So it updates
+// the STATE directly (m and z) rather than contributing to a tendency:
+//
+//     m_s  <-  m_s + dt (E_s - D_s)                       [G-3] source part
+//     z    <-  z   + dt (D - E)/(1 - lambda)              [G-4]
+//
+// The two use the SAME limited source, so the sediment volume leaving
+// suspension equals (1 - lambda) dz exactly and the budget closes by
+// construction, whatever the timestepping method.
+//
+// Stage is deliberately NOT adjusted here: holding w while z rises makes the
+// depth h = w - z fall by exactly dz, which is the quiescent-water behaviour
+// LM15 Example 2 requires (their free surface stays flat while the bed
+// aggrades). The pore space in the new bed is filled from the water column.
 //
 // Phase 3 is the FIXED-BED stage of spec 2.4: the bed does not evolve, there is
 // no bed -> flow feedback and no sediment -> momentum feedback. Deposited mass
@@ -608,7 +624,10 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     // the device, so a D->member load inside it reads a host address and the
     // work silently does not happen. See HANDOVER.md 2.4.
     double * restrict t_cons = D->tracer_conserved_values;
-    double * restrict t_eu = D->tracer_explicit_update;
+    double * restrict bed_cv_w = D->bed_centroid_values;
+    double * restrict bed_ev_w = D->bed_edge_values;
+    const double one_minus_lambda = 1.0 - D->sediment_porosity;
+    const anuga_int bed_evolves = D->sediment_bed_evolution;
 
     OMP_PARALLEL_LOOP
     for (anuga_int k = 0; k < n; k++) {
@@ -622,6 +641,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
 
         const double inv_h = 1.0 / h;
         const double m_max = c_max * h;
+        double dz_cell = 0.0;
 
         // Velocity by the ANUGA depth-limiting form [T-5], the same
         // regularisation RDy26 A22-A23 adopt. Never a bare (uh)/h.
@@ -769,7 +789,28 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                 }
             }
 
-            t_eu[idx] += source;
+            // Fractional step: update the state directly with the full dt.
+            t_cons[idx] += timestep * source;
+            // [G-4]. source = E - D, so dz = -source dt/(1-lambda).
+            if (bed_evolves && one_minus_lambda > 0.0) {
+                dz_cell += -(timestep * source) / one_minus_lambda;
+            }
+        }
+        // Raise the bed by dz. The DE algorithms use DISCONTINUOUS elevation,
+        // so edge values are not re-derived from the centroid and must be
+        // shifted too; shifting all three by the same dz preserves the
+        // within-cell bed slope, which is what keeps a flat bed flat. Vertex
+        // values need no action: extrapolation recomputes them from the edges
+        // (bed_vv = bed_ev1 + bed_ev2 - bed_ev0).
+        //
+        // Stage is left alone, so h = w - z falls by exactly dz -- the
+        // quiescent-water behaviour of LM15 Example 2.
+        if (dz_cell != 0.0) {
+            bed_cv_w[k] += dz_cell;
+            const anuga_int k3 = 3 * k;
+            bed_ev_w[k3 + 0] += dz_cell;
+            bed_ev_w[k3 + 1] += dz_cell;
+            bed_ev_w[k3 + 2] += dz_cell;
         }
     }
 }
@@ -779,13 +820,6 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
 // ============================================================================
 
 void core_update_conserved_quantities(struct domain *D, double timestep) {
-    // Sediment exchange is part of dm/dt, so it must be added to
-    // tracer_explicit_update BEFORE the integration below consumes it. Hooking
-    // it here rather than at the call sites means legacy and unified get the
-    // same ordering for free -- both delegate to this function. Returns
-    // immediately when no sediment classes are registered.
-    core_apply_sediment_source(D, timestep);
-
     anuga_int n = D->number_of_elements;
     const anuga_int n_tracers = D->number_of_tracers;
 

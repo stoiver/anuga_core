@@ -211,6 +211,14 @@ struct domain {
     /* [L-4] maximum packing fraction bounding the near-bed concentration
      * c_b = d* c. Same constant that bounds E* in [E-1]. */
     double sediment_c_pack;
+    /* Bed porosity lambda in [G-4]: dz/dt = (D-E)/(1-lambda). The sediment
+     * VOLUME leaving suspension is (1-lambda) dz, the rest being pore space. */
+    double sediment_porosity;
+    /* Coupling stage of spec 2.4:
+     *   0 = FIXED BED (Phase 3): exchange acts on m only, z never moves.
+     *   1 = EVOLVING BED (Phase 4): [G-4] Exner update is applied.
+     * Both are legitimate published configurations, not a debug switch. */
+    anuga_int sediment_bed_evolution;
 
     /* Friction closure for the sediment kernel, spec 3.3.
      *   0 = constant     n from friction_centroid_values (default)

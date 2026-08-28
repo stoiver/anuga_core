@@ -1311,6 +1311,17 @@ void gpu_domain_sync_from_device(struct gpu_domain *GD) {
         double *tr_qv = GD->D.tracer_conserved_values;
         #pragma omp target update from(tr_cv[0:ns*n], tr_qv[0:ns*n])
     }
+
+    // Bed elevation, once sediment can move it. Normally z is constant and
+    // never needs syncing back, which is why it is not in the list above; with
+    // the Exner update of [G-4] the device owns it and the host copy would
+    // otherwise stay at its initial value for ever. Centroid AND edge, because
+    // the DE algorithms use discontinuous elevation and the kernel shifts both.
+    if (GD->D.n_sediment_classes > 0) {
+        double *bed_cv_s = GD->D.bed_centroid_values;
+        double *bed_ev_s = GD->D.bed_edge_values;
+        #pragma omp target update from(bed_cv_s[0:n], bed_ev_s[0:3*n])
+    }
 }
 
 void gpu_domain_sync_all_from_device(struct gpu_domain *GD) {

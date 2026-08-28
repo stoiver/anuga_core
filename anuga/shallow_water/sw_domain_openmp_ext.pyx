@@ -32,6 +32,8 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		anuga_int sediment_d_star_mode
 		double* sediment_reference_height
 		double sediment_a_h_floor
+		double sediment_porosity
+		anuga_int sediment_bed_evolution
 		double sediment_c_pack
 		anuga_int sediment_friction_mode
 		double sediment_manning_ll
@@ -187,6 +189,8 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.sediment_d_star_mode = getattr(domain_py_object, 'sediment_d_star_mode', 0)
 	D.sediment_a_h_floor = getattr(domain_py_object, 'sediment_a_h_floor', 0.01)
 	D.sediment_c_pack = getattr(domain_py_object, 'sediment_c_pack', 0.65)
+	D.sediment_porosity = getattr(domain_py_object, 'sediment_porosity', 0.3)
+	D.sediment_bed_evolution = 1 if getattr(domain_py_object, 'sediment_bed_evolution', True) else 0
 	D.sediment_friction_mode = getattr(domain_py_object, 'sediment_friction_mode', 0)
 	D.sediment_manning_ll = getattr(domain_py_object, 'sediment_manning_ll', 0.065)
 	D.sediment_wilson_bed = getattr(domain_py_object, 'sediment_wilson_bed', 0)
@@ -1087,6 +1091,20 @@ def extrapolate_second_order_edge_sw(object domain_py_object,
 	if distribute_to_vertices:
 		with nogil:
 			_openmp_distribute_edges_to_vertices(D)
+
+
+cdef extern from "gpu/core_kernels.h" nogil:
+	void core_apply_sediment_source(domain* D, double timestep)
+
+
+def apply_sediment_source(object domain_py_object, double timestep,
+                          update_domain_c_struct=False):
+	"""Fractional step: apply E-D to m and the resulting bed change to z."""
+
+	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=update_domain_c_struct)
+
+	with nogil:
+		core_apply_sediment_source(D, timestep)
 
 
 def protect_new(object domain_py_object, update_domain_c_struct=False):

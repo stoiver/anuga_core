@@ -114,6 +114,8 @@ cdef extern from "gpu_domain.h" nogil:
         int64_t sediment_d_star_mode
         double* sediment_reference_height
         double sediment_a_h_floor
+        double sediment_porosity
+        int64_t sediment_bed_evolution
         double sediment_c_pack
         int64_t sediment_friction_mode
         double sediment_manning_ll
@@ -423,6 +425,10 @@ cdef extern from "gpu_domain.h" nogil:
     uint64_t gpu_flop_counters_get_global_total(gpu_domain *GD)
     double gpu_flop_counters_get_global_flops(gpu_domain *GD)
     void gpu_flop_counters_print_global(gpu_domain *GD)
+
+
+cdef extern from "core_kernels.h" nogil:
+    void core_apply_sediment_source(domain* D, double timestep)
 
 
 cdef extern from "gpu_culvert_operator.h" nogil:
@@ -838,6 +844,8 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     D.sediment_d_star_mode = getattr(domain_object, 'sediment_d_star_mode', 0)
     D.sediment_a_h_floor = getattr(domain_object, 'sediment_a_h_floor', 0.01)
     D.sediment_c_pack = getattr(domain_object, 'sediment_c_pack', 0.65)
+    D.sediment_porosity = getattr(domain_object, 'sediment_porosity', 0.3)
+    D.sediment_bed_evolution = 1 if getattr(domain_object, 'sediment_bed_evolution', True) else 0
     D.sediment_friction_mode = getattr(domain_object, 'sediment_friction_mode', 0)
     D.sediment_manning_ll = getattr(domain_object, 'sediment_manning_ll', 0.065)
     D.sediment_wilson_bed = getattr(domain_object, 'sediment_wilson_bed', 0)
@@ -2133,6 +2141,17 @@ def saxpy3_conserved_quantities_gpu(GPUDomain gpu_dom, double a, double b, doubl
     computes Q = (2*Q_current + Q_backup) / 3.
     """
     gpu_saxpy3_conserved_quantities(&gpu_dom.GD, a, b, c)
+
+
+def apply_sediment_source_gpu(GPUDomain gpu_dom, double timestep):
+    """Fractional step on the device: apply E-D to m and the bed change to z.
+
+    Runs the same core kernel as mode 1; on a GPU build its loop is an
+    'omp target' region, so the tracer and bed arrays are updated in place on
+    the device with no host round trip. That is what keeps this operator
+    GPU-safe and off the _gpu_host_writes_suppressed fallback path.
+    """
+    core_apply_sediment_source(&gpu_dom.GD.D, timestep)
 
 
 def protect_gpu(GPUDomain gpu_dom):

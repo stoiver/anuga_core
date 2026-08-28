@@ -26,6 +26,7 @@ python_sources = [
   'collect_max_stage_operator.py',
   'elliptic_operator.py',
   'erosion_operators.py',
+  'sediment_operator.py',
   '__init__.py',
   'kinematic_viscosity_operator.py',
   'mannings_operator.py',

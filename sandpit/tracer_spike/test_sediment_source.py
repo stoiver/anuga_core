@@ -4,9 +4,13 @@ Phase 3 is the FIXED-BED stage of spec 2.4 -- no bed evolution, no bed->flow or
 sediment->momentum feedback. Deposited mass leaves suspension.
 
   A. SETTLING [S-1]. Ferguson & Church against the value the spec verifies.
-  B. ANALYTIC DECAY. In still water with no advection the source reduces to
-       dm/dt = -d* v_s m / h   =>   m(t) = m0 exp(-d* v_s t / h)
-     and the scheme should converge to it at first order in dt.
+  B. ANALYTIC DECAY, FIXED BED. In still water with no advection the source
+     reduces to dm/dt = -d* v_s m/h  =>  m(t) = m0 exp(-d* v_s t/h).
+     This solution assumes h is CONSTANT, so it is only the right target with
+     bed evolution off (spec 2.4's Phase 3 stage). With [G-4] active the bed
+     rises, h = w - z shrinks, and c = m/h ends ~2% higher -- physics, not
+     integration error: the discrepancy converges to 2.08e-2 as dt -> 0 rather
+     than vanishing.
   C. NO-OP. v_s = 0 must reproduce Phase 2 transport bit-for-bit.
   D. [L-1] POSITIVITY. A deliberately huge v_s must drive m to zero and stop,
      never below. This is the limiter that replaces aS16's concentration clamp.
@@ -68,6 +72,7 @@ DEPTH, DIAM, T_END = 1.0, 1.0e-4, 60.0
 errs = {}
 for dt in (4.0, 1.0):
     dom = still(depth=DEPTH, dt=dt)
+    dom.sediment_bed_evolution = False        # fixed bed: see the docstring
     dom.add_sediment_class('sand', diameter=DIAM, initial_concentration=0.05)
     v_s = dom.sediment_settling_velocity[0]
     dom.evolve_to_end(finaltime=T_END)

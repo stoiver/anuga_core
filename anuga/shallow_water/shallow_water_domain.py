@@ -708,6 +708,15 @@ class Domain(Generic_Domain):
         # rate diverge as shear vanishes. Same constant that bounds E* in
         # [E-1]. Inactive when d* = 1, since c <= c_max = 0.3 < 0.65.
         self.sediment_c_pack = 0.65
+        # [G-4] bed porosity lambda: the sediment VOLUME leaving suspension is
+        # (1-lambda) dz, the remainder being pore space filled from the water
+        # column. LM15 Example 2 uses 0.28.
+        self.sediment_porosity = 0.30
+        # Coupling stage, spec 2.4. True = evolving bed via [G-4] (Phase 4);
+        # False = FIXED bed (Phase 3), which is RDy26 v1.0's configuration and
+        # what the analytic constant-depth deposition solutions assume. Both are
+        # published configurations, not a debug switch.
+        self.sediment_bed_evolution = True
         # Friction closure for the sediment kernel (spec 3.3). 'constant' is
         # the right default for ordinary flood work; see set_sediment_friction.
         self.sediment_friction_mode = 0
@@ -995,7 +1004,8 @@ class Domain(Generic_Domain):
     def add_sediment_class(self, name, diameter, d_star=1.0, beta=None,
                            initial_concentration=0.0, rho_s=2650.0,
                            rho_w=1000.0, tau_c_star=0.04,
-                           reference_height=None, **settling_kwargs):
+                           reference_height=None, auto_operator=True,
+                           **settling_kwargs):
         """Register a suspended sediment class and return its index.
 
         A sediment class is a tracer -- so it is transported by the machinery of
@@ -1023,6 +1033,11 @@ class Domain(Generic_Domain):
             Critical Shields stress for entrainment `[E-1]`. Default 0.04,
             FG21's choice for suspension. Setting it to 0 disables entrainment
             for this class, leaving deposition only.
+        auto_operator : bool, optional
+            Register a `Sediment_operator` on this domain if one is not already
+            present (default True). The operator is what applies `[G-3]`'s bed
+            exchange and `[G-4]`'s bed evolution as a fractional step; without
+            it the classes are transported as inert tracers, silently.
         reference_height : float, optional
             `a` in `[S-4]`, the near-bed reference height at which `c_b` is
             evaluated, in metres. Only used when `sediment_d_star_mode = 1`.
@@ -1079,6 +1094,18 @@ class Domain(Generic_Domain):
 
         self._sediment_names.append(name)
         self.n_sediment_classes = ncl
+
+        # Register the fractional-step operator that actually applies the bed
+        # exchange, unless one is already present. Without it a domain accepts
+        # sediment classes and then quietly transports them as inert tracers --
+        # no erosion, no deposition, no bed change, and no error. Requiring the
+        # user to remember is a silent-no-op waiting to happen; pass
+        # auto_operator=False to manage it yourself.
+        if auto_operator:
+            from anuga.operators.sediment_operator import Sediment_operator
+            if not any(isinstance(op, Sediment_operator)
+                       for op in self.fractional_step_operators):
+                Sediment_operator(self)
 
         # add_tracer already invalidated both caches, but it did so BEFORE the
         # arrays above existed. Invalidate again so the rebuilt struct sees them.
@@ -5536,6 +5563,7 @@ class Domain(Generic_Domain):
 
         Rate_operators with GPU support don't need CPU sync.
         boundary_flux_integral_operator is GPU-safe (only reads boundary_flux_sum).
+        Sediment_operator is GPU-safe (device-resident kernel, updates in place).
         Boyd_box_operator/Boyd_pipe_operator are GPU-safe via GPUCulvertManager.
         Inlet_operator with GPU support doesn't need CPU sync.
 
@@ -5550,6 +5578,7 @@ class Domain(Generic_Domain):
         from anuga.structures.inlet_operator import Inlet_operator
         from anuga.structures.gpu_culvert_manager import GPUCulvertManager
         from anuga.operators.collect_max_quantities_operator import Collect_max_quantities_operator
+        from anuga.operators.sediment_operator import Sediment_operator
 
         # Initialize GPU culvert manager for Boyd operators if needed
         has_boyd_ops = any(GPUCulvertManager.is_boyd_operator(op)
@@ -5586,6 +5615,10 @@ class Domain(Generic_Domain):
                     op._init_gpu()
                 if hasattr(op, '_gpu_initialized') and op._gpu_initialized:
                     continue  # GPU-accelerated, no sync needed
+            elif isinstance(op, Sediment_operator):
+                # The sediment kernel runs on the device in mode 2 and updates
+                # the tracer and bed arrays in place, so no host sync is needed.
+                continue
             elif GPUCulvertManager.is_boyd_operator(op):
                 # Handled by GPUCulvertManager (local + cross-boundary via MPI in C)
                 if (self.gpu_culvert_manager is not None
