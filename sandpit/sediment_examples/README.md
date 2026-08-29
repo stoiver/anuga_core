@@ -53,8 +53,36 @@ D50 = 65 um (Griffin et al. 2014).
 | `example_1_channel.py` | `run_simple_sed_transport.py` |
 | `example_2_raster.py`  | `run_raster_sed_transport.py` |
 
+`example_3_erodible_dambreak.py` and `example_4_dune_collapse.py` are not ports;
+see below.
+
 `run_simple_veg.py` is not ported: vegetation drag (spec 8) is Phase 5 and is
 not implemented.
+
+## Example 4 -- what slope collapse changes
+
+`example_4_dune_collapse.py` runs the same dune-overtopping event twice, once
+with angle-of-repose relaxation off and once with it on, because either run
+alone says very little. The comparison is the example.
+
+```
+                                       repose off      repose on
+steepest bed slope (deg)                    38.38          33.03
+surviving crest (m)                         1.780          1.780
+budget: suspended + bed (m3)            -2.84e-14      -4.26e-14
+```
+
+The dune starts at 27.8 degrees, below the 33 degree limit, so everything
+relaxation does here was caused by the scour rather than by an unreasonable
+initial condition. Without it, scour leaves a 38.4 degree face -- steeper than
+sand stands. With it, the bed is held at the limit.
+
+The crest is *not* where the difference shows: scour takes the top of the dune
+either way. The difference is on the face, where relaxation removes a further
+0.052 m and lays it down 0.051 m thick just downslope. And it is moved, not
+lost -- the budget closes to machine precision with relaxation on exactly as it
+does with it off, which is the property that separates this from
+`sanddune_erosion_operator`, where the collapsed material simply disappears.
 
 ## Example 3 is not a port
 
@@ -99,30 +127,35 @@ Runnable demonstration is not the same as coverage. This table is what the
 three examples actually exercise; everything else is covered only by the test
 suites in `../tracer_spike/`.
 
-| capability | spec | ex 1 | ex 2 | ex 3 | tests |
-|---|---|:--:|:--:|:--:|---|
-| suspended transport | `[G-3]` | yes | yes | yes | `test_tracer_ns1`, `test_ns2` |
-| multiple classes | 2.2 | -- | -- | **yes** | `test_add_tracer` |
-| Shields erosion, non-cohesive | `[E-1]` | yes | yes | yes | `test_sediment_source` |
-| Hanson & Simon, cohesive | `[E-3]` | `--bed cohesive` | -- | -- | `test_cohesive` |
-| Partheniades | `[E-4]` | -- | -- | -- | `test_cohesive` |
-| deposition | `[D-1]` | yes | yes | yes | `test_sediment_source` |
-| Rouse near-bed ratio | `[S-4]` | -- | -- | **yes** | `test_rouse` |
-| Exner, suspended exchange | `[G-4]` | yes | yes | yes | `test_exner` |
-| bedload and its bed term | `[K-1]`, `[G-5]` | -- | -- | **yes** | `test_bedload` |
-| quadratic drag | `[T-1]` | yes | yes | yes | `test_shear_closure` |
-| depth-slope closure | `[T-7]` | -- | -- | -- | `test_shear_closure` |
-| Wilson / Larsen-Lamb friction | `[T-8..15]` | -- | -- | -- | `test_friction` |
-| limiters | `[L-1..4]` | yes | yes | yes | `test_sediment_source` |
-| external tracer source | 2.6 | -- | -- | -- | `test_mms_full` |
-| compute mode 1 | -- | yes | yes | fallback | all |
-| compute mode 2 (GPU) | -- | -- | -- | **yes** | `test_mode1_vs_mode2` |
-| parallel halo exchange | -- | -- | -- | -- | `run_parallel_tracer.py` |
+| capability | spec | ex 1 | ex 2 | ex 3 | ex 4 | tests |
+|---|---|:--:|:--:|:--:|:--:|---|
+| suspended transport | `[G-3]` | yes | yes | yes | yes | `test_tracer_ns1`, `test_ns2` |
+| multiple classes | 2.2 | -- | -- | **yes** | -- | `test_add_tracer` |
+| Shields erosion, non-cohesive | `[E-1]` | yes | yes | yes | yes | `test_sediment_source` |
+| Hanson & Simon, cohesive | `[E-3]` | `--bed cohesive` | -- | -- | -- | `test_cohesive` |
+| Partheniades | `[E-4]` | -- | -- | -- | -- | `test_cohesive` |
+| deposition | `[D-1]` | yes | yes | yes | yes | `test_sediment_source` |
+| Rouse near-bed ratio | `[S-4]` | -- | -- | **yes** | -- | `test_rouse` |
+| Exner, suspended exchange | `[G-4]` | yes | yes | yes | yes | `test_exner` |
+| bedload and its bed term | `[K-1]`, `[G-5]` | -- | -- | **yes** | -- | `test_bedload` |
+| quadratic drag | `[T-1]` | yes | yes | yes | yes | `test_shear_closure` |
+| depth-slope closure | `[T-7]` | -- | -- | -- | -- | `test_shear_closure` |
+| Wilson / Larsen-Lamb friction | `[T-8..15]` | -- | -- | -- | -- | `test_friction` |
+| limiters | `[L-1..4]` | yes | yes | yes | yes | `test_sediment_source` |
+| non-erodible base | `[L-5]` | -- | -- | -- | -- | `test_erodible_base` |
+| erodible region | `[L-5]` | -- | -- | -- | -- | `test_erodible_base` |
+| angle-of-repose relaxation | 7 | -- | -- | -- | **yes** | `test_repose` |
+| external tracer source | 2.6 | -- | -- | -- | -- | `test_mms_full` |
+| compute mode 1 | -- | yes | yes | -- | yes | all |
+| compute mode 2 (GPU) | -- | -- | -- | **yes** | -- | `test_mode1_vs_mode2` |
+| parallel halo exchange | -- | -- | -- | -- | -- | `run_parallel_tracer.py` |
 
-Three gaps are visible in that table and are worth naming: the depth-slope
-closure `[T-7]` and the Wilson/Larsen-Lamb friction closures `[T-8..15]` are
-implemented and tested but appear in no example, and nothing here runs in
-parallel. None is a correctness concern; they are simply undemonstrated.
+Gaps are visible in that table and are worth naming rather than leaving to be
+noticed: the depth-slope closure `[T-7]`, the Wilson/Larsen-Lamb friction
+closures `[T-8..15]`, the non-erodible base and region restriction `[L-5]`, and
+the external tracer source all have tests but appear in no example, and nothing
+here runs in parallel. None is a correctness concern; they are simply
+undemonstrated.
 
 ## A note on the data files
 
