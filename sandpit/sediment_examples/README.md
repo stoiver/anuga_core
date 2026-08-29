@@ -56,6 +56,74 @@ D50 = 65 um (Griffin et al. 2014).
 `run_simple_veg.py` is not ported: vegetation drag (spec 8) is Phase 5 and is
 not implemented.
 
+## Example 3 is not a port
+
+Because examples 1 and 2 are faithful ports, they only exercise what anugaSed
+does: a single sediment class, suspension only, compute mode 1. Four of the
+things this module adds were therefore not demonstrated anywhere runnable.
+`example_3_erodible_dambreak.py` covers them -- two grain sizes at once,
+bedload beside suspension, a bed that moves, and the unified GPU path:
+
+```
+$ python example_3_erodible_dambreak.py
+```
+
+It prints `sediment_summary()` first, so the run begins with a full statement
+of what was configured, then tracks the sediment budget as it evolves. The
+budget is the point of the example. Boundaries are reflective, so nothing
+leaves the domain, and over 60 s:
+
+```
+Sediment budget:  suspended +5.752703e+03  +  bed -5.752703e+03  =  -9.09e-13 m3
+```
+
+Every cubic metre in suspension came out of the bed, and `(1-lambda) dz`
+accounts for it to machine precision -- across both classes, with erosion,
+deposition and bedload all running and the bed moving under them. Bed change
+ranges from 0.43 m of scour to 0.11 m of deposition, so this is not a
+small-perturbation result.
+
+The two classes separate as they should: fine sand (150 um, `v_s` = 1.7 cm/s)
+climbs monotonically to 5.7e3 m3 in suspension, while coarse sand (800 um,
+`v_s` = 15 cm/s) peaks near 1.1e2 m3 at t = 30 s and then falls to 6.0e1 as
+deposition overtakes entrainment.
+
+Mode 2 selects the unified code path; whether it offloads is a property of
+the build, so the example reports `anuga.gpu_offload_enabled()` rather than
+inferring a device from the mode. A build without offload runs the same
+kernels on the host and the example still works.
+
+## What these examples do and do not cover
+
+Runnable demonstration is not the same as coverage. This table is what the
+three examples actually exercise; everything else is covered only by the test
+suites in `../tracer_spike/`.
+
+| capability | spec | ex 1 | ex 2 | ex 3 | tests |
+|---|---|:--:|:--:|:--:|---|
+| suspended transport | `[G-3]` | yes | yes | yes | `test_tracer_ns1`, `test_ns2` |
+| multiple classes | 2.2 | -- | -- | **yes** | `test_add_tracer` |
+| Shields erosion, non-cohesive | `[E-1]` | yes | yes | yes | `test_sediment_source` |
+| Hanson & Simon, cohesive | `[E-3]` | `--bed cohesive` | -- | -- | `test_cohesive` |
+| Partheniades | `[E-4]` | -- | -- | -- | `test_cohesive` |
+| deposition | `[D-1]` | yes | yes | yes | `test_sediment_source` |
+| Rouse near-bed ratio | `[S-4]` | -- | -- | **yes** | `test_rouse` |
+| Exner, suspended exchange | `[G-4]` | yes | yes | yes | `test_exner` |
+| bedload and its bed term | `[K-1]`, `[G-5]` | -- | -- | **yes** | `test_bedload` |
+| quadratic drag | `[T-1]` | yes | yes | yes | `test_shear_closure` |
+| depth-slope closure | `[T-7]` | -- | -- | -- | `test_shear_closure` |
+| Wilson / Larsen-Lamb friction | `[T-8..15]` | -- | -- | -- | `test_friction` |
+| limiters | `[L-1..4]` | yes | yes | yes | `test_sediment_source` |
+| external tracer source | 2.6 | -- | -- | -- | `test_mms_full` |
+| compute mode 1 | -- | yes | yes | fallback | all |
+| compute mode 2 (GPU) | -- | -- | -- | **yes** | `test_mode1_vs_mode2` |
+| parallel halo exchange | -- | -- | -- | -- | `run_parallel_tracer.py` |
+
+Three gaps are visible in that table and are worth naming: the depth-slope
+closure `[T-7]` and the Wilson/Larsen-Lamb friction closures `[T-8..15]` are
+implemented and tested but appear in no example, and nothing here runs in
+parallel. None is a correctness concern; they are simply undemonstrated.
+
 ## A note on the data files
 
 `topo.asc` (594 KB) and `outline.csv` are force-added: the repository's root
@@ -66,5 +134,7 @@ example 2 would have been committed without the data it needs.
 
 These demonstrate the module running end to end. They are **not validation**:
 nothing here has been checked against measured data or against a published
-result. The validation rungs of spec 10 -- Rio Puerco (rung 8) and the crater
+result. Verification -- that the equations are solved correctly -- lives in
+`../tracer_spike/` (MMS convergence, the RDycore benchmarks, mode 1 against
+mode 2), and is a separate claim from validation. The validation rungs of spec 10 -- Rio Puerco (rung 8) and the crater
 breach (rung 7) -- have not been attempted.

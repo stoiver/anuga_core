@@ -1141,22 +1141,45 @@ class Domain(Generic_Domain):
 
         return index
 
-    def set_deposition(self, law='d_star', tau_d=0.0):
-        """Select the deposition law (spec 4.4).
+    def set_deposition(self, law='d_star', tau_d=0.0, near_bed='constant',
+                       reference_height_floor=0.01):
+        """Select the deposition law and its near-bed treatment (spec 4.4).
 
-        `'d_star'` (default) -- `[D-1]`, `D = d*(Z) c v_s`.
-
-        `'threshold'` -- `[D-2]`, `D = v_s c (1 - tau_b/tau_d)` for
-        `tau_b < tau_d`, else zero. This is RDycore-sediment's form.
-        `tau_d = 0` disables deposition entirely, which is the hook their
-        passive-transport benchmarks rely on.
+        Parameters
+        ----------
+        law : {'d_star', 'threshold'}
+            `'d_star'` (default) -- `[D-1]`, `D = d*(Z) c v_s`.
+            `'threshold'` -- `[D-2]`, `D = v_s c (1 - tau_b/tau_d)` for
+            `tau_b < tau_d`, else zero; RDycore-sediment's form.
+        tau_d : float
+            Critical deposition stress in **pascals**, for `'threshold'`.
+            `tau_d = 0` disables deposition entirely -- the hook RDycore's
+            passive-transport benchmarks rely on.
+        near_bed : {'constant', 'rouse'}
+            How `d*` in `[D-1]` is obtained. `'constant'` uses the per-class
+            value given to `add_sediment_class` (default 1.0, the well-mixed
+            limit of P14/P13). `'rouse'` evaluates the fitted `[S-4]` profile
+            per cell from the local Rouse number.
+        reference_height_floor : float
+            The van Rijn-style floor `a >= floor * h`, used only by
+            `'rouse'`. Default 0.01. Set to 0 to reach anugaSed's regime,
+            which applies no floor -- see spec 12, D4b, where this is the
+            largest single divergence from them.
         """
         laws = {'d_star': 0, 'threshold': 1}
         if law not in laws:
             raise ValueError('unknown deposition law %r; expected one of %r'
                              % (law, sorted(laws)))
+        modes = {'constant': 0, 'rouse': 1}
+        if near_bed not in modes:
+            raise ValueError('unknown near_bed %r; expected one of %r'
+                             % (near_bed, sorted(modes)))
+        if tau_d < 0.0:
+            raise ValueError('tau_d must be >= 0 Pa, got %g' % tau_d)
         self.sediment_deposition_mode = laws[law]
         self.sediment_tau_d = float(tau_d)
+        self.sediment_d_star_mode = modes[near_bed]
+        self.sediment_a_h_floor = float(reference_height_floor)
         self._Domain_C_struct = None
         self.gpu_interface = None
         if hasattr(self, '_gpu_boundary_info_initialized'):
@@ -1198,6 +1221,127 @@ class Domain(Generic_Domain):
         self.gpu_interface = None
         if hasattr(self, '_gpu_boundary_info_initialized'):
             del self._gpu_boundary_info_initialized
+
+    def set_sediment_parameters(self, porosity=None, c_max=None, c_pack=None,
+                                bed_evolution=None, rho_w=None):
+        """Set the scalar sediment parameters, with validation.
+
+        Everything here is a physical property of the run, not a numerical
+        knob. All are optional; only what you pass is changed.
+
+        Parameters
+        ----------
+        porosity : float
+            Bed porosity `lambda` in `[G-4]`. The sediment VOLUME leaving
+            suspension is `(1-lambda) dz`, the rest being pore space filled
+            from the water column. Default 0.30; LM15 use 0.28.
+        c_max : float
+            `[L-2]`, the ceiling on depth-averaged volumetric concentration.
+            Default 0.30 (FG21); aS16 use 0.20.
+        c_pack : float
+            `[L-4]`, maximum packing bounding the NEAR-BED concentration
+            `c_b = d* c`. Default 0.65, the same constant that bounds `E*` in
+            `[E-1]`. Only bites when `d* != 1`.
+        bed_evolution : bool
+            Spec 2.4's coupling stage. `True` (default) evolves the bed via
+            `[G-4]`/`[G-5]`; `False` is the FIXED BED of Phase 3, which is
+            RDycore v1.0's configuration and what the analytic
+            constant-depth deposition solutions assume.
+        rho_w : float
+            Water density, used to form the dimensional bed shear stress.
+        """
+        if porosity is not None:
+            if not 0.0 <= porosity < 1.0:
+                raise ValueError('porosity must be in [0, 1), got %g' % porosity)
+            self.sediment_porosity = float(porosity)
+        if c_max is not None:
+            if c_max <= 0.0:
+                raise ValueError('c_max must be > 0, got %g' % c_max)
+            self.sediment_c_max = float(c_max)
+        if c_pack is not None:
+            if c_pack <= 0.0:
+                raise ValueError('c_pack must be > 0, got %g' % c_pack)
+            self.sediment_c_pack = float(c_pack)
+        if bed_evolution is not None:
+            self.sediment_bed_evolution = bool(bed_evolution)
+        if rho_w is not None:
+            if rho_w <= 0.0:
+                raise ValueError('rho_w must be > 0, got %g' % rho_w)
+            self.sediment_rho_w = float(rho_w)
+        self._Domain_C_struct = None
+        self.gpu_interface = None
+        if hasattr(self, '_gpu_boundary_info_initialized'):
+            del self._gpu_boundary_info_initialized
+
+    def sediment_summary(self):
+        """Return the complete active sediment configuration as text.
+
+        Every choice that affects the answer, with its units and the spec
+        label it implements. Worth printing at the top of any run: the module
+        has enough switches that "which erosion law was that?" is a real
+        question six months later, and several of the choices are physics
+        statements rather than tuning (spec 4.1.1).
+        """
+        if self.n_sediment_classes == 0:
+            return 'sediment: no classes registered'
+
+        ero = {0: "[E-1] Shields / Smith-McLean, non-cohesive (sand, gravel)",
+               1: "[E-3] Hanson & Simon, cohesive (silt, clay)",
+               2: "[E-4] Partheniades (RDycore)"}[self.sediment_erosion_mode]
+        dep = {0: "[D-1] D = d* c v_s", 1: "[D-2] D = v_s c (1 - tau_b/tau_d)"
+               }[self.sediment_deposition_mode]
+        dstar = {0: "constant, per class", 1: "[S-4] Rouse profile"
+                 }[self.sediment_d_star_mode]
+        shear = {0: "[T-1] quadratic drag, tau_b = rho f_c |v|^2",
+                 1: "[T-7] depth-slope, tau_b = rho g h S (aSM16; legacy)"
+                 }[self.sediment_shear_closure]
+        fric = {0: "constant n, from the domain friction quantity",
+                1: "larsen_lamb [T-13..15], n = %.5f" % self.sediment_manning_ll,
+                2: "wilson [T-8..10], bed=%s, D=%.4g m"
+                   % (['sand', 'gravel', 'boulder'][self.sediment_wilson_bed],
+                      self.sediment_wilson_D)}[self.sediment_friction_mode]
+        bl = ("off" if self.sediment_bedload_mode == 0 else
+              ("[K-5] Engelund-Hansen, TOTAL LOAD (suspended source disabled)"
+               if self.sediment_bedload_mode == 2 else
+               "[K-1] power law, K=%.4g m=%.4g tau_c*=%.4g"
+               % (self.sediment_bedload_K, self.sediment_bedload_m,
+                  self.sediment_bedload_tau_c_star)))
+
+        L = ['sediment configuration',
+             '  classes            : %d  %r' % (self.n_sediment_classes,
+                                                self.get_sediment_names()),
+             '  erosion            : %s' % ero,
+             '  deposition         : %s' % dep,
+             '  near-bed d*        : %s' % dstar,
+             '  shear closure      : %s' % shear,
+             '  friction closure   : %s' % fric,
+             '  bedload            : %s' % bl,
+             '  bed evolution      : %s  (spec 2.4 %s)'
+             % (self.sediment_bed_evolution,
+                'Phase 4, evolving' if self.sediment_bed_evolution
+                else 'Phase 3, FIXED bed'),
+             '  porosity lambda    : %.4g' % self.sediment_porosity,
+             '  c_max      [L-2]   : %.4g' % self.sediment_c_max,
+             '  c_pack     [L-4]   : %.4g' % self.sediment_c_pack,
+             '  rho_w              : %.4g kg/m3' % self.sediment_rho_w]
+        if self.sediment_erosion_mode in (1, 2):
+            L.append('  tau_crit           : %.4g Pa' % self.sediment_tau_crit)
+        if self.sediment_erosion_mode == 1:
+            L.append('  K_e        [E-5]   : %.4e m3/N/s' % self.sediment_K_e)
+        if self.sediment_erosion_mode == 2:
+            L.append('  K_p        [E-4]   : %.4e kg/m2/s'
+                     % self.sediment_K_partheniades)
+        if self.sediment_deposition_mode == 1:
+            L.append('  tau_d      [D-2]   : %.4g Pa' % self.sediment_tau_d)
+        if self.sediment_d_star_mode == 1:
+            L.append('  a/h floor          : %.4g' % self.sediment_a_h_floor)
+        L.append('  per class:')
+        for i, nm in enumerate(self.get_sediment_names()):
+            L.append('    %-10s d=%.4g m  v_s=%.4e m/s  R=%.4g  tau_c*=%.4g'
+                     % (nm, self.sediment_diameter[i],
+                        self.sediment_settling_velocity[i],
+                        self.sediment_R[i], self.sediment_tau_c_star[i]))
+        return '\n'.join(L)
 
     def set_bed_material(self, material='noncohesive', tau_crit=0.088,
                          K_e=None, rho_w=1000.0):
