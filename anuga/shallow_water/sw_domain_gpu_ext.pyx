@@ -129,6 +129,10 @@ cdef extern from "gpu_domain.h" nogil:
         double sediment_bedload_K
         double sediment_bedload_m
         double sediment_bedload_tau_c_star
+        double* sediment_z_base
+        int64_t sediment_has_z_base
+        double* sediment_source_limited
+        int64_t* sediment_bed_exhausted
         double* sediment_qbx
         double* sediment_qby
         double sediment_c_pack
@@ -871,6 +875,11 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     D.sediment_porosity = getattr(domain_object, 'sediment_porosity', 0.3)
     D.sediment_bed_evolution = 1 if getattr(domain_object, 'sediment_bed_evolution', True) else 0
     D.sediment_bedload_mode = getattr(domain_object, 'sediment_bedload_mode', 0)
+    # [L-5]. Set UNCONDITIONALLY, outside the n_sediment_classes guard
+    # below: the kernels test this flag before dereferencing
+    # sediment_z_base, so leaving it uninitialised makes a NULL
+    # pointer look like a configured base.
+    D.sediment_has_z_base = getattr(domain_object, 'sediment_has_z_base', 0)
     D.sediment_bedload_K = getattr(domain_object, 'sediment_bedload_K', 3.97)
     D.sediment_bedload_m = getattr(domain_object, 'sediment_bedload_m', 1.5)
     D.sediment_bedload_tau_c_star = getattr(domain_object, 'sediment_bedload_tau_c_star', 0.0495)
@@ -879,6 +888,8 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     D.sediment_wilson_bed = getattr(domain_object, 'sediment_wilson_bed', 0)
     D.sediment_wilson_D = getattr(domain_object, 'sediment_wilson_D', 1.0e-3)
     cdef double[::1] sed1
+    cdef double[:,::1] sed2
+    cdef int64_t[::1] sedi
     if D.n_sediment_classes > 0:
         sed1 = domain_object.sediment_settling_velocity
         D.sediment_settling_velocity = &sed1[0]
@@ -896,6 +907,17 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.sediment_qbx = &sed1[0]
         sed1 = domain_object.sediment_qby
         D.sediment_qby = &sed1[0]
+        # [L-5]. See the note in the OpenMP binding: the scratch is
+        # dereferenced whenever a class exists, the base only when set.
+        sed2 = domain_object.sediment_source_limited
+        D.sediment_source_limited = &sed2[0,0]
+        sedi = domain_object.sediment_bed_exhausted
+        D.sediment_bed_exhausted = &sedi[0]
+        if domain_object.sediment_has_z_base:
+            sed1 = domain_object.sediment_z_base
+            D.sediment_z_base = &sed1[0]
+        else:
+            D.sediment_z_base = NULL
     else:
         D.sediment_settling_velocity = NULL
         D.sediment_d_star = NULL
@@ -905,6 +927,9 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.sediment_reference_height = NULL
         D.sediment_qbx = NULL
         D.sediment_qby = NULL
+        D.sediment_z_base = NULL
+        D.sediment_source_limited = NULL
+        D.sediment_bed_exhausted = NULL
     # Phase 2: wire the tracer arrays for the device. The pointers must be set
     # whenever number_of_tracers > 0 -- the shared kernels guard on that count
     # and dereference all six, so a NULL here is CUDA_ERROR_ILLEGAL_ADDRESS on

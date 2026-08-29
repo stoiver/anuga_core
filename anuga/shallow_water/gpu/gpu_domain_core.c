@@ -819,6 +819,19 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
         #pragma omp target enter data map(to: sed_vs[0:ncl], sed_ds[0:ncl], \
             sed_dm[0:ncl], sed_rr[0:ncl], sed_tc[0:ncl], sed_ar[0:ncl]) \
             map(alloc: sed_qx[0:n], sed_qy[0:n])
+
+        // [L-5]. The scratch and the exhaustion snapshot are pure device
+        // workspace, so alloc; the base itself is input and must be copied.
+        // Mapped inside the same n_sediment_classes guard as everything
+        // above, which is what allocates them.
+        double *sed_sl = GD->D.sediment_source_limited;
+        anuga_int *sed_ex = GD->D.sediment_bed_exhausted;
+        #pragma omp target enter data map(alloc: sed_sl[0:ncl*n], \
+            sed_ex[0:n])
+        if (GD->D.sediment_has_z_base) {
+            double *sed_zb = GD->D.sediment_z_base;
+            #pragma omp target enter data map(to: sed_zb[0:n])
+        }
     }
 
     // Map halo exchange arrays if we have neighbors
@@ -1245,6 +1258,15 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
         #pragma omp target exit data map(delete: sed_vs[0:ncl], sed_ds[0:ncl], \
             sed_dm[0:ncl], sed_rr[0:ncl], sed_tc[0:ncl], sed_ar[0:ncl], \
             sed_qx[0:n], sed_qy[0:n])
+
+        // [L-5]. Mirrors the enter-data above, on the same guard.
+        double *sed_sl = GD->D.sediment_source_limited;
+        anuga_int *sed_ex = GD->D.sediment_bed_exhausted;
+        #pragma omp target exit data map(delete: sed_sl[0:ncl*n], sed_ex[0:n])
+        if (GD->D.sediment_has_z_base) {
+            double *sed_zb = GD->D.sediment_z_base;
+            #pragma omp target exit data map(delete: sed_zb[0:n])
+        }
     }
 
     // Unmap halo arrays

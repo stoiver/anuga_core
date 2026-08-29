@@ -47,6 +47,10 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double sediment_bedload_K
 		double sediment_bedload_m
 		double sediment_bedload_tau_c_star
+		double* sediment_z_base
+		anuga_int sediment_has_z_base
+		double* sediment_source_limited
+		anuga_int* sediment_bed_exhausted
 		double* sediment_qbx
 		double* sediment_qby
 		double sediment_c_pack
@@ -215,6 +219,11 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.sediment_porosity = getattr(domain_py_object, 'sediment_porosity', 0.3)
 	D.sediment_bed_evolution = 1 if getattr(domain_py_object, 'sediment_bed_evolution', True) else 0
 	D.sediment_bedload_mode = getattr(domain_py_object, 'sediment_bedload_mode', 0)
+	# [L-5]. Set UNCONDITIONALLY, outside the n_sediment_classes guard
+	# below: the kernels test this flag before dereferencing
+	# sediment_z_base, so leaving it uninitialised makes a NULL
+	# pointer look like a configured base.
+	D.sediment_has_z_base = getattr(domain_py_object, 'sediment_has_z_base', 0)
 	D.sediment_bedload_K = getattr(domain_py_object, 'sediment_bedload_K', 3.97)
 	D.sediment_bedload_m = getattr(domain_py_object, 'sediment_bedload_m', 1.5)
 	D.sediment_bedload_tau_c_star = getattr(domain_py_object, 'sediment_bedload_tau_c_star', 0.0495)
@@ -384,6 +393,8 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 	# (ns, ...) float64 arrays; NULL when no tracers are registered.
 	cdef double[:, ::1] tr2
 	cdef double[::1] sed1
+	cdef double[:,::1] sed2
+	cdef anuga_int[::1] sedi
 	if getattr(domain_py_object, 'number_of_tracers', 0) > 0:
 		tr2 = domain_py_object.tracer_centroid_values
 		D.tracer_centroid_values = &tr2[0, 0]
@@ -419,6 +430,18 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 			D.sediment_qbx = &sed1[0]
 			sed1 = domain_py_object.sediment_qby
 			D.sediment_qby = &sed1[0]
+			# [L-5]. sediment_source_limited is dereferenced by the source
+			# kernel whenever there is a class, so it is bound unconditionally
+			# alongside them; z_base only when a base was actually set.
+			sed2 = domain_py_object.sediment_source_limited
+			D.sediment_source_limited = &sed2[0,0]
+			sedi = domain_py_object.sediment_bed_exhausted
+			D.sediment_bed_exhausted = &sedi[0]
+			if domain_py_object.sediment_has_z_base:
+				sed1 = domain_py_object.sediment_z_base
+				D.sediment_z_base = &sed1[0]
+			else:
+				D.sediment_z_base = NULL
 		else:
 			D.sediment_settling_velocity = NULL
 			D.sediment_d_star = NULL
@@ -428,6 +451,9 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 			D.sediment_reference_height = NULL
 			D.sediment_qbx = NULL
 			D.sediment_qby = NULL
+			D.sediment_z_base = NULL
+			D.sediment_source_limited = NULL
+			D.sediment_bed_exhausted = NULL
 	else:
 		D.sediment_settling_velocity = NULL
 		D.sediment_d_star = NULL
@@ -437,6 +463,9 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 		D.sediment_reference_height = NULL
 		D.sediment_qbx = NULL
 		D.sediment_qby = NULL
+		D.sediment_z_base = NULL
+		D.sediment_source_limited = NULL
+		D.sediment_bed_exhausted = NULL
 		D.tracer_centroid_values = NULL
 		D.tracer_edge_values = NULL
 		D.tracer_boundary_values = NULL

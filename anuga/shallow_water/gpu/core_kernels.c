@@ -641,6 +641,12 @@ void core_apply_bedload(struct domain *D, double timestep) {
     double * restrict normals = D->normals;
     double * restrict edgelengths = D->edgelengths;
     double * restrict areas = D->areas;
+    /* [L-5]. Both the flag and the arrays are required; see the note in
+     * core_apply_sediment_source. */
+    double * restrict z_base = D->sediment_z_base;
+    anuga_int * restrict exhausted = D->sediment_bed_exhausted;
+    const anuga_int has_z_base = (D->sediment_has_z_base
+                                  && z_base != NULL && exhausted != NULL);
 
     if (one_minus_lambda <= 0.0) {
         return;
@@ -707,9 +713,80 @@ void core_apply_bedload(struct domain *D, double timestep) {
         }
 
         if (q_b_total > 0.0) {
+            /* [L-5]. A cell cannot export bed material it does not have.
+             * The limit is applied to the TRANSPORT VECTOR, not to the
+             * divergence: both cells sharing an edge then form their flux
+             * from the same limited q, so the flux stays antisymmetric and
+             * the scheme stays exactly conservative. Clamping the divergence
+             * instead would let one side remove what the other never
+             * received, which creates bed material. */
+            if (has_z_base) {
+                const double avail = bed_cv[k] - z_base[k];
+                const double thickness = (avail > 0.0) ? avail : 0.0;
+                /* The cell's own contribution to its outflow: its half of
+                 * every edge's centred flux, counting only the outgoing
+                 * ones. */
+                double own_out = 0.0;
+                const double ex = q_b_total * u / speed;
+                const double ey = q_b_total * v / speed;
+                for (anuga_int i = 0; i < 3; i++) {
+                    const anuga_int ki = 3 * k + i;
+                    if (neighbours[ki] < 0) continue;
+                    const double qn = 0.5 * (ex * normals[6 * k + 2 * i]
+                                           + ey * normals[6 * k + 2 * i + 1]);
+                    if (qn > 0.0) own_out += qn * edgelengths[ki];
+                }
+                if (own_out > 0.0) {
+                    const double cap = thickness * one_minus_lambda
+                                     * areas[k] / timestep;
+                    if (own_out > cap) {
+                        q_b_total *= cap / own_out;
+                    }
+                }
+            }
+
             /* [K-4] parallel to (u, v) */
             qbx[k] = q_b_total * u / speed;
             qby[k] = q_b_total * v / speed;
+        }
+    }
+
+    /* ---- [L-5] pass 1.5: which cells cannot afford what is about to be
+     * taken from them ----------------------------------------------------
+     *
+     * Flagging cells that have ALREADY reached the base is not enough. A cell
+     * with a millimetre left can be asked for two in a single step and is
+     * only found empty afterwards, which is how the first version of this
+     * overshot its base by 6.1e-6 m on a 1e-2 m layer. So the test is
+     * predictive: form the divergence this step WILL produce and flag the
+     * cell if it cannot pay for it.
+     *
+     * Separate sweep, not folded into pass 2, because pass 2 writes bed
+     * elevation while its neighbours are still reading it -- see the note in
+     * sw_domain.h. This one only reads, so every cell sees the same state.
+     */
+    if (has_z_base) {
+        OMP_PARALLEL_LOOP
+        for (anuga_int k = 0; k < n; k++) {
+            const double avail = bed_cv[k] - z_base[k];
+            if (avail <= 0.0) {
+                exhausted[k] = 1;      /* nothing left to give */
+                continue;
+            }
+            double outflux = 0.0;
+            for (anuga_int i = 0; i < 3; i++) {
+                const anuga_int ki = 3 * k + i;
+                const anuga_int nb = neighbours[ki];
+                if (nb < 0) continue;
+                const double qn = 0.5 *
+                    ((qbx[k] + qbx[nb]) * normals[6 * k + 2 * i]
+                   + (qby[k] + qby[nb]) * normals[6 * k + 2 * i + 1]);
+                outflux += qn * edgelengths[ki];
+            }
+            /* dz this step, if nothing were blocked. */
+            const double drop = (timestep * outflux / areas[k])
+                              / one_minus_lambda;
+            exhausted[k] = (drop > avail) ? 1 : 0;
         }
     }
 
@@ -751,8 +828,25 @@ void core_apply_bedload(struct domain *D, double timestep) {
              * If oscillations ever appear in an advection-dominated case, the
              * upgrade is a Rusanov-type flux -- centred plus a dissipation
              * term in (z_nb - z_k) -- not a bare donor switch. */
-            const double qn = 0.5 * ((qx_k + qbx[nb]) * nx
-                                   + (qy_k + qby[nb]) * ny);
+            double qn = 0.5 * ((qx_k + qbx[nb]) * nx
+                             + (qy_k + qby[nb]) * ny);
+
+            /* [L-5]. A cell that cannot pay for this step's removal (pass
+             * 1.5) may gain material but must not lose any, so close every
+             * edge that would take material OUT of it. qn > 0 is outflow from
+             * k, qn < 0 is outflow from nb.
+             *
+             * This is SYMMETRIC, which is the whole point: cell nb reaches
+             * this edge with the opposite normal, hence -qn, and the same
+             * two tests in the same order, so both sides close the same edge
+             * and neither can remove what the other did not give up. That is
+             * what keeps bedload exactly conservative with a base present.
+             * It works on a snapshot taken in pass 1 rather than on live
+             * elevation, because this loop writes elevation as it goes. */
+            if (has_z_base) {
+                if (qn > 0.0 && exhausted[k])  qn = 0.0;
+                if (qn < 0.0 && exhausted[nb]) qn = 0.0;
+            }
             outflux += qn * edgelengths[ki];
         }
 
@@ -866,6 +960,15 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     double * restrict bed_ev_w = D->bed_edge_values;
     const double one_minus_lambda = 1.0 - D->sediment_porosity;
     const anuga_int bed_evolves = D->sediment_bed_evolution;
+    /* [L-5]. Hoisted for the same device reason as the tracer pointers.
+     *
+     * The flag alone does not license the dereference: it and the pointer are
+     * set by separate lines of the Cython binding, and when one of them was
+     * missed the flag read as uninitialised garbage, tested true, and this
+     * kernel dereferenced a NULL base. Require both. */
+    double * restrict z_base = D->sediment_z_base;
+    const anuga_int has_z_base = (D->sediment_has_z_base && z_base != NULL);
+    double * restrict src_lim = D->sediment_source_limited;
 
     OMP_PARALLEL_LOOP
     for (anuga_int k = 0; k < n; k++) {
@@ -880,6 +983,8 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
         const double inv_h = 1.0 / h;
         const double m_max = c_max * h;
         double dz_cell = 0.0;
+        double total_E = 0.0;   /* [L-5]: erosive demand on the bed */
+        double total_D = 0.0;   /* [L-5]: what deposition returns to it */
 
         // Velocity by the ANUGA depth-limiting form [T-5], the same
         // regularisation RDy26 A22-A23 adopt. Never a bare (uh)/h.
@@ -1067,6 +1172,66 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                 }
             }
 
+            // Held, not applied. [L-5] below limits the classes TOGETHER
+            // against the cell's erodible thickness, so no class may be
+            // applied until every class's demand on the bed is known.
+            //
+            // The external supply is deliberately NOT folded in here: it is
+            // not a bed exchange, so it must not be scaled by a bed-material
+            // limiter, and it is added in the apply loop instead.
+            src_lim[idx] = source;
+            if (source > 0.0) total_E += source;
+            else              total_D += source;
+        }
+
+        // ---- [L-5] non-erodible base -----------------------------------
+        //
+        // The bed may be lowered to sediment_z_base and no further. Erosion
+        // is a bed-material budget, so the limit belongs on the SOURCE, like
+        // [L-1] and [L-2], and not on z: clamping z after the fact would
+        // leave sediment in the water column that no longer came from
+        // anywhere, which is exactly how [L-1]'s sign bug created 957% of
+        // the initial mass.
+        //
+        // Only the EROSIVE part is scaled. Deposition is not restrained by a
+        // shortage of bed material -- it is what supplies it -- and scaling
+        // it down would suppress the very process that reopens the cell.
+        //
+        // The scale is shared and proportional, so the answer does not depend
+        // on the order the classes were registered. There is no bed
+        // stratigraphy in this model: the bed is not tracked per class, so
+        // no class has a better claim on the last millimetre than another,
+        // and proportional is the only choice that does not invent one.
+        double scale = 1.0;
+        if (has_z_base && bed_evolves && one_minus_lambda > 0.0
+                && total_E > 0.0) {
+            const double avail = bed_cv[k] - z_base[k];
+            const double thickness = (avail > 0.0) ? avail : 0.0;
+            // The largest net removal from the bed this step, as a source.
+            const double S_max = thickness * one_minus_lambda / timestep;
+            if (total_E + total_D > S_max) {
+                scale = (S_max - total_D) / total_E;
+                if (scale < 0.0) scale = 0.0;
+                if (scale > 1.0) scale = 1.0;
+            }
+        }
+
+        // ---- apply ------------------------------------------------------
+        for (anuga_int s = 0; s < n_classes; s++) {
+            const anuga_int idx = s * n + k;
+            double source = src_lim[idx];
+            if (source > 0.0) {
+                source *= scale;
+            }
+
+            // [G-4]. source = E - D, so dz = -source dt/(1-lambda). Taken
+            // from the bed exchange ALONE, before the external supply is
+            // added: sediment introduced from outside the model does not
+            // come out of the bed, so it must not move it.
+            if (bed_evolves && one_minus_lambda > 0.0) {
+                dz_cell += -(timestep * source) / one_minus_lambda;
+            }
+
             // [G-3] S_ms: external supply, added AFTER the limiters. They
             // bound bed exchange by what bed and water column can supply;
             // an external source is neither, and clipping it would also make
@@ -1077,10 +1242,6 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
 
             // Fractional step: update the state directly with the full dt.
             t_cons[idx] += timestep * source;
-            // [G-4]. source = E - D, so dz = -source dt/(1-lambda).
-            if (bed_evolves && one_minus_lambda > 0.0) {
-                dz_cell += -(timestep * source) / one_minus_lambda;
-            }
         }
         // Raise the bed by dz. The DE algorithms use DISCONTINUOUS elevation,
         // so edge values are not re-derived from the centroid and must be

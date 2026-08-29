@@ -85,6 +85,7 @@ Choices are made by naming the **physics**, never by setting a flag:
 | `set_sediment_friction(mode, ...)` | the friction factor feeding `tau_b` | 3.3 |
 | `set_bedload(formula, ...)` | bedload transport, or off | 5 |
 | `set_sediment_parameters(...)` | the scalar physical properties | 2.4, 6 |
+| `set_erodible_base(...)` | the depth below which nothing erodes | 4.5 |
 | `set_tracer_source(name, values)` | an external source | 2.6 |
 | `set_tracer_boundary(name, value)` | inflow concentration | 2.5 |
 
@@ -350,7 +351,75 @@ fractional step.
 
 ---
 
-## 10. External sources
+## 10. The non-erodible base
+
+```python
+domain.set_erodible_base(depth=0.5)          # 0.5 m of erodible material
+domain.set_erodible_base(elevation=z_rock)   # or an absolute surface, (n,)
+domain.set_erodible_base()                   # remove it again
+```
+
+By default the bed is **bottomless**: erosion lowers it for as long as the flow
+has the strength to. That is right for a deep alluvial channel and wrong
+wherever the erodible layer is finite -- a reach floored by an outcrop, a lined
+culvert, a dam apron, a soil layer of known depth over rock. `[L-5]` gives it a
+floor.
+
+The base is a **per-centroid field**, because bedrock is a surface. `depth=`
+measures down from the elevation set so far and is recorded as an elevation at
+the moment of the call, so later changes to the elevation quantity do not drag
+it around. `elevation=` gives the surface directly, in the domain's datum.
+Scalars broadcast; arrays must be `(n,)`. Give exactly one.
+
+A base above the bed is rejected rather than silently accepted -- it would mean
+negative erodible thickness, which is a mistake, not a configuration.
+
+```python
+domain.erodible_thickness()   # (n,) metres remaining; 0 means bedrock
+```
+
+`sediment_summary()` reports the range and how many cells have reached bedrock.
+
+### 10.1 What it guarantees
+
+The limit is applied to the **source**, not by clamping elevation. Erosion is
+scaled back to what the remaining thickness can supply, so the sediment that is
+not eroded never enters the water column and the budget still closes to machine
+precision. Clamping `z` afterwards would leave suspended sediment that came
+from nowhere.
+
+Where several classes compete for the last of the material they are scaled by
+one shared proportional factor, not served in registration order: the bed
+carries no per-class stratigraphy, so no class has a better claim, and the
+answer must not depend on the order you called `add_sediment_class`.
+Deposition is never scaled -- it is what replenishes the bed.
+
+The two transport routes give **different strengths of guarantee**, and it is
+worth knowing which you are relying on:
+
+| route | floor is | why |
+|---|---|---|
+| suspended exchange `[G-4]` | **exact** | the limit is on the exchange term itself |
+| bedload `[G-5]` | within one step's flux | bedload is a divergence; see below |
+
+Bedload only redistributes, and stays exactly conservative with a base present,
+because the limit is applied to the transport vector and to whole edges -- both
+of which the two cells sharing an edge evaluate identically. The price is that
+the floor is not exact: closing an edge for a cell that cannot pay also cancels
+its neighbour's inflow, so the deficit migrates. Measured overshoot is
+5.1e-6 m on a 1.0e-2 m layer. If you need bedload's floor exact, that is a
+known limitation with a known fix (iterating the exhaustion flag to a fixed
+point), not a mystery.
+
+### 10.2 Cost
+
+None when unset. With no base configured the kernels take the path they took
+before the feature existed, and produce bitwise identical results -- which is
+asserted, not assumed, in `test_erodible_base.py` check E1.
+
+---
+
+## 11. External sources
 
 ```python
 domain.set_tracer_source('sand', values)   # array over centroids, or a scalar
@@ -364,7 +433,7 @@ prescribed release.
 
 ---
 
-## 11. Running on the GPU
+## 12. Running on the GPU
 
 ```python
 domain.set_multiprocessor_mode(2)
@@ -400,7 +469,7 @@ simply forces the mapping to be rebuilt.
 
 ---
 
-## 12. Choosing a configuration
+## 13. Choosing a configuration
 
 If you do not know where to start:
 
@@ -418,12 +487,14 @@ If you do not know where to start:
   `set_shear_closure('depth_slope')`; see `sandpit/sediment_examples/`.
 * **Comparing against an analytic solution.**
   `set_sediment_parameters(bed_evolution=False)` and leave `d*` at 1.0.
+* **A finite erodible layer over rock.** `set_erodible_base(depth=...)`, and
+  check `erodible_thickness()` afterwards to see where it bit.
 
 Then print `sediment_summary()` and check it says what you meant.
 
 ---
 
-## 13. What is not implemented
+## 14. What is not implemented
 
 Vegetation drag (spec 8) is Phase 5 and absent. Neither validation rung of
 spec 10 -- Rio Puerco, the crater breach -- has been attempted; the evidence

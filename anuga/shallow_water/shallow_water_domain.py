@@ -736,6 +736,14 @@ class Domain(Generic_Domain):
         self.sediment_bedload_tau_c_star = 0.0495
         self.sediment_qbx = None
         self.sediment_qby = None
+        # [L-5] non-erodible base, spec 4.5. Off by default: with no base the
+        # bed is bottomless, which is what every published test case in the
+        # spec assumes. See set_erodible_base().
+        self.sediment_z_base = None
+        self.sediment_has_z_base = 0
+        self.sediment_bed_exhausted = None
+        # Scratch for the source kernel, (ncl, n). Allocated with the classes.
+        self.sediment_source_limited = None
         # Friction closure for the sediment kernel (spec 3.3). 'constant' is
         # the right default for ordinary flood work; see set_sediment_friction.
         self.sediment_friction_mode = 0
@@ -1116,6 +1124,16 @@ class Domain(Generic_Domain):
                                           dtype=num.float64)
             self.sediment_qby = num.zeros(self.number_of_elements,
                                           dtype=num.float64)
+            # [L-5] snapshot, int64 to match anuga_int.
+            self.sediment_bed_exhausted = num.zeros(self.number_of_elements,
+                                                    dtype=num.int64)
+
+        # Scratch for the source kernel: every class's bed exchange is held
+        # here until [L-5] has limited them together. Sized (ncl, n) and
+        # REALLOCATED as classes are added -- the kernel dereferences it
+        # whenever n_sediment_classes > 0, so it must never be short.
+        self.sediment_source_limited = num.zeros(
+            (ncl, self.number_of_elements), dtype=num.float64)
 
         self._sediment_names.append(name)
         self.n_sediment_classes = ncl
@@ -1140,6 +1158,109 @@ class Domain(Generic_Domain):
             del self._gpu_boundary_info_initialized
 
         return index
+
+    def set_erodible_base(self, elevation=None, depth=None):
+        """Set the non-erodible base -- bedrock -- below which no erosion acts.
+
+        `[L-5]`. Without this the bed is bottomless: erosion lowers it for as
+        long as the flow has the strength to, which is the right default for
+        an alluvial channel and wrong wherever the erodible layer is finite --
+        a scoured reach over an outcrop, a lined culvert, a dam apron, a soil
+        layer of known depth over rock.
+
+        The base is a per-CENTROID elevation, not a scalar, because bedrock is
+        a surface. Give it either way round:
+
+            domain.set_erodible_base(elevation=z_rock)  # absolute [m]
+            domain.set_erodible_base(depth=0.5)         # 0.5 m below the
+                                                        # elevation set so far
+            domain.set_erodible_base()                  # remove the base
+
+        Parameters
+        ----------
+        elevation : float or array (n,)
+            Base elevation, in the same datum as the domain's elevation
+            quantity. Scalar broadcasts.
+        depth : float or array (n,)
+            Erodible thickness below the CURRENT bed. The base is recorded as
+            an elevation at the moment of the call, so later changes to the
+            elevation quantity do not move it. Scalar broadcasts.
+
+        Give exactly one. With neither, the base is removed and the bed is
+        bottomless again.
+
+        Notes
+        -----
+        The limiter acts on the SOURCE, never by clamping elevation. Erosion
+        is scaled back to what the remaining thickness can supply, and the
+        sediment that is not eroded never enters the water column, so the
+        budget still closes exactly. Clamping z afterwards would leave
+        suspended sediment that came from nowhere.
+
+        Where several classes compete for the last of the material, they are
+        scaled by a shared proportional factor rather than served in order:
+        the bed carries no per-class stratigraphy, so no class has a better
+        claim, and registration order must not change the answer. Deposition
+        is never scaled -- it is what replenishes the bed.
+
+        Bedload is limited too, and stays exactly conservative while it is:
+        the limit applies to the transport vector and to whole edges, both of
+        which the two cells sharing an edge see identically.
+        """
+        if elevation is not None and depth is not None:
+            raise ValueError('give elevation or depth, not both')
+
+        if elevation is None and depth is None:
+            self.sediment_z_base = None
+            self.sediment_has_z_base = 0
+        else:
+            n = self.number_of_elements
+            z = self.quantities['elevation'].centroid_values
+            if depth is not None:
+                d = num.asarray(depth, dtype=num.float64)
+                if num.any(d < 0.0):
+                    raise ValueError('erodible depth must be >= 0')
+                base = z - d
+            else:
+                base = num.asarray(elevation, dtype=num.float64)
+
+            base = num.ascontiguousarray(
+                num.broadcast_to(base, (n,)), dtype=num.float64).copy()
+
+            # A base above the bed is not a configuration, it is a mistake:
+            # the cell starts with negative erodible thickness and the
+            # limiter would simply hold it there, silently.
+            over = base - z
+            if num.any(over > 0.0):
+                worst = int(num.argmax(over))
+                raise ValueError(
+                    'erodible base is ABOVE the bed in %d of %d cells '
+                    '(worst: cell %d, base %g > elevation %g). The base is '
+                    'the floor of erosion, so it must lie at or below the '
+                    'initial bed everywhere.'
+                    % (int(num.sum(over > 0.0)), n, worst,
+                       base[worst], z[worst]))
+
+            self.sediment_z_base = base
+            self.sediment_has_z_base = 1
+            if self.sediment_bed_exhausted is None:
+                self.sediment_bed_exhausted = num.zeros(n, dtype=num.int64)
+
+        self._Domain_C_struct = None
+        self.gpu_interface = None
+        if hasattr(self, '_gpu_boundary_info_initialized'):
+            del self._gpu_boundary_info_initialized
+
+    def erodible_thickness(self):
+        """Remaining erodible thickness per centroid [m], or None if no base.
+
+        `elevation - sediment_z_base`, clipped at zero. Zero means the cell
+        has reached bedrock and will not erode further.
+        """
+        if not self.sediment_has_z_base:
+            return None
+        z = self.quantities['elevation'].centroid_values
+        return num.maximum(z - self.sediment_z_base, 0.0)
 
     def set_deposition(self, law='d_star', tau_d=0.0, near_bed='constant',
                        reference_height_floor=0.01):
@@ -1335,6 +1456,13 @@ class Domain(Generic_Domain):
             L.append('  tau_d      [D-2]   : %.4g Pa' % self.sediment_tau_d)
         if self.sediment_d_star_mode == 1:
             L.append('  a/h floor          : %.4g' % self.sediment_a_h_floor)
+        if self.sediment_has_z_base:
+            t = self.erodible_thickness()
+            L.append('  erodible base [L-5]: on   thickness %.4g to %.4g m, '
+                     '%d of %d cells at bedrock'
+                     % (t.min(), t.max(), int((t <= 0.0).sum()), len(t)))
+        else:
+            L.append('  erodible base [L-5]: none (bed is bottomless)')
         L.append('  per class:')
         for i, nm in enumerate(self.get_sediment_names()):
             L.append('    %-10s d=%.4g m  v_s=%.4e m/s  R=%.4g  tau_c*=%.4g'

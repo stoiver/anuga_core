@@ -316,6 +316,43 @@ struct domain {
     anuga_int sediment_wilson_bed;  /* 0 sand [T-8], 1 gravel [T-9], 2 boulder [T-10] */
     double sediment_wilson_D;       /* D50 for sand, D84 for gravel/boulder [m] */
 
+    /* ---- [L-5] non-erodible base -----------------------------------------
+     *
+     * sediment_z_base is a per-CENTROID bedrock elevation: erosion may lower
+     * the bed to it and no further. It is a full (n) array, not a scalar,
+     * because bedrock is a surface -- a scoured channel over an outcrop, a
+     * lined culvert, a dam apron -- and a single number cannot describe one.
+     *
+     * The available erodible thickness in cell k is bed_centroid_values[k] -
+     * sediment_z_base[k], which the limiter never lets go negative.
+     *
+     * sediment_has_z_base is the enable flag. With no base configured the
+     * kernels take exactly the path they took before this existed, so the
+     * default costs nothing and cannot change an existing answer.
+     */
+    double* sediment_z_base;           /* (n) bedrock centroid elevation [m] */
+    anuga_int sediment_has_z_base;     /* 0 = unlimited depth (default) */
+
+    /* Scratch, (ncl x n), tracer-major like the tracer arrays.
+     *
+     * The suspended source is computed for every class BEFORE any of it is
+     * applied, because [L-5] scales the classes against a shared budget: the
+     * erodible thickness is a property of the CELL, not of a class, so the
+     * classes must be limited together. Applying class 0 in full and letting
+     * class 1 take what is left would make the answer depend on registration
+     * order, which is not physics. */
+    double* sediment_source_limited;   /* (ncl*n) [G-3] bed exchange, per class */
+
+    /* Whether each cell had reached its base at the START of the bedload
+     * step, snapshotted because bedload's second pass WRITES bed elevation
+     * while reading its neighbours' state. Testing bed_cv against z_base
+     * inside that loop would read a value a neighbouring thread may already
+     * have updated, so the two cells sharing an edge could disagree about
+     * whether it is open -- and a bedload edge flux the two sides disagree
+     * about is no longer antisymmetric, which is precisely what makes the
+     * scheme conservative. */
+    anuga_int* sediment_bed_exhausted; /* (n) */
+
 };
 
 
