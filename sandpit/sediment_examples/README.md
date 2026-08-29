@@ -30,6 +30,12 @@ D50 = 65 um (Griffin et al. 2014).
 `run_simple_veg.py` is not ported: vegetation drag (spec 8) is Phase 5 and is
 not implemented.
 
+## A note on the data files
+
+`topo.asc` (594 KB) and `outline.csv` are force-added: the repository's root
+`.gitignore` excludes `*.asc` and `*.csv` as build artefacts, and without `-f`
+example 2 would have been committed without the data it needs.
+
 ## Status
 
 These demonstrate the module running end to end. They are **not validation**:
