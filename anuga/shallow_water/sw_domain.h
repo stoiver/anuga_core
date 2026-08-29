@@ -207,7 +207,19 @@ struct domain {
      *
      * Units check (spec open item E1): [m3 N-1 s-1][N m-2] = m/s, the same
      * units as the non-cohesive v_s E*, so it drops into the same slot. */
-    anuga_int sediment_erosion_mode;
+    anuga_int sediment_erosion_mode;      /* 0 [E-1], 1 [E-3], 2 [E-4] */
+    /* [E-4] Partheniades, as RDy26 use it:
+     *     E = K_p (tau_b - tau_c)/tau_c   for tau_b > tau_c, else 0
+     * K_p is a MASS flux in kg m-2 s-1 (RDy26 give 1e-4), so it is divided by
+     * the class density to reach the m/s that E and D use here. */
+    double sediment_K_partheniades;
+    /* Deposition law:
+     *   0 = [D-1]  D = d*(Z) c v_s                          (default)
+     *   1 = [D-2]  D = v_s c (1 - tau_b/tau_d),  tau_b < tau_d, else 0
+     * [D-2] is RDy26's form. tau_d = 0 disables deposition entirely, which is
+     * the hook their passive-transport benchmarks rely on. */
+    anuga_int sediment_deposition_mode;
+    double sediment_tau_d;                /* critical DEPOSITION stress [Pa] */
     double sediment_tau_crit;       /* tau_c, DIMENSIONAL [Pa] */
     double sediment_K_e;            /* [E-5], [m3 N-1 s-1] */
     double sediment_rho_w;          /* needed for tau_b = rho f_c |v|^2 [T-1] */

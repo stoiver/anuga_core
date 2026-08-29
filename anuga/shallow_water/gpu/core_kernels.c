@@ -826,6 +826,9 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     const double tau_crit = D->sediment_tau_crit;
     const double K_e = D->sediment_K_e;
     const double rho_w = D->sediment_rho_w;
+    const double K_p = D->sediment_K_partheniades;
+    const anuga_int dep_mode = D->sediment_deposition_mode;
+    const double tau_d = D->sediment_tau_d;
     const anuga_int shear_closure = D->sediment_shear_closure;
     const double h_eps = D->epsilon;
     const double grav = D->g;
@@ -982,9 +985,19 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             // Added in PHYSICS_SPEC Draft 5 as [L-4]; it has no counterpart in
             // P14, FG21, RDy26, DL09 or aSM16, being required by combining an
             // equilibrium profile with a transient solver.
-            double c_bed = ds * c_pos;
-            if (c_bed > c_pack) c_bed = c_pack;
-            const double deposition = c_bed * v_s[s];
+            double deposition;
+            if (dep_mode == 1) {
+                /* [D-2] RDy26's threshold form. tau_d = 0 disables deposition
+                 * entirely -- the hook their passive benchmarks rely on. */
+                const double tau_b_d = rho_w * tbr;
+                deposition = (tau_d > 0.0 && tau_b_d < tau_d)
+                           ? v_s[s] * c_pos * (1.0 - tau_b_d / tau_d)
+                           : 0.0;
+            } else {
+                double c_bed = ds * c_pos;
+                if (c_bed > c_pack) c_bed = c_pack;
+                deposition = c_bed * v_s[s];
+            }
 
             // [E-1]/[E-2] entrainment, non-cohesive (Shields) route.
             //
@@ -995,7 +1008,18 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             // Below threshold (S <= 0) there is no entrainment at all; this is
             // a genuine threshold, not a smooth roll-off.
             double erosion = 0.0;
-            if (erosion_mode == 1) {
+            if (erosion_mode == 2) {
+                /* [E-4] Partheniades. K_p is a MASS flux, so divide by the
+                 * class density to get the volume flux the rest of the source
+                 * term works in. rho_s = (R + 1) rho_w. */
+                const double tau_b = rho_w * tbr;
+                if (tau_crit > 0.0 && tau_b > tau_crit) {
+                    const double rho_s = (sedR[s] + 1.0) * rho_w;
+                    if (rho_s > 0.0) {
+                        erosion = (K_p * (tau_b - tau_crit) / tau_crit) / rho_s;
+                    }
+                }
+            } else if (erosion_mode == 1) {
                 /* [E-3] cohesive, Hanson & Simon. DIMENSIONAL excess shear:
                  * tau_b = rho f_c |v|^2 [T-1], and E = K_e (tau_b - tau_c),
                  * zero below threshold. Note this is per class only through

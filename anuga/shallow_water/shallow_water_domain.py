@@ -696,6 +696,9 @@ class Domain(Generic_Domain):
         self.sediment_tau_crit = 0.088          # [Pa], aS16's value
         self.sediment_K_e = 0.2e-6 / 0.088**0.5  # [E-5]
         self.sediment_rho_w = 1000.0
+        self.sediment_K_partheniades = 1.0e-4   # [E-4] kg m-2 s-1 (RDy26)
+        self.sediment_deposition_mode = 0       # 0 = [D-1], 1 = [D-2]
+        self.sediment_tau_d = 0.0               # [D-2] critical depo stress [Pa]
         # Bed shear closure, spec 3.1/3.4 (divergence D1). 0 = [T-1] quadratic
         # drag (default); 1 = [T-7] depth-slope, for reproducing anugaSed.
         self.sediment_shear_closure = 0
@@ -1138,6 +1141,27 @@ class Domain(Generic_Domain):
 
         return index
 
+    def set_deposition(self, law='d_star', tau_d=0.0):
+        """Select the deposition law (spec 4.4).
+
+        `'d_star'` (default) -- `[D-1]`, `D = d*(Z) c v_s`.
+
+        `'threshold'` -- `[D-2]`, `D = v_s c (1 - tau_b/tau_d)` for
+        `tau_b < tau_d`, else zero. This is RDycore-sediment's form.
+        `tau_d = 0` disables deposition entirely, which is the hook their
+        passive-transport benchmarks rely on.
+        """
+        laws = {'d_star': 0, 'threshold': 1}
+        if law not in laws:
+            raise ValueError('unknown deposition law %r; expected one of %r'
+                             % (law, sorted(laws)))
+        self.sediment_deposition_mode = laws[law]
+        self.sediment_tau_d = float(tau_d)
+        self._Domain_C_struct = None
+        self.gpu_interface = None
+        if hasattr(self, '_gpu_boundary_info_initialized'):
+            del self._gpu_boundary_info_initialized
+
     def set_shear_closure(self, closure='quadratic_drag'):
         """Select how bed shear stress is obtained (spec 3.1 / 3.4).
 
@@ -1184,6 +1208,11 @@ class Domain(Generic_Domain):
         critical Shields stress per class (`tau_c_star` on
         `add_sediment_class`).
 
+        `'partheniades'` -- `[E-4]`, `E = K_p (tau_b - tau_c)/tau_c`, the form
+        RDycore-sediment uses. `K_e` here is the Partheniades coefficient as a
+        **mass** flux in kg m-2 s-1 (RDy26 use 1e-4), a different quantity from
+        `[E-5]`'s erodibility, and is divided internally by the class density.
+
         `'cohesive'` -- silt, clay, cohesive bank material. Excess DIMENSIONAL
         shear via Hanson & Simon `[E-3]`, `E = K_e (tau_b - tau_c)`, with the
         jet-test erodibility `[E-5]` `K_e = 0.2e-6 / sqrt(tau_c)` unless `K_e`
@@ -1199,7 +1228,7 @@ class Domain(Generic_Domain):
         tuning error. That is why this method is named for the material rather
         than for the equation.
         """
-        materials = {'noncohesive': 0, 'cohesive': 1}
+        materials = {'noncohesive': 0, 'cohesive': 1, 'partheniades': 2}
         if material not in materials:
             raise ValueError('unknown bed material %r; expected one of %r'
                              % (material, sorted(materials)))
@@ -1208,6 +1237,10 @@ class Domain(Generic_Domain):
 
         self.sediment_erosion_mode = materials[material]
         self.sediment_tau_crit = float(tau_crit)
+        if material == 'partheniades' and K_e is not None:
+            # [E-4]'s coefficient is a MASS flux in kg m-2 s-1, not [E-5]'s
+            # m3 N-1 s-1. Different quantity, so it lands in its own field.
+            self.sediment_K_partheniades = float(K_e)
         self.sediment_rho_w = float(rho_w)
         # [E-5] Hanson & Simon jet-test erodibility, k_d = 0.2 tau_c^-0.5 in
         # cm3 N-1 s-1; the 1e-6 converts to m3 N-1 s-1.
