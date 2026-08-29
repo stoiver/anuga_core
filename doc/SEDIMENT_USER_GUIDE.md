@@ -6,7 +6,8 @@ alternative methods. It assumes you know ANUGA; it does not derive the
 physics, which is `PHYSICS_SPEC.md`. Spec labels like `[E-1]` are that
 document's, and each one below is a pointer into it.
 
-Verification evidence for these terms is in `sandpit/tracer_spike/`; runnable
+Verification evidence for these terms is in
+`anuga/shallow_water/tests/test_sediment_*.py`; runnable
 examples are in `sandpit/sediment_examples/`.
 
 ---
@@ -632,6 +633,7 @@ Then print `sediment_summary()` and check it says what you meant.
 
 Vegetation drag (spec 8) is Phase 5 and absent. Neither validation rung of
 spec 10 -- Rio Puerco, the crater breach -- has been attempted; the evidence
-in `sandpit/tracer_spike/` is verification (the equations are solved
+in `anuga/shallow_water/tests/test_sediment_*.py` is verification (the
+equations are solved
 correctly), which is a different claim from validation (they are the right
 equations for the field case).

@@ -125,27 +125,27 @@ kernels on the host and the example still works.
 
 Runnable demonstration is not the same as coverage. This table is what the
 three examples actually exercise; everything else is covered only by the test
-suites in `../tracer_spike/`.
+suites in `anuga/shallow_water/tests/test_sediment_*.py`.
 
 | capability | spec | ex 1 | ex 2 | ex 3 | ex 4 | tests |
 |---|---|:--:|:--:|:--:|:--:|---|
 | suspended transport | `[G-3]` | yes | yes | yes | yes | `test_tracer_ns1`, `test_ns2` |
 | multiple classes | 2.2 | -- | -- | **yes** | -- | `test_add_tracer` |
 | Shields erosion, non-cohesive | `[E-1]` | yes | yes | yes | yes | `test_sediment_source` |
-| Hanson & Simon, cohesive | `[E-3]` | `--bed cohesive` | -- | -- | -- | `test_cohesive` |
-| Partheniades | `[E-4]` | -- | -- | -- | -- | `test_cohesive` |
+| Hanson & Simon, cohesive | `[E-3]` | `--bed cohesive` | -- | -- | -- | `test_sediment_cohesive` |
+| Partheniades | `[E-4]` | -- | -- | -- | -- | `test_sediment_cohesive` |
 | deposition | `[D-1]` | yes | yes | yes | yes | `test_sediment_source` |
-| Rouse near-bed ratio | `[S-4]` | -- | -- | **yes** | -- | `test_rouse` |
-| Exner, suspended exchange | `[G-4]` | yes | yes | yes | yes | `test_exner` |
-| bedload and its bed term | `[K-1]`, `[G-5]` | -- | -- | **yes** | -- | `test_bedload` |
-| quadratic drag | `[T-1]` | yes | yes | yes | yes | `test_shear_closure` |
-| depth-slope closure | `[T-7]` | -- | -- | -- | -- | `test_shear_closure` |
-| Wilson / Larsen-Lamb friction | `[T-8..15]` | -- | -- | -- | -- | `test_friction` |
+| Rouse near-bed ratio | `[S-4]` | -- | -- | **yes** | -- | `test_sediment_rouse` |
+| Exner, suspended exchange | `[G-4]` | yes | yes | yes | yes | `test_sediment_exner` |
+| bedload and its bed term | `[K-1]`, `[G-5]` | -- | -- | **yes** | -- | `test_sediment_bedload` |
+| quadratic drag | `[T-1]` | yes | yes | yes | yes | `test_sediment_shear_closure` |
+| depth-slope closure | `[T-7]` | -- | -- | -- | -- | `test_sediment_shear_closure` |
+| Wilson / Larsen-Lamb friction | `[T-8..15]` | -- | -- | -- | -- | `test_sediment_friction` |
 | limiters | `[L-1..4]` | yes | yes | yes | yes | `test_sediment_source` |
-| non-erodible base | `[L-5]` | -- | -- | -- | -- | `test_erodible_base` |
-| erodible region | `[L-5]` | -- | -- | -- | -- | `test_erodible_base` |
-| angle-of-repose relaxation | 7 | -- | -- | -- | **yes** | `test_repose` |
-| external tracer source | 2.6 | -- | -- | -- | -- | `test_mms_full` |
+| non-erodible base | `[L-5]` | -- | -- | -- | -- | `test_sediment_erodible_base` |
+| erodible region | `[L-5]` | -- | -- | -- | -- | `test_sediment_erodible_base` |
+| angle-of-repose relaxation | 7 | -- | -- | -- | **yes** | `test_sediment_repose` |
+| external tracer source | 2.6 | -- | -- | -- | -- | `test_sediment_mms_full` |
 | compute mode 1 | -- | yes | yes | -- | yes | all |
 | compute mode 2 (GPU) | -- | -- | -- | **yes** | -- | `test_mode1_vs_mode2` |
 | parallel halo exchange | -- | -- | -- | -- | -- | `run_parallel_tracer.py` |
@@ -168,6 +168,7 @@ example 2 would have been committed without the data it needs.
 These demonstrate the module running end to end. They are **not validation**:
 nothing here has been checked against measured data or against a published
 result. Verification -- that the equations are solved correctly -- lives in
-`../tracer_spike/` (MMS convergence, the RDycore benchmarks, mode 1 against
+`anuga/shallow_water/tests/test_sediment_*.py` (MMS convergence, the RDycore
+benchmarks, mode 1 against
 mode 2), and is a separate claim from validation. The validation rungs of spec 10 -- Rio Puerco (rung 8) and the crater
 breach (rung 7) -- have not been attempted.

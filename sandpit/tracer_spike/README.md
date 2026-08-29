@@ -28,3 +28,24 @@ New work should use `domain.add_tracer()`.
 `--size large` is 360k triangles. Mode 1 = legacy CPU, mode 2 = unified/GPU.
 Run baseline and prototype on the SAME build configuration — see the rebuild
 warning in ../../../Projects/Sediment_Transport/HANDOVER.md.
+
+## Where the sediment tests went
+
+The sediment suites that used to live here are now proper pytest modules in
+`anuga/shallow_water/tests/test_sediment_*.py`, so CI runs them and pointing
+pytest at this directory no longer matters:
+
+    pytest anuga/shallow_water/tests/test_sediment_*.py
+    pytest anuga/shallow_water/tests/test_sediment_*.py --run-fast   # skip the
+                                                                    # convergence
+                                                                    # studies
+
+The mode 1 / mode 2 comparisons are collected in `test_sediment_gpu.py`, which
+skips itself on a GPU-offload build unless `ANUGA_GPU_TESTS_ISOLATED=1` is set
+-- the NVHPC runtime aborts a process that builds many mode-2 domains.
+
+What remains here is the tracer work: the five kernel suites above, the
+registration API test, and the Ns=0 benchmark harness (`bench_tracer.py`,
+`compare.py`), which is a TIMING gate rather than a correctness test and so
+does not belong in the pytest suite. Its equivalents are converted on the
+`develop_tracers` branch.
