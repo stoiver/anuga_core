@@ -9,8 +9,19 @@ Demonstrates
   * set_tracer_boundary()     prescribed inflow concentration (spec 9.3)
   * entrainment [E-1], deposition [D-1], Exner bed change [G-4]
 """
+import argparse
+
 import numpy as np
 import anuga
+
+ap = argparse.ArgumentParser(description=__doc__)
+ap.add_argument('--bed', default='noncohesive',
+                choices=['noncohesive', 'cohesive'],
+                help="bed material (spec 4.1.1). 'cohesive' reproduces "
+                     "anugaSed's own erosion route [E-3] with their "
+                     "tau_crit = 0.088 Pa; 'noncohesive' uses the Shields "
+                     "route [E-1] this work targets.")
+args = ap.parse_args()
 
 # --- their setup ------------------------------------------------------------
 length = 5.0
@@ -45,6 +56,9 @@ domain.set_boundary({
 
 # --- our API ----------------------------------------------------------------
 domain.sediment_porosity = 0.3
+if args.bed == 'cohesive':
+    # anugaSed's own configuration: Hanson & Simon [E-3] with tau_c = 0.088 Pa.
+    domain.set_bed_material('cohesive', tau_crit=0.088)
 domain.add_sediment_class('sand', diameter=D50, rho_s=2650.0, rho_w=1000.0,
                           initial_concentration=INFLOW_CONC)
 # The domain starts DRY, so the initial concentration washes out immediately;
@@ -55,6 +69,11 @@ areas = domain.areas
 z0 = domain.quantities['elevation'].centroid_values.copy()
 lam = domain.sediment_porosity
 
+print('bed material: %s   %s'
+      % (args.bed,
+         ('[E-3] Hanson & Simon, tau_c = %.3f Pa, K_e = %.4e m3/N/s'
+          % (domain.sediment_tau_crit, domain.sediment_K_e))
+         if args.bed == 'cohesive' else '[E-1] Shields, tau_c* = 0.04'))
 print('v_s = %.3e m/s   D50 = %.0f um   inflow c = %.3f'
       % (domain.sediment_settling_velocity[0], D50 * 1e6, INFLOW_CONC))
 print()

@@ -196,6 +196,22 @@ struct domain {
     double* sediment_tau_c_star;    /* (ncl) critical Shields stress; FG21 0.04 */
     double sediment_gamma0;         /* [E-1] empirical, FG21 0.0024 */
 
+    /* Erosion route, spec 4.1.1. This is a statement about the BED MATERIAL,
+     * not a numerical preference: [E-1] and [E-3] describe different sediment
+     * and getting it wrong is a physics error, not a tuning error.
+     *   0 = NON-COHESIVE, Shields/Smith-McLean [E-1]/[E-2]: sand, gravel
+     *   1 = COHESIVE, Hanson & Simon [E-3]/[E-5]: silt, clay, cohesive banks
+     *
+     *   [E-3]  E   = K_e (tau_b - tau_c)     tau DIMENSIONAL, Pa
+     *   [E-5]  K_e = 0.2e-6 / sqrt(tau_c)    [m3 N-1 s-1]
+     *
+     * Units check (spec open item E1): [m3 N-1 s-1][N m-2] = m/s, the same
+     * units as the non-cohesive v_s E*, so it drops into the same slot. */
+    anuga_int sediment_erosion_mode;
+    double sediment_tau_crit;       /* tau_c, DIMENSIONAL [Pa] */
+    double sediment_K_e;            /* [E-5], [m3 N-1 s-1] */
+    double sediment_rho_w;          /* needed for tau_b = rho f_c |v|^2 [T-1] */
+
     /* Near-bed concentration ratio d*(Z), spec 4.3 / open item S1a.
      *   0 = constant, use sediment_d_star (the P14/P13 d* = 1 limiting case)
      *   1 = Rouse, evaluate the fitted form of [S-4] per cell

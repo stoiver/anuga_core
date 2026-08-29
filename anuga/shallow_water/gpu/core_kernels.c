@@ -778,6 +778,10 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     const double minimum_allowed_height = D->minimum_allowed_height;
 
     const double gamma0 = D->sediment_gamma0;
+    const anuga_int erosion_mode = D->sediment_erosion_mode;
+    const double tau_crit = D->sediment_tau_crit;
+    const double K_e = D->sediment_K_e;
+    const double rho_w = D->sediment_rho_w;
     const double h_eps = D->epsilon;
     const double grav = D->g;
 
@@ -936,13 +940,27 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             // Below threshold (S <= 0) there is no entrainment at all; this is
             // a genuine threshold, not a smooth roll-off.
             double erosion = 0.0;
-            const double Rgd = sedR[s] * grav * diam[s];
-            if (Rgd > 0.0 && tau_c_star[s] > 0.0) {
-                const double tau_star = f_c * vel2 / Rgd;
-                const double S = tau_star / tau_c_star[s] - 1.0;
-                if (S > 0.0) {
-                    const double gS = gamma0 * S;
-                    erosion = v_s[s] * (0.65 * gS / (1.0 + gS));
+            if (erosion_mode == 1) {
+                /* [E-3] cohesive, Hanson & Simon. DIMENSIONAL excess shear:
+                 * tau_b = rho f_c |v|^2 [T-1], and E = K_e (tau_b - tau_c),
+                 * zero below threshold. Note this is per class only through
+                 * the loop -- tau_c and K_e are bed properties, not grain
+                 * properties, which is precisely the cohesive premise. */
+                const double tau_b = rho_w * f_c * vel2;
+                const double excess = tau_b - tau_crit;
+                if (excess > 0.0) {
+                    erosion = K_e * excess;
+                }
+            } else {
+                /* [E-1]/[E-2] non-cohesive, Shields route. */
+                const double Rgd = sedR[s] * grav * diam[s];
+                if (Rgd > 0.0 && tau_c_star[s] > 0.0) {
+                    const double tau_star = f_c * vel2 / Rgd;
+                    const double S = tau_star / tau_c_star[s] - 1.0;
+                    if (S > 0.0) {
+                        const double gS = gamma0 * S;
+                        erosion = v_s[s] * (0.65 * gS / (1.0 + gS));
+                    }
                 }
             }
 
