@@ -695,6 +695,9 @@ class Domain(Generic_Domain):
         self.sediment_tau_crit = 0.088          # [Pa], aS16's value
         self.sediment_K_e = 0.2e-6 / 0.088**0.5  # [E-5]
         self.sediment_rho_w = 1000.0
+        # Bed shear closure, spec 3.1/3.4 (divergence D1). 0 = [T-1] quadratic
+        # drag (default); 1 = [T-7] depth-slope, for reproducing anugaSed.
+        self.sediment_shear_closure = 0
         self.sediment_settling_velocity = None  # v_s        (ncl,)
         self.sediment_d_star = None             # d*(Z)      (ncl,)
         self.sediment_diameter = None           # d_g   [m]  (ncl,)
@@ -1133,6 +1136,43 @@ class Domain(Generic_Domain):
             del self._gpu_boundary_info_initialized
 
         return index
+
+    def set_shear_closure(self, closure='quadratic_drag'):
+        """Select how bed shear stress is obtained (spec 3.1 / 3.4).
+
+        `'quadratic_drag'` (default) -- `[T-1]`, `tau_b = rho f_c |v|^2`. Makes
+        no equilibrium assumption.
+
+        `'depth_slope'` -- `[T-7]`, `tau_b = rho g h S` with `S` the bed slope
+        magnitude, as `aSM16` Eqs 6-7 and hence anugaSed. This is the steady
+        uniform (normal) flow approximation: it assumes the energy slope equals
+        the **bed** slope and the flow is locally in equilibrium.
+
+        Notes
+        -----
+        Spec 3.4 recommends `[T-1]` and keeps `[T-7]` only for reproducing
+        published anugaSed results, for three reasons: normal-flow equilibrium
+        is exactly what fails in the dam-breach and outburst floods this work
+        targets; `S` should be the energy slope, not the bed slope (substituting
+        the energy slope into `[T-7]` recovers `[T-1]` identically); and the
+        domain-global slope clamp anugaSed applies has no counterpart in their
+        own manual.
+
+        **This does not reproduce anugaSed exactly.** Their code additionally
+        divides the elevation gradient by a domain-mean cell size and applies
+        `S <- min(S, mean(S)/2)`. Neither is in `aSM16`; the first is
+        dimensionally inconsistent and the second is the undocumented clamp of
+        divergence D1a. `[T-7]` here follows the manual, not the code.
+        """
+        closures = {'quadratic_drag': 0, 'depth_slope': 1}
+        if closure not in closures:
+            raise ValueError('unknown shear closure %r; expected one of %r'
+                             % (closure, sorted(closures)))
+        self.sediment_shear_closure = closures[closure]
+        self._Domain_C_struct = None
+        self.gpu_interface = None
+        if hasattr(self, '_gpu_boundary_info_initialized'):
+            del self._gpu_boundary_info_initialized
 
     def set_bed_material(self, material='noncohesive', tau_crit=0.088,
                          K_e=None, rho_w=1000.0):

@@ -543,6 +543,44 @@ static inline double core_rouse_d_star(double Z, double a_h) {
     return (d < 1.0) ? 1.0 : d;
 }
 
+/* tau_b / rho for a cell, under either shear closure (spec 3.1 / 3.4).
+ *
+ *   [T-1]  tau_b/rho = f_c |v|^2          quadratic drag, no equilibrium
+ *                                         assumption
+ *   [T-7]  tau_b/rho = g h S              depth-slope, aSM16 Eqs 6-7
+ *
+ * Returning tau_b/rho rather than tau_b keeps the two interchangeable
+ * everywhere downstream: the Shields stress is tau* = (tau_b/rho)/(R g d), in
+ * which the density cancels, and the dimensional stress the cohesive route
+ * needs is simply rho_w times this.
+ *
+ * S is the bed gradient magnitude from the divergence theorem over the cell's
+ * own edges, so this stays cell-local and offloads. */
+static inline double core_tau_b_over_rho(anuga_int closure, double f_c,
+                                         double vel2, double grav, double h,
+                                         const double * restrict bed_ev,
+                                         const double * restrict normals,
+                                         const double * restrict edgelengths,
+                                         double area, anuga_int k) {
+    if (closure != 1) {
+        return f_c * vel2;                       /* [T-1] */
+    }
+    /* [T-7]: grad z = (1/A) sum_e z_e n_e L_e */
+    double gx = 0.0, gy = 0.0;
+    for (anuga_int i = 0; i < 3; i++) {
+        const double ze = bed_ev[3 * k + i];
+        const double L = edgelengths[3 * k + i];
+        gx += ze * normals[6 * k + 2 * i] * L;
+        gy += ze * normals[6 * k + 2 * i + 1] * L;
+    }
+    if (area > 0.0) {
+        gx /= area;
+        gy /= area;
+    }
+    const double S = sqrt(gx * gx + gy * gy);
+    return grav * h * S;
+}
+
 // ============================================================================
 // Bedload transport and its bed evolution   [G-5]/[K-3], spec 6
 // ============================================================================
@@ -587,6 +625,7 @@ void core_apply_bedload(struct domain *D, double timestep) {
     const double n_ll = D->sediment_manning_ll;
     const anuga_int wbed = D->sediment_wilson_bed;
     const double wD = D->sediment_wilson_D;
+    const anuga_int shear_closure = D->sediment_shear_closure;
 
     double * restrict stage_cv = D->stage_centroid_values;
     double * restrict bed_cv = D->bed_centroid_values;
@@ -641,11 +680,16 @@ void core_apply_bedload(struct domain *D, double timestep) {
             f_c = grav * nman * nman / cbrt(h);
         }
 
+        /* Same closure as the suspended source, [T-1] or [T-7]. */
+        const double tbr = core_tau_b_over_rho(shear_closure, f_c, vel2, grav,
+                                               h, bed_ev, normals,
+                                               edgelengths, areas[k], k);
+
         double q_b_total = 0.0;
         for (anuga_int s = 0; s < n_classes; s++) {
             const double Rgd = sedR[s] * grav * diam[s];
             if (!(Rgd > 0.0)) continue;
-            const double tau_star = f_c * vel2 / Rgd;
+            const double tau_star = tbr / Rgd;
 
             double q_star;
             if (mode == 2) {
@@ -782,6 +826,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     const double tau_crit = D->sediment_tau_crit;
     const double K_e = D->sediment_K_e;
     const double rho_w = D->sediment_rho_w;
+    const anuga_int shear_closure = D->sediment_shear_closure;
     const double h_eps = D->epsilon;
     const double grav = D->g;
 
@@ -796,6 +841,10 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     double * restrict sedR = D->sediment_R;
     double * restrict tau_c_star = D->sediment_tau_c_star;
     double * restrict a_ref = D->sediment_reference_height;
+    double * restrict bed_ev_r = D->bed_edge_values;
+    double * restrict normals_r = D->normals;
+    double * restrict edgelengths_r = D->edgelengths;
+    double * restrict areas_r = D->areas;
     const anuga_int d_star_mode = D->sediment_d_star_mode;
     const double a_h_floor = D->sediment_a_h_floor;
     const double c_pack = D->sediment_c_pack;
@@ -868,6 +917,11 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             const double nman = (fric_mode == 1) ? n_ll : friction_cv[k];
             f_c = grav * nman * nman / cbrt(h);
         }
+
+        /* tau_b/rho under the selected closure, [T-1] or [T-7]. */
+        const double tbr = core_tau_b_over_rho(shear_closure, f_c, vel2, grav,
+                                               h, bed_ev_r, normals_r,
+                                               edgelengths_r, areas_r[k], k);
 
         for (anuga_int s = 0; s < n_classes; s++) {
             const anuga_int idx = s * n + k;
@@ -946,7 +1000,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                  * zero below threshold. Note this is per class only through
                  * the loop -- tau_c and K_e are bed properties, not grain
                  * properties, which is precisely the cohesive premise. */
-                const double tau_b = rho_w * f_c * vel2;
+                const double tau_b = rho_w * tbr;
                 const double excess = tau_b - tau_crit;
                 if (excess > 0.0) {
                     erosion = K_e * excess;
@@ -955,7 +1009,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                 /* [E-1]/[E-2] non-cohesive, Shields route. */
                 const double Rgd = sedR[s] * grav * diam[s];
                 if (Rgd > 0.0 && tau_c_star[s] > 0.0) {
-                    const double tau_star = f_c * vel2 / Rgd;
+                    const double tau_star = tbr / Rgd;
                     const double S = tau_star / tau_c_star[s] - 1.0;
                     if (S > 0.0) {
                         const double gS = gamma0 * S;

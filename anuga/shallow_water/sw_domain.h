@@ -212,6 +212,21 @@ struct domain {
     double sediment_K_e;            /* [E-5], [m3 N-1 s-1] */
     double sediment_rho_w;          /* needed for tau_b = rho f_c |v|^2 [T-1] */
 
+    /* Bed shear closure, spec 3.1 and 3.4. Divergence D1.
+     *   0 = [T-1] quadratic drag,  tau_b = rho f_c |v|^2   (default)
+     *   1 = [T-7] depth-slope,     tau_b = rho g h S       (aSM16 Eqs 6-7)
+     *
+     * [T-7] is the steady uniform (normal) flow approximation: it assumes the
+     * energy slope equals the BED slope and that the flow is locally in
+     * equilibrium -- exactly what does not hold in the dam-breach and outburst
+     * floods this work targets. It is retained only for reproducing published
+     * anugaSed results, as spec 3.4 recommends, and is not the default.
+     *
+     * S is the magnitude of the bed gradient, taken cell-locally from the
+     * divergence theorem, grad z = (1/A) sum_e z_e n_e L_e, using the edge
+     * values already to hand. No neighbour access, so it offloads. */
+    anuga_int sediment_shear_closure;
+
     /* Near-bed concentration ratio d*(Z), spec 4.3 / open item S1a.
      *   0 = constant, use sediment_d_star (the P14/P13 d* = 1 limiting case)
      *   1 = Rouse, evaluate the fitted form of [S-4] per cell
