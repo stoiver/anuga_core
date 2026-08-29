@@ -116,6 +116,7 @@ cdef extern from "gpu_domain.h" nogil:
         double sediment_K_e
         double sediment_rho_w
         int64_t sediment_shear_closure
+        double* tracer_external_source
         int64_t sediment_d_star_mode
         double* sediment_reference_height
         double sediment_a_h_floor
@@ -916,6 +917,11 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.tracer_conserved_values = &tr2[0, 0]
         tr2 = domain_object.tracer_backup_values
         D.tracer_backup_values = &tr2[0, 0]
+        if domain_object.tracer_external_source is not None:
+            tr2 = domain_object.tracer_external_source
+            D.tracer_external_source = &tr2[0, 0]
+        else:
+            D.tracer_external_source = NULL
     else:
         D.tracer_centroid_values = NULL
         D.tracer_edge_values = NULL
@@ -923,6 +929,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.tracer_explicit_update = NULL
         D.tracer_conserved_values = NULL
         D.tracer_backup_values = NULL
+        D.tracer_external_source = NULL
 
     # Extract riverwall arrays (may be empty if no riverwalls)
     D.number_of_riverwall_edges = getattr(domain_object, 'number_of_riverwall_edges', 0)

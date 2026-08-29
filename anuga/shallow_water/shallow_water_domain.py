@@ -680,6 +680,7 @@ class Domain(Generic_Domain):
         self.tracer_explicit_update = None      # dm/dt        (ns, N)
         self.tracer_conserved_values = None     # m = h*c      (ns, N)
         self.tracer_backup_values = None        # m backup     (ns, N)
+        self.tracer_external_source = None      # S_ms [G-3]   (ns, N) [m/s]
 
         #-------------------------------
         # Phase 3: suspended sediment. A sediment class IS a tracer -- class s
@@ -1366,6 +1367,35 @@ class Domain(Generic_Domain):
         except ValueError:
             raise ValueError('no tracer named %r; registered tracers are %r'
                              % (name, list(self._tracer_names)))
+
+    def set_tracer_source(self, name, values):
+        """Prescribe an external source `S_ms` for tracer `name`, in m/s.
+
+        `[G-3]`'s optional external supply: hillslope yield, tributary load,
+        rainfall washoff. Same units as `E` and `D`.
+
+        Applied **after** the `[L-1]`/`[L-2]` limiters. Those bound the bed
+        exchange by what the bed and water column can supply; an external
+        source is neither, so clipping it there would be wrong -- and would
+        also make a manufactured solution impossible to impose exactly.
+        """
+        s = self.get_tracer_index(name)
+        if self.tracer_external_source is None:
+            self.tracer_external_source = num.zeros(
+                (self.number_of_tracers, self.number_of_elements),
+                dtype=num.float64)
+            self._Domain_C_struct = None
+            self.gpu_interface = None
+            if hasattr(self, '_gpu_boundary_info_initialized'):
+                del self._gpu_boundary_info_initialized
+        v = num.asarray(values, dtype=num.float64)
+        if v.ndim == 0:
+            self.tracer_external_source[s] = float(v)
+        elif v.shape == (self.number_of_elements,):
+            self.tracer_external_source[s] = v
+        else:
+            raise ValueError('tracer %r: expected a scalar or %d values, got %r'
+                             % (name, self.number_of_elements, v.shape))
 
     def set_tracer_boundary(self, name, value):
         """Prescribe the inflow concentration `c` for tracer `name`.

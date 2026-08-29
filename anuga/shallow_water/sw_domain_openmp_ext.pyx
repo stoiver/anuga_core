@@ -34,6 +34,7 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double sediment_K_e
 		double sediment_rho_w
 		anuga_int sediment_shear_closure
+		double* tracer_external_source
 		anuga_int sediment_d_star_mode
 		double* sediment_reference_height
 		double sediment_a_h_floor
@@ -390,6 +391,11 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 		D.tracer_conserved_values = &tr2[0, 0]
 		tr2 = domain_py_object.tracer_backup_values
 		D.tracer_backup_values = &tr2[0, 0]
+		if domain_py_object.tracer_external_source is not None:
+			tr2 = domain_py_object.tracer_external_source
+			D.tracer_external_source = &tr2[0, 0]
+		else:
+			D.tracer_external_source = NULL
 		if D.n_sediment_classes > 0:
 			sed1 = domain_py_object.sediment_settling_velocity
 			D.sediment_settling_velocity = &sed1[0]
@@ -431,6 +437,7 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 		D.tracer_explicit_update = NULL
 		D.tracer_conserved_values = NULL
 		D.tracer_backup_values = NULL
+		D.tracer_external_source = NULL
 
 	quantities = domain_py_object.quantities
 	stage = quantities["stage"]

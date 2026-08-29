@@ -858,6 +858,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     // the device, so a D->member load inside it reads a host address and the
     // work silently does not happen. See HANDOVER.md 2.4.
     double * restrict t_cons = D->tracer_conserved_values;
+    double * restrict ext_src = D->tracer_external_source;
     double * restrict bed_cv_w = D->bed_centroid_values;
     double * restrict bed_ev_w = D->bed_edge_values;
     const double one_minus_lambda = 1.0 - D->sediment_porosity;
@@ -1040,6 +1041,14 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                 if (source > max_source) {
                     source = (max_source > 0.0) ? max_source : 0.0;
                 }
+            }
+
+            // [G-3] S_ms: external supply, added AFTER the limiters. They
+            // bound bed exchange by what bed and water column can supply;
+            // an external source is neither, and clipping it would also make
+            // a manufactured solution impossible to impose exactly.
+            if (ext_src != NULL) {
+                source += ext_src[idx];
             }
 
             // Fractional step: update the state directly with the full dt.

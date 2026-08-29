@@ -227,6 +227,17 @@ struct domain {
      * values already to hand. No neighbour access, so it offloads. */
     anuga_int sediment_shear_closure;
 
+    /* S_ms of [G-3]: an optional EXTERNAL source of suspended sediment --
+     * hillslope yield, tributary load, rainfall washoff -- in m/s, i.e. the
+     * same units as E and D. (ns, n), or NULL when unused.
+     *
+     * Applied AFTER the [L-1]/[L-2] limiters, deliberately. Those bound the
+     * BED EXCHANGE by what the bed and the water column can supply; an
+     * external supply is not bed exchange and must not be clipped by them. It
+     * is also what makes a Method of Manufactured Solutions possible: the
+     * manufactured source has to reach the equation unmodified. */
+    double* tracer_external_source;
+
     /* Near-bed concentration ratio d*(Z), spec 4.3 / open item S1a.
      *   0 = constant, use sediment_d_star (the P14/P13 d* = 1 limiting case)
      *   1 = Rouse, evaluate the fitted form of [S-4] per cell
