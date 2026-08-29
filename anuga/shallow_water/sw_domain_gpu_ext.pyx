@@ -101,6 +101,14 @@ cdef extern from "gpu_domain.h" nogil:
         int64_t* tri_full_flag
         # Riverwall arrays
         int64_t number_of_riverwall_edges
+        int64_t number_of_tracers
+        double beta_tracer
+        double* tracer_centroid_values
+        double* tracer_edge_values
+        double* tracer_boundary_values
+        double* tracer_explicit_update
+        double* tracer_conserved_values
+        double* tracer_backup_values
         int64_t ncol_riverwall_hydraulic_properties
         int64_t nrow_riverwall_hydraulic_properties
         int64_t* edge_flux_type
@@ -799,6 +807,37 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.edge_flux_type = &edge_flux_type[0]
     else:
         D.edge_flux_type = NULL
+
+    # Generic tracers. number_of_tracers MUST be set explicitly -- the mode-2
+    # struct is PyMem_Malloc'd and not reliably zeroed, and a garbage count makes
+    # the kernel guard fire on the device (CUDA_ERROR_ILLEGAL_ADDRESS).
+    D.number_of_tracers = getattr(domain_object, 'number_of_tracers', 0)
+    D.beta_tracer = getattr(domain_object, 'beta_tracer', 1.0)
+    # Phase 2: wire the tracer arrays for the device. The pointers must be set
+    # whenever number_of_tracers > 0 -- the shared kernels guard on that count
+    # and dereference all six, so a NULL here is CUDA_ERROR_ILLEGAL_ADDRESS on
+    # the device, not a degraded result. gpu_domain_core.c maps them.
+    cdef double[:, ::1] tr2
+    if D.number_of_tracers > 0:
+        tr2 = domain_object.tracer_centroid_values
+        D.tracer_centroid_values = &tr2[0, 0]
+        tr2 = domain_object.tracer_edge_values
+        D.tracer_edge_values = &tr2[0, 0]
+        tr2 = domain_object.tracer_boundary_values
+        D.tracer_boundary_values = &tr2[0, 0]
+        tr2 = domain_object.tracer_explicit_update
+        D.tracer_explicit_update = &tr2[0, 0]
+        tr2 = domain_object.tracer_conserved_values
+        D.tracer_conserved_values = &tr2[0, 0]
+        tr2 = domain_object.tracer_backup_values
+        D.tracer_backup_values = &tr2[0, 0]
+    else:
+        D.tracer_centroid_values = NULL
+        D.tracer_edge_values = NULL
+        D.tracer_boundary_values = NULL
+        D.tracer_explicit_update = NULL
+        D.tracer_conserved_values = NULL
+        D.tracer_backup_values = NULL
 
     # Extract riverwall arrays (may be empty if no riverwalls)
     D.number_of_riverwall_edges = getattr(domain_object, 'number_of_riverwall_edges', 0)
