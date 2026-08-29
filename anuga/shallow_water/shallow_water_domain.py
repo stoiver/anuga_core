@@ -741,6 +741,12 @@ class Domain(Generic_Domain):
         # spec assumes. See set_erodible_base().
         self.sediment_z_base = None
         self.sediment_has_z_base = 0
+        # The two user intents behind sediment_z_base, kept apart so they
+        # compose: a base is a DEPTH limit, a region is a WHERE limit, and
+        # setting one must not silently discard the other. Both are folded
+        # into the single field the kernel reads by _rebuild_sediment_base().
+        self._sediment_user_base = None      # (n,) from set_erodible_base
+        self._sediment_erodible_mask = None  # (n,) bool from set_erodible_region
         self.sediment_bed_exhausted = None
         # Scratch for the source kernel, (ncl, n). Allocated with the classes.
         self.sediment_source_limited = None
@@ -1211,8 +1217,7 @@ class Domain(Generic_Domain):
             raise ValueError('give elevation or depth, not both')
 
         if elevation is None and depth is None:
-            self.sediment_z_base = None
-            self.sediment_has_z_base = 0
+            self._sediment_user_base = None
         else:
             n = self.number_of_elements
             z = self.quantities['elevation'].centroid_values
@@ -1241,7 +1246,113 @@ class Domain(Generic_Domain):
                     % (int(num.sum(over > 0.0)), n, worst,
                        base[worst], z[worst]))
 
-            self.sediment_z_base = base
+            self._sediment_user_base = base
+
+        self._rebuild_sediment_base()
+
+    def set_erodible_region(self, polygon=None, center=None, radius=None,
+                            indices=None, erodible=True):
+        """Restrict erosion to part of the domain (or lock part of it).
+
+        The bed is erodible everywhere by default. Give a region to say
+        otherwise:
+
+            domain.set_erodible_region(polygon=breach)     # ONLY here erodes
+            domain.set_erodible_region(polygon=apron,      # everywhere BUT here
+                                       erodible=False)
+            domain.set_erodible_region()                   # remove the restriction
+
+        Parameters
+        ----------
+        polygon : list of [x, y]
+            Region boundary, as for the region-based operators.
+        center, radius : [x, y], float
+            A circular region instead.
+        indices : array of int
+            Triangle ids directly. Overrides the geometric arguments.
+        erodible : bool
+            `True` (default): the region named is the ONLY erodible part.
+            `False`: the region named is the only LOCKED part.
+
+        The arguments are the same ones `Erosion_operator` and the other
+        region-based operators take, and are resolved by the same `Region`
+        class, so a polygon that selects a set of cells there selects the same
+        set here.
+
+        Notes
+        -----
+        A locked cell is held at the elevation it has WHEN THIS IS CALLED, by
+        giving it zero erodible thickness -- the region restriction is
+        `[L-5]` with the layer set to nothing, not a separate mechanism. So
+        call it after the elevation is set.
+
+        Locked means it cannot be SCOURED. Sediment may still settle onto it,
+        which is what a concrete apron or a rock bar does in the field, and
+        that new material is erodible again -- it is above the base. If you
+        want a cell that neither erodes nor accretes, that is not this.
+
+        Composes with `set_erodible_base()`: the base sets how DEEP erosion
+        may go, the region sets WHERE it may happen, and setting one leaves
+        the other in place. Where they disagree the stricter wins.
+        """
+        if (polygon is None and center is None and radius is None
+                and indices is None):
+            self._sediment_erodible_mask = None
+            self._rebuild_sediment_base()
+            return
+
+        from anuga.abstract_2d_finite_volumes.region import Region
+        region = Region(self, indices=indices, polygon=polygon,
+                        center=center, radius=radius)
+        idx = region.indices
+
+        n = self.number_of_elements
+        if idx is None:
+            # Region resolved to "everywhere".
+            sel = num.ones(n, dtype=bool)
+        else:
+            idx = num.asarray(idx, dtype=num.int64)
+            if idx.size == 0:
+                # Almost always a coordinate mistake -- a polygon in the wrong
+                # units or the wrong datum selects nothing, and the run then
+                # quietly does no erosion at all (or, with erodible=False, is
+                # unrestricted). Neither is what anyone meant.
+                raise ValueError(
+                    'the region selects no cells; check the polygon or centre '
+                    'is in the same coordinates as the mesh')
+            sel = num.zeros(n, dtype=bool)
+            sel[idx] = True
+
+        # erodible=True: the region is the erodible part. Otherwise it is the
+        # locked part and everything else erodes.
+        self._sediment_erodible_mask = sel if erodible else ~sel
+        self._rebuild_sediment_base()
+
+    # Depth used for "no limit" in the combined base field. The cap it implies
+    # (thickness (1-lambda)/dt) is then so far above any physical erosion rate
+    # that it never binds, which is what an absent base means.
+    _SEDIMENT_UNLIMITED_DEPTH = 1.0e6
+
+    def _rebuild_sediment_base(self):
+        """Fold the base and the region into the one field the kernel reads."""
+        base = self._sediment_user_base
+        mask = self._sediment_erodible_mask
+
+        if base is None and mask is None:
+            self.sediment_z_base = None
+            self.sediment_has_z_base = 0
+        else:
+            n = self.number_of_elements
+            z = self.quantities['elevation'].centroid_values
+            if base is None:
+                combined = z - self._SEDIMENT_UNLIMITED_DEPTH
+            else:
+                combined = base.copy()
+            if mask is not None:
+                # Locked cells get zero thickness: the base IS the bed.
+                combined[~mask] = z[~mask]
+            self.sediment_z_base = num.ascontiguousarray(combined,
+                                                         dtype=num.float64)
             self.sediment_has_z_base = 1
             if self.sediment_bed_exhausted is None:
                 self.sediment_bed_exhausted = num.zeros(n, dtype=num.int64)
@@ -1456,13 +1567,27 @@ class Domain(Generic_Domain):
             L.append('  tau_d      [D-2]   : %.4g Pa' % self.sediment_tau_d)
         if self.sediment_d_star_mode == 1:
             L.append('  a/h floor          : %.4g' % self.sediment_a_h_floor)
-        if self.sediment_has_z_base:
+        mask = self._sediment_erodible_mask
+        if self._sediment_user_base is not None:
             t = self.erodible_thickness()
-            L.append('  erodible base [L-5]: on   thickness %.4g to %.4g m, '
-                     '%d of %d cells at bedrock'
-                     % (t.min(), t.max(), int((t <= 0.0).sum()), len(t)))
+            # Report only where erosion is actually permitted; locked cells
+            # carry zero thickness and would drag the minimum to 0 whatever
+            # the layer is.
+            tt = t if mask is None else t[mask]
+            if len(tt):
+                L.append('  erodible base [L-5]: thickness %.4g to %.4g m, '
+                         '%d of %d erodible cells at bedrock'
+                         % (tt.min(), tt.max(), int((tt <= 0.0).sum()), len(tt)))
+            else:
+                L.append('  erodible base [L-5]: set, but no cell is erodible')
         else:
-            L.append('  erodible base [L-5]: none (bed is bottomless)')
+            L.append('  erodible base [L-5]: none (unlimited depth)')
+        if mask is None:
+            L.append('  erodible region    : whole domain')
+        else:
+            L.append('  erodible region    : %d of %d cells erodible '
+                     '(%d locked at their current bed)'
+                     % (int(mask.sum()), len(mask), int((~mask).sum())))
         L.append('  per class:')
         for i, nm in enumerate(self.get_sediment_names()):
             L.append('    %-10s d=%.4g m  v_s=%.4e m/s  R=%.4g  tau_c*=%.4g'

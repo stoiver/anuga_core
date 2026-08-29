@@ -20,6 +20,7 @@ sediment out of nothing. They are:
      depend on the order they were registered
   E  no base configured reproduces the old answer bit for bit
   F  mode 1 and mode 2 agree
+  H  erosion can be restricted to a region, which composes with the base
 
 D and E are the ones that catch a careless implementation. E is the regression
 gate: this feature must be invisible when it is off.
@@ -276,6 +277,130 @@ check('G4. erodible_thickness reports the layer',
 check('G5. sediment_summary reports the base',
       'erodible base' in d.sediment_summary()
       and '[L-5]' in d.sediment_summary())
+
+# ---------------------------------------------------------------- H
+print('H. region restriction')
+
+HALF = [[0.0, -1.0], [30.0, -1.0], [30.0, 17.0], [0.0, 17.0]]   # x < 30
+
+d = build()
+zc = d.quantities['elevation'].centroid_values.copy()
+x = d.centroid_coordinates[:, 0]
+d.set_erodible_region(polygon=HALF)
+d.evolve_to_end(finaltime=30.0)
+z1 = d.quantities['elevation'].centroid_values
+inside, outside = x < 30.0, x >= 30.0
+check('H1. cells outside the erodible region do not scour',
+      (zc - z1)[outside].max() <= 0.0,
+      'max scour outside %.3e m' % (zc - z1)[outside].max())
+check('H2. cells inside it do',
+      (zc - z1)[inside].max() > 1e-4,
+      'max scour inside %.4f m' % (zc - z1)[inside].max())
+
+# erodible=False is the complement
+d = build()
+zc = d.quantities['elevation'].centroid_values.copy()
+d.set_erodible_region(polygon=HALF, erodible=False)
+d.evolve_to_end(finaltime=30.0)
+z1 = d.quantities['elevation'].centroid_values
+check('H3. erodible=False locks the named region instead',
+      (zc - z1)[inside].max() <= 0.0 and (zc - z1)[outside].max() > 1e-4,
+      'scour inside %.3e m, outside %.4f m'
+      % ((zc - z1)[inside].max(), (zc - z1)[outside].max()))
+
+# A locked cell may still receive deposition. It needs a depositional case
+# to show: in the erosive channel above the limiter holds those cells at
+# exactly net zero, scaling erosion back until it just cancels deposition,
+# which is the correct answer there -- sand does not pile up on a scoured
+# apron under erosive flow. So build a settling case instead: sediment
+# already in suspension, no erosion (tau_c* far above anything reached).
+d = rectangular_cross_domain(30, 8, len1=60.0, len2=16.0)
+d.set_flow_algorithm('DE0')
+d.set_low_froude(0)
+d.store = False
+d.set_quantity('elevation', 0.0)
+d.set_quantity('stage', 1.0)
+d.set_quantity('friction', 0.03)
+d.set_boundary({t: Reflective_boundary(d) for t in d.get_boundary_tags()})
+d.set_sediment_parameters(porosity=0.3)
+d.add_sediment_class('silt', diameter=6.0e-5, tau_c_star=1.0e6,
+                     initial_concentration=0.01)
+zc = d.quantities['elevation'].centroid_values.copy()
+d.set_erodible_region(polygon=HALF)          # x >= 30 is locked
+xq = d.centroid_coordinates[:, 0]
+locked = xq >= 30.0
+d.evolve_to_end(finaltime=30.0)
+z1 = d.quantities['elevation'].centroid_values
+check('H4. locked cells still accrete -- locked means unscourable, not inert',
+      (z1 - zc)[locked].min() > 0.0,
+      'deposition on every locked cell, %.3e to %.3e m'
+      % ((z1 - zc)[locked].min(), (z1 - zc)[locked].max()))
+check('H5. and that new material is erodible again, being above the base',
+      (d.erodible_thickness()[locked] > 0.0).all(),
+      'thickness on locked cells now %.3e to %.3e m'
+      % (d.erodible_thickness()[locked].min(),
+         d.erodible_thickness()[locked].max()))
+
+# conservation is untouched by the restriction
+d = build()
+z0 = d.quantities['elevation'].centroid_values.copy()
+m0 = float((d.tracer_conserved_values[0] * d.areas).sum())
+d.set_erodible_region(polygon=HALF)
+poro = d.sediment_porosity
+d.evolve_to_end(finaltime=30.0)
+z1 = d.quantities['elevation'].centroid_values
+m1 = float((d.tracer_conserved_values[0] * d.areas).sum())
+bed = float(((1.0 - poro) * (z1 - z0) * d.areas).sum())
+check('H6. the budget still closes with a region restriction',
+      abs((m1 + bed) - m0) < 1e-12 * max(abs(m1), 1e-30),
+      'drift %+.3e m3 against %.4e suspended' % ((m1 + bed) - m0, m1))
+
+# base and region compose, and neither discards the other
+d = build()
+zc = d.quantities['elevation'].centroid_values.copy()
+d.set_erodible_base(depth=0.01)
+d.set_erodible_region(polygon=HALF)
+d.evolve_to_end(finaltime=40.0)
+z1 = d.quantities['elevation'].centroid_values
+check('H7. base and region compose: the region says where, the base '
+      'says how deep',
+      (zc - z1)[outside].max() <= 0.0
+      and 1e-4 < (zc - z1)[inside].max() <= 0.01 + 1e-12,
+      'outside %.3e m, inside %.5f m against a 0.010 m layer'
+      % ((zc - z1)[outside].max(), (zc - z1)[inside].max()))
+
+d = build()
+d.set_erodible_region(polygon=HALF)
+d.set_erodible_base(depth=0.01)
+check('H8. and the order they are called in does not matter',
+      d._sediment_erodible_mask is not None
+      and d._sediment_user_base is not None
+      and int((d.erodible_thickness() > 0).sum())
+      == int(d._sediment_erodible_mask.sum()),
+      '%d erodible cells either way'
+      % int((d.erodible_thickness() > 0).sum()))
+
+d = build()
+d.set_erodible_region(center=[15.0, 8.0], radius=6.0)
+n_circ = int(d._sediment_erodible_mask.sum())
+check('H9. a circular region works too',
+      0 < n_circ < len(d), '%d of %d cells inside r=6 m' % (n_circ, len(d)))
+try:
+    d.set_erodible_region(polygon=[[900.0, 900.0], [910.0, 900.0],
+                                   [910.0, 910.0], [900.0, 910.0]])
+    check('H10. a region that selects nothing is rejected', False, 'no error')
+except ValueError as exc:
+    check('H10. a region that selects nothing is rejected', True, str(exc)[:70])
+d = build()
+d.set_erodible_region(polygon=HALF)
+d.set_erodible_region()
+check('H11. calling it with nothing removes the restriction',
+      d._sediment_erodible_mask is None and d.sediment_has_z_base == 0)
+d = build()
+d.set_erodible_region(polygon=HALF)
+check('H12. sediment_summary reports the region',
+      'erodible region' in d.sediment_summary()
+      and 'locked' in d.sediment_summary())
 
 print('\n%d checks failed' % _fail[0])
 raise SystemExit(1 if _fail[0] else 0)

@@ -86,6 +86,7 @@ Choices are made by naming the **physics**, never by setting a flag:
 | `set_bedload(formula, ...)` | bedload transport, or off | 5 |
 | `set_sediment_parameters(...)` | the scalar physical properties | 2.4, 6 |
 | `set_erodible_base(...)` | the depth below which nothing erodes | 4.5 |
+| `set_erodible_region(...)` | where erosion may act at all | 4.5 |
 | `set_tracer_source(name, values)` | an external source | 2.6 |
 | `set_tracer_boundary(name, value)` | inflow concentration | 2.5 |
 
@@ -411,7 +412,47 @@ its neighbour's inflow, so the deficit migrates. Measured overshoot is
 known limitation with a known fix (iterating the exhaustion flag to a fixed
 point), not a mystery.
 
-### 10.2 Cost
+### 10.2 Restricting erosion to a region
+
+The base says how *deep* erosion may go; a region says *where* it may happen
+at all.
+
+```python
+domain.set_erodible_region(polygon=breach)                 # ONLY here erodes
+domain.set_erodible_region(polygon=apron, erodible=False)  # everywhere BUT here
+domain.set_erodible_region(center=[x, y], radius=25.0)     # a circle
+domain.set_erodible_region(indices=ids)                    # triangles directly
+domain.set_erodible_region()                               # remove it
+```
+
+The arguments are the ones the region-based operators (`Erosion_operator` and
+friends) already take, resolved by the same `Region` class, so a polygon that
+selects a set of cells there selects the same set here. A region that selects
+no cells is rejected rather than silently doing nothing -- that is almost
+always a polygon in the wrong coordinates.
+
+**Locked means unscourable, not inert.** A locked cell is held at the
+elevation it has when you call this, by giving it zero erodible thickness --
+the restriction is `[L-5]` with the layer set to nothing, not a separate
+mechanism. Sediment may still settle onto it, which is what a concrete apron
+or a rock bar does in the field, and that new material is erodible again
+because it now sits above the base. Under genuinely erosive flow such a cell
+sits at exactly net zero: the limiter scales erosion back until it just
+cancels deposition, so nothing piles up on a scoured apron.
+
+The two compose, in either order, and neither discards the other:
+
+```python
+domain.set_erodible_base(depth=0.4)        # 0.4 m of erodible material
+domain.set_erodible_region(polygon=reach)  # but only inside this reach
+```
+
+Where they disagree the stricter wins. `sediment_summary()` reports both, and
+the thickness range it prints covers only the erodible cells -- locked ones
+carry zero thickness and would otherwise drag the minimum to zero whatever the
+layer is.
+
+### 10.3 Cost
 
 None when unset. With no base configured the kernels take the path they took
 before the feature existed, and produce bitwise identical results -- which is
@@ -489,6 +530,8 @@ If you do not know where to start:
   `set_sediment_parameters(bed_evolution=False)` and leave `d*` at 1.0.
 * **A finite erodible layer over rock.** `set_erodible_base(depth=...)`, and
   check `erodible_thickness()` afterwards to see where it bit.
+* **Scour confined to one structure or reach.** `set_erodible_region(polygon=...)`,
+  or `erodible=False` to lock an apron while the rest of the domain erodes.
 
 Then print `sediment_summary()` and check it says what you meant.
 
