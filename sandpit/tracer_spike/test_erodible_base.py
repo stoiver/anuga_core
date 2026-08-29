@@ -391,14 +391,46 @@ try:
     check('H10. a region that selects nothing is rejected', False, 'no error')
 except ValueError as exc:
     check('H10. a region that selects nothing is rejected', True, str(exc)[:70])
+# a Region object, which is the general form: Region also understands line=,
+# poly= and expand_polygon=, none of which has a keyword on the setter
+from anuga.abstract_2d_finite_volumes.region import Region
+d = build()
+d.set_erodible_region(Region(d, polygon=HALF))
+by_object = d._sediment_erodible_mask.copy()
+d2 = build()
+d2.set_erodible_region(polygon=HALF)
+check('H11. a Region object selects the same cells as the polygon that '
+      'would build it',
+      np.array_equal(by_object, d2._sediment_erodible_mask),
+      '%d cells either way' % int(by_object.sum()))
+d = build()
+try:
+    d.set_erodible_region(HALF)
+    check('H12. a bare list of points is refused, not mistaken for a Region',
+          False, 'no error raised')
+except TypeError as exc:
+    check('H12. a bare list of points is refused, not mistaken for a Region',
+          True, str(exc)[:74])
+try:
+    d.set_erodible_region(Region(build(), polygon=HALF))
+    check('H13. a Region built on another domain is refused', False, 'no error')
+except ValueError as exc:
+    check('H13. a Region built on another domain is refused', True,
+          str(exc)[:74])
+try:
+    d.set_erodible_region(Region(d, polygon=HALF), polygon=HALF)
+    check('H14. a Region plus build-arguments is refused', False, 'no error')
+except ValueError:
+    check('H14. a Region plus build-arguments is refused', True)
+
 d = build()
 d.set_erodible_region(polygon=HALF)
 d.set_erodible_region()
-check('H11. calling it with nothing removes the restriction',
+check('H15. calling it with nothing removes the restriction',
       d._sediment_erodible_mask is None and d.sediment_has_z_base == 0)
 d = build()
 d.set_erodible_region(polygon=HALF)
-check('H12. sediment_summary reports the region',
+check('H16. sediment_summary reports the region',
       'erodible region' in d.sediment_summary()
       and 'locked' in d.sediment_summary())
 

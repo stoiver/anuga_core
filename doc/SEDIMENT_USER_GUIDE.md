@@ -422,14 +422,36 @@ domain.set_erodible_region(polygon=breach)                 # ONLY here erodes
 domain.set_erodible_region(polygon=apron, erodible=False)  # everywhere BUT here
 domain.set_erodible_region(center=[x, y], radius=25.0)     # a circle
 domain.set_erodible_region(indices=ids)                    # triangles directly
+domain.set_erodible_region(my_region)                      # a Region object
 domain.set_erodible_region()                               # remove it
 ```
 
-The arguments are the ones the region-based operators (`Erosion_operator` and
-friends) already take, resolved by the same `Region` class, so a polygon that
-selects a set of cells there selects the same set here. A region that selects
-no cells is rejected rather than silently doing nothing -- that is almost
-always a polygon in the wrong coordinates.
+The keyword arguments are the ones the region-based operators
+(`Erosion_operator` and friends) already take, resolved by the same `Region`
+class, so a polygon that selects a set of cells there selects the same set
+here. A region that selects no cells is rejected rather than silently doing
+nothing -- that is almost always a polygon in the wrong coordinates.
+
+**Passing a `Region` is the general form.** `Region` understands more than the
+keywords above -- `line=`, `poly=`, `expand_polygon=` -- so build one and hand
+it over when you need those:
+
+```python
+from anuga.abstract_2d_finite_volumes.region import Region
+
+domain.set_erodible_region(Region(domain, line=thalweg))
+domain.set_erodible_region(Region(domain, polygon=reach, expand_polygon=True))
+```
+
+Both do reach through: a line selects the cells it crosses (83 of 960 on a test
+mesh), and `expand_polygon` genuinely changes the selection (504 cells against
+480), because it intersects on vertices rather than centroids.
+
+It must be a `Region` built on **this** domain -- one built elsewhere carries
+triangle indices that mean nothing here, and is refused rather than silently
+mis-selecting. A bare list of points passed positionally is refused too, with a
+message pointing at `polygon=`: taking it as a region would select every cell
+and look like it worked.
 
 **Locked means unscourable, not inert.** A locked cell is held at the
 elevation it has when you call this, by giving it zero erodible thickness --

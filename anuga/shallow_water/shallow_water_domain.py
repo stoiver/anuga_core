@@ -1250,8 +1250,8 @@ class Domain(Generic_Domain):
 
         self._rebuild_sediment_base()
 
-    def set_erodible_region(self, polygon=None, center=None, radius=None,
-                            indices=None, erodible=True):
+    def set_erodible_region(self, region=None, polygon=None, center=None,
+                            radius=None, indices=None, erodible=True):
         """Restrict erosion to part of the domain (or lock part of it).
 
         The bed is erodible everywhere by default. Give a region to say
@@ -1260,10 +1260,18 @@ class Domain(Generic_Domain):
             domain.set_erodible_region(polygon=breach)     # ONLY here erodes
             domain.set_erodible_region(polygon=apron,      # everywhere BUT here
                                        erodible=False)
+            domain.set_erodible_region(my_region)          # a Region object
             domain.set_erodible_region()                   # remove the restriction
 
         Parameters
         ----------
+        region : Region
+            An already-built `anuga.abstract_2d_finite_volumes.region.Region`.
+            This is the general form: `Region` also understands `line=`,
+            `poly=` and `expand_polygon=`, which have no keyword here, so
+            build one and pass it when you need them. It must belong to THIS
+            domain -- its indices mean nothing on another mesh, and one built
+            elsewhere is rejected rather than quietly mis-selecting.
         polygon : list of [x, y]
             Region boundary, as for the region-based operators.
         center, radius : [x, y], float
@@ -1274,10 +1282,10 @@ class Domain(Generic_Domain):
             `True` (default): the region named is the ONLY erodible part.
             `False`: the region named is the only LOCKED part.
 
-        The arguments are the same ones `Erosion_operator` and the other
-        region-based operators take, and are resolved by the same `Region`
-        class, so a polygon that selects a set of cells there selects the same
-        set here.
+        The keyword arguments are the same ones `Erosion_operator` and the
+        other region-based operators take, and are resolved by the same
+        `Region` class, so a polygon that selects a set of cells there selects
+        the same set here.
 
         Notes
         -----
@@ -1295,15 +1303,33 @@ class Domain(Generic_Domain):
         may go, the region sets WHERE it may happen, and setting one leaves
         the other in place. Where they disagree the stricter wins.
         """
-        if (polygon is None and center is None and radius is None
-                and indices is None):
+        from anuga.abstract_2d_finite_volumes.region import Region
+
+        if (region is None and polygon is None and center is None
+                and radius is None and indices is None):
             self._sediment_erodible_mask = None
             self._rebuild_sediment_base()
             return
 
-        from anuga.abstract_2d_finite_volumes.region import Region
-        region = Region(self, indices=indices, polygon=polygon,
-                        center=center, radius=radius)
+        if region is not None:
+            if any(a is not None
+                   for a in (polygon, center, radius, indices)):
+                raise ValueError(
+                    'give a Region or the arguments to build one, not both')
+            if not isinstance(region, Region):
+                # A list of points is the likely mistake, and it is a silent
+                # one: Region would not be consulted and every cell would look
+                # selected.
+                raise TypeError(
+                    'region must be a Region object; to pass a list of points '
+                    'use set_erodible_region(polygon=...)')
+            if getattr(region, 'domain', None) is not self:
+                raise ValueError(
+                    'that Region belongs to a different domain; its triangle '
+                    'indices do not refer to this mesh')
+        else:
+            region = Region(self, indices=indices, polygon=polygon,
+                            center=center, radius=radius)
         idx = region.indices
 
         n = self.number_of_elements
