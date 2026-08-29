@@ -53,21 +53,33 @@ class Sediment_operator(Operator):
             return
 
         domain = self.domain
-        if domain.multiprocessor_mode == 2 and domain.gpu_interface is not None:
+        suspended = getattr(domain, '_sediment_suspended_enabled', True)
+        on_gpu = (domain.multiprocessor_mode == 2
+                  and domain.gpu_interface is not None)
+
+        if on_gpu:
             from anuga.shallow_water.sw_domain_gpu_ext import (
-                apply_sediment_source_gpu)
-            apply_sediment_source_gpu(domain.gpu_interface.gpu_dom, timestep)
+                apply_sediment_source_gpu, apply_bedload_gpu)
+            if suspended:
+                apply_sediment_source_gpu(domain.gpu_interface.gpu_dom, timestep)
+            if domain.sediment_bedload_mode:
+                apply_bedload_gpu(domain.gpu_interface.gpu_dom, timestep)
         else:
             from anuga.shallow_water.sw_domain_openmp_ext import (
-                apply_sediment_source)
-            apply_sediment_source(domain, timestep)
+                apply_sediment_source, apply_bedload)
+            if suspended:
+                apply_sediment_source(domain, timestep)
+            if domain.sediment_bedload_mode:
+                apply_bedload(domain, timestep)
 
     def parallel_safe(self):
-        """Safe in parallel: the kernel is cell-local.
+        """Safe in parallel.
 
-        It reads only quantities the halo exchange already keeps current, and
-        writes only to the cell it is working on -- no neighbour access, so
-        ghost cells need no special treatment.
+        The suspended exchange is cell-local. The bedload divergence DOES read
+        neighbours, but only their transport vector, which is computed from
+        stage, momentum and friction -- all quantities the halo exchange already
+        keeps current -- so ghost cells carry a valid q_b and the divergence is
+        correct on owned cells.
         """
         return True
 

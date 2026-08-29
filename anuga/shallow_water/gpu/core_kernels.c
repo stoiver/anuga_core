@@ -544,6 +544,187 @@ static inline double core_rouse_d_star(double Z, double a_h) {
 }
 
 // ============================================================================
+// Bedload transport and its bed evolution   [G-5]/[K-3], spec 6
+// ============================================================================
+//
+//   [K-1]  q_b* = K tau_x^m                 tau_x = tau* - tau_c*  [T-4]
+//   [K-5]  q_b* = 0.05 tau*^2.5 / f_c       Engelund-Hansen, no threshold
+//   [K-2]  q_b  = q_b* sqrt(R g) d^1.5
+//   [K-4]  q_b is parallel to the bed shear stress, hence to (u, v)
+//   [K-3]  dz/dt = -(1/(1-lambda)) div q_b
+//
+// Unlike the suspended exchange, this is a DIVERGENCE: it moves sediment along
+// the bed rather than between bed and water column, so in a closed domain it
+// redistributes bed material and conserves total bed volume exactly. That is
+// the property to test it with.
+//
+// Two passes, because the divergence at cell k needs its neighbours' q_b:
+// pass 1 fills the per-cell transport vector, pass 2 takes the divergence.
+// Both are ordinary cell loops, so both offload.
+//
+// Edge flux is CENTRED; see the note at the flux itself for why upwinding was
+// tried and rejected. Boundary edges carry zero bedload flux, which is what
+// makes the closed-domain conservation test exact.
+void core_apply_bedload(struct domain *D, double timestep) {
+    const anuga_int mode = D->sediment_bedload_mode;
+    const anuga_int n_classes = D->n_sediment_classes;
+    if (mode == 0 || n_classes <= 0 || timestep <= 0.0) {
+        return;
+    }
+    if (!D->sediment_bed_evolution) {
+        return;   /* fixed bed: bedload would have nowhere to go */
+    }
+
+    const anuga_int n = D->number_of_elements;
+    const double grav = D->g;
+    const double h_eps = D->epsilon;
+    const double minimum_allowed_height = D->minimum_allowed_height;
+    const double one_minus_lambda = 1.0 - D->sediment_porosity;
+    const double K = D->sediment_bedload_K;
+    const double mexp = D->sediment_bedload_m;
+    const double tau_c_b = D->sediment_bedload_tau_c_star;
+    const anuga_int fric_mode = D->sediment_friction_mode;
+    const double n_ll = D->sediment_manning_ll;
+    const anuga_int wbed = D->sediment_wilson_bed;
+    const double wD = D->sediment_wilson_D;
+
+    double * restrict stage_cv = D->stage_centroid_values;
+    double * restrict bed_cv = D->bed_centroid_values;
+    double * restrict bed_ev = D->bed_edge_values;
+    double * restrict xmom_cv = D->xmom_centroid_values;
+    double * restrict ymom_cv = D->ymom_centroid_values;
+    double * restrict friction_cv = D->friction_centroid_values;
+    double * restrict diam = D->sediment_diameter;
+    double * restrict sedR = D->sediment_R;
+    double * restrict qbx = D->sediment_qbx;
+    double * restrict qby = D->sediment_qby;
+    anuga_int * restrict neighbours = D->neighbours;
+    double * restrict normals = D->normals;
+    double * restrict edgelengths = D->edgelengths;
+    double * restrict areas = D->areas;
+
+    if (one_minus_lambda <= 0.0) {
+        return;
+    }
+
+    /* ---- pass 1: the transport vector, summed over classes ---- */
+    OMP_PARALLEL_LOOP
+    for (anuga_int k = 0; k < n; k++) {
+        qbx[k] = 0.0;
+        qby[k] = 0.0;
+
+        const double h = fmax(stage_cv[k] - bed_cv[k], 0.0);
+        if (h <= minimum_allowed_height) {
+            continue;
+        }
+
+        const double denom = h * h + h_eps * h_eps;
+        const double u = (denom > 0.0) ? (xmom_cv[k] * h / denom) : 0.0;
+        const double v = (denom > 0.0) ? (ymom_cv[k] * h / denom) : 0.0;
+        const double vel2 = u * u + v * v;
+        if (vel2 <= 0.0) {
+            continue;
+        }
+        const double speed = sqrt(vel2);
+
+        double f_c;
+        if (fric_mode == 2) {
+            double rel = h / wD;
+            if (!(rel > 1.0)) rel = 1.0;
+            double X;
+            if (wbed == 0)      X = 8.46 * pow(rel, 0.1005);
+            else if (wbed == 1) X = 5.75 * log10(rel) + 3.514;
+            else                X = 5.62 * log10(rel) + 4.0;
+            f_c = 1.0 / (X * X);
+        } else {
+            const double nman = (fric_mode == 1) ? n_ll : friction_cv[k];
+            f_c = grav * nman * nman / cbrt(h);
+        }
+
+        double q_b_total = 0.0;
+        for (anuga_int s = 0; s < n_classes; s++) {
+            const double Rgd = sedR[s] * grav * diam[s];
+            if (!(Rgd > 0.0)) continue;
+            const double tau_star = f_c * vel2 / Rgd;
+
+            double q_star;
+            if (mode == 2) {
+                /* [K-5] Engelund-Hansen, total load, NO threshold. Subtracting
+                 * tau_c* here would silently make it a different model. */
+                q_star = (f_c > 0.0) ? 0.05 * pow(tau_star, 2.5) / f_c : 0.0;
+            } else {
+                const double tau_x = tau_star - tau_c_b;
+                q_star = (tau_x > 0.0) ? K * pow(tau_x, mexp) : 0.0;
+            }
+            if (q_star <= 0.0) continue;
+
+            /* [K-2] */
+            q_b_total += q_star * sqrt(sedR[s] * grav) * pow(diam[s], 1.5);
+        }
+
+        if (q_b_total > 0.0) {
+            /* [K-4] parallel to (u, v) */
+            qbx[k] = q_b_total * u / speed;
+            qby[k] = q_b_total * v / speed;
+        }
+    }
+
+    /* ---- pass 2: divergence, and the bed update ---- */
+    OMP_PARALLEL_LOOP
+    for (anuga_int k = 0; k < n; k++) {
+        const double qx_k = qbx[k];
+        const double qy_k = qby[k];
+        double outflux = 0.0;
+
+        for (anuga_int i = 0; i < 3; i++) {
+            const anuga_int ki = 3 * k + i;
+            const anuga_int nb = neighbours[ki];
+            if (nb < 0) {
+                continue;            /* boundary: no bedload across it */
+            }
+            const double nx = normals[6 * k + 2 * i];
+            const double ny = normals[6 * k + 2 * i + 1];
+
+            /* CENTRED edge flux: q_edge = (q_k + q_nb)/2.
+             *
+             * Exactly conservative -- cell nb forms the same average against
+             * the opposite normal and so removes precisely what k gains -- and,
+             * unlike an upwind donor choice, CONTINUOUS.
+             *
+             * Upwinding was tried first and rejected twice over. Deciding the
+             * donor from each cell's own q.n is not antisymmetric and creates
+             * bed material (measured 1.05e-5 of bed volume in 60 s). Fixing
+             * that by deciding from the averaged vector is conservative but
+             * DISCONTINUOUS: where q_k.n = -q_nb.n, which is exactly a
+             * converging-flow edge, the average passes through zero while the
+             * two candidate fluxes differ by a finite amount, so the donor
+             * flips on roundoff. That put mode 1 and mode 2 1.3e-4 apart.
+             *
+             * The centred flux is also the physically right answer at such an
+             * edge: bedload converging from both sides should deposit there,
+             * not be attributed to one arbitrary donor.
+             *
+             * If oscillations ever appear in an advection-dominated case, the
+             * upgrade is a Rusanov-type flux -- centred plus a dissipation
+             * term in (z_nb - z_k) -- not a bare donor switch. */
+            const double qn = 0.5 * ((qx_k + qbx[nb]) * nx
+                                   + (qy_k + qby[nb]) * ny);
+            outflux += qn * edgelengths[ki];
+        }
+
+        /* [K-3]: dz/dt = -(1/(1-lambda)) div q_b, div q_b = outflux/area */
+        const double dz = -(timestep * outflux / areas[k]) / one_minus_lambda;
+        if (dz != 0.0) {
+            bed_cv[k] += dz;
+            const anuga_int k3 = 3 * k;
+            bed_ev[k3 + 0] += dz;
+            bed_ev[k3 + 1] += dz;
+            bed_ev[k3 + 2] += dz;
+        }
+    }
+}
+
+// ============================================================================
 // Suspended sediment source terms  (Phase 3)
 // ============================================================================
 

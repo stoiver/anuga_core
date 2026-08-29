@@ -220,6 +220,30 @@ struct domain {
      * Both are legitimate published configurations, not a debug switch. */
     anuga_int sediment_bed_evolution;
 
+    /* Bedload, spec 6.  dz/dt = -(1/(1-lambda)) div q_b   [K-3]/[G-5]
+     *
+     *   0 = off
+     *   1 = power law [K-1]/[K-2]:  q_b* = K tau_x^m,
+     *       q_b = q_b* sqrt(R g) d^1.5,  tau_x = tau* - tau_c*
+     *   2 = Engelund-Hansen [K-5]:  q_b* = 0.05 tau*^2.5 / f_c, NO threshold
+     *
+     * Mode 2 is a TOTAL LOAD relation with suspension already in it, so the
+     * suspended source must not run alongside it (spec 6, "critical usage
+     * rule"). The Python API refuses the combination rather than warning.
+     *
+     * K, m and tau_c* are exposed rather than hard-coded because which Wong &
+     * Parker relation FG21 used is still open: Eq 24 gives 3.97/1.5/0.0495,
+     * Eq 23 gives 4.93/1.60/0.0470. Resolving it should be a default change. */
+    anuga_int sediment_bedload_mode;
+    double sediment_bedload_K;
+    double sediment_bedload_m;
+    double sediment_bedload_tau_c_star;
+    /* Per-cell bedload transport vector, [K-4]. Scratch: filled and consumed
+     * within one call, but device-resident so the divergence pass can read a
+     * neighbour's value. */
+    double* sediment_qbx;
+    double* sediment_qby;
+
     /* Friction closure for the sediment kernel, spec 3.3.
      *   0 = constant     n from friction_centroid_values (default)
      *   1 = larsen_lamb  n uniform, from [T-14]/[T-15]; sediment_manning_ll

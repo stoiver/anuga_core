@@ -116,6 +116,12 @@ cdef extern from "gpu_domain.h" nogil:
         double sediment_a_h_floor
         double sediment_porosity
         int64_t sediment_bed_evolution
+        int64_t sediment_bedload_mode
+        double sediment_bedload_K
+        double sediment_bedload_m
+        double sediment_bedload_tau_c_star
+        double* sediment_qbx
+        double* sediment_qby
         double sediment_c_pack
         int64_t sediment_friction_mode
         double sediment_manning_ll
@@ -429,6 +435,7 @@ cdef extern from "gpu_domain.h" nogil:
 
 cdef extern from "core_kernels.h" nogil:
     void core_apply_sediment_source(domain* D, double timestep)
+    void core_apply_bedload(domain* D, double timestep)
 
 
 cdef extern from "gpu_culvert_operator.h" nogil:
@@ -846,6 +853,10 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     D.sediment_c_pack = getattr(domain_object, 'sediment_c_pack', 0.65)
     D.sediment_porosity = getattr(domain_object, 'sediment_porosity', 0.3)
     D.sediment_bed_evolution = 1 if getattr(domain_object, 'sediment_bed_evolution', True) else 0
+    D.sediment_bedload_mode = getattr(domain_object, 'sediment_bedload_mode', 0)
+    D.sediment_bedload_K = getattr(domain_object, 'sediment_bedload_K', 3.97)
+    D.sediment_bedload_m = getattr(domain_object, 'sediment_bedload_m', 1.5)
+    D.sediment_bedload_tau_c_star = getattr(domain_object, 'sediment_bedload_tau_c_star', 0.0495)
     D.sediment_friction_mode = getattr(domain_object, 'sediment_friction_mode', 0)
     D.sediment_manning_ll = getattr(domain_object, 'sediment_manning_ll', 0.065)
     D.sediment_wilson_bed = getattr(domain_object, 'sediment_wilson_bed', 0)
@@ -864,6 +875,10 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.sediment_tau_c_star = &sed1[0]
         sed1 = domain_object.sediment_reference_height
         D.sediment_reference_height = &sed1[0]
+        sed1 = domain_object.sediment_qbx
+        D.sediment_qbx = &sed1[0]
+        sed1 = domain_object.sediment_qby
+        D.sediment_qby = &sed1[0]
     else:
         D.sediment_settling_velocity = NULL
         D.sediment_d_star = NULL
@@ -871,6 +886,8 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.sediment_R = NULL
         D.sediment_tau_c_star = NULL
         D.sediment_reference_height = NULL
+        D.sediment_qbx = NULL
+        D.sediment_qby = NULL
     # Phase 2: wire the tracer arrays for the device. The pointers must be set
     # whenever number_of_tracers > 0 -- the shared kernels guard on that count
     # and dereference all six, so a NULL here is CUDA_ERROR_ILLEGAL_ADDRESS on
@@ -2152,6 +2169,11 @@ def apply_sediment_source_gpu(GPUDomain gpu_dom, double timestep):
     GPU-safe and off the _gpu_host_writes_suppressed fallback path.
     """
     core_apply_sediment_source(&gpu_dom.GD.D, timestep)
+
+
+def apply_bedload_gpu(GPUDomain gpu_dom, double timestep):
+    """Bedload divergence [G-5] on the device."""
+    core_apply_bedload(&gpu_dom.GD.D, timestep)
 
 
 def protect_gpu(GPUDomain gpu_dom):

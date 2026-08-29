@@ -34,6 +34,12 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double sediment_a_h_floor
 		double sediment_porosity
 		anuga_int sediment_bed_evolution
+		anuga_int sediment_bedload_mode
+		double sediment_bedload_K
+		double sediment_bedload_m
+		double sediment_bedload_tau_c_star
+		double* sediment_qbx
+		double* sediment_qby
 		double sediment_c_pack
 		anuga_int sediment_friction_mode
 		double sediment_manning_ll
@@ -191,6 +197,10 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.sediment_c_pack = getattr(domain_py_object, 'sediment_c_pack', 0.65)
 	D.sediment_porosity = getattr(domain_py_object, 'sediment_porosity', 0.3)
 	D.sediment_bed_evolution = 1 if getattr(domain_py_object, 'sediment_bed_evolution', True) else 0
+	D.sediment_bedload_mode = getattr(domain_py_object, 'sediment_bedload_mode', 0)
+	D.sediment_bedload_K = getattr(domain_py_object, 'sediment_bedload_K', 3.97)
+	D.sediment_bedload_m = getattr(domain_py_object, 'sediment_bedload_m', 1.5)
+	D.sediment_bedload_tau_c_star = getattr(domain_py_object, 'sediment_bedload_tau_c_star', 0.0495)
 	D.sediment_friction_mode = getattr(domain_py_object, 'sediment_friction_mode', 0)
 	D.sediment_manning_ll = getattr(domain_py_object, 'sediment_manning_ll', 0.065)
 	D.sediment_wilson_bed = getattr(domain_py_object, 'sediment_wilson_bed', 0)
@@ -383,6 +393,10 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 			D.sediment_tau_c_star = &sed1[0]
 			sed1 = domain_py_object.sediment_reference_height
 			D.sediment_reference_height = &sed1[0]
+			sed1 = domain_py_object.sediment_qbx
+			D.sediment_qbx = &sed1[0]
+			sed1 = domain_py_object.sediment_qby
+			D.sediment_qby = &sed1[0]
 		else:
 			D.sediment_settling_velocity = NULL
 			D.sediment_d_star = NULL
@@ -390,6 +404,8 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 			D.sediment_R = NULL
 			D.sediment_tau_c_star = NULL
 			D.sediment_reference_height = NULL
+			D.sediment_qbx = NULL
+			D.sediment_qby = NULL
 	else:
 		D.sediment_settling_velocity = NULL
 		D.sediment_d_star = NULL
@@ -397,6 +413,8 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 		D.sediment_R = NULL
 		D.sediment_tau_c_star = NULL
 		D.sediment_reference_height = NULL
+		D.sediment_qbx = NULL
+		D.sediment_qby = NULL
 		D.tracer_centroid_values = NULL
 		D.tracer_edge_values = NULL
 		D.tracer_boundary_values = NULL
@@ -1095,6 +1113,7 @@ def extrapolate_second_order_edge_sw(object domain_py_object,
 
 cdef extern from "gpu/core_kernels.h" nogil:
 	void core_apply_sediment_source(domain* D, double timestep)
+	void core_apply_bedload(domain* D, double timestep)
 
 
 def apply_sediment_source(object domain_py_object, double timestep,
@@ -1105,6 +1124,16 @@ def apply_sediment_source(object domain_py_object, double timestep,
 
 	with nogil:
 		core_apply_sediment_source(D, timestep)
+
+
+def apply_bedload(object domain_py_object, double timestep,
+                  update_domain_c_struct=False):
+	"""Fractional step: bedload divergence [G-5] applied to the bed."""
+
+	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=update_domain_c_struct)
+
+	with nogil:
+		core_apply_bedload(D, timestep)
 
 
 def protect_new(object domain_py_object, update_domain_c_struct=False):

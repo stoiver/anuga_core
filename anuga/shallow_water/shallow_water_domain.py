@@ -717,6 +717,13 @@ class Domain(Generic_Domain):
         # what the analytic constant-depth deposition solutions assume. Both are
         # published configurations, not a debug switch.
         self.sediment_bed_evolution = True
+        # Bedload, spec 6. Off by default; see set_bedload().
+        self.sediment_bedload_mode = 0
+        self.sediment_bedload_K = 3.97
+        self.sediment_bedload_m = 1.5
+        self.sediment_bedload_tau_c_star = 0.0495
+        self.sediment_qbx = None
+        self.sediment_qby = None
         # Friction closure for the sediment kernel (spec 3.3). 'constant' is
         # the right default for ordinary flood work; see set_sediment_friction.
         self.sediment_friction_mode = 0
@@ -1092,6 +1099,12 @@ class Domain(Generic_Domain):
             new[index] = value
             setattr(self, attr, new)
 
+        if self.sediment_qbx is None:
+            self.sediment_qbx = num.zeros(self.number_of_elements,
+                                          dtype=num.float64)
+            self.sediment_qby = num.zeros(self.number_of_elements,
+                                          dtype=num.float64)
+
         self._sediment_names.append(name)
         self.n_sediment_classes = ncl
 
@@ -1182,6 +1195,71 @@ class Domain(Generic_Domain):
                     "gravel/boulder)")
             self.sediment_wilson_bed = beds[bed]
             self.sediment_wilson_D = float(grain_size)
+
+        self._Domain_C_struct = None
+        self.gpu_interface = None
+        if hasattr(self, '_gpu_boundary_info_initialized'):
+            del self._gpu_boundary_info_initialized
+
+    #: Bedload parameter sets for `[K-1]`, keyed by name.
+    #: Which of the two Wong & Parker relations FG21 used is still open, so
+    #: both are provided and neither is privileged beyond the default.
+    BEDLOAD_PARAMETER_SETS = {
+        'wong_parker_eq24': (3.97, 1.5, 0.0495),
+        'wong_parker_eq23': (4.93, 1.60, 0.0470),
+    }
+
+    def set_bedload(self, formula='wong_parker_eq24', K=None, m=None,
+                    tau_c_star=None):
+        """Enable bedload transport `[K-1]`-`[K-4]` and its bed evolution `[G-5]`.
+
+        Parameters
+        ----------
+        formula : str
+            `'wong_parker_eq24'` (default; `K`=3.97, `m`=1.5, `tau_c*`=0.0495),
+            `'wong_parker_eq23'` (4.93, 1.60, 0.0470), `'engelund_hansen'`, or
+            `'off'`.
+        K, m, tau_c_star : float, optional
+            Override the chosen set's values individually.
+
+        Notes
+        -----
+        **Engelund & Hansen is a TOTAL LOAD relation** `[K-5]`: suspension is
+        already inside it, so running the suspended source alongside it double
+        counts. Spec 6 calls this out as a critical usage rule, and this method
+        enforces it rather than warning -- selecting `'engelund_hansen'` turns
+        the suspended exchange off, and it has no threshold by construction.
+
+        Which Wong & Parker relation FG21 used, their Eq 23 or Eq 24, is an open
+        item. The two differ enough to matter, so the parameters are exposed:
+        resolving it is a change of default, not an edit.
+        """
+        if formula == 'off':
+            self.sediment_bedload_mode = 0
+        elif formula == 'engelund_hansen':
+            self.sediment_bedload_mode = 2
+            # [K-5] has no threshold; subtracting one would be a different
+            # model. And it already contains suspension:
+            self.sediment_bedload_tau_c_star = 0.0
+            self._sediment_suspended_enabled = False
+        elif formula in self.BEDLOAD_PARAMETER_SETS:
+            self.sediment_bedload_mode = 1
+            (self.sediment_bedload_K, self.sediment_bedload_m,
+             self.sediment_bedload_tau_c_star) = \
+                self.BEDLOAD_PARAMETER_SETS[formula]
+        else:
+            raise ValueError(
+                'unknown bedload formula %r; expected one of %r'
+                % (formula, sorted(self.BEDLOAD_PARAMETER_SETS) +
+                   ['engelund_hansen', 'off']))
+
+        if formula != 'engelund_hansen':
+            if K is not None:
+                self.sediment_bedload_K = float(K)
+            if m is not None:
+                self.sediment_bedload_m = float(m)
+            if tau_c_star is not None:
+                self.sediment_bedload_tau_c_star = float(tau_c_star)
 
         self._Domain_C_struct = None
         self.gpu_interface = None
