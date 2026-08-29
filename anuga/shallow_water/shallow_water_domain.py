@@ -747,6 +747,13 @@ class Domain(Generic_Domain):
         # into the single field the kernel reads by _rebuild_sediment_base().
         self._sediment_user_base = None      # (n,) from set_erodible_base
         self._sediment_erodible_mask = None  # (n,) bool from set_erodible_region
+        # Spec 7, angle-of-repose relaxation. Off by default: it is a numerical
+        # heuristic, not physics, and it suppresses knickpoint retreat that may
+        # be real. See set_angle_of_repose().
+        self.sediment_repose_tan = 0.0
+        self.sediment_repose_relax = 1.0
+        self.sediment_repose_max_sweeps = 50
+        self.sediment_repose_dz = None
         self.sediment_bed_exhausted = None
         # Scratch for the source kernel, (ncl, n). Allocated with the classes.
         self.sediment_source_limited = None
@@ -1133,6 +1140,9 @@ class Domain(Generic_Domain):
             # [L-5] snapshot, int64 to match anuga_int.
             self.sediment_bed_exhausted = num.zeros(self.number_of_elements,
                                                     dtype=num.int64)
+            # Spec 7 Jacobi scratch.
+            self.sediment_repose_dz = num.zeros(self.number_of_elements,
+                                                dtype=num.float64)
 
         # Scratch for the source kernel: every class's bed exchange is held
         # here until [L-5] has limited them together. Sized (ncl, n) and
@@ -1164,6 +1174,88 @@ class Domain(Generic_Domain):
             del self._gpu_boundary_info_initialized
 
         return index
+
+    def set_angle_of_repose(self, angle=None, relax=1.0, max_sweeps=50):
+        """Relax bed slopes steeper than `angle` by moving material downslope.
+
+        Spec 7, from FG21 §2.2.4. Where the centroid-to-centroid bed slope
+        exceeds the critical angle, material is diffused downslope until it
+        does not.
+
+            domain.set_angle_of_repose(35.0)     # degrees; FG21 use 35
+            domain.set_angle_of_repose(None)     # off again (the default)
+
+        Parameters
+        ----------
+        angle : float
+            Critical angle in DEGREES, in (0, 90). `None` or 0 disables it.
+        relax : float
+            Relaxation in (0, 1], default 1.0. The kernel already divides by
+            the edge count for stability, so 1.0 is the fastest STABLE setting
+            rather than an aggressive one -- measured 793 sweeps to converge an
+            over-steep cone against 2400+ at 0.3. Lower it only if you see
+            something pathological.
+        max_sweeps : int
+            Hard cap on sweeps per timestep, default 50. Reaching it is
+            reported, because it means the bed may still be over-steep.
+
+        Notes
+        -----
+        FG21 are explicit that this is **a numerical heuristic, not physics**:
+        real bed slope failures are advective. It exists to stop the rest of
+        the model breaking on over-steep slopes. It has a side effect worth
+        knowing before you switch it on -- it limits the steepness of canyon
+        walls and knickpoints, and so suppresses knickpoint retreat that may be
+        real. That is why it is off by default.
+
+        Mass is conserved: material removed from an over-steep cell is
+        deposited on its neighbour, never discarded. This is the one place this
+        module differs sharply from `sanddune_erosion_operator`, which lowers
+        an over-steep cell and lets the material vanish.
+
+        Respects `[L-5]`: a cell cannot slump away material it is not allowed
+        to lose, so a locked cell or one at its base stays put and its
+        neighbours relax around it.
+
+        **On the sweep count.** This is an explicit diffusion solve, so
+        convergence from a badly over-steep bed is slow: an over-steep cone
+        needed 793 sweeps to reach the critical angle from cold. That is not
+        what the per-timestep cap is sized for. In a running model the bed is
+        already near-relaxed and each step needs a handful of sweeps; the cap
+        is there for the pathological case, and hitting it is not fatal --
+        progress carries over, so the bed keeps relaxing on subsequent steps.
+        It is reported so that you know relaxation is lagging rather than
+        finished.
+
+        If you START from a bed steeper than the critical angle, expect the
+        cap to be hit on the first steps. Either accept that it settles over
+        the first few, or raise `max_sweeps` for that run.
+        """
+        if angle is None or angle == 0.0:
+            self.sediment_repose_tan = 0.0
+        else:
+            if not 0.0 < angle < 90.0:
+                raise ValueError(
+                    'angle of repose must be in (0, 90) degrees, got %g'
+                    % angle)
+            self.sediment_repose_tan = float(num.tan(num.radians(angle)))
+
+        if not 0.0 < relax <= 1.0:
+            raise ValueError('relax must be in (0, 1], got %g' % relax)
+        if max_sweeps < 1:
+            raise ValueError('max_sweeps must be >= 1, got %d' % max_sweeps)
+        self.sediment_repose_relax = float(relax)
+        self.sediment_repose_max_sweeps = int(max_sweeps)
+
+        if (self.sediment_repose_tan > 0.0
+                and self.sediment_repose_dz is None):
+            self.sediment_repose_dz = num.zeros(self.number_of_elements,
+                                                dtype=num.float64)
+
+        self._Domain_C_struct = None
+        self.gpu_interface = None
+        if hasattr(self, '_gpu_boundary_info_initialized'):
+            del self._gpu_boundary_info_initialized
 
     def set_erodible_base(self, elevation=None, depth=None):
         """Set the non-erodible base -- bedrock -- below which no erosion acts.
@@ -1608,6 +1700,14 @@ class Domain(Generic_Domain):
                 L.append('  erodible base [L-5]: set, but no cell is erodible')
         else:
             L.append('  erodible base [L-5]: none (unlimited depth)')
+        if self.sediment_repose_tan > 0.0:
+            L.append('  angle of repose    : %.1f degrees (spec 7), relax %.2g, '
+                     'max %d sweeps'
+                     % (num.degrees(num.arctan(self.sediment_repose_tan)),
+                        self.sediment_repose_relax,
+                        self.sediment_repose_max_sweeps))
+        else:
+            L.append('  angle of repose    : off (spec 7)')
         if mask is None:
             L.append('  erodible region    : whole domain')
         else:

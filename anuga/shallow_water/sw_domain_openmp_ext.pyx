@@ -49,6 +49,10 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double sediment_bedload_tau_c_star
 		double* sediment_z_base
 		anuga_int sediment_has_z_base
+		double* sediment_repose_dz
+		double sediment_repose_tan
+		double sediment_repose_relax
+		anuga_int sediment_repose_max_sweeps
 		double* sediment_source_limited
 		anuga_int* sediment_bed_exhausted
 		double* sediment_qbx
@@ -224,6 +228,11 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	# sediment_z_base, so leaving it uninitialised makes a NULL
 	# pointer look like a configured base.
 	D.sediment_has_z_base = getattr(domain_py_object, 'sediment_has_z_base', 0)
+	# spec 7 repose. Scalars again set unconditionally -- the kernel
+	# tests sediment_repose_tan before touching sediment_repose_dz.
+	D.sediment_repose_tan = getattr(domain_py_object, 'sediment_repose_tan', 0.0)
+	D.sediment_repose_relax = getattr(domain_py_object, 'sediment_repose_relax', 1.0)
+	D.sediment_repose_max_sweeps = getattr(domain_py_object, 'sediment_repose_max_sweeps', 0)
 	D.sediment_bedload_K = getattr(domain_py_object, 'sediment_bedload_K', 3.97)
 	D.sediment_bedload_m = getattr(domain_py_object, 'sediment_bedload_m', 1.5)
 	D.sediment_bedload_tau_c_star = getattr(domain_py_object, 'sediment_bedload_tau_c_star', 0.0495)
@@ -437,6 +446,8 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 			D.sediment_source_limited = &sed2[0,0]
 			sedi = domain_py_object.sediment_bed_exhausted
 			D.sediment_bed_exhausted = &sedi[0]
+			sed1 = domain_py_object.sediment_repose_dz
+			D.sediment_repose_dz = &sed1[0]
 			if domain_py_object.sediment_has_z_base:
 				sed1 = domain_py_object.sediment_z_base
 				D.sediment_z_base = &sed1[0]
@@ -454,6 +465,7 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 			D.sediment_z_base = NULL
 			D.sediment_source_limited = NULL
 			D.sediment_bed_exhausted = NULL
+			D.sediment_repose_dz = NULL
 	else:
 		D.sediment_settling_velocity = NULL
 		D.sediment_d_star = NULL
@@ -466,6 +478,7 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 		D.sediment_z_base = NULL
 		D.sediment_source_limited = NULL
 		D.sediment_bed_exhausted = NULL
+		D.sediment_repose_dz = NULL
 		D.tracer_centroid_values = NULL
 		D.tracer_edge_values = NULL
 		D.tracer_boundary_values = NULL
@@ -1166,6 +1179,7 @@ def extrapolate_second_order_edge_sw(object domain_py_object,
 cdef extern from "gpu/core_kernels.h" nogil:
 	void core_apply_sediment_source(domain* D, double timestep)
 	void core_apply_bedload(domain* D, double timestep)
+	anuga_int core_apply_repose(domain* D)
 
 
 def apply_sediment_source(object domain_py_object, double timestep,
@@ -1186,6 +1200,22 @@ def apply_bedload(object domain_py_object, double timestep,
 
 	with nogil:
 		core_apply_bedload(D, timestep)
+
+
+def apply_repose(object domain_py_object, update_domain_c_struct=False):
+	"""Fractional step: angle-of-repose relaxation (spec 7).
+
+	Returns the number of sweeps used. Equal to the configured cap means the
+	cap was hit and the bed may still be over-steep.
+	"""
+
+	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=update_domain_c_struct)
+	cdef anuga_int sweeps
+
+	with nogil:
+		sweeps = core_apply_repose(D)
+
+	return sweeps
 
 
 def protect_new(object domain_py_object, update_domain_c_struct=False):

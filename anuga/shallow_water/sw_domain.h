@@ -353,6 +353,26 @@ struct domain {
      * scheme conservative. */
     anuga_int* sediment_bed_exhausted; /* (n) */
 
+    /* ---- spec 7, angle-of-repose relaxation ------------------------------
+     *
+     * Where the centroid-to-centroid bed slope exceeds a threshold angle, bed
+     * material is moved downslope until it does not. FG21 are explicit that
+     * this is a NUMERICAL HEURISTIC, not physics -- real slope failures are
+     * advective -- and that it suppresses knickpoint retreat that may be real.
+     * It exists to stop the rest of the model breaking on over-steep slopes.
+     *
+     * This is the ONLY non-cell-local sediment kernel: a cell's update depends
+     * on its neighbours' elevation, so it is swept iteratively, Jacobi style,
+     * with sediment_repose_dz holding the sweep's increments. Reading live
+     * elevation instead would make the result depend on thread order.
+     *
+     * sediment_repose_tan = 0 disables it, which is the default.
+     */
+    double* sediment_repose_dz;            /* (n) per-sweep increment [m] */
+    double sediment_repose_tan;            /* tan of the critical angle */
+    double sediment_repose_relax;          /* under-relaxation, (0, 1] */
+    anuga_int sediment_repose_max_sweeps;  /* hard cap; reported when hit */
+
 };
 
 

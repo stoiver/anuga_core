@@ -25,6 +25,9 @@ operator must therefore stay on the GPU-safe list in
 `Domain._has_cpu_only_fractional_operators`.
 """
 
+import math
+
+import anuga.utilities.log as log
 from anuga.operators.base_operator import Operator
 
 
@@ -46,6 +49,11 @@ class Sediment_operator(Operator):
             raise ValueError(
                 'Sediment_operator requires at least one sediment class; '
                 'call domain.add_sediment_class(...) first')
+
+        # Reporting for the repose relaxation (spec 7).
+        self.repose_sweeps = 0
+        self.repose_sweeps_total = 0
+        self.repose_cap_hits = 0
 
     def __call__(self):
         timestep = self.domain.get_timestep()
@@ -72,6 +80,47 @@ class Sediment_operator(Operator):
             if domain.sediment_bedload_mode:
                 apply_bedload(domain, timestep)
 
+        # Angle-of-repose relaxation LAST, so it relaxes the bed this step
+        # actually produced rather than the one it started from. It is the only
+        # non-cell-local sediment kernel, and the only one that can iterate.
+        if domain.sediment_repose_tan > 0.0:
+            if on_gpu:
+                from anuga.shallow_water.sw_domain_gpu_ext import (
+                    apply_repose_gpu)
+                sweeps = apply_repose_gpu(domain.gpu_interface.gpu_dom)
+            else:
+                from anuga.shallow_water.sw_domain_openmp_ext import (
+                    apply_repose)
+                sweeps = apply_repose(domain)
+
+            self.repose_sweeps = sweeps
+            self.repose_sweeps_total += sweeps
+            if sweeps >= domain.sediment_repose_max_sweeps:
+                # Spec 7 requires this be reported, not swallowed: hitting the
+                # cap means the bed may still be over-steep where the whole
+                # point of the kernel was that it should not be.
+                self.repose_cap_hits += 1
+                if self.repose_cap_hits == 1 or self.verbose:
+                    log.critical(
+                        '%s: angle-of-repose relaxation hit its %d-sweep cap '
+                        'at t = %g s; the bed may still exceed %.1f degrees. '
+                        'Raise max_sweeps, or relax less aggressively.'
+                        % (self.label, domain.sediment_repose_max_sweeps,
+                           domain.get_time(),
+                           math.degrees(math.atan(domain.sediment_repose_tan))))
+
+            # Spec 7 requires a halo exchange per sweep. This exchanges once
+            # per timestep instead: the sweep loop lives inside the kernel so
+            # that it stays on the device, and pulling it into Python to
+            # exchange between sweeps would put a host round trip in the middle
+            # of every sweep and drop the run off the GPU path. In parallel the
+            # consequence is that relaxation propagates across a subdomain
+            # boundary one sweep per TIMESTEP rather than one per sweep, so a
+            # slump spanning a boundary relaxes more slowly there. Recorded in
+            # PHYSICS_SPEC 7.1; serial results are unaffected.
+            if domain.parallel:
+                domain.update_ghosts(['elevation'])
+
     def parallel_safe(self):
         """Safe in parallel.
 
@@ -80,6 +129,10 @@ class Sediment_operator(Operator):
         stage, momentum and friction -- all quantities the halo exchange already
         keeps current -- so ghost cells carry a valid q_b and the divergence is
         correct on owned cells.
+
+        Angle-of-repose relaxation also reads neighbours, and exchanges
+        elevation after its sweeps. See the note at the call site for what it
+        does NOT do, which is exchange between them.
         """
         return True
 
@@ -88,4 +141,6 @@ class Sediment_operator(Operator):
                                               self.domain.n_sediment_classes)
 
     def timestepping_statistics(self):
+        if self.domain.sediment_repose_tan > 0.0:
+            return ', repose sweeps %d' % self.repose_sweeps
         return ''

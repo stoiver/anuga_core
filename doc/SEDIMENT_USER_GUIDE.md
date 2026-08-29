@@ -87,6 +87,7 @@ Choices are made by naming the **physics**, never by setting a flag:
 | `set_sediment_parameters(...)` | the scalar physical properties | 2.4, 6 |
 | `set_erodible_base(...)` | the depth below which nothing erodes | 4.5 |
 | `set_erodible_region(...)` | where erosion may act at all | 4.5 |
+| `set_angle_of_repose(...)` | relaxation of over-steep bed slopes | 7 |
 | `set_tracer_source(name, values)` | an external source | 2.6 |
 | `set_tracer_boundary(name, value)` | inflow concentration | 2.5 |
 
@@ -482,7 +483,73 @@ asserted, not assumed, in `test_erodible_base.py` check E1.
 
 ---
 
-## 11. External sources
+## 11. Angle-of-repose relaxation
+
+```python
+domain.set_angle_of_repose(35.0)     # degrees; FG21 use 35
+domain.set_angle_of_repose(None)     # off again (the default)
+```
+
+Where the centroid-to-centroid bed slope exceeds the critical angle, bed
+material is moved downslope until it does not. Without it, scour will cut a
+vertical face that in the field would collapse.
+
+**It is off by default, and that is a considered default.** FG21, whose
+formulation this is, are explicit that it is *a numerical heuristic, not
+physics* -- real slope failures are advective. It exists to stop the rest of
+the model breaking on over-steep slopes, and it has a side effect worth
+knowing before you switch it on: it limits the steepness of canyon walls and
+knickpoints, and so suppresses knickpoint retreat that may be real.
+
+**Mass is conserved.** Material removed from an over-steep cell is deposited on
+its neighbours, never discarded (measured drift 2.3e-13 m3 on 4.0e2 m3 of bed).
+This is the sharpest difference from ANUGA's `sanddune_erosion_operator`, which
+lowers an over-steep cell and lets the material vanish.
+
+It respects `[L-5]`: a cell cannot slump away material it is not allowed to
+lose, so a locked cell or one already at its base stays put and its neighbours
+relax around it.
+
+### 11.1 The sweep count, which will surprise you
+
+This is an explicit diffusion solve, and convergence from a badly over-steep
+bed is slow. An over-steep cone (36.8 degrees) needed **793 sweeps** to reach a
+30 degree limit from cold.
+
+That is not what the per-timestep cap is sized for. In a running model the bed
+is already near-relaxed and each step needs a handful of sweeps. The cap
+(`max_sweeps`, default 50) exists for the pathological case, and **hitting it
+is not fatal** -- progress carries over, so the bed keeps relaxing on
+subsequent steps. It is reported so you know relaxation is lagging rather than
+finished:
+
+```
+Sediment_operator: angle-of-repose relaxation hit its 50-sweep cap at
+t = 0.3 s; the bed may still exceed 30.0 degrees.
+```
+
+If you *start* from a bed steeper than the critical angle, expect that on the
+first few steps. Either let it settle, or raise `max_sweeps` for that run.
+`operator.repose_sweeps` and `operator.repose_cap_hits` are available if you
+want to watch it, and `timestepping_statistics()` prints the sweep count.
+
+`relax` defaults to 1.0. That is the fastest **stable** setting, not an
+aggressive one -- the kernel already divides by the edge count for stability,
+and 1.0 converged the cone in 793 sweeps against 2400+ at 0.3. Lower it only if
+you see something pathological.
+
+### 11.2 In parallel
+
+The kernel sweeps internally so it stays on the device, and elevation is
+exchanged once per timestep afterwards. Spec 7 asks for an exchange per sweep.
+The consequence is that relaxation crosses a subdomain boundary one sweep per
+*timestep* rather than one per sweep, so a slump spanning a boundary relaxes
+more slowly there than it would in serial. Serial and single-subdomain results
+are unaffected. See PHYSICS_SPEC 7.1.
+
+---
+
+## 12. External sources
 
 ```python
 domain.set_tracer_source('sand', values)   # array over centroids, or a scalar
@@ -496,7 +563,7 @@ prescribed release.
 
 ---
 
-## 12. Running on the GPU
+## 13. Running on the GPU
 
 ```python
 domain.set_multiprocessor_mode(2)
@@ -532,7 +599,7 @@ simply forces the mapping to be rebuilt.
 
 ---
 
-## 13. Choosing a configuration
+## 14. Choosing a configuration
 
 If you do not know where to start:
 
@@ -554,12 +621,14 @@ If you do not know where to start:
   check `erodible_thickness()` afterwards to see where it bit.
 * **Scour confined to one structure or reach.** `set_erodible_region(polygon=...)`,
   or `erodible=False` to lock an apron while the rest of the domain erodes.
+* **A dune or a steep bank that should collapse rather than stand vertical.**
+  `set_angle_of_repose(35.0)`, and read section 11.1 first.
 
 Then print `sediment_summary()` and check it says what you meant.
 
 ---
 
-## 14. What is not implemented
+## 15. What is not implemented
 
 Vegetation drag (spec 8) is Phase 5 and absent. Neither validation rung of
 spec 10 -- Rio Puerco, the crater breach -- has been attempted; the evidence

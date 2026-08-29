@@ -863,6 +863,193 @@ void core_apply_bedload(struct domain *D, double timestep) {
 }
 
 // ============================================================================
+// Angle-of-repose relaxation  (spec 7)
+// ============================================================================
+
+// Diffuse bed material downslope wherever the centroid-to-centroid slope
+// exceeds the critical angle, until it does not.
+//
+// FG21 §2.2.4, who are explicit that this is a NUMERICAL HEURISTIC and not
+// physics: real bed slope failures are advective. It exists to stop the rest of
+// the model breaking on over-steep slopes -- and it has a side effect worth
+// remembering, that it limits the steepness of canyon walls and knickpoints and
+// so suppresses knickpoint retreat that may be real.
+//
+// THE ONLY NON-CELL-LOCAL SEDIMENT KERNEL. A cell's update depends on its
+// neighbours' elevation, which forces two things:
+//
+//   * Jacobi, not Gauss-Seidel. Each sweep reads elevation and writes
+//     increments to a separate array, so no cell sees a neighbour that has
+//     already moved this sweep. Reading live elevation would make the answer
+//     depend on which thread got there first, and mode 1 and mode 2 would
+//     diverge.
+//   * a hard sweep cap, reported to the caller. Relaxation is iterative and a
+//     pathological bed could otherwise spin.
+//
+// MASS IS CONSERVED, which is what makes this different from the older
+// sanddune operator: material removed from an over-steep cell is DEPOSITED ON
+// ITS NEIGHBOUR, never discarded. The mechanism is the same one bedload uses --
+// the transfer is computed per EDGE from data both cells share, so both compute
+// the identical volume and the pair balances exactly:
+//
+//     V = relax (|dz| - tan(theta) d) / (1/A_k + 1/A_nb)
+//
+// which is the volume that brings the pair exactly to the threshold slope when
+// relax = 1: moving V lowers the donor by V/A_donor and raises the receiver by
+// V/A_receiver, closing the excess by V(1/A_k + 1/A_nb).
+//
+// Interacts with [L-5]: material that cannot be scoured cannot slump either, so
+// a transfer is capped by the DONOR's erodible thickness. The cap is a third of
+// it per edge, because a cell has three edges and may be the donor on all of
+// them; a full-thickness cap on each could lower it to three times its
+// available depth in one sweep. The remainder is simply moved on later sweeps.
+//
+// Returns the number of sweeps used. Equal to max_sweeps means the cap was hit
+// and the bed may still be over-steep -- the caller reports that rather than
+// letting it pass silently.
+/* Relative tolerance on the threshold slope; see the note at its use. */
+#define REPOSE_TOL 1.0e-3
+
+anuga_int core_apply_repose(struct domain *D) {
+    const double tan_c = D->sediment_repose_tan;
+    if (!(tan_c > 0.0)) {
+        return 0;                      /* disabled, the default */
+    }
+    if (!D->sediment_bed_evolution) {
+        return 0;                      /* a fixed bed cannot slump */
+    }
+
+    const anuga_int n = D->number_of_elements;
+    const anuga_int max_sweeps = D->sediment_repose_max_sweeps;
+    const double relax = D->sediment_repose_relax;
+
+    double * restrict bed_cv = D->bed_centroid_values;
+    double * restrict bed_ev = D->bed_edge_values;
+    double * restrict dz = D->sediment_repose_dz;
+    double * restrict areas = D->areas;
+    double * restrict cc = D->centroid_coordinates;
+    anuga_int * restrict neighbours = D->neighbours;
+    double * restrict z_base = D->sediment_z_base;
+    const anuga_int has_z_base = (D->sediment_has_z_base && z_base != NULL);
+
+    if (dz == NULL || max_sweeps <= 0) {
+        return 0;
+    }
+
+    anuga_int sweeps = 0;
+    for (anuga_int it = 0; it < max_sweeps; it++) {
+        anuga_int n_steep = 0;
+
+        OMP_PARALLEL_LOOP_REDUCTION_PLUS(n_steep)
+        for (anuga_int k = 0; k < n; k++) {
+            double acc = 0.0;
+            const double z_k = bed_cv[k];
+            const double A_k = areas[k];
+            const double xk = cc[2 * k];
+            const double yk = cc[2 * k + 1];
+
+            for (anuga_int i = 0; i < 3; i++) {
+                const anuga_int nb = neighbours[3 * k + i];
+                if (nb < 0 || nb == k) {
+                    continue;          /* boundary, or a ghost self-reference */
+                }
+                const double dx = xk - cc[2 * nb];
+                const double dy = yk - cc[2 * nb + 1];
+                const double d = sqrt(dx * dx + dy * dy);
+                if (!(d > 0.0)) {
+                    continue;
+                }
+
+                const double z_nb = bed_cv[nb];
+                const double diff = z_k - z_nb;
+                const double adiff = fabs(diff);
+                const double thresh = tan_c * d;
+
+                /* Convergence is ASYMPTOTIC: each sweep removes a fraction of
+                 * the excess, so a strict `> thresh` test is never satisfied
+                 * and the loop runs to its cap every timestep, reporting a
+                 * failure that has not happened. Measured on an over-steep
+                 * cone: 36.84 -> 30.09 degrees against a 30 degree limit in
+                 * 400 sweeps, still "not converged".
+                 *
+                 * So converged means within REPOSE_TOL of the threshold
+                 * slope, which bounds the final angle: at 30 degrees a
+                 * tolerance of 1e-3 in tan leaves at most 30.03 degrees.
+                 * Deliberately not exposed -- it is the kernel's own
+                 * convergence criterion, not a physical parameter, and the
+                 * physical knob (the angle) is already there. */
+                if (!(adiff > thresh * (1.0 + REPOSE_TOL))) {
+                    continue;
+                }
+                n_steep++;
+
+                const double A_nb = areas[nb];
+                const double inv_sum = 1.0 / A_k + 1.0 / A_nb;
+
+                /* The /3 is a STABILITY limit, not a fudge. relax = 1 with no
+                 * divisor brings a single over-steep PAIR exactly to the
+                 * threshold in one sweep -- but a cell has three edges and can
+                 * be the donor on all of them at once, so its total change is
+                 * up to three times what any one edge intended. That is an
+                 * explicit diffusion step past its stability limit: it
+                 * overshoots, creates fresh over-steep edges on the far side,
+                 * and oscillates instead of converging. Observed with relax =
+                 * 0.5 and no divisor: an over-steep cone stalled at 30.09
+                 * degrees against a 30 degree limit and burned all 400 sweeps
+                 * every timestep, so the cap was reported hit on a problem
+                 * that was simply never going to converge.
+                 *
+                 * Dividing by the edge count bounds a cell's total movement by
+                 * relax times its worst excess, which is stable for any
+                 * relax <= 1, and keeps relax meaning what the docstring says
+                 * it means. Both cells divide by the same 3, so the transfer
+                 * stays symmetric and B1 conservation is untouched. */
+                double V = relax * (adiff - thresh) / inv_sum / 3.0;
+
+                /* [L-5]: the donor cannot give up what it may not lose. Both
+                 * cells identify the same donor -- the higher one -- and
+                 * compute the same cap, so the transfer stays symmetric. */
+                if (has_z_base) {
+                    const anuga_int donor = (diff > 0.0) ? k : nb;
+                    const double avail = (bed_cv[donor] - z_base[donor])
+                                       * areas[donor] / 3.0;
+                    if (V > avail) {
+                        V = (avail > 0.0) ? avail : 0.0;
+                    }
+                }
+
+                /* The higher cell gives, the lower receives. */
+                acc += (diff > 0.0) ? (-V / A_k) : (V / A_k);
+            }
+            dz[k] = acc;
+        }
+
+        sweeps = it + 1;
+        if (n_steep == 0) {
+            /* Nothing was over-steep, so nothing was written; stop before
+             * applying a sweep of zeros. */
+            sweeps = it;
+            break;
+        }
+
+        OMP_PARALLEL_LOOP
+        for (anuga_int k = 0; k < n; k++) {
+            const double d = dz[k];
+            if (d != 0.0) {
+                bed_cv[k] += d;
+                const anuga_int k3 = 3 * k;
+                bed_ev[k3 + 0] += d;
+                bed_ev[k3 + 1] += d;
+                bed_ev[k3 + 2] += d;
+            }
+        }
+    }
+
+    return sweeps;
+}
+
+
+// ============================================================================
 // Suspended sediment source terms  (Phase 3)
 // ============================================================================
 
