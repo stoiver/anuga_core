@@ -1278,6 +1278,32 @@ class Domain(Generic_Domain):
             raise ValueError('no tracer named %r; registered tracers are %r'
                              % (name, list(self._tracer_names)))
 
+    def set_tracer_boundary(self, name, value):
+        """Prescribe the inflow concentration `c` for tracer `name`.
+
+        Spec 9.3: sediment boundary conditions act through the conserved
+        `h*c`, and a prescribed inflow concentration is the minimum required
+        set. Water entering the domain carries this concentration; water
+        leaving is unaffected, since the flux is upwinded on the water flux.
+
+        A scalar applies to the whole boundary; an array must have one value
+        per boundary edge (`domain.boundary_length`).
+        """
+        s = self.get_tracer_index(name)
+        v = num.asarray(value, dtype=num.float64)
+        if v.ndim == 0:
+            self.tracer_boundary_values[s] = float(v)
+        elif v.shape == (self.boundary_length,):
+            self.tracer_boundary_values[s] = v
+        else:
+            raise ValueError(
+                'tracer %r: expected a scalar or %d boundary values, got %r'
+                % (name, self.boundary_length, v.shape))
+
+    def get_tracer_boundary(self, name):
+        """Return the prescribed boundary concentration for tracer `name`."""
+        return self.tracer_boundary_values[self.get_tracer_index(name)]
+
     def get_tracer_names(self):
         """Return the registered tracer names, in index order."""
         return list(self._tracer_names)
