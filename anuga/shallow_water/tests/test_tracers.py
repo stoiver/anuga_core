@@ -18,6 +18,11 @@ The properties tested here, in the order they matter:
   API             `add_tracer` shapes, contiguity, cache invalidation, and the
                   errors it raises
 
+The transport tests are parametrised over every flow algorithm, because a
+kernel that does not carry tracers drops them silently -- nothing errors, the
+concentration just stops moving. `test_every_transport_path_is_covered` fails
+if a new path selector appears without the parametrisation growing to match.
+
 Mode 1 only. The mode 1 / mode 2 comparison is in test_tracers_gpu.py, which
 has to guard itself against the NVHPC runtime.
 """
@@ -148,9 +153,24 @@ def test_order_of_accuracy_on_a_smooth_monotone_field():
 
 # ---------------------------------------------------------------- flux kernel
 
-def _dam_break_domain(nxy=20, names=('c',), beta=1.0):
+# Every distinct transport path this build offers. The tracer tests below are
+# parametrised over it, which is what makes "a tracer is transported" an
+# enforced guarantee rather than an argued one: a flux or update kernel that
+# does not carry tracers fails here instead of silently dropping them, and a
+# dropped tracer is invisible -- the concentration simply stops moving.
+#
+# Adding a path is one entry. See test_every_transport_path_is_covered below,
+# which fails when a new path selector appears and this list has not grown.
+_FLOW_ALGORITHMS = ('DE0', 'DE1', 'DE2')
+
+# Domain attributes, not yet present, that will select an alternative flux or
+# update kernel. Named here so their arrival is noticed; see the test.
+_FUTURE_PATH_SELECTORS = ('reconstruct_edge_bed',)
+
+
+def _dam_break_domain(nxy=20, names=('c',), beta=1.0, algorithm='DE0'):
     d = rectangular_cross_domain(nxy, nxy, len1=LEN, len2=LEN)
-    d.set_flow_algorithm('DE0')
+    d.set_flow_algorithm(algorithm)
     d.set_low_froude(0)
     d.store = False
     d.set_quantity('elevation', 0.0)
@@ -263,9 +283,10 @@ def test_two_tracers_are_indexed_and_do_not_alias():
 
 # ---------------------------------------------------------------- integration
 
-def test_uniform_tracer_survives_a_dam_break_unchanged():
+@pytest.mark.parametrize('algorithm', _FLOW_ALGORITHMS)
+def test_uniform_tracer_survives_a_dam_break_unchanged(algorithm):
     """Free stream: a uniform c must stay uniform however violent the flow."""
-    d = _dam_break_domain(nxy=30)
+    d = _dam_break_domain(nxy=30, algorithm=algorithm)
     d.set_tracer('c', 0.4)
     d.tracer_boundary_values[0, :] = 0.4
     d.evolve_to_end(finaltime=20.0)
@@ -276,8 +297,9 @@ def test_uniform_tracer_survives_a_dam_break_unchanged():
     assert np.abs(c - 0.4).max() < 1e-9
 
 
-def test_tracer_mass_is_conserved_positive_and_bounded():
-    d = _dam_break_domain(nxy=30)
+@pytest.mark.parametrize('algorithm', _FLOW_ALGORITHMS)
+def test_tracer_mass_is_conserved_positive_and_bounded(algorithm):
+    d = _dam_break_domain(nxy=30, algorithm=algorithm)
     xc = d.centroid_coordinates[:, 0]
     d.set_tracer('c', np.where(xc < LEN / 4, 0.8, 0.0))
     d.tracer_boundary_values[0, :] = 0.0
@@ -301,13 +323,14 @@ def test_tracer_mass_is_conserved_positive_and_bounded():
 
 
 @pytest.mark.slow
-def test_tracer_is_actually_transported():
+@pytest.mark.parametrize('algorithm', _FLOW_ALGORITHMS)
+def test_tracer_is_actually_transported(algorithm):
     """Guards against a suite that would pass on a tracer that never moves.
 
     Needs the whole upstream reservoir, and long enough to matter: over 20 s
     the centre of mass barely shifts and the test measures nothing.
     """
-    d = _dam_break_domain(nxy=30)
+    d = _dam_break_domain(nxy=30, algorithm=algorithm)
     xc = d.centroid_coordinates[:, 0]
     d.set_tracer('c', np.where(xc < LEN / 2, 1.0, 0.0))
     d.tracer_boundary_values[0, :] = 0.0
@@ -317,6 +340,29 @@ def test_tracer_is_actually_transported():
     w = d.tracer_conserved_values[0] * d.areas
     x1 = float((w * xc).sum() / max(w.sum(), 1e-30))
     assert x1 > x0 + 1.0, 'the tracer centre of mass did not move downstream'
+
+
+def test_every_transport_path_is_covered():
+    """Fail when a new transport path appears that the tests do not cover.
+
+    A flux or update kernel that does not carry tracers drops them SILENTLY --
+    the concentration simply stops moving, with no error and no failing test
+    unless something exercises that path. The parametrisation above covers the
+    paths that exist today; this exists so that the next one cannot arrive
+    unnoticed.
+
+    If this fails, a domain attribute selecting an alternative kernel has been
+    added. That is not a defect -- the fix is to decide whether tracers are
+    carried on the new path, make sure they are, and add it to _FLOW_ALGORITHMS
+    or to a parametrisation of its own so the guarantee stays enforced.
+    """
+    d = _small_domain()
+    present = [name for name in _FUTURE_PATH_SELECTORS if hasattr(d, name)]
+    assert not present, (
+        'Domain now has %s, which selects an alternative flux or update '
+        'kernel. Check that kernel carries tracers, then extend the '
+        'parametrisation in this file to cover it and remove the name from '
+        '_FUTURE_PATH_SELECTORS.' % ', '.join(repr(n) for n in present))
 
 
 # ---------------------------------------------------------------- add_tracer
