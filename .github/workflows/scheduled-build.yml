@@ -1,0 +1,98 @@
+# Scheduled watchdog for the release branches.
+#
+# Why this exists: between 2026-08-23 and 2026-08-30 `main` could not be built
+# on any platform, and nobody noticed for a week. Two upstream changes broke it
+# — Cython 3.3.0 (dict views can no longer be assigned to a `cdef list`) and a
+# conda-forge mingw sysroot rebuild — and both had already been fixed on
+# `develop`. Nothing reported it because `main` had had no push since 28 July
+# and CI only ran on push/PR, so the branch was never rebuilt against a moving
+# toolchain. It surfaced by accident, via a mirror-sync PR.
+#
+# Neither break was in ANUGA's code. That is the point: the things most likely
+# to break a quiet release branch come from outside it, so the branch has to be
+# rebuilt on a clock rather than on our commits.
+#
+# This reuses conda-setup.yml via workflow_call rather than copying its build
+# steps, so there is one recipe to maintain.
+
+name: Scheduled build
+
+on:
+  schedule:
+    # 20:00 UTC daily = 06:00 next day in Sydney, so a failure is waiting at the
+    # start of the working day rather than discovered a week later.
+    - cron: '0 20 * * *'
+  workflow_dispatch:
+    inputs:
+      python_versions:
+        description: 'JSON list of Python versions (default: oldest + newest)'
+        type: string
+        default: '["3.10", "3.14"]'
+
+permissions:
+  contents: read
+
+jobs:
+  # The matrix is deliberately trimmed to the oldest and newest supported
+  # Python, across all three OSes. Both historic breakages were platform- or
+  # toolchain-shaped rather than Python-version-shaped, so OS coverage is what
+  # earns its keep here; push/PR runs still cover every version.
+  main:
+    name: main
+    uses: ./.github/workflows/conda-setup.yml
+    with:
+      ref: main
+      python_versions: ${{ inputs.python_versions || '["3.10", "3.14"]' }}
+
+  develop:
+    name: develop
+    uses: ./.github/workflows/conda-setup.yml
+    with:
+      ref: develop
+      python_versions: ${{ inputs.python_versions || '["3.10", "3.14"]' }}
+
+  # A red run in the Actions tab is what already failed us — nobody was looking.
+  # Turn a failure into an issue, and keep updating that one issue rather than
+  # filing a new one every night.
+  report:
+    name: Report failure
+    needs: [main, develop]
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          MAIN_RESULT: ${{ needs.main.result }}
+          DEVELOP_RESULT: ${{ needs.develop.result }}
+        run: |
+          set -euo pipefail
+          TITLE="Scheduled build failing"
+          BODY=$(printf '%s\n' \
+            "The nightly build failed." \
+            "" \
+            "| branch | result |" \
+            "|---|---|" \
+            "| \`main\` | \`${MAIN_RESULT}\` |" \
+            "| \`develop\` | \`${DEVELOP_RESULT}\` |" \
+            "" \
+            "Run: ${RUN_URL}" \
+            "" \
+            "A failure here usually means something outside ANUGA moved — a new" \
+            "Cython, a rebuilt conda-forge toolchain, a runner image change —" \
+            "rather than a commit of ours, since these branches may have had no" \
+            "pushes at all. Check the build step before the test step.")
+          EXISTING=$(gh issue list --repo "$REPO" --state open \
+                       --search "\"$TITLE\" in:title" --json number \
+                       --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --repo "$REPO" --body "$BODY"
+            echo "commented on #$EXISTING"
+          else
+            gh issue create --repo "$REPO" --title "$TITLE" --body "$BODY"
+          fi
