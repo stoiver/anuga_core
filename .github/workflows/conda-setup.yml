@@ -19,6 +19,20 @@ on:
       - jorge/unify_again
       - feat/sc26
 
+  # Callable so the scheduled watchdog (scheduled-build.yml) reuses this exact
+  # recipe instead of keeping a second copy of the build steps. The Windows
+  # toolchain pin already lives in two workflows; a third copy would drift.
+  workflow_call:
+    inputs:
+      ref:
+        description: 'Branch/tag/SHA to check out. Empty = the triggering ref.'
+        type: string
+        default: ''
+      python_versions:
+        description: 'JSON list of Python versions to run.'
+        type: string
+        default: '["3.10", "3.11", "3.12", "3.13", "3.14"]'
+
 jobs:
   test_conda:
     name: Example (${{ matrix.python-version }}, ${{ matrix.os }})
@@ -30,12 +44,13 @@ jobs:
 
         # 2026/04/05: dropped 3.8 -- numpy>=2.0.0 (required by anuga) requires Python>=3.9
         # 2026/04/06: dropped 3.9 -- X | Y union type syntax requires Python>=3.10
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ${{ fromJSON(inputs.python_versions || '["3.10", "3.11", "3.12", "3.13", "3.14"]') }}
 
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # fetch full history so git describe can find tags
+          ref: ${{ inputs.ref }}   # empty outside workflow_call = triggering ref
       - uses: conda-incubator/setup-miniconda@v4
         with:
           miniforge-version: latest      # Installs Miniforge instead of Miniconda
@@ -153,8 +168,8 @@ jobs:
           export OMP_NUM_THREADS=1
           pytest -rs --pyargs anuga --run-fast
 
-      - name: Test package (full suite — push to main/develop)
-        if: github.event_name == 'push'
+      - name: Test package (full suite — push to main/develop, and scheduled)
+        if: github.event_name != 'pull_request'
         shell: bash -el {0}
         run: |
           conda activate anuga_env
