@@ -36,10 +36,10 @@ on:
       gpu_dockerfile:
         description: 'Which GPU image to build. slim = multi-stage on a CUDA base (same cc70..cc120 coverage, a fraction of the size); mpi = slim plus CUDA-aware HPC-X for multi-GPU; gpu = the original single-stage devel image.'
         type: choice
-        default: 'docker/Dockerfile.gpu.slim'
+        default: 'docker/Dockerfile.gpu.mpi'
         options:
-          - docker/Dockerfile.gpu.slim
           - docker/Dockerfile.gpu.mpi
+          - docker/Dockerfile.gpu.slim
           - docker/Dockerfile.gpu
       nvhpc_tag:
         description: 'nvcr.io/nvidia/nvhpc devel tag for the GPU image'
@@ -163,7 +163,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ${{ inputs.gpu_dockerfile || 'docker/Dockerfile.gpu.slim' }}
+          file: ${{ inputs.gpu_dockerfile || 'docker/Dockerfile.gpu.mpi' }}
           push: true
           build-args: |
             NVHPC_TAG=${{ inputs.nvhpc_tag }}
