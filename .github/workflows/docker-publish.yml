@@ -1,19 +1,34 @@
 # Build and publish ANUGA container images to GitHub Container Registry (GHCR).
 #
-# - CPU image: built + pushed automatically on a GitHub Release (and on demand).
-# - GPU image: opt-in only (workflow_dispatch with build_gpu=true), because the
-#   NVHPC base is ~15 GB and the multi-arch build is heavy for free runners —
-#   it may need disk cleanup and/or a larger runner. It is never in the release
-#   critical path.
+# BOTH images are manual (workflow_dispatch). The CPU image used to build
+# automatically on a GitHub Release, but that races the PyPI upload: both fire
+# on `release: published`, and the CPU image installs ANUGA *from PyPI*, so the
+# new version is not there yet. On the 4.0.0 release this produced an image
+# tagged 4.0.0-cpu containing anuga 3.3.10; only an unrelated build failure
+# stopped it being pushed. Run this workflow after PyPI has the release, and
+# pass anuga_version so the pin is explicit and verified inside the build.
+#
+# - GPU image: additionally opt-in via build_gpu=true, because the NVHPC base
+#   is ~15 GB and the multi-arch build is heavy for free runners.
+#
+# See issue #248.
 #
 # Images: ghcr.io/<owner>/anuga:<tag>-cpu  and  ...:<tag>-gpu
 name: Build and Publish Docker images
 
 on:
-  release:
-    types: [published]
   workflow_dispatch:
     inputs:
+      anuga_version:
+        description: 'ANUGA version to install from PyPI, e.g. 4.0.0. Empty = whatever PyPI serves as latest (not recommended for a release).'
+        default: ''
+      image_tag:
+        description: 'Tag for the image, e.g. 4.0.0. Empty = derive from the ref.'
+        default: ''
+      mark_latest:
+        description: 'Also tag this image as latest'
+        type: boolean
+        default: false
       build_gpu:
         description: 'Also build & push the (large) GPU image'
         type: boolean
@@ -55,7 +70,18 @@ jobs:
             suffix=-cpu,onlatest=true
           tags: |
             type=ref,event=tag
-            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+            type=raw,value=${{ inputs.image_tag }},enable=${{ inputs.image_tag != '' }}
+            type=raw,value=latest,enable=${{ inputs.mark_latest }}
+
+      - name: Refuse to build a release image before PyPI has that version
+        if: inputs.anuga_version != ''
+        run: |
+          v='${{ inputs.anuga_version }}'
+          if ! curl -sf "https://pypi.org/pypi/anuga/$v/json" > /dev/null; then
+            echo "::error::anuga $v is not on PyPI yet - wait for the publish workflow to finish."
+            exit 1
+          fi
+          echo "anuga $v is on PyPI, proceeding."
 
       - name: Build & push CPU image
         uses: docker/build-push-action@v6
@@ -63,12 +89,14 @@ jobs:
           context: .
           file: docker/Dockerfile.cpu
           push: true
+          build-args: |
+            ANUGA_VERSION=${{ inputs.anuga_version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
   gpu:
     name: GPU image (opt-in)
-    if: github.event_name == 'workflow_dispatch' && inputs.build_gpu
+    if: inputs.build_gpu
     runs-on: ubuntu-latest
     steps:
       - name: Free up disk space (NVHPC base is large)

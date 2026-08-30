@@ -14,11 +14,14 @@ FROM python:3.12-slim
 
 # Empty = latest release; pin with e.g. --build-arg ANUGA_VERSION=3.3.10
 ARG ANUGA_VERSION=
+ENV ANUGA_VERSION=${ANUGA_VERSION}
 
 # libgomp1: OpenMP runtime the manylinux extension links against.
 # ca-certificates: TLS for pip/aws.
+# libexpat1: fiona's wheel dlopens libexpat.so.1 at import; python:*-slim does
+#   not ship it, so `import fiona` dies with ImportError without this.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libgomp1 ca-certificates && \
+        libgomp1 ca-certificates libexpat1 && \
     rm -rf /var/lib/apt/lists/*
 
 # anuga[data] pulls the optional geodata stack (rasterio/fiona/shapely/xarray/
@@ -27,7 +30,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # import in a degraded mode and raise AttributeError/ImportError.
 RUN pip install --no-cache-dir -U pip && \
     pip install --no-cache-dir "anuga[data]${ANUGA_VERSION:+==${ANUGA_VERSION}}" awscli && \
-    python -c "import anuga, fiona, rasterio, shapely; print('ANUGA', anuga.__version__, '+ geodata imported OK')"
+    python -c "import anuga, fiona, rasterio, shapely; print('ANUGA', anuga.__version__, '+ geodata imported OK')" && \
+    python -c "import os,sys,anuga; w=os.environ.get('ANUGA_VERSION','') or None; \
+sys.exit(0) if (w is None or anuga.__version__==w) else sys.exit('PINNED %s but installed %s' % (w, anuga.__version__))"
 
 COPY docker/anuga-entrypoint.sh /usr/local/bin/anuga-entrypoint
 RUN chmod +x /usr/local/bin/anuga-entrypoint
