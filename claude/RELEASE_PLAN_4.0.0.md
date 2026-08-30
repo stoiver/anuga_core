@@ -158,13 +158,20 @@ receives in a wheel. Remove it when upstream fixes build 11.
       Linux/macOS arm64+x86_64/Windows, plus sdist), built via the
       `ANUGA_VERSION` override with no rc tag. Dispatch:
       `gh workflow run python-publish-pypi.yml -f publish_to=testpypi -f version=4.0.0rc1`
-- [ ] **Send the announcement** — draft ready at
-      `claude/RELEASE_4.0.0rc1_ANNOUNCEMENT.md`, addressed to Ole, Rudy, Petar
-      and Jorge, with a specific ask for each. Then 3–4 days of soak.
+- [x] **Send the announcement** — draft at
+      `claude/RELEASE_4.0.0rc1_ANNOUNCEMENT.md`, addressed to Ole, Rudy, Petar,
+      David and Jorge, with a specific ask for each. Then 3–4 days of soak.
       **Wait for Petar on Towradgi before Phase 3**: it is his case study, it is
       the evidence behind the #229 numbers in the release notes, and if he says
       the changed result looks wrong for that catchment the physics decision
       reopens rather than the wording.
+- [x] **PETAR'S VERDICT — 2026-08-30: the culvert stage reconstruction on slopes
+      is OK.** This was the Phase-3 gate. The #229 physics decision stands, the
+      release-notes delta table stands as written, and the soak is closed.
+      During the review he asked for the Collins St culvert logs and the
+      upstream approach flow; the peak was extracted from the existing 24 h run
+      (RUN_20260810_195336) as 32.4 m³/s at t=38 700 s, harness preserved in
+      `sandpit/culvert_issue/`.
 
 ### Commits after 4.0.0rc1
 
@@ -175,10 +182,24 @@ discovered at tag time:
 | commit | change | in the RC? |
 |---|---|---|
 | `32577739` | #237 — explain the missing `anuga/_version.py` instead of a bare ModuleNotFoundError | no |
+| `9c5d1215` | release-plan bookkeeping (this table) | no |
+| `13195657` | `claude/PPA_FEASIBILITY.md` for issue #25 — notes only | no |
+| `64f53a6a` | **Fix the build under Cython 3.3.0** (dict views are not lists) | **no** |
+| `9dc87f0f` | Towradgi reproduction recipe from the soak — notes only | no |
 
-Judgement: an import-time error message, no solver or API change, so it does
-not invalidate the soak. If anything else lands that *could* change results,
-rebuild the RC rather than adding a row here.
+Judgement: no solver or API change among them, so the soak stands.
+
+`64f53a6a` is the one that matters and it is worth stating plainly: Cython 3.3.0
+landed on conda-forge on 23 Aug, a few hours *after* the RC wheels were built.
+**The RC on TestPyPI therefore cannot be built from its sdist today** — the same
+defect that left `main` unbuildable 23–30 Aug and that the released 3.3.10 tag
+still carries. 4.0.0 fixes it. The difference between the soaked artifact and
+the tag is in the safe direction (broken → fixed), and it is a build-time fix
+that cannot move a simulation result, so this is a row rather than an RC rebuild.
+
+Before cutting the release PR, confirm `origin/develop` is current: as of
+2026-08-30 the local branch was 2 commits ahead (`bdbc9d8f` session notes,
+`db7230c4` aws_run_gpu.sh) and unpushed.
 
 ## Phase 3 — Ship (Day 10–12)
 

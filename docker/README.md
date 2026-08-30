@@ -164,6 +164,18 @@ docker/aws_run_gpu.sh --region ap-southeast-2 \
   --output s3://my-bucket/anuga/out --command "python run.py" --dry-run
 ```
 
+**Use `--spot` for anything repeatable.** It tries the spot market first across
+every instance type and AZ, then falls back to on-demand automatically, so the
+worst case is the price you would have paid anyway. Spot is roughly a third of
+on-demand. The launch output labels each attempt `[spot]` or `[on-demand]` and
+the success line says which market you actually got.
+
+Note what "safe to interrupt" does and does not mean here: the entrypoint
+uploads results to S3 **after the command finishes**, so a spot reclaim loses
+that run entirely — there is no checkpointing. That is fine for short jobs
+(10–40 min) where re-running is cheap, and a bad trade for a long production
+run unless your own script checkpoints.
+
 Defaults to `g5.2xlarge` (1× A10G / cc86, 8 vCPU, 32 GB — a good balance since
 mesh-gen + DEM fitting are CPU-bound). Flags: `--dry-run`, `--instance`, `--spot`,
 `--keep` (don't self-terminate, for debugging), `--ami`, `--instance-profile`,

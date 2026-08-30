@@ -449,7 +449,95 @@ Findings:
 
 ---
 
-## Recent session summaries (sessions 21–56)
+## Recent session summaries (sessions 21–57)
+
+**Session 57 (2026-08-21/23):** **4.0.0 release engineering** — Phases 1 and 2
+complete, RC published, and three separate upstream breakages absorbed along the
+way. None of the four defects found were in ANUGA's solver.
+
+- **Review + release plan.** An engineering review of the whole repo (published
+  as an Artifact) produced `claude/RELEASE_PLAN_4.0.0.md`: go straight to 4.0.0,
+  no 3.4 bridge, because `main` and `develop` already share the packaging
+  foundation and develop still defaults to `legacy` compute mode — so there is
+  no behavioural cliff. The scary parts of "v4" (mode-2 default flip, forcing
+  removal) are explicitly deferred to 4.1.
+- **Phase 1: nine verification gates, all green.** Full suite both builds
+  (2937 / 2948), unified-mode one-process (2947), GPU isolated runners on TWO
+  architectures (local RTX 5070 cc120 and cloud g6.xlarge Ada L4 — identical
+  counts), validation suite (120 passed), Towradgi mode-1 vs mode-2, MPI,
+  wheels, fresh conda 3.10/3.14, docs.
+- **Phase 2: notes, guide, citation, RC.** `RELEASE_NOTES.md` and
+  `UPGRADING_TO_4.0.md` written and approved; `CITATION.cff` was stale at
+  version 3.1.9 / 2022-06-26 with a 2022 commit pin. `4.0.0rc1` published to
+  **TestPyPI** — 21 artifacts, cp310–cp314, Linux/macOS(arm64+x86_64)/Windows —
+  built via the `ANUGA_VERSION` override so **no rc tag** was needed on develop.
+  Verified installable in a clean venv by the exact command the announcement
+  gives people.
+
+**Four defects found, none in the solver:**
+
+1. **`run_gpu_tests_isolated.sh` swallowed failures** — `rc=$?` after a pipeline
+   read `tail`'s status, so every failing class reported "ok" and the script
+   exited 0. This is why several "all GPU classes green" claims earlier were
+   worthless.
+2. **`anuga_run_isolated_tests` crashed against an installed anuga** — all 106
+   tests CRASH in a container. pytest emits node ids relative to ITS rootdir
+   (the common ancestor of the targets); the runner resolved them against its
+   own cwd-derived ROOTDIR. In a checkout the two coincide, which is why it was
+   invisible locally. Now resolves against target-derived base dirs and **fails
+   loudly** when an id resolves to no file.
+3. **gcc/nvc disagree on line-region triangle selection** (#231) — a culvert
+   exchange line lying exactly on mesh edges selected 32 vs 54 triangles for the
+   same script. Test made geometry-robust.
+4. **Concurrent writes to one SWW silently interleave** (#232) — `domain_name`
+   is hardcoded in the case-study scripts, so two runs corrupt each other's
+   output with a non-monotonic time axis and plausible-looking numbers. Cost a
+   full invalid gate-5 result. Found via the frame-index pattern (writer A at
+   0,2,4-8; B at 1,3).
+
+**Three upstream breakages, none our doing:**
+
+- **conda-forge mingw build 11** broke every Windows job for two days: binaries
+  compile and then abort in the stack protector (`__stack_chk_fail` on an empty
+  `main`). Took five CI cycles to converge because the ground kept moving — the
+  compilers were rebuilt mid-investigation, so a sysroot-only pin worked for a
+  day and then failed. **Only one self-consistent set exists**: gcc/gxx_impl
+  build 2 + sysroot chain build 10 + `libwinpthread` build 10 + `libstdcxx`
+  build 2. Pinning one half looks like it works (wheels build) and then every
+  test process dies silently at exit 127, because libwinpthread bites at RUN
+  time. Removal tracked in **#235**; upstream is
+  conda-forge/m2w64-sysroot-feedstock#23, where our reproduction is cited.
+- **Cython 3.3.0** broke all 20 wheel builds: `dict.items()` can no longer be
+  assigned to a `cdef list`. `sparse_matrix_ext.pyx` had one such assignment
+  that was **never used**, plus a second on the next line that would have failed
+  next. Local builds stayed green on Cython 3.2.5.
+- **Branch protection** turned out to be enforced by *rulesets*, not classic
+  protection — removing the classic setting did nothing, which only surfaced
+  when a merge was refused.
+
+**Also:** #237 (bare `ModuleNotFoundError` from an unbuilt tree) fixed;
+#238 filed (make the meshpy import lazy — Triangle's licence makes it a hard
+non-free dependency at import time); `claude/PPA_FEASIBILITY.md` written for
+#25 (Ubuntu has every dependency except meshpy and pymetis; recommend against a
+PPA since pip wheels, conda-forge and Docker now cover the original ask).
+
+**RESUME STATE (as of 2026-08-23):**
+- `develop` == `origin/develop` == `stoiver/develop` at `743b6369`. All CI green.
+- **Waiting on**: RC soak feedback from Ole, Rudy, Petar, David and Jorge; and
+  conda-forge/admin-requests#2297 landing so the Windows pin (#235) can go.
+- **Petar's verdict on Towradgi can reopen the #229 physics decision**, not just
+  the wording — it is his case study and it is the evidence behind the release
+  notes' numbers. Reproduction recipe kept in
+  `claude/RELEASE_4.0.0rc1_REPLY_PETAR.md`.
+- **RC drift** (commits after 4.0.0rc1, tracked in the release plan): #237's
+  import message and the Cython 3.3.0 fix. Both build/import level; neither can
+  change results, so the soak stands. Anything that COULD change results means
+  rebuilding the RC, not adding a row.
+- Phase 3 is short and scripted in `claude/RELEASE_PLAN_4.0.0.md`: release PR to
+  `main`, set `date-released` in CITATION.cff, annotated bare-version tag, then
+  the GitHub Release triggers PyPI / Docker / the conda-forge bot.
+- Open from this session: #231, #232, #235, #238. Closed: #189, #214, #224,
+  #225, #229, #237.
 
 **Session 56 (2026-08-20/21):** **Issue triage sweep → five issues closed**, one
 of them the long-standing well-balancedness defect in every structure operator.
@@ -502,6 +590,8 @@ of them the long-standing well-balancedness defect in every structure operator.
   comparisons need a driven head; well-balancedness tests stay short.
 - **Process:** merges to `develop` don't fire `Fixes #N` (default branch is
   `main`) — #189/#224/#225/#229 all closed by hand with commit citations.
+
+*(superseded by session 57's resume state above)*
 
 **RESUME STATE (as of 2026-08-21):**
 - `develop` == `origin/develop` == `stoiver/develop` at `7f98999a` (merge of
@@ -561,7 +651,8 @@ and hardening the installers so neither can happen quietly again.
   stages every halo through host memory in *both* paths (UCX `uct_mm` SIGSEGVs
   on device pointers). Measure halo cost before implementing real GPUDirect.
 
-*(Session 55's resume state below is superseded by session 56's above — PR #222
+*(Session 56's resume state below is superseded by session 57's above; and
+session 55's by session 56's — PR #222
 merged, and the issue landscape has moved.)*
 
 **RESUME STATE (as of 2026-08-13):**
