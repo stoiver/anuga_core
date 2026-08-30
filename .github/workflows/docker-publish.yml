@@ -101,17 +101,28 @@ jobs:
     steps:
       - name: Free up disk space (NVHPC base is large)
         run: |
+          echo "before:"; df -h / | tail -1
           sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/lib/android \
-                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" || true
-          df -h /
+                      /usr/local/share/boost "$AGENT_TOOLSDIRECTORY" \
+                      /usr/local/.ghcup /opt/hostedtoolcache/CodeQL \
+                      /usr/share/swift /usr/local/share/powershell || true
+          sudo docker image prune --all --force || true
+          echo "after:"; df -h / | tail -1
 
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # full history + tags so _git_version.py can describe
 
-      - name: Compute ANUGA version (PEP 440, from git)
+      - name: Compute ANUGA version (PEP 440)
         id: ver
-        run: echo "v=$(python _git_version.py)" >> "$GITHUB_OUTPUT"
+        # Prefer the explicit input: `git describe` on a branch a few commits
+        # past the tag yields 4.0.0.devN+gSHA, which reads as a pre-release even
+        # when the solver source is identical to the tag.
+        run: |
+          v='${{ inputs.anuga_version }}'
+          [ -n "$v" ] || v=$(python _git_version.py)
+          echo "v=$v" >> "$GITHUB_OUTPUT"
+          echo "building ANUGA $v"
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -126,15 +137,18 @@ jobs:
         with:
           images: ${{ env.IMAGE }}
           flavor: |
-            suffix=-gpu,onlatest=false
+            suffix=-gpu,onlatest=true
           tags: |
             # branch name (e.g. develop-gpu) — the pre-release channel
             type=ref,event=branch
             # immutable commit tag (e.g. sha-abc1234-gpu)
             type=sha
-            # release version (e.g. 4.0.0-gpu) and latest-gpu, only on a Release
-            type=ref,event=tag
-            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+            # release version (e.g. 4.0.0-gpu) and latest-gpu, both explicit.
+            # These were previously gated on `github.event_name == 'release'`,
+            # which has been permanently false since the release trigger was
+            # removed — so latest-gpu was unreachable.
+            type=raw,value=${{ inputs.image_tag }},enable=${{ inputs.image_tag != '' }}
+            type=raw,value=latest,enable=${{ inputs.mark_latest }}
 
       - name: Build & push GPU image
         uses: docker/build-push-action@v6
