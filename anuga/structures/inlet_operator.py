@@ -27,7 +27,7 @@ class Inlet_operator(anuga.Operator):
                  logging = False,
                  verbose = False):
         """Inlet Operator - add water to a domain via an inlet.
-        
+
         :param domain: Specify domain
         :param region: Apply Inlet flow over a region (which can be a Region, Polygon or line)
         :param Q: function(t) or scalar discharge (m^3/s)
@@ -37,8 +37,8 @@ class Inlet_operator(anuga.Operator):
         :param description: Describe the Inlet_operator
         :param label: Give Inlet_operator a label (name)
         :param verbose: Provide verbose output
-        
-        
+
+
 
         Example:
 
@@ -70,9 +70,130 @@ class Inlet_operator(anuga.Operator):
 
         self.activate_logging()
 
-        #print('Setting up inlet operator')
+        # GPU state (lazy init on first __call__)
+        self._gpu_op_id = None
+        self._gpu_initialized = False
+
+    def _init_gpu(self):
+        """Initialize GPU inlet operator (lazy, called on first __call__ in GPU mode).
+
+        On any failure — a missing/partial GPU interface, or the
+        ``MAX_INLET_OPERATORS`` slot limit being exceeded — leave
+        ``self._gpu_initialized`` False and return so ``__call__`` falls through
+        to the Python path rather than crashing. Mirrors the graceful-fallback
+        contract of ``Rate_operator._init_gpu``.
+        """
+        if self._gpu_initialized:
+            return
+
+        # If the GPU interface isn't ready, fall back to the Python path silently.
+        gpu_interface = getattr(self.domain, 'gpu_interface', None)
+        if gpu_interface is None or getattr(gpu_interface, 'gpu_dom', None) is None:
+            return
+
+        try:
+            from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
+
+            tri_indices = numpy.ascontiguousarray(
+                self.inlet.triangle_indices, dtype=numpy.intc)
+            areas = numpy.ascontiguousarray(
+                self.inlet.get_areas(), dtype=numpy.float64)
+
+            op_id = gpu_ext.init_inlet_operator(gpu_interface.gpu_dom, tri_indices, areas)
+        except Exception as e:
+            warnings.warn(
+                f"GPU inlet operator init failed for "
+                f"'{getattr(self, 'label', repr(self))}' ({e}); "
+                f"falling back to the Python path.",
+                stacklevel=2,
+            )
+            return
+
+        if op_id < 0:
+            warnings.warn(
+                f"Failed to register GPU inlet operator "
+                f"'{getattr(self, 'label', repr(self))}': slot limit exceeded "
+                f"(MAX_INLET_OPERATORS=32). Falling back to the Python path; "
+                f"reduce the number of Inlet_operator instances or increase "
+                f"MAX_INLET_OPERATORS in gpu_domain.h to use the GPU kernel.",
+                stacklevel=2,
+            )
+            return
+
+        self._gpu_op_id = op_id
+        self._gpu_initialized = True
+
+    def _call_gpu(self):
+        """GPU path for __call__ - transfers only inlet data (~6KB)."""
+        from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
+
+        gpu_dom = self.domain.gpu_interface.gpu_dom
+        op_id = self._gpu_op_id
+        timestep = self.domain.get_timestep()
+        t = self.domain.get_time()
+
+        # Get current volume from GPU (small reduction, returns scalar)
+        current_volume = gpu_ext.inlet_get_volume_gpu(gpu_dom, op_id)
+        total_area = self.inlet.area
+
+        assert current_volume >= 0.0
+
+        # Compute Q on CPU (scalar, cheap)
+        Q1 = self.update_Q(t)
+        Q2 = self.update_Q(t + timestep)
+        Q = 0.5 * (Q1 + Q2)
+        # update_Q may return a length-1 array (time-varying / file Q); the GPU
+        # kernel (and the scalar volume tracking below) need a Python float —
+        # numpy 2.x rejects float() on a >0-d array.
+        try:
+            Q = float(Q)
+        except (TypeError, ValueError):
+            Q = float(numpy.asarray(Q).ravel()[0])
+        volume = Q * timestep
+
+        self.applied_Q = Q
+
+        # Get velocities from GPU (small D2H)
+        vel_u, vel_v = gpu_ext.inlet_get_velocities_gpu(gpu_dom, op_id)
+
+        has_velocity = 1 if self.velocity is not None else 0
+        ext_vel_u = self.velocity[0] if has_velocity else 0.0
+        ext_vel_v = self.velocity[1] if has_velocity else 0.0
+        zero_vel = 1 if self.zero_velocity else 0
+
+        # Apply on GPU (handles all 3 cases)
+        actual_volume = gpu_ext.inlet_apply_gpu(
+            gpu_dom, op_id, volume, current_volume, total_area,
+            vel_u, vel_v, has_velocity, ext_vel_u, ext_vel_v, zero_vel)
+
+        # Update tracking variables
+        self.total_requested_volume += volume
+        if volume >= 0.0:
+            self.domain.fractional_step_volume_integral += volume
+        elif current_volume + volume >= 0.0:
+            self.domain.fractional_step_volume_integral += volume
+        else:
+            self.applied_Q = -current_volume / timestep
+            self.domain.fractional_step_volume_integral -= current_volume
+
+        self.total_applied_volume += actual_volume
 
     def __call__(self):
+
+        # GPU path: skip full domain sync, transfer only inlet data.
+        # NOT taken when _gpu_host_writes_suppressed is set: that flag means we
+        # are inside apply_fractional_steps' sync_from_device()/sync_to_device()
+        # bracket (a CPU-only fractional operator is present). The GPU path
+        # writes the *device* inlet cells, but the trailing sync_to_device()
+        # (host->device) would then overwrite them with host data that never
+        # received the inflow — silently dropping it. Fall through to the host
+        # path so the batch sync_to_device() carries the inflow to the device.
+        if (getattr(self.domain, 'multiprocessor_mode', 0) == 2
+                and not getattr(self.domain, '_gpu_host_writes_suppressed', False)):
+            if not self._gpu_initialized:
+                self._init_gpu()
+            if self._gpu_initialized:
+                return self._call_gpu()
 
         timestep = self.domain.get_timestep()
 
@@ -125,7 +246,7 @@ class Inlet_operator(anuga.Operator):
                 self.inlet.set_ymoms(depths*self.velocity[1])
             else:
                 depths = self.inlet.get_depths()
-            
+
                 self.inlet.set_xmoms(depths*u)
                 self.inlet.set_ymoms(depths*v)
 

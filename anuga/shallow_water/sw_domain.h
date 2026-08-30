@@ -8,6 +8,7 @@
 #define SW_DOMAIN_H
 
 #include <stdint.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <inttypes.h>
@@ -23,8 +24,8 @@ struct domain {
     anuga_int extrapolate_velocity_second_order;
     anuga_int low_froude;
     anuga_int timestep_fluxcalls;
-    anuga_int max_flux_update_frequency;
     anuga_int ncol_riverwall_hydraulic_properties;
+    anuga_int nrow_riverwall_hydraulic_properties;
 
     double epsilon;
     double H0;
@@ -95,18 +96,12 @@ struct domain {
     double* xmom_explicit_update;
     double* ymom_explicit_update;
 
-    anuga_int* flux_update_frequency;
-    anuga_int* update_next_flux;
-    anuga_int* update_extrapolation;
-    double* edge_timestep;
     double* edge_flux_work;
     double* neigh_work;
     double* pressuregrad_work;
     double* x_centroid_work;
     double* y_centroid_work;
     double* boundary_flux_sum;
-
-    anuga_int* allow_timestep_increase;
 
     anuga_int* edge_river_wall_counter;
     double* riverwall_elevation;
@@ -160,7 +155,7 @@ struct edge {
 };
 
 
-void get_edge_data(struct edge *E, struct domain *D, anuga_int k, anuga_int i) {
+static inline void get_edge_data(struct edge *E, struct domain *D, anuga_int k, anuga_int i) {
     // fill edge data (conserved and bed) for ith edge of kth triangle
 
     anuga_int k3i, k3i1, k3i2;
@@ -193,7 +188,7 @@ void get_edge_data(struct edge *E, struct domain *D, anuga_int k, anuga_int i) {
 
 }
 
-anuga_int print_domain_struct(struct domain *D) {
+static inline anuga_int print_domain_struct(struct domain *D) {
 
 
     printf("D->number_of_elements     %" PRId64 "  \n", D->number_of_elements);
@@ -322,8 +317,10 @@ static inline void get_edge_data_central_flux(const struct domain * __restrict D
 
     E->z_half = fmax(E->zl, E->zr);
 
-    // Check for riverwall elevation override
-    E->is_riverwall = (D->edge_flux_type[E->ki] == 1);
+    // Check for riverwall elevation override (skip entirely when no riverwalls)
+    E->is_riverwall = (D->number_of_riverwall_edges > 0 &&
+                       D->edge_flux_type != NULL &&
+                       D->edge_flux_type[E->ki] == 1);
     if (E->is_riverwall) {
         E->riverwall_index = D->edge_river_wall_counter[E->ki] - 1;
         double zwall = D->riverwall_elevation[E->riverwall_index];

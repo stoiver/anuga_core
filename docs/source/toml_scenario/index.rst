@@ -1,12 +1,12 @@
 .. _toml_scenario:
 
 =====================================
-Running Scenarios with anuga_run_toml
+Running Scenarios with anuga_toml_run
 =====================================
 
 .. currentmodule:: anuga
 
-The ``anuga_run_toml`` script provides a ready-made runner for ANUGA flood and
+The ``anuga_toml_run`` script provides a ready-made runner for ANUGA flood and
 tsunami scenarios.  All simulation inputs are described in a single
 `TOML <https://toml.io>`_ configuration file — no Python coding required for
 standard setups.  The same script also accepts legacy Excel (``.xlsx``) files
@@ -24,33 +24,60 @@ Quick Start
 
 .. code-block:: bash
 
-   anuga_run_toml  path/to/scenario.toml
+   anuga_toml_run  path/to/scenario.toml
 
 **Parallel run (MPI):**
 
 .. code-block:: bash
 
-   mpirun -np 6  anuga_run_toml  path/to/scenario.toml
+   mpirun -np 6  anuga_toml_run  path/to/scenario.toml
 
 All relative paths inside the TOML file are resolved relative to the directory
 that contains the TOML file, so the script can be invoked from any working
 directory.
 
 
+Eject to a standalone Python script
+-----------------------------------
+
+When you need to go beyond what the TOML supports — a custom operator, a
+scripted boundary function, bespoke post-processing — generate an equivalent
+standalone script and edit it::
+
+   anuga_toml_run --emit-script my_run.py  path/to/scenario.toml
+
+This writes ``my_run.py`` (and exits without running). The script parses the
+same TOML via ``PrepareData`` and drives the standard phases (mesh → initial
+conditions → forcing/structures → boundaries → evolve), so it runs identically
+to ``anuga_toml_run``::
+
+   python my_run.py
+   mpiexec -np 4 python my_run.py        # legacy (CPU) parallel
+
+It is ordinary, editable Python: delete phases you do not need, splice in your
+own operators or boundaries between phases, or replace any ``setup_*`` call with
+hand-written ANUGA code. Keep the script alongside the TOML (it resolves
+TOML-relative paths from its own directory).
+
+
 Working example — Cairns tsunami scenario
 ------------------------------------------
 
 A complete, ready-to-run example is provided in
-``examples/cairns_toml_excel/`` of the repository.  It models a synthetic
+``examples/run_toml/cairns/`` of the repository.  It models a synthetic
 tsunami entering Cairns Harbour (Queensland, Australia) and exercises most
 TOML features: a shapefile boundary, a DEM elevation raster, Flather open-
-ocean boundaries, and the bridge/pumping-station stubs.
+ocean boundaries, and one each of a bridge, pumping station, culvert, and weir.
+The (≈9 MB) DEM is shared under ``examples/data/cairns/``.
 
 .. code-block:: bash
 
-   cd examples/cairns_toml_excel
-   anuga_run_toml cairns_example.toml          # serial
-   mpirun -np 4 anuga_run_toml cairns_example.toml   # parallel
+   cd examples/run_toml/cairns
+   anuga_toml_run cairns_example.toml          # serial
+   mpirun -np 4 anuga_toml_run cairns_example.toml   # parallel
+
+The same scenario is also available through a legacy Excel front-end under
+``examples/cairns_toml_excel/`` (see *Excel Compatibility* below).
 
 
 Minimal annotated TOML
@@ -67,7 +94,7 @@ Copy it, adjust the file paths, and add extra sections as needed.
    output_base_directory     = "OUTPUT/"
    yieldstep                 = 120.0         # seconds between evolve yields
    finaltime                 = 21600.0       # total simulation duration [s]
-   projection_information    = -55           # UTM zone (negative = southern hemisphere)
+   projection_information    = "EPSG:32755"  # "EPSG:<code>", UTM zone int (e.g. -55), or proj4 string
    flow_algorithm            = "DE0"         # "DE0" (fast) or "DE1" (accurate)
    output_tif_cellsize       = 50.0          # cell size [m] for output GeoTiff rasters
 
@@ -78,6 +105,10 @@ Copy it, adjust the file paths, and add extra sections as needed.
    # [[mesh.interior_regions]]
    # polygon    = "mesh/fine_zone.csv"
    # resolution = 10000.0   # finer triangles inside this polygon [m²]
+
+   # [[mesh.interior_holes]]
+   # polygon = "mesh/buildings.csv"   # cut OUT of the mesh entirely
+   # tag     = "building"             # optional; needs a matching boundary condition
 
    # ── Boundary conditions ───────────────────────────────────────────────────
    [boundary_conditions]
@@ -154,6 +185,15 @@ The TOML file is divided into sections (TOML *tables*).  Every key shown
 without a comment is **required**; keys shown with a ``# default:`` comment
 are optional.
 
+.. note::
+
+   TOML has no arithmetic, so ``finaltime = 5*60`` is a syntax error. Numeric
+   fields therefore also accept a **quoted** arithmetic expression, which the
+   parser evaluates — e.g. ``finaltime = "5*60"`` gives ``300``,
+   ``finaltime = "7*24*3600"`` gives one week. Only numeric literals and
+   ``+ - * / // % **`` with parentheses are permitted (no names or function
+   calls). Plain numbers such as ``finaltime = 21600.0`` work as before.
+
 .. _toml-project:
 
 [project]
@@ -183,10 +223,11 @@ Top-level simulation settings.
    # Omit to write SWW output at every yieldstep (the default).
    # outputstep = 600.0
 
-   # Coordinate reference system.
-   #   Integer: UTM zone (negative = southern hemisphere, e.g. -55)
-   #   String:  full proj4 string for non-UTM projections
-   projection_information = -55
+   # Coordinate reference system. One of:
+   #   Integer       — UTM zone (negative = southern hemisphere), e.g. -55
+   #   "EPSG:<code>" — an EPSG code, e.g. "EPSG:32755" (= UTM zone 55 south)
+   #   String        — a full proj4 string for other projections
+   projection_information = "EPSG:32755"
 
    # Numerical flow algorithm.
    #   "DE0" — first-order (faster)
@@ -273,7 +314,11 @@ Mesh geometry and resolution.
    # default: []
    breakline_files = []
 
-   # Riverwall CSV files — like breaklines but with an elevation column.
+   # Riverwall CSV files — like breaklines but each row has three columns:
+   #   x [m], y [m], crest_elevation [m]
+   # An optional first line may contain hydraulic parameters, e.g.:
+   #   Qfactor: 1.5, s1: 0.94, Cd_through: 0.1
+   # Glob patterns are accepted (e.g. "mesh/riverwalls_*.csv").
    # default: []
    riverwall_csv_files = []
 
@@ -285,6 +330,23 @@ Mesh geometry and resolution.
    # Point-based resolution file — CSV with columns x, y, resolution.
    # Mutually exclusive with [[mesh.interior_regions]].
    region_areas_file = ""
+
+   # [[mesh.interior_holes]] — polygons cut OUT of the mesh entirely, leaving a
+   # void rather than a refined region. Use for anything water should neither
+   # enter nor flow through: building footprints, tank pads, solid structures.
+   #
+   # Unlike [[mesh.interior_regions]], which keeps the triangles and only changes
+   # their size, so no resolution is given.
+   #
+   # 'tag' is optional and names the hole's edges so a boundary condition can be
+   # bound to them. If set, a matching [[boundary_conditions.boundaries]] entry is
+   # REQUIRED, or the run stops with
+   #   Tag "..." has not been bound to a boundary object
+   # Omit it and the mesh generator applies its own 'interior' default.
+   #
+   # [[mesh.interior_holes]]
+   # polygon = "mesh/buildings.csv"
+   # tag     = "building"
 
    # Interpretation of the resolution column in region_areas_file.
    #   "area"   — maximum triangle area [m²]
@@ -363,12 +425,18 @@ entries.  Earlier entries take priority over later ones.
 Supported quantities: ``elevation``, ``friction``, ``stage``, ``xmomentum``,
 ``ymomentum``.
 
+Each quantity also supports an optional spatial-averaging step controlled by
+a ``{qty}_spatial_average`` key at the ``[initial_conditions]`` level.
+When set, the quantity field is averaged onto a regular grid at the given
+spacing (metres) before being applied to the mesh — useful for smoothing
+noisy DEMs or variable-resolution friction fields:
+
 .. code-block:: toml
 
    [initial_conditions]
-
-   # Optional: spatially average elevation on a grid at this spacing [m]
-   # elevation_spatial_average = 100.0
+   elevation_spatial_average  = 100.0   # smooth DEM at 100 m grid
+   friction_spatial_average   = 50.0    # smooth friction at  50 m grid
+   # stage_spatial_average    = 50.0    # also valid for stage, xmomentum, ymomentum
 
    [[initial_conditions.elevation]]
    polygon  = "Extent"                    # apply over full raster extent
@@ -488,6 +556,125 @@ disable a bridge without removing its definition.
    vertical_datum_offset        = 0.0         # [m] added to curve elevations
    smoothing_timescale          = 20.0        # [s] exponential smoothing constant
 
+.. _toml-culverts:
+
+[[culverts]]
+~~~~~~~~~~~~
+
+Box or pipe culverts using the Boyd (1987) head-discharge algorithm.
+Set ``enabled = false`` to disable without removing the definition.
+
+``type`` selects the cross-section shape:
+
+* ``"boyd_box"``  — rectangular barrel (``width`` × ``height``).
+* ``"boyd_pipe"`` — circular barrel (``diameter``).
+
+**Geometry** — choose exactly one of:
+
+* ``exchange_line_0`` / ``exchange_line_1``: paths to CSV polyline files
+  that define the upstream and downstream exchange zones.  The exchange
+  zone widths govern how much of the mesh perimeter couples to the culvert.
+  This is the preferred approach for field models.
+
+* ``end_point_0`` / ``end_point_1``: ``[x, y]`` coordinate pairs for the
+  two barrel ends.  ANUGA derives short perpendicular exchange lines
+  automatically.
+
+**Boyd box example:**
+
+.. code-block:: toml
+
+   [[culverts]]
+   enabled              = true
+   type                 = "boyd_box"
+   label                = "road_culvert_1"
+   width                = 0.9              # [m] internal barrel width
+   height               = 0.6             # [m] internal barrel height (omit = square)
+   exchange_line_0      = "mesh/culvert1_exchange_up.csv"
+   exchange_line_1      = "mesh/culvert1_exchange_down.csv"
+   enquiry_gap          = 0.2             # [m] from exchange line to enquiry point
+   losses               = 0.5             # head-loss coefficient (0.5 = sharp-edge inlet)
+   barrels              = 1.0             # number of parallel identical barrels
+   blockage             = 0.0             # fractional blockage [0,1]; 0 = fully open
+   z1                   = 0.0             # batter slope at end 0 (rise/run)
+   z2                   = 0.0             # batter slope at end 1
+   apron                = 0.1             # [m] flat apron at each end
+   manning              = 0.013           # barrel Manning's n
+   smoothing_timescale  = 0.0             # [s] exponential smoothing constant
+   use_momentum_jet     = true
+   use_velocity_head    = true
+   # invert_elevations  = [1.0, 0.8]      # [m] upstream, downstream; sampled from DEM if omitted
+
+**Boyd pipe example:**
+
+.. code-block:: toml
+
+   [[culverts]]
+   enabled              = true
+   type                 = "boyd_pipe"
+   label                = "drain_pipe_1"
+   diameter             = 0.6              # [m] internal barrel diameter
+   exchange_line_0      = "mesh/pipe1_exchange_up.csv"
+   exchange_line_1      = "mesh/pipe1_exchange_down.csv"
+   enquiry_gap          = 0.2
+   losses               = 0.5
+   barrels              = 2.0              # two parallel pipes
+   manning              = 0.013
+   smoothing_timescale  = 0.0
+
+**Using end points instead of exchange lines:**
+
+.. code-block:: toml
+
+   [[culverts]]
+   type        = "boyd_box"
+   label       = "simple_culvert"
+   width       = 0.9
+   end_point_0 = [355420.0, 8132050.0]    # [x, y] upstream barrel end [m]
+   end_point_1 = [355435.0, 8132050.0]    # [x, y] downstream barrel end [m]
+   losses      = 0.5
+
+Multiple ``[[culverts]]`` entries are supported.
+
+
+.. _toml-weirs:
+
+[[weirs]]
+~~~~~~~~~
+
+Weir / orifice structures with a trapezoidal cross-section, using combined
+weir and orifice flow formulae (``Weir_orifice_trapezoid_operator``).
+Set ``enabled = false`` to disable without removing the definition.
+
+Geometry is specified with the same ``exchange_line_0`` / ``exchange_line_1``
+(file paths) or ``end_point_0`` / ``end_point_1`` (coordinates) choice as for
+``[[culverts]]``.
+
+.. code-block:: toml
+
+   [[weirs]]
+   enabled              = true
+   label                = "outlet_weir"
+   width                = 3.0             # [m] bottom width of trapezoidal section
+   height               = 1.2             # [m] section height (omit = width)
+   exchange_line_0      = "mesh/weir1_exchange_up.csv"
+   exchange_line_1      = "mesh/weir1_exchange_down.csv"
+   enquiry_gap          = 0.0             # [m]; 0 is typical for weirs
+   losses               = 0.5             # head-loss coefficient
+   barrels              = 1.0
+   blockage             = 0.0
+   z1                   = 0.0
+   z2                   = 0.0
+   apron                = 0.1
+   manning              = 0.013
+   smoothing_timescale  = 0.0
+   use_momentum_jet     = true
+   use_velocity_head    = true
+   # invert_elevations  = [1.0, 0.8]      # [m]; sampled from DEM if omitted
+
+Multiple ``[[weirs]]`` entries are supported.
+
+
 .. _toml-pumping:
 
 [[pumping_stations]]
@@ -495,6 +682,8 @@ disable a bridge without removing its definition.
 
 Pump operator transferring water between a wet-well basin and a discharge
 point.  Set ``enabled = false`` to disable without removing the definition.
+
+
 
 .. code-block:: toml
 
@@ -511,6 +700,77 @@ point.  Set ``enabled = false`` to disable without removing the definition.
    exchange_line_0       = "mesh/pump1_wet_well_line.csv"
    exchange_line_1       = "mesh/pump1_discharge_line.csv"
    smoothing_timescale   = 30.0    # [s]
+
+Multiple ``[[pumping_stations]]`` entries are supported.
+
+
+[[erosion]]
+~~~~~~~~~~~
+
+Bed erosion / scour operators. Multiple ``[[erosion]]`` entries are supported.
+
+.. code-block:: toml
+
+   [[erosion]]
+
+   # Which erosion behaviour to apply. One of:
+   #   simple      — base erosion operator
+   #   bed_shear   — scour driven by bed shear stress (dam-breach style)
+   #   flat_slice  — erode down to a flat surface at a given elevation
+   #   flat_fill   — as flat_slice, filling rather than only cutting
+   #   sand_dune   — sand-dune erosion, limited by an angle of repose
+   type = "bed_shear"
+
+   # Region the operator acts on — give EITHER a polygon OR center + radius.
+   # (Raw triangle indices are not supported here: they cannot survive a
+   # re-mesh, so they have no stable meaning in a configuration file.)
+   polygon = "erosion/breach.csv"
+   # center = [382000.0, 6354000.0]
+   # radius = 50.0
+
+   # Bed shear below which no scour occurs. 0.0 means scour begins immediately.
+   # default: 0.0
+   threshold = 0.0
+
+   # Minimum bed level [m]; scour does not cut below this.
+   # default: 0.0
+   base = -5.0
+
+   # Optional label naming this operator's log file when logging = true
+   label   = "breach"
+   logging = false
+
+   # ── Type-specific parameters ──────────────────────────────────────────────
+   # Supplying one on the wrong type is an ERROR, not silently ignored.
+   #
+   #   shear_factor   bed_shear only   — higher slows the breach (default 75000.0)
+   #   elevation      flat_slice / flat_fill only — target surface level [m]
+   #   Ra             sand_dune only   — angle of repose [degrees] (default 34.0)
+   shear_factor = 75000.0
+
+.. warning::
+
+   Erosion changes bed elevation as the run proceeds, but ANUGA stores elevation
+   **once at t=0** by default — so the eroded bed will not appear in the ``.sww``
+   file or in any raster derived from it. Set ``store_elevation_every_timestep =
+   true`` in ``[project]`` when using erosion operators. A warning is issued if
+   ``[[erosion]]`` is present without it.
+
+Input Validation
+-----------------
+
+The TOML parser validates all required fields and value ranges before the
+simulation starts.  Errors are collected and reported together so you can
+fix all problems in a single pass rather than re-running after each one.
+
+A missing required field or an out-of-range value produces a message like::
+
+   TOML configuration errors in 'scenario.toml':
+     [project] 'scenario' is required but missing
+     [project] 'flow_algorithm' must be one of ('DE0', 'DE1', 'DE2', 'DE0_7', 'DE1_7', 'DE_ader2') — got 'de0'
+     culverts['road_culvert_1'] 'width' must be > 0 — got -0.9
+
+The run aborts after reporting all errors.
 
 
 Custom Callbacks: user_functions.py
@@ -571,7 +831,7 @@ Each run creates a timestamped directory under ``output_base_directory``::
        ├── *.tif                  ← GeoTiff rasters of peak quantities
        ├── code/                  ← archived copy of all input files
        │   ├── scenario.toml
-       │   ├── anuga_run_toml     ← copy of the runner script
+       │   ├── anuga_toml_run     ← copy of the runner script
        │   └── user_functions.py
        └── SPATIAL_TEXT/          ← text copies of spatial inputs (for QC)
 
@@ -579,9 +839,9 @@ Each run creates a timestamped directory under ``output_base_directory``::
 Excel Compatibility
 --------------------
 
-``anuga_run_toml`` also accepts legacy Excel files::
+``anuga_toml_run`` also accepts legacy Excel files::
 
-   anuga_run_toml  path/to/ANUGA_setup.xlsx
+   anuga_toml_run  path/to/ANUGA_setup.xlsx
 
 The Excel format is described in the ``cairns_toml_excel`` example directory.
 Attributes that exist only in the TOML interface

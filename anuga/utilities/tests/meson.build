@@ -6,6 +6,7 @@ python_sources = [
 'test_data_audit.py',
 'test_file_utils.py',
 'test_function_utils.py',
+'test_log.py',
 'test_log_analyser.py',
 'test_mem_time_equation.py',
 'test_model_tools.py',
@@ -16,7 +17,12 @@ python_sources = [
 'test_sparse.py',
 'test_spatialInputUtil.py',
 'test_system_tools.py',
+'test_tk_scaling.py',
+'test_toml_view.py',
+'test_where_close.py',
 'test_xml_tools.py',
+'test_parse_time.py',
+'test_animate.py',
 ]
 
 py3.install_sources(

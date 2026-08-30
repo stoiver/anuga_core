@@ -2,7 +2,8 @@
 """
 
 
-import unittest, os
+import unittest
+import os
 import anuga
 from anuga.shallow_water.shallow_water_domain import Domain
 from anuga.shallow_water.boundaries import Reflective_boundary
@@ -29,7 +30,7 @@ def scalar_func_list(t, x, y):
 
 def speed(t, x, y):
     """
-    Variable windfield implemented using functions    
+    Variable windfield implemented using functions
     Large speeds halfway between center and edges
 
     Low speeds at center and edges
@@ -153,7 +154,7 @@ def spatial_linear_varying_speed(t, x, y):
     s0=250.
     ymin=num.min(y)
     xmin=num.min(x)
-    a=0.000025; b=0.0000125;
+    a=0.000025; b=0.0000125
     for k in range(N):
         s[k]=s0*(1+t/100.)+a*x[k]+b*y[k]
     return s
@@ -171,14 +172,14 @@ def spatial_linear_varying_angle(t, x, y):
     a = 0 * x    # New array
 
     phi=135.
-    b1=0.000025; b2=0.00001125;
+    b1=0.000025; b2=0.00001125
     for k in range(N):
         a[k]=phi*(1+t/100.)+b1*x[k]+b2*y[k]
     return a
 
 def spatial_linear_varying_pressure(t, x, y):
-    p0=1000;
-    a=0.000025; b=0.0000125;
+    p0=1000
+    a=0.000025; b=0.0000125
 
     x = num.array(x)
     y = num.array(y)
@@ -196,7 +197,7 @@ def grid_1d(x0,dx,nx):
     for i in range(nx):
         x[i]=x0+float(i)*dx
     return x
-    
+
 
 def ndgrid(x,y):
     nx = len(x)
@@ -221,7 +222,7 @@ class Test_Forcing(unittest.TestCase):
                 os.remove(file)
             except OSError:
                 pass
-        
+
     def write_wind_pressure_field_sts(self,
                                       field_sts_filename,
                                       nrows=10,
@@ -237,7 +238,7 @@ class Test_Forcing(unittest.TestCase):
 
         xllcorner=origin[0]
         yllcorner=origin[1]
-        starttime = 0; endtime = number_of_timesteps*timestep;
+        starttime = 0; endtime = number_of_timesteps*timestep
         no_data = -9999
 
         time = num.arange(starttime, endtime, timestep, dtype='i')
@@ -300,13 +301,13 @@ class Test_Forcing(unittest.TestCase):
         fid.createVariable('x', 'd', ('number_of_points',))
         fid.createVariable('y', 'd', ('number_of_points',))
         fid.createVariable('time', 'i', ('number_of_timesteps',))
-        fid.createVariable('wind_speed', 'd', ('number_of_timesteps', 
+        fid.createVariable('wind_speed', 'd', ('number_of_timesteps',
                                                'number_of_points'))
         fid.createVariable('wind_speed_range', 'd', ('numbers_in_range', ))
-        fid.createVariable('wind_angle', 'd', ('number_of_timesteps', 
+        fid.createVariable('wind_angle', 'd', ('number_of_timesteps',
                                                'number_of_points'))
         fid.createVariable('wind_angle_range', 'd', ('numbers_in_range',))
-        fid.createVariable('barometric_pressure', 'd', ('number_of_timesteps', 
+        fid.createVariable('barometric_pressure', 'd', ('number_of_timesteps',
                                              'number_of_points'))
         fid.createVariable('barometric_pressure_range', 'd', ('numbers_in_range',))
 
@@ -795,7 +796,7 @@ class Test_Forcing(unittest.TestCase):
                      polygon = [[1,1], [2,1], [2,2], [1,2]])
 
         assert num.allclose(R.exchange_area, 2)
-        
+
         domain.forcing_terms.append(R)
 
         domain.set_time(10.0)
@@ -836,10 +837,10 @@ class Test_Forcing(unittest.TestCase):
         domain.forcing_terms = []
         R = Rainfall(domain,
                      rate=lambda t: 3*t + 7,
-                     polygon=rainfall_poly)                     
+                     polygon=rainfall_poly)
 
         assert num.allclose(R.exchange_area, 2)
-        
+
         domain.forcing_terms.append(R)
 
         # This will test that time is set to starttime in set_starttime
@@ -883,10 +884,10 @@ class Test_Forcing(unittest.TestCase):
         domain.forcing_terms = []
         R = Rainfall(domain,
                      rate=lambda t: 3*t + 7,
-                     polygon=rainfall_poly)                     
+                     polygon=rainfall_poly)
 
         assert num.allclose(R.exchange_area, 2)
-        
+
         domain.forcing_terms.append(R)
 
         # This will test that time is set to starttime in set_starttime
@@ -944,7 +945,7 @@ class Test_Forcing(unittest.TestCase):
                      polygon=rainfall_poly)
 
         assert num.allclose(R.exchange_area, 2)
-        
+
         domain.forcing_terms.append(R)
 
         # This will test that time is set to starttime in set_starttime
@@ -1002,7 +1003,7 @@ class Test_Forcing(unittest.TestCase):
                      polygon=rainfall_poly)
 
         assert num.allclose(R.exchange_area, 2)
-        
+
         domain.forcing_terms.append(R)
 
         # This will test that time is set to starttime in set_starttime
@@ -1072,7 +1073,7 @@ class Test_Forcing(unittest.TestCase):
                      default_rate=5.0)
 
         assert num.allclose(R.exchange_area, 2)
-        
+
         domain.forcing_terms.append(R)
 
         domain.set_time(10.)
@@ -1143,7 +1144,7 @@ class Test_Forcing(unittest.TestCase):
                      default_rate=5.0)
 
         assert num.allclose(R.exchange_area, 2)
-        
+
         domain.forcing_terms.append(R)
 
         for t in domain.evolve(yieldstep=1, finaltime=25):
@@ -1195,6 +1196,12 @@ class Test_Forcing(unittest.TestCase):
             else:
                 return 3*t + 7
 
+        # Forcing-function classes (Rainfall/Wind_stress/...) are legacy-only;
+        # multiprocessor_mode=2 ('unified') applies forcing in C (Manning only)
+        # and deliberately skips them. Pin legacy so this test exercises the
+        # forcing-function machinery it is written for.
+        domain.set_compute_mode('legacy')
+
         domain.forcing_terms = []
         R = Rainfall(domain,
                      rate=main_rate,
@@ -1202,11 +1209,11 @@ class Test_Forcing(unittest.TestCase):
 
 
         assert num.allclose(R.exchange_area, 2)
-        
+
         domain.forcing_terms.append(R)
         #for t in domain.evolve(yieldstep=1, finaltime=25):
         #    pass
-                
+
         try:
             for t in domain.evolve(yieldstep=1, finaltime=25):
                 pass
@@ -1222,9 +1229,9 @@ class Test_Forcing(unittest.TestCase):
         from anuga.file_conversion.sts2sww_mesh import sts2sww_mesh
 
         cellsize = 25
-        nrows=5; ncols = 6;
+        nrows=5; ncols = 6
         refzone=50
-        xllcorner=366000;yllcorner=6369500;
+        xllcorner=366000;yllcorner=6369500
         number_of_timesteps = 6
         timestep=12*60
         eps=2e-16
@@ -1299,9 +1306,9 @@ class Test_Forcing(unittest.TestCase):
 
         cellsize = 25
         #nrows=25; ncols = 25;
-        nrows=10; ncols = 10;
+        nrows=10; ncols = 10
         refzone=50
-        xllcorner=366000;yllcorner=6369500;
+        xllcorner=366000;yllcorner=6369500
         number_of_timesteps = 10
         timestep=1
         eps=2.e-16
@@ -1313,7 +1320,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         time=num.arange(0,10,1,float)
-        eval_time=time[7];
+        eval_time=time[7]
 
         domain = Domain(points, vertices, boundary)
         midpoints = domain.get_centroid_coordinates()
@@ -1450,9 +1457,9 @@ class Test_Forcing(unittest.TestCase):
 
         cellsize = 25
         #nrows=25; ncols = 25;
-        nrows=10; ncols = 10;
+        nrows=10; ncols = 10
         refzone=50
-        xllcorner=366000;yllcorner=6369500;
+        xllcorner=366000;yllcorner=6369500
         number_of_timesteps = 10
         timestep=1
         eps=2.e-16
@@ -1464,7 +1471,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         time=num.arange(0,10,1,float)
-        eval_time=time[7];
+        eval_time=time[7]
 
         domain = Domain(points, vertices, boundary)
         midpoints = domain.get_centroid_coordinates()
@@ -1543,9 +1550,9 @@ class Test_Forcing(unittest.TestCase):
         from anuga.file_conversion.sts2sww_mesh import sts2sww_mesh
 
         cellsize = 25
-        nrows=5; ncols = 6;
+        nrows=5; ncols = 6
         refzone=50
-        xllcorner=366000;yllcorner=6369500;
+        xllcorner=366000;yllcorner=6369500
         number_of_timesteps = 27
         timestep=1
         eps=2e-16
@@ -1556,6 +1563,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         domain = Domain(points, vertices, boundary)
+        domain.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
         midpoints = domain.get_centroid_coordinates()
 
         # Flat surface with 1m of water
@@ -1603,6 +1611,7 @@ class Test_Forcing(unittest.TestCase):
 
 
         domain_II = Domain(points, vertices, boundary)
+        domain_II.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
 
         # Flat surface with 1m of water
         domain_II.set_quantity('elevation', 0)
@@ -1617,8 +1626,8 @@ class Test_Forcing(unittest.TestCase):
         domain_II.forcing_terms = []
         domain_II.forcing_terms.append(Wind_stress(s, phi))
 
-        i=0;
-        for t in domain_II.evolve(yieldstep=1, 
+        i=0
+        for t in domain_II.evolve(yieldstep=1,
                                   finaltime=number_of_timesteps*timestep):
             assert num.allclose(valuesUsingFunction[0,i],domain_II.quantities['stage'].explicit_update), max(valuesUsingFunction[0,i]-domain_II.quantities['stage'].explicit_update)
             assert  num.allclose(valuesUsingFunction[1,i],domain_II.quantities['xmomentum'].explicit_update)
@@ -1636,9 +1645,9 @@ class Test_Forcing(unittest.TestCase):
 
         cellsize = 25
         #nrows=20; ncols = 20;
-        nrows=10; ncols = 10;
+        nrows=10; ncols = 10
         refzone=50
-        xllcorner=366000;yllcorner=6369500;
+        xllcorner=366000;yllcorner=6369500
         number_of_timesteps = 28
         timestep=1.
         eps=2e-16
@@ -1650,6 +1659,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         domain = Domain(points, vertices, boundary)
+        domain.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
         midpoints = domain.get_centroid_coordinates()
 
         # Flat surface with 1m of water
@@ -1697,6 +1707,7 @@ class Test_Forcing(unittest.TestCase):
 
 
         domain_II = Domain(points, vertices, boundary)
+        domain_II.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
 
         # Flat surface with 1m of water
         domain_II.set_quantity('elevation', 0)
@@ -1706,11 +1717,11 @@ class Test_Forcing(unittest.TestCase):
         Br = Reflective_boundary(domain_II)
         domain_II.set_boundary({'top': Br, 'bottom' :Br, 'left': Br, 'right': Br})
 
-        domain_II.forcing_terms.append(Wind_stress(s=time_varying_speed, 
+        domain_II.forcing_terms.append(Wind_stress(s=time_varying_speed,
                                                    phi=time_varying_angle))
 
-        i=0;
-        for t in domain_II.evolve(yieldstep=timestep/2., 
+        i=0
+        for t in domain_II.evolve(yieldstep=timestep/2.,
                                   finaltime=(number_of_timesteps-1)*timestep):
             assert num.allclose(valuesUsingFunction[0,i],
                                 domain_II.quantities['stage'].explicit_update,
@@ -1736,10 +1747,10 @@ class Test_Forcing(unittest.TestCase):
         from anuga.file_conversion.sts2sww_mesh import sts2sww_mesh
 
         cellsize = 25
-        nrows=20; ncols = 20;
-        nrows=10; ncols = 10;
+        nrows=20; ncols = 20
+        nrows=10; ncols = 10
         refzone=50
-        xllcorner=366000;yllcorner=6369500;
+        xllcorner=366000;yllcorner=6369500
         number_of_timesteps = 28
         timestep=1.
         eps=2e-16
@@ -1751,6 +1762,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         domain = Domain(points, vertices, boundary)
+        domain.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
         midpoints = domain.get_centroid_coordinates()
 
         # Flat surface with 1m of water
@@ -1797,6 +1809,7 @@ class Test_Forcing(unittest.TestCase):
 
 
         domain_II = Domain(points, vertices, boundary)
+        domain_II.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
 
         # Flat surface with 1m of water
         domain_II.set_quantity('elevation', 0)
@@ -1806,11 +1819,11 @@ class Test_Forcing(unittest.TestCase):
         Br = Reflective_boundary(domain_II)
         domain_II.set_boundary({'top': Br, 'bottom' :Br, 'left': Br, 'right': Br})
 
-        domain_II.forcing_terms.append(Wind_stress(s=spatial_linear_varying_speed, 
+        domain_II.forcing_terms.append(Wind_stress(s=spatial_linear_varying_speed,
                                                    phi=spatial_linear_varying_angle))
 
-        i=0;
-        for t in domain_II.evolve(yieldstep=timestep, 
+        i=0
+        for t in domain_II.evolve(yieldstep=timestep,
                                   finaltime=(number_of_timesteps-1)*timestep):
             #print valuesUsingFunction[1,i],domain_II.quantities['xmomentum'].explicit_update
             assert num.allclose(valuesUsingFunction[0,i],
@@ -1835,9 +1848,9 @@ class Test_Forcing(unittest.TestCase):
 
         cellsize = 25
         #nrows=20; ncols = 20;
-        nrows=10; ncols = 10;
+        nrows=10; ncols = 10
         refzone=50
-        xllcorner=366000;yllcorner=6369500;
+        xllcorner=366000;yllcorner=6369500
         number_of_timesteps = 28
         timestep=10.
         eps=2e-16
@@ -1850,6 +1863,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         domain = Domain(points, vertices, boundary)
+        domain.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
         vertexpoints = domain.get_nodes()
 
         # Flat surface with 1m of water
@@ -1906,6 +1920,7 @@ class Test_Forcing(unittest.TestCase):
 
 
         domain_II = Domain(points, vertices, boundary)
+        domain_II.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
 
         # Flat surface with 1m of water
         domain_II.set_quantity('elevation', 0)
@@ -1917,8 +1932,8 @@ class Test_Forcing(unittest.TestCase):
 
         domain_II.forcing_terms.append(Barometric_pressure(p=time_varying_pressure))
 
-        i=0;
-        for t in domain_II.evolve(yieldstep=timestep/2., 
+        i=0
+        for t in domain_II.evolve(yieldstep=timestep/2.,
                                   finaltime=(number_of_timesteps-1)*timestep):
             assert num.allclose(valuesUsingFunction[0,i],
                                 domain_II.quantities['stage'].explicit_update,
@@ -1942,9 +1957,9 @@ class Test_Forcing(unittest.TestCase):
 
         cellsize = 25
         #nrows=20; ncols = 20;
-        nrows=10; ncols = 10;
+        nrows=10; ncols = 10
         refzone=50
-        xllcorner=366000;yllcorner=6369500;
+        xllcorner=366000;yllcorner=6369500
         number_of_timesteps = 28
         timestep=1.
         eps=2e-16
@@ -1956,6 +1971,7 @@ class Test_Forcing(unittest.TestCase):
                                                 origin=(xllcorner,yllcorner))
 
         domain = Domain(points, vertices, boundary)
+        domain.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
         vertexpoints = domain.get_nodes()
 
         # Flat surface with 1m of water
@@ -2002,6 +2018,7 @@ class Test_Forcing(unittest.TestCase):
 
 
         domain_II = Domain(points, vertices, boundary)
+        domain_II.set_compute_mode('legacy')  # forcing-function class is legacy-only (mode-2 skips it; use the operators)
 
         # Flat surface with 1m of water
         domain_II.set_quantity('elevation', 0)
@@ -2013,8 +2030,8 @@ class Test_Forcing(unittest.TestCase):
 
         domain_II.forcing_terms.append(Barometric_pressure(p=spatial_linear_varying_pressure))
 
-        i=0;
-        for t in domain_II.evolve(yieldstep=timestep, 
+        i=0
+        for t in domain_II.evolve(yieldstep=timestep,
                                   finaltime=(number_of_timesteps-1)*timestep):
 
             assert num.allclose(valuesUsingFunction[0,i],
@@ -2048,6 +2065,10 @@ class Test_Forcing(unittest.TestCase):
         vertices = [[1,0,2], [1,2,4], [4,2,5], [3,1,4]]
 
         domain = Domain(points, vertices)
+        # Mode-2 ('unified') computes fluxes/forcing on-device and never syncs the
+        # host explicit_update/semi_implicit_update arrays this white-box test reads.
+        # Pin legacy to exercise the in-Python machinery it is written for.
+        domain.set_compute_mode('legacy')
         domain.set_flow_algorithm('DE0')
 
         B = Reflective_boundary(domain)
@@ -2074,9 +2095,9 @@ class Test_Forcing(unittest.TestCase):
         # need to set reflective boundaries
         domain.update_boundary()
         domain.compute_fluxes()
-        
+
         assert num.allclose(domain.quantities['stage'].explicit_update, 0)
-        
+
         msg = 'Got %s expected %f' % (domain.quantities['xmomentum'].explicit_update, -g*h*3)
         assert num.allclose(domain.quantities['xmomentum'].explicit_update, -g*h*3), msg
         assert num.allclose(domain.quantities['ymomentum'].explicit_update, 0)
@@ -2098,6 +2119,10 @@ class Test_Forcing(unittest.TestCase):
         vertices = [[1,0,2], [1,2,4], [4,2,5], [3,1,4]]
 
         domain = Domain(points, vertices)
+        # Mode-2 ('unified') computes friction on-device and never syncs the host
+        # semi_implicit_update array this white-box test reads. Pin legacy to
+        # exercise the in-Python forcing machinery it is written for.
+        domain.set_compute_mode('legacy')
 
         # Use the old function which doesn't take into account the extra
         # wetted area due to slope of bed
@@ -2183,6 +2208,10 @@ class Test_Forcing(unittest.TestCase):
         vertices = [[1,0,2], [1,2,4], [4,2,5], [3,1,4]]
 
         domain = Domain(points, vertices)
+        # Mode-2 ('unified') computes friction on-device and never syncs the host
+        # semi_implicit_update array this white-box test reads. Pin legacy to
+        # exercise the in-Python forcing machinery it is written for.
+        domain.set_compute_mode('legacy')
         B = Reflective_boundary(domain)
         domain.set_boundary( {'exterior': B})
 
@@ -2378,7 +2407,7 @@ class Test_Forcing(unittest.TestCase):
             raise(Exception, msg)
 
 
-            
+
 if __name__ == "__main__":
     suite = unittest.TestLoader().loadTestsFromTestCase(Test_Forcing)
     runner = unittest.TextTestRunner(verbosity=1)

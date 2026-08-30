@@ -42,6 +42,7 @@ extensions = [
     'sphinx.ext.duration',
     'sphinx.ext.doctest',
     'sphinx.ext.autodoc',
+    'sphinx.ext.napoleon',
     'sphinx.ext.autosummary',
     'sphinx.ext.mathjax',
     'sphinx.ext.coverage',
@@ -62,8 +63,28 @@ def linkcode_resolve(domain, info):
 
 #autodoc_mock_imports = ["anuga"]
 
-autodoc_default_flags = ['members']
+# Document class members by default so the method/attribute summary tables on
+# each class page link through to the individual method signatures + docstrings.
+# (autodoc_default_flags is deprecated and ignored by modern Sphinx — use
+# autodoc_default_options.)
+autodoc_default_options = {
+    'members': True,
+    'show-inheritance': True,
+}
 autosummary_generate = True
+
+# Render NumPy-style 'Attributes' sections as :ivar: fields rather than
+# .. attribute:: directives, so an attribute that is also a property (e.g.
+# Geo_reference.epsg) is not documented twice (avoids a duplicate-object warning).
+napoleon_use_ivar = True
+
+autosectionlabel_prefix_document = True
+
+# Suppress duplicate-label warnings from autosectionlabel on autodoc-generated
+# docstring sections (e.g. "Parameters", "Returns" in multiple functions on
+# the same page).  Explicit .. _label: targets are used for all real
+# cross-references so these auto-labels are not needed.
+suppress_warnings = ['autosectionlabel']
 
 #extensions.append('sphinxcontrib.bibtex')
 #bibtex_bibfiles = ['refs.bib']
@@ -87,4 +108,4 @@ html_theme = 'sphinx_rtd_theme'
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
 # so a file named "default.css" will overwrite the builtin "default.css".
-html_static_path = ['../_static']
+html_static_path = ['_static']

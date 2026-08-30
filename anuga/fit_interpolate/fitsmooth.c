@@ -4,18 +4,13 @@
 #include <stdio.h>   /* gets */
 #include <stdlib.h>  /* atoi, malloc */
 #include <string.h>  /* strcpy */
-#include <stdint.h>  /* uanuga_int */
 #include "math.h"
 
 #include "sparse_dok.h" /* in utilities */
 #include "quad_tree.h"  /* in utilities */
 #include "anuga_typedefs.h" /* in utilities */
 
-#if defined(__APPLE__)
-   // clang doesn't have openmp
-#else
-   #include "omp.h"
-#endif
+#include "omp.h"
 
 // Errors defined for netcdf reading
 #define ERRCODE 2
@@ -28,11 +23,10 @@
 // of a variables from scattered data points to a mesh. See fit.py for more details.s
 anuga_int _build_smoothing_matrix(anuga_int n,
                       anuga_int* triangles,
-        		      double* areas,
+        		          double* areas,
                       double* vertex_coordinates,
                       anuga_int* strides,
-                      sparse_dok * smoothing_mat)
-		      {
+                      sparse_dok * smoothing_mat){
 
 
     anuga_int k;

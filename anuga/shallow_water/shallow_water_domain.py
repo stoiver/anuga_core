@@ -69,6 +69,8 @@ Reference:
 Constraints: See license in the user guide
 """
 
+from __future__ import annotations
+
 
 
 
@@ -95,6 +97,19 @@ import numpy as num
 import sys
 import os
 import time
+from typing import TYPE_CHECKING
+from collections.abc import Callable, Iterator
+from numpy.typing import ArrayLike
+
+if TYPE_CHECKING:
+    from datetime import datetime as DateTime
+    from zoneinfo import ZoneInfo as ZoneInfoType
+    # Only for set_collect_max_quantities()'s return annotation. The real import is
+    # done inside that method, because operators import this module — a module-level
+    # import here would be circular.
+    from anuga.operators.collect_max_quantities_operator import (
+        Collect_max_quantities_operator,
+    )
 
 
 try:
@@ -124,6 +139,20 @@ from anuga.utilities.parallel_abstraction import finalize, send, receive
 from anuga.utilities.parallel_abstraction import pypar_available, barrier
 
 
+# The centroid arrays the GPU interface round-trips between host and device —
+# see gpu_domain_sync_to_device()/_from_device() in gpu/gpu_domain_core.c.  A host
+# write to any other quantity (elevation, friction, a user tracer) is not
+# device-resident state and so needs no sync.  Keep this in step with the C.
+GPU_SYNCED_QUANTITIES = frozenset(('stage', 'xmomentum', 'ymomentum', 'height'))
+
+# Absolute lower bound (m^3) on the volume added by clamping negative-depth cells
+# below which the "possible loss of conservation" warning is never raised. This
+# rejects pure floating-point noise (femto/pico-litre deficits in a nearly-dry
+# domain) that can otherwise be a large *fraction* of an essentially-zero total
+# volume. Any physically meaningful conservation loss is many orders larger.
+_negative_volume_noise_floor = 1.0e-9
+
+
 #-----------------------------------------------------
 # Code for profiling cuda version
 #-----------------------------------------------------
@@ -143,6 +172,282 @@ try:
     from nvtx import range_pop  as nvtxRangePop
 except ImportError:
     pass
+
+
+#-----------------------------------------------------
+# Process-global GPU offload control
+#
+# Whether mode 2 ('unified') offloads to a GPU is a *process-level* OpenMP
+# setting (the target-offload runtime ICV), not a per-domain property: a single
+# process cannot run one domain on the GPU and another on the CPU with the same
+# unified kernels. These module functions own that process-wide decision; the
+# per-domain choice (legacy vs unified) lives on Domain.set_compute_mode().
+#-----------------------------------------------------
+
+def _gpu_ext_or_none():
+    try:
+        from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
+        return gpu_ext
+    except Exception:
+        return None
+
+
+def gpu_offload_supported() -> bool:
+    """True if this build/run can offload mode 2 to a GPU device.
+
+    Reflects build + hardware: False for a CPU-only build (``gpu_offload=false`` /
+    ``CPU_ONLY_MODE`` — the standard pip/conda install), when no device is
+    present, or when offload was disabled at launch via
+    ``OMP_TARGET_OFFLOAD=disabled`` (``gpu_available()`` covers all three). This
+    is a static capability and is *not* affected by :func:`set_gpu_offload`.
+    """
+    ge = _gpu_ext_or_none()
+    return bool(ge.gpu_available()) if ge is not None else False
+
+
+def gpu_offload_enabled() -> bool:
+    """Return the resolved process-global offload state for mode 2 ('unified').
+
+    True only when the build supports offload *and* it has not been switched off
+    via :func:`set_gpu_offload`. Always False on a CPU-only build.
+    """
+    if not gpu_offload_supported():
+        return False
+    ge = _gpu_ext_or_none()
+    return bool(ge.get_offload_enabled()) if ge is not None else False
+
+
+def gpu_startup_banner(numprocs: int,
+                       num_devices: int,
+                       device_id: int,
+                       offload_active: bool,
+                       omp_num_threads: str = '1') -> list:
+    """Build the mode-2 ('unified') startup banner as a list of lines.
+
+    Pure function of its arguments so the rank/device mismatch warning can be tested
+    without an actual multi-GPU machine.
+
+    `numprocs` is the MPI rank count and `num_devices` the number of GPUs the runtime
+    can actually see.  These are DIFFERENT NUMBERS, and the banner used to print the
+    rank count labelled as "GPU(s)" — so a 4-rank run on a 1-GPU box cheerfully
+    reported "4 GPU(s)".  That mattered because ranks are assigned to devices
+    round-robin (``device_id = rank % num_devices``), so an oversubscribed run silently
+    puts several ranks on one device.  The banner was the natural place to notice that,
+    and instead it concealed it.  See issue #194.
+
+    Why the warning is worded the way it is.  Measured on one RTX 5070, a 160k-triangle
+    mode-2 evolve, ranks all sharing the single device:
+
+        ranks   no MPS     with MPS
+          1      3.80 s     3.51 s
+          2      7.13 s     3.48 s
+          4     11.21 s     3.72 s
+
+    So the *reliable* cost of oversubscribing is speed: without MPS the ranks time-slice
+    the device and it is ~3x slower.  NVIDIA MPS lets their kernels run concurrently and
+    restores parity — but never beats one rank per GPU, because a single rank with the
+    whole mesh already saturates the device; splitting it creates no new parallelism.
+    So MPS is a way to stop losing, not a way to go faster.
+
+    Hangs and garbled results have been reported in this configuration on real hardware,
+    but did NOT reproduce in the runs above (every rank count gave a bit-identical
+    checksum).  The warning therefore leads with the measured slowdown and reports the
+    hangs as a possibility, rather than promising a failure that may not arrive — an
+    oversubscribed run that quietly works but is 3x slow is the likelier outcome, and is
+    exactly the one a user would otherwise never notice.
+    """
+
+    bar = '+==============================================================================+'
+    lines = [bar]
+
+    if not offload_active:
+        lines.append("| ANUGA compute mode: 'unified' CPU multicore (gpu_ext kernels, no offload)   |")
+        lines.append(f'| OMP_NUM_THREADS={omp_num_threads}')
+    elif device_id < 0:
+        lines.append('| WARNING: No GPU devices found, running on CPU via OpenMP target offloading  |')
+    elif num_devices <= 0:
+        # Device count unavailable (query failed). Say so rather than inventing one —
+        # printing numprocs here is exactly the bug this function exists to remove.
+        lines.append(f'| GPU interface initialized: {numprocs} MPI rank(s), device count unknown, '
+                     f'OpenMP target offloading')
+    else:
+        lines.append(f'| GPU interface initialized: {numprocs} MPI rank(s) on {num_devices} GPU(s), '
+                     f'OpenMP target offloading')
+
+        if numprocs > num_devices:
+            lines.append(f'| WARNING: {numprocs} MPI ranks but only {num_devices} GPU(s). Ranks map round-robin')
+            lines.append(f'|          (rank % {num_devices}), so several ranks share one device. Mode-2 MPI')
+            lines.append('|          expects ONE RANK PER GPU. Measured: up to ~3x SLOWER than one')
+            lines.append('|          rank per GPU (the ranks time-slice the device); hangs and wrong')
+            lines.append('|          results have also been reported in this configuration.')
+            lines.append(f'|          Re-run with -np {num_devices}. NVIDIA MPS removes the slowdown')
+            lines.append('|          but never beats one rank per GPU, so it is not a way to go faster.')
+        elif numprocs < num_devices:
+            idle = num_devices - numprocs
+            lines.append(f'| NOTE: {idle} GPU(s) idle — {numprocs} rank(s) for {num_devices} device(s). '
+                         f'Use -np {num_devices} to use them all.')
+
+    lines.append(bar)
+    return lines
+
+
+def set_gpu_offload(enable: bool = True, verbose: bool = True) -> bool:
+    """Enable or disable GPU offload for mode-2 ('unified') domains, process-wide.
+
+    This is a *process-level* switch, not per-domain: it affects every domain
+    that runs in 'unified' mode, because OpenMP target offload is a process-wide
+    runtime setting (one process cannot run the same unified kernels on a GPU for
+    one domain and on the CPU for another).
+
+    The setting is honoured at GPU-domain init, where arrays are mapped to the
+    chosen device. **Call it before building the first 'unified' domain** — once
+    a domain's data is mapped to a device, switching this domain's offload would
+    leave data and execution on different devices.
+
+    Implemented via the OpenMP default-device ICV (``omp_set_default_device`` /
+    a process-global flag in ``sw_domain_gpu_ext``) — robust and re-enableable,
+    unlike mutating ``OMP_TARGET_OFFLOAD`` after the runtime has initialised.
+
+    Parameters
+    ----------
+    enable : bool
+        True to offload 'unified' domains to a GPU (GPU build + device required);
+        False to force 'unified' to run CPU-multicore.
+    verbose : bool
+        Print a one-line confirmation.
+
+    Returns
+    -------
+    bool
+        The resolved offload state (:func:`gpu_offload_enabled`). Requesting
+        ``enable=True`` on a build without offload support warns and returns
+        False — never hard-fails.
+    """
+    import warnings
+
+    ge = _gpu_ext_or_none()
+    was_supported = gpu_offload_supported()
+
+    if enable:
+        # Clear any prior disable BEFORE checking capability, so re-enabling is
+        # not blocked by our own OMP_TARGET_OFFLOAD=disabled.
+        os.environ.pop('OMP_TARGET_OFFLOAD', None)
+        if not gpu_offload_supported():
+            warnings.warn(
+                "set_gpu_offload(True): this ANUGA build has no GPU offload support "
+                "(built with gpu_offload=false) or no device is present; 'unified' "
+                "domains will run on CPU multicore. Rebuild with -Dgpu_offload=true "
+                "and a GPU-capable compiler to enable offload.",
+                stacklevel=2)
+            enable = False
+    elif was_supported:
+        # Disabling offload on a GPU build. This forces the unified kernels onto
+        # the host, but a GPU build (nvc -mp=gpu,multicore) runs the `omp target`
+        # regions on the host through a slow fallback that does NOT scale with
+        # threads — so this is for correctness A/B (GPU vs CPU give the same
+        # results), NOT for performance. For fast CPU multicore, use a
+        # gpu_offload=false (gcc) build instead.
+        try:
+            from anuga import myid
+        except Exception:
+            myid = 0
+        if myid == 0:
+            warnings.warn(
+                "set_gpu_offload(False) on a GPU build: 'unified' will run on the "
+                "host, but the nvc GPU build's host fallback is slow and does not "
+                "scale with threads (use it for correctness checks, not timing). "
+                "For fast CPU multicore, build with -Dgpu_offload=false.",
+                stacklevel=2)
+
+    if not enable:
+        # OMP_TARGET_OFFLOAD=disabled is what actually keeps the `omp target`
+        # regions (solver AND operators) on the host. The default-device flag
+        # alone does NOT stop the solver offloading, so it must be set here.
+        # The OpenMP runtime reads this at its first target region, so call
+        # set_gpu_offload() before the first evolve()/domain build.
+        os.environ['OMP_TARGET_OFFLOAD'] = 'disabled'
+
+    # Keep the C-side flag consistent so gpu_domain_init picks the host device
+    # and the inlet/culvert operators route there too (gpu_compute_device).
+    if ge is not None:
+        ge.set_offload_enabled(bool(enable))
+
+    state = bool(enable)
+    if verbose:
+        print(f"GPU offload {'enabled' if state else 'disabled'} "
+              f"(process-wide; 'unified' domains run on {'GPU' if state else 'CPU multicore'})")
+    return state
+
+
+# Process-wide OpenMP thread count for ANUGA kernels. This is the single source
+# of truth read back by ``Domain.omp_num_threads`` (a property), so that setting
+# it once via ``anuga.set_omp_num_threads(n)`` is reflected by every domain in
+# the session — including ones already constructed (important in notebooks).
+# Initialised from OMP_NUM_THREADS so introspection is sane before the first
+# call / domain construction.
+try:
+    _omp_num_threads = int(os.environ.get('OMP_NUM_THREADS', 1))
+except (ValueError, TypeError):
+    _omp_num_threads = 1
+
+
+def get_omp_num_threads() -> int:
+    """Return the current process-wide OpenMP thread count for ANUGA kernels."""
+    return _omp_num_threads
+
+
+def set_omp_num_threads(omp_num_threads: int | None = None, verbose: bool = True) -> int:
+    """Set the OpenMP thread count for ANUGA kernels (process-wide).
+
+    ``OMP_NUM_THREADS`` / ``omp_set_num_threads`` controls the whole process, so
+    this is a module-level setting, not per-domain — it affects every domain's
+    OpenMP regions (both the legacy ``sw_domain_openmp_ext`` solver and the
+    unified ``gpu_ext`` kernels), and is reflected by the ``omp_num_threads``
+    property of every existing domain. ``Domain.set_omp_num_threads`` delegates
+    here.
+
+    Parameters
+    ----------
+    omp_num_threads : int or None
+        Thread count. If None, use ``OMP_NUM_THREADS`` from the environment,
+        defaulting to 1 when unset.
+    verbose : bool
+        Print a one-line confirmation.
+
+    Returns
+    -------
+    int
+        The thread count applied.
+    """
+    if omp_num_threads is None:
+        omp_num_threads = os.environ.get('OMP_NUM_THREADS', None)
+        if verbose:
+            print(f'Using OMP_NUM_THREADS from environment: {omp_num_threads}')
+
+    if omp_num_threads is None:
+        omp_num_threads = 1  # Default to 1 if not set
+
+    try:
+        omp_num_threads = int(omp_num_threads)
+    except (ValueError, TypeError):
+        raise ValueError('OMP_NUM_THREADS must be an integer')
+
+    # omp_set_num_threads is process-global: one call covers every OpenMP region
+    # in the process, so routing through the legacy extension also sets the
+    # thread count for the unified gpu_ext kernels.
+    from .sw_domain_openmp_ext import set_omp_num_threads as set_omp_num_threads_ext
+    set_omp_num_threads_ext(omp_num_threads)
+    # Keep the env var consistent so banners / introspection / any subprocess
+    # report the same count (the runtime ICV is already set above).
+    os.environ['OMP_NUM_THREADS'] = str(omp_num_threads)
+    # Record the process-wide count so every domain's omp_num_threads property
+    # reflects this call (including domains constructed before it).
+    global _omp_num_threads
+    _omp_num_threads = omp_num_threads
+
+    if verbose:
+        print(f'Setting omp_num_threads to {omp_num_threads}')
+    return omp_num_threads
 
 
 class Domain(Generic_Domain):
@@ -233,27 +538,27 @@ class Domain(Generic_Domain):
     """
 
     def __init__(self,
-                 coordinates=None,
-                 vertices=None,
-                 boundary=None,
-                 tagged_elements=None,
+                 coordinates: ArrayLike | str | None = None,
+                 vertices: ArrayLike | None = None,
+                 boundary: dict | None = None,
+                 tagged_elements: dict | None = None,
                  geo_reference=None,
-                 use_inscribed_circle=False,
-                 mesh_filename=None,
-                 use_cache=False,
-                 verbose=False,
-                 conserved_quantities = None,
-                 evolved_quantities = None,
-                 other_quantities = None,
-                 full_send_dict=None,
-                 ghost_recv_dict=None,
-                 starttime=0,
-                 processor=0,
-                 numproc=1,
-                 number_of_full_nodes=None,
-                 number_of_full_triangles=None,
-                 ghost_layer_width=2,
-                 **kwargs):
+                 use_inscribed_circle: bool = False,
+                 mesh_filename: str | None = None,
+                 use_cache: bool = False,
+                 verbose: bool = False,
+                 conserved_quantities: list[str] | None = None,
+                 evolved_quantities: list[str] | None = None,
+                 other_quantities: list[str] | None = None,
+                 full_send_dict: dict | None = None,
+                 ghost_recv_dict: dict | None = None,
+                 starttime: float = 0,
+                 processor: int = 0,
+                 numproc: int = 1,
+                 number_of_full_nodes: int | None = None,
+                 number_of_full_triangles: int | None = None,
+                 ghost_layer_width: int = 2,
+                 **kwargs) -> None:
 
         """Instantiate a shallow water domain.
 
@@ -273,8 +578,23 @@ class Domain(Generic_Domain):
             other_quantities = ['elevation', 'friction', 'height',
                                 'xvelocity', 'yvelocity', 'x', 'y']
 
-
-
+        # Selective array allocation per quantity type.
+        # Quantities not listed default to 'evolved' (all arrays) for
+        # backward compatibility with user-defined quantities.
+        self._quantity_type_map = {
+            'stage':       'evolved',
+            'xmomentum':   'evolved',
+            'ymomentum':   'evolved',
+            # elevation: centroid + edge only; gradients lazy (erosion operators
+            # trigger allocation via compute_local_gradients when needed)
+            'elevation':   'edge_diagnostic',
+            'friction':    'centroid_only',
+            'height':      'edge_diagnostic',
+            'xvelocity':   'edge_diagnostic',
+            'yvelocity':   'edge_diagnostic',
+            'x':           'coordinate',
+            'y':           'coordinate',
+        }
 
 
         Generic_Domain.__init__(self,
@@ -304,7 +624,9 @@ class Domain(Generic_Domain):
         #-------------------------------
         self.fractional_step_operators = []
         self.kv_operator = None
+        self.max_quantities_operator = None
         self.dplotter = None
+        self.gpu_culvert_manager = None  # Initialized when GPU mode + Boyd operators
 
         #-------------------------------
         # Set flow defaults
@@ -317,7 +639,24 @@ class Domain(Generic_Domain):
         # 2. Cuda
         #-------------------------------
         self.gpu_interface = None
-        self.set_multiprocessor_mode(1)  # Default to OpenMP
+        self.use_c_rk_loop = True  # Use C RK loop (faster) vs Python-orchestrated GPU loop
+        # Default compute mode: 'legacy' (mode 1). Set ANUGA_DEFAULT_COMPUTE_MODE=unified
+        # to default new domains to mode 2 (the migration target); the device interface
+        # is then built lazily at first evolve() so construction needs no boundaries.
+        # SERIAL ONLY: under MPI (numprocs > 1) the env opt-in is ignored and domains
+        # stay 'legacy'. Mode-2 parallel is validated for purpose-built setups (it must
+        # be selected explicitly), but is not yet robust as a blanket default for every
+        # parallel test's evolve pattern — defaulting all parallel domains to mode 2
+        # deadlocks the MPI path. Parallel unified is a later migration step.
+        try:
+            from anuga import numprocs
+        except Exception:
+            numprocs = 1
+        if (numprocs == 1
+                and os.environ.get('ANUGA_DEFAULT_COMPUTE_MODE', 'legacy').lower() == 'unified'):
+            self.set_compute_mode('unified')
+        else:
+            self.set_compute_mode('legacy')
 
         #-------------------------------
         # C extension domain structure
@@ -326,7 +665,7 @@ class Domain(Generic_Domain):
         self._Domain_C_struct = None
 
         #-------------------------------
-        # If environment variable OMP_NUM_THREADS is not set, 
+        # If environment variable OMP_NUM_THREADS is not set,
         # then set to default (1 thread). If a value is given to
         # the method, then it will override the default.
         #------------------------------
@@ -369,21 +708,39 @@ class Domain(Generic_Domain):
 
         #-------------------------------
         # Useful auxiliary quantity
+        # Set centroid and edge values directly from mesh coordinate arrays
+        # without allocating vertex_values (kept lazy to save memory).
+        # Edge formula matches _interpolate in quantity_openmp.c:
+        #   edge[0] = 0.5*(v[1]+v[2]),  edge[1] = 0.5*(v[2]+v[0]),
+        #   edge[2] = 0.5*(v[0]+v[1])
         #-------------------------------
         n = self.number_of_elements
-        self.quantities['x'].set_values(self.vertex_coordinates[:,0].reshape(n,3))
-        self.quantities['x'].set_boundary_values_from_edges()
+        vx = self.vertex_coordinates[:, 0].reshape(n, 3)
+        vy = self.vertex_coordinates[:, 1].reshape(n, 3)
 
-        self.quantities['y'].set_values(self.vertex_coordinates[:,1].reshape(n,3))
-        self.quantities['y'].set_boundary_values_from_edges()
+        qx = self.quantities['x']
+        qx.centroid_values[:]  = (vx[:, 0] + vx[:, 1] + vx[:, 2]) / 3.0
+        qx.edge_values[:, 0]   = 0.5 * (vx[:, 1] + vx[:, 2])
+        qx.edge_values[:, 1]   = 0.5 * (vx[:, 2] + vx[:, 0])
+        qx.edge_values[:, 2]   = 0.5 * (vx[:, 0] + vx[:, 1])
+        qx.set_boundary_values_from_edges()
+
+        qy = self.quantities['y']
+        qy.centroid_values[:]  = (vy[:, 0] + vy[:, 1] + vy[:, 2]) / 3.0
+        qy.edge_values[:, 0]   = 0.5 * (vy[:, 1] + vy[:, 2])
+        qy.edge_values[:, 1]   = 0.5 * (vy[:, 2] + vy[:, 0])
+        qy.edge_values[:, 2]   = 0.5 * (vy[:, 0] + vy[:, 1])
+        qy.set_boundary_values_from_edges()
 
         # For riverwalls, we need to know the 'edge_flux_type' for each edge
         # Edge-flux-type of 0 == Normal edge, with shallow water flux
         #                   1 == riverwall
         #                   2 == ?
         #                   etc
-        self.edge_flux_type=num.zeros(len(self.edge_coordinates[:,0])).astype(int)
-        self.edge_river_wall_counter=num.zeros(len(self.edge_coordinates[:,0])).astype(int)
+        # Lazy: allocated by _ensure_work_arrays() (no river walls) or by
+        # create_riverwalls() (before evolve).  Saves ~108 MB at N=2.25M.
+        self.edge_flux_type = None          # (3N,) int — 0=normal, 1=riverwall
+        self.edge_river_wall_counter = None # (3N,) int — per-edge riverwall index
         self.number_of_riverwall_edges = 0
 
         # Riverwalls -- initialise with dummy values
@@ -405,44 +762,17 @@ class Domain(Generic_Domain):
         # List to store the volumes we computed before
         self.volume_history=[]
 
-        # Work arrays [avoid allocate statements in compute_fluxes or extrapolate_second_order]
-        # FIXME SR: Should rationalise these arrays -- some may be redundant
-        self.edge_flux_work=num.zeros(len(self.edge_coordinates[:,0])*3) # Advective fluxes
-        self.neigh_work=num.zeros(len(self.edge_coordinates[:,0])*3) # Advective fluxes
-        self.pressuregrad_work=num.zeros(len(self.edge_coordinates[:,0])) # Gravity related terms
-        self.x_centroid_work=num.zeros(len(self.edge_coordinates[:,0])//3)
-        self.y_centroid_work=num.zeros(len(self.edge_coordinates[:,0])//3)
+        # Work arrays actually read by the C extension — allocated lazily on the
+        # first evolve step (via setup_Domain_C_struct → _ensure_work_arrays).
+        self.x_centroid_work     = None  # (N,)   scratch for velocity extrapolation
+        self.y_centroid_work     = None  # (N,)   scratch for velocity extrapolation
 
-        ############################################################################
-        ## Local-timestepping information
-        ############################################################################
-        # FIXME SR: Nice idea but is not generally used, so should hive off to 
-        # another branch of the code and removed for general use
-
-        #
-        # Fluxes can be updated every 1, 2, 4, 8, .. max_flux_update_frequency timesteps
-        # The global timestep is not allowed to increase except when
-        # number_of_timesteps%max_flux_update_frequency==0
-        self.max_flux_update_frequency=2**0 # Must be a power of 2.
-
-        # flux_update_frequency. The edge flux terms are re-computed only when
-        #    number_of_timesteps%flux_update_frequency[myEdge]==0
-        self.flux_update_frequency=num.zeros(len(self.edge_coordinates[:,0])).astype(int)+1
-
-        # Flag: should we update the flux on the next compute fluxes call?
-        self.update_next_flux=num.zeros(len(self.edge_coordinates[:,0])).astype(int)+1
-
-        # Flag: should we update the extrapolation on the next extrapolation call?
-        # (Only do this if one or more of the fluxes on that triangle will be computed on
-        # the next timestep, assuming only the flux computation uses edge/vertex values)
-        self.update_extrapolation=num.zeros(len(self.edge_coordinates[:,0])//3).astype(int)+1
-
-        # edge_timestep [wavespeed/radius] -- not updated every timestep
-        self.edge_timestep=num.zeros(len(self.edge_coordinates[:,0]))+1.0e+100
-
-        # Do we allow the timestep to increase (not every time if local
-        # extrapolation/flux updating is used)
-        self.allow_timestep_increase=num.zeros(1).astype(int)+1
+        # The following arrays were historically allocated but are confirmed dead
+        # (C computation never reads them).  They remain None (→ NULL in C struct)
+        # for the entire simulation lifetime, saving ~600+ MB at N=2.25M.
+        self.edge_flux_work      = None  # (9N,)  — unused, NULL in C struct
+        self.neigh_work          = None  # (9N,)  — unused, NULL in C struct
+        self.pressuregrad_work   = None  # (3N,)  — unused, NULL in C struct
 
 
         #-----------------------------------
@@ -452,9 +782,9 @@ class Domain(Generic_Domain):
 
 
     #------------------------------------------------
-    # Domain_C_struct is a cdef class with a custom __cinit__, 
-    # so Cython will not auto-generate a default pickling protocol for it; 
-    # when pickle reaches the Domain object and tries to pickle _Domain_C_struct, 
+    # Domain_C_struct is a cdef class with a custom __cinit__,
+    # so Cython will not auto-generate a default pickling protocol for it;
+    # when pickle reaches the Domain object and tries to pickle _Domain_C_struct,
     # you get TypeError: no default __reduce__ due to non-trivial __cinit__.
     # So we implement __getstate__ and __setstate__ to exclude it from pickling,
     # and recreate it lazily when needed.
@@ -463,12 +793,19 @@ class Domain(Generic_Domain):
         state = self.__dict__.copy()
         # Do not pickle the C wrapper; it can be recreated
         state.pop('_Domain_C_struct', None)
+        # The mode-2 ('unified') GPU interface wraps a cdef GPUDomain with a
+        # non-trivial __cinit__ (not picklable) and holds device handles. Drop
+        # it; _ensure_gpu_interface() rebuilds it lazily after unpickling.
+        state.pop('gpu_interface', None)
+        state.pop('_gpu_boundary_info_initialized', None)
         return state
 
     def __setstate__(self, state):
         self.__dict__.update(state)
         # Recreate C wrapper lazily when needed
         self._Domain_C_struct = None
+        # Force the mode-2 device interface to be rebuilt on demand.
+        self.gpu_interface = None
 
     def update_domain_c_struct(self):
         """Update the C domain structure from the Python Domain object.
@@ -476,6 +813,28 @@ class Domain(Generic_Domain):
         from .sw_domain_openmp_ext import update_Domain_C_struct
         update_Domain_C_struct(self)
 
+    def _ensure_work_arrays(self):
+        """Allocate the work arrays actually needed by the C extension.
+
+        Called by ``setup_Domain_C_struct`` in the Cython extension before the
+        C domain struct is populated.  Only arrays that the C computation code
+        actually reads are allocated here — confirmed-dead arrays remain None
+        (passed as NULL to the C struct) for the full simulation lifetime.
+        """
+        if self.x_centroid_work is not None:
+            return  # already allocated
+
+        N  = self.number_of_elements
+
+        # ---- scratch arrays used by the C extrapolation kernel ----
+        self.x_centroid_work   = num.zeros(N)               # (N,)
+        self.y_centroid_work   = num.zeros(N)               # (N,)
+
+        # ---- per-element max wave speed (CFL timestep calculation) ----
+        self.max_speed         = num.zeros(N, float)        # (N,)
+
+        # Note: edge_flux_type / edge_river_wall_counter stay None unless
+        # create_riverwalls() is called; all other struct fields remain NULL.
 
     #---------------------------------------------------------------
     # Plotting methods
@@ -483,14 +842,14 @@ class Domain(Generic_Domain):
     def set_plotter(self, *args, **kwargs):
         """Set the plotter for this domain
         """
-        
-        #FIXME SR: Should look into seeing if the triang can use the 
+
+        #FIXME SR: Should look into seeing if the triang can use the
         # triangulation from Domain rather than having two copies
         if self.dplotter is None:
             import anuga
-            self.dplotter = anuga.Domain_plotter(self, *args, **kwargs) 
+            self.dplotter = anuga.Domain_plotter(self, *args, **kwargs)
 
-        
+
         self.triang = self.dplotter.triang
         self.stage = self.dplotter.stage
         self.xmom = self.dplotter.xmom
@@ -512,13 +871,13 @@ class Domain(Generic_Domain):
 
         self.save_stage_frame = self.dplotter.save_stage_frame
         self.plot_stage_frame = self.dplotter.plot_stage_frame
-        self.make_stage_animation = self.dplotter.make_stage_animation        
+        self.make_stage_animation = self.dplotter.make_stage_animation
 
         self.save_speed_frame = self.dplotter.save_speed_frame
         self.plot_speed_frame = self.dplotter.plot_speed_frame
-        self.make_speed_animation = self.dplotter.make_speed_animation        
+        self.make_speed_animation = self.dplotter.make_speed_animation
 
-        
+
     def triplot(self, *args,  **kwargs):
 
         self.set_plotter()
@@ -550,9 +909,9 @@ class Domain(Generic_Domain):
 
     #==============================================================
     # Methods to set and get domain parameters
-    # 
-    # FIXME SR: These (and other paramters) should be refactored 
-    # to save the underlying quantities in np.ndarray(s) for 
+    #
+    # FIXME SR: These (and other paramters) should be refactored
+    # to save the underlying quantities in np.ndarray(s) for
     # efficient access in Cython
     #==============================================================
 
@@ -570,7 +929,7 @@ class Domain(Generic_Domain):
     def timestep(self) -> float:
         """Current timestep [s]"""
         return self._timestep
-    
+
     @timestep.setter
     def timestep(self, value: float):
         """Set current timestep [s]"""
@@ -602,11 +961,8 @@ class Domain(Generic_Domain):
         from anuga.config import extrapolate_velocity_second_order
         from anuga.config import alpha_balance
         from anuga.config import optimise_dry_cells
-        from anuga.config import optimised_gradient_limiter
-        from anuga.config import use_edge_limiter
         from anuga.config import use_centroid_velocities
         from anuga.config import compute_fluxes_method
-        from anuga.config import distribute_to_vertices_and_edges_method
         from anuga.config import sloped_mannings_function
         from anuga.config import low_froude
 
@@ -616,6 +972,9 @@ class Domain(Generic_Domain):
 
         self.set_minimum_allowed_height(minimum_allowed_height)
         self.maximum_allowed_speed = maximum_allowed_speed
+
+        from anuga.config import negative_volume_warning_fraction
+        self.negative_volume_warning_fraction = negative_volume_warning_fraction
 
         self.minimum_storable_height = minimum_storable_height
 
@@ -629,18 +988,14 @@ class Domain(Generic_Domain):
         self.set_use_optimise_dry_cells(optimise_dry_cells)
         self.set_extrapolate_velocity(extrapolate_velocity_second_order)
 
-        self.set_use_edge_limiter(use_edge_limiter)
-        self.optimised_gradient_limiter = optimised_gradient_limiter
         self.use_centroid_velocities = use_centroid_velocities
 
         self.set_sloped_mannings_function(sloped_mannings_function)
         self.set_compute_fluxes_method(compute_fluxes_method)
 
-        self.set_distribute_to_vertices_and_edges_method(distribute_to_vertices_and_edges_method)
-
         self.set_store_centroids(False)
 
-    def get_algorithm_parameters(self):
+    def get_algorithm_parameters(self) -> dict:
         """
         Get the standard parameter that are currently set (as a dictionary)
         """
@@ -654,25 +1009,21 @@ class Domain(Generic_Domain):
         parameters['alpha_balance']           = self.alpha_balance
         parameters['tight_slope_limiters']    = self.tight_slope_limiters
         parameters['optimise_dry_cells']      = self.optimise_dry_cells
-        parameters['use_edge_limiter']        = self.use_edge_limiter
         parameters['low_froude']              = self.low_froude
         parameters['use_centroid_velocities'] = self.use_centroid_velocities
         parameters['use_sloped_mannings']     = self.use_sloped_mannings
         parameters['compute_fluxes_method']   = self.get_compute_fluxes_method()
-        parameters['distribute_to_vertices_and_edges_method'] = \
-                         self.get_distribute_to_vertices_and_edges_method()
         parameters['flow_algorithm']          = self.get_flow_algorithm()
         parameters['CFL']                     = self.get_cfl()
         parameters['timestepping_method']     = self.get_timestepping_method()
 
-        parameters['optimised_gradient_limiter']        = self.optimised_gradient_limiter
         parameters['extrapolate_velocity_second_order'] = self.extrapolate_velocity_second_order
 
 
 
         return parameters
 
-    def print_algorithm_parameters(self):
+    def print_algorithm_parameters(self) -> None:
         """
         Print the standard parameters that are curently set (as a dictionary)
         """
@@ -703,13 +1054,11 @@ class Domain(Generic_Domain):
         self.set_using_discontinuous_elevation(True)
         self.set_using_centroid_averaging(True)
         self.set_compute_fluxes_method('DE')
-        self.set_distribute_to_vertices_and_edges_method('DE')
 
         # Don't place any restriction on the minimum storable height
         #self.minimum_storable_height=-99999999999.0
         self.minimum_allowed_height=1.0e-12
 
-        self.use_edge_limiter=True
         self.set_default_order(2)
         self.set_extrapolate_velocity()
 
@@ -767,13 +1116,11 @@ class Domain(Generic_Domain):
         self.set_using_discontinuous_elevation(True)
         self.set_using_centroid_averaging(True)
         self.set_compute_fluxes_method('DE')
-        self.set_distribute_to_vertices_and_edges_method('DE')
 
         # Don't place any restriction on the minimum storable height
         #self.minimum_storable_height=-99999999999.0
         self.minimum_allowed_height=1.0e-5
 
-        self.use_edge_limiter=True
         self.set_default_order(2)
         self.set_extrapolate_velocity()
 
@@ -815,6 +1162,52 @@ class Domain(Generic_Domain):
             print('#')
             print('##########################################################################')
 
+    def _set_DE_ader2_defaults(self):
+        """Set up the defaults for running the flow_algorithm "DE_ader2"
+           DE1 settings with ADER-2 (Cauchy-Kovalewski) timestepping.
+        """
+
+        self._set_config_defaults()
+
+        self.set_cfl(1.0)
+        self.set_use_kinematic_viscosity(False)
+        self.set_timestepping_method('ader2')
+
+        self.set_using_discontinuous_elevation(True)
+        self.set_using_centroid_averaging(True)
+        self.set_compute_fluxes_method('DE')
+
+        self.minimum_allowed_height = 1.0e-5
+
+        self.set_default_order(2)
+        self.set_extrapolate_velocity()
+
+        self.beta_w = 0.5
+        self.beta_w_dry = 0.0
+        self.beta_uh = 0.5
+        self.beta_uh_dry = 0.0
+        self.beta_vh = 0.5
+        self.beta_vh_dry = 0.0
+
+        self.set_store_centroids(True)
+
+        self.optimise_dry_cells = False
+
+        self.edge_coordinates = self.get_edge_midpoint_coordinates()
+
+        self.maximum_allowed_speed = 0.0
+
+        if self.processor == 0 and self.verbose:
+            print('##########################################################################')
+            print('#')
+            print('# Using discontinuous elevation solver DE_ader2')
+            print('#')
+            print('# Uses ADER-2 (Cauchy-Kovalewski) timestepping')
+            print('#')
+            print('# Make sure you use centroid values when reporting on important output quantities')
+            print('#')
+            print('##########################################################################')
+
     def _set_DE2_defaults(self):
         """Set up the defaults for running the flow_algorithm "DE2"
            A 'discontinuous elevation' method
@@ -830,13 +1223,11 @@ class Domain(Generic_Domain):
         self.set_using_discontinuous_elevation(True)
         self.set_using_centroid_averaging(True)
         self.set_compute_fluxes_method('DE')
-        self.set_distribute_to_vertices_and_edges_method('DE')
 
         # Don't place any restriction on the minimum storable height
         #self.minimum_storable_height=-99999999999.0
         self.minimum_allowed_height=1.0e-5
 
-        self.use_edge_limiter=True
         self.set_default_order(2)
         self.set_extrapolate_velocity()
 
@@ -893,13 +1284,11 @@ class Domain(Generic_Domain):
         self.set_using_discontinuous_elevation(True)
         self.set_using_centroid_averaging(True)
         self.set_compute_fluxes_method('DE')
-        self.set_distribute_to_vertices_and_edges_method('DE')
 
         # Don't place any restriction on the minimum storable height
         #self.minimum_storable_height=-99999999999.0
         self.minimum_allowed_height=1.0e-12
 
-        self.use_edge_limiter=True
         self.set_default_order(2)
         self.set_extrapolate_velocity()
 
@@ -956,13 +1345,11 @@ class Domain(Generic_Domain):
         self.set_using_discontinuous_elevation(True)
         self.set_using_centroid_averaging(True)
         self.set_compute_fluxes_method('DE')
-        self.set_distribute_to_vertices_and_edges_method('DE')
 
         # Don't place any restriction on the minimum storable height
         #self.minimum_storable_height=-99999999999.0
         self.minimum_allowed_height=1.0e-12
 
-        self.use_edge_limiter=True
         self.set_default_order(2)
         self.set_extrapolate_velocity()
 
@@ -1014,11 +1401,17 @@ class Domain(Generic_Domain):
     # the set_quantity function to be profiled individually.
     # Need to uncomment the decorator at top of file.
     #@profileit("set_quantity.profile")
-    def set_quantity(self, name, *args, **kwargs):
+    def set_quantity(self, name: str, *args, **kwargs) -> None:
         """Set values for named quantity
 
         We have to do something special for 'elevation'
         otherwise pass through to generic set_quantity
+
+        Mode-2 ('unified'): the device holds the authoritative centroid state once
+        the GPU interface exists, so a host-only write has to be mirrored to it.
+        That is handled one level down, in Quantity.set_values(), via the
+        _notify_*_host_quantity_write() hooks below — which also covers callers
+        that reach a Quantity directly and bypass this method.
         """
 
 #        if name == 'elevation':
@@ -1032,8 +1425,84 @@ class Domain(Generic_Domain):
 
         Generic_Domain.set_quantity(self, name, *args, **kwargs)
 
+    # ------------------------------------------------------------------
+    # Mode-2 host->device coherency for quantity writes
+    #
+    # Once the GPU interface exists the *device* holds the authoritative centroid
+    # state.  A write that touches only the host arrays is then silently ignored —
+    # the next step reads the stale device values, so the simulation runs with the
+    # wrong data.  This bites whenever something builds the interface *before* the
+    # quantities are set (distribute_to_vertices_and_edges() and set_boundary()
+    # both call _ensure_gpu_interface()), and for any mid-run write.
+    #
+    # Quantity.set_values() is the single choke point for host-side quantity
+    # writes, so the sync hangs off there rather than off Domain.set_quantity() —
+    # that way a caller holding a Quantity directly is covered too.
+    # ------------------------------------------------------------------
 
-    def set_timezone(self, tz = None):
+    # Set while apply_fractional_steps() already brackets its operators with a
+    # sync_from_device()/sync_to_device() pair, so operator writes inside that
+    # region don't re-sync once per call.
+    _gpu_host_writes_suppressed = False
+
+    def _gpu_syncs_host_quantity_write(self, name: str) -> bool:
+        """True if a host write to quantity `name` has to be mirrored to the device."""
+
+        return (not self._gpu_host_writes_suppressed
+                and name in GPU_SYNCED_QUANTITIES
+                and self.multiprocessor_mode == MULTIPROCESSOR_GPU
+                and getattr(self, 'gpu_interface', None) is not None)
+
+    def _notify_before_host_quantity_write(self, name: str) -> None:
+        """Refresh the host centroids from the device, ahead of a host-side write.
+
+        Without this the push in _notify_after_host_quantity_write() would send
+        stale host values for the *other* quantities over the device's current ones.
+        """
+
+        if self._gpu_syncs_host_quantity_write(name):
+            try:
+                self.gpu_interface.sync_from_device()
+            except Exception:
+                pass
+
+    def _notify_after_host_quantity_write(self, name: str) -> None:
+        """Push a host-side quantity write out to the device."""
+
+        if self._gpu_syncs_host_quantity_write(name):
+            self.gpu_interface.sync_to_device()
+
+
+    def _sync_riverwall_to_device(self) -> None:
+        """Push pending host-side riverwall changes out to the device (mode 2).
+
+        The riverwall crest elevations and hydraulic properties are mapped to the
+        device once, when the mode-2 interface is built, and are never written
+        there. A host-side change — RiverWall.set_elevation() to operate a gate,
+        say — therefore has no effect on the device until it is pushed across,
+        which is what this does.
+
+        Called by evolve() at yieldstep boundaries only: that is where a script
+        can make such a change (in the body of the evolve loop) and where the
+        host and device are already in step, so the crest never changes part-way
+        through a timestep or between RK substeps.
+        """
+
+        riverwall_data = getattr(self, 'riverwallData', None)
+        if riverwall_data is None:
+            return
+        if not getattr(riverwall_data, 'device_data_dirty', False):
+            return
+
+        if (self.multiprocessor_mode == MULTIPROCESSOR_GPU
+                and getattr(self, 'gpu_interface', None) is not None):
+            self.gpu_interface.sync_riverwall_to_device()
+
+        # Cleared unconditionally: on the CPU paths the kernels read the host
+        # arrays directly, and a later mode-2 setup maps their current values.
+        riverwall_data.device_data_dirty = False
+
+    def set_timezone(self, tz: str | ZoneInfoType | None = None) -> None:
         """Set timezone for domain
 
         :param tz: either a timezone object or string
@@ -1074,23 +1543,23 @@ class Domain(Generic_Domain):
 
         self.timezone = new_tz
 
-    def get_timezone(self):
+    def get_timezone(self) -> ZoneInfoType:
         """Retrieve current domain timezone"""
 
         return self.timezone
 
-    def get_datetime(self, timestamp=None):
+    def get_datetime(self, timestamp: float | None = None) -> DateTime:
         """Retrieve datetime corresponding to current timestamp wrt to domain timezone
 
         param: timestamp: return datetime corresponding to given timestamp"""
 
         from datetime import datetime
-        
+
         try:
             from datetime import UTC
         except ImportError:
             from datetime import timezone
-            UTC = timezone.utc 
+            UTC = timezone.utc
 
 
         if timestamp is None:
@@ -1102,7 +1571,7 @@ class Domain(Generic_Domain):
         current_dt = utc_datetime.astimezone(self.timezone)
         return current_dt
 
-    def set_starttime(self, timestamp=0.0):
+    def set_starttime(self, timestamp: float | DateTime = 0.0) -> None:
         """Set the starttime for the evolution
 
         :param timestamp: Either a float or a datetime object
@@ -1194,7 +1663,7 @@ class Domain(Generic_Domain):
         # starttime is now the origin for relative_time
         self.set_relative_time(0.0)
 
-    def get_starttime(self, datetime=False):
+    def get_starttime(self, datetime: bool = False) -> float | DateTime:
         """return starttime, either as timestamp, or as a datetime"""
 
         starttime = self.starttime
@@ -1205,32 +1674,33 @@ class Domain(Generic_Domain):
             return self.get_datetime(starttime)
 
 
-    def set_store(self, flag=True):
+    def set_store(self, flag: bool = True) -> None:
         """Set whether data saved to sww file.
         """
 
         self.store = flag
 
-    def get_store(self):
+    def get_store(self) -> bool:
         """Get whether data saved to sww file.
         """
 
         return self.store
 
 
-    def set_store_centroids(self, flag=True):
+    def set_store_centroids(self, flag: bool = True) -> None:
         """Set whether centroid data is saved to sww file.
         """
 
         self.store_centroids = flag
 
-    def get_store_centroids(self):
+    def get_store_centroids(self) -> bool:
         """Get whether data saved to sww file.
         """
 
         return self.store_centroids
 
-    def set_checkpointing(self, checkpoint= True, checkpoint_dir = 'CHECKPOINTS', checkpoint_step=10, checkpoint_time = None):
+    def set_checkpointing(self, checkpoint: bool = True, checkpoint_dir: str = 'CHECKPOINTS',
+                          checkpoint_step: int = 10, checkpoint_time: float | None = None) -> None:
         """Set up checkpointing.
 
         param checkpoint: Default = True. Set to False will turn off checkpointing
@@ -1266,7 +1736,7 @@ class Domain(Generic_Domain):
         else:
             self.checkpoint = False
 
-    def set_sloped_mannings_function(self, flag=True):
+    def set_sloped_mannings_function(self, flag: bool = True) -> None:
         """Set mannings friction function to use the sloped
         wetted area.
 
@@ -1279,7 +1749,7 @@ class Domain(Generic_Domain):
             self.use_sloped_mannings = False
 
 
-    def set_compute_fluxes_method(self, flag='original'):
+    def set_compute_fluxes_method(self, flag: str = 'original') -> None:
         """Set method for computing fluxes.
 
         Currently
@@ -1300,30 +1770,7 @@ class Domain(Generic_Domain):
             raise Exception(msg)
 
 
-    def set_local_extrapolation_and_flux_updating(self,nlevels=8):
-        """
-            Use local flux and extrapolation updating
-
-            nlevels == number of flux_update_frequency levels > 1
-
-                   For example, to allow flux updating every 1,2,4,8
-                   timesteps, do:
-
-                    domain.set_local_extrapolation_and_flux_updating(nlevels=3)
-
-                   (since 2**3==8)
-        """
-
-        self.max_flux_update_frequency=2**nlevels
-
-        if(self.max_flux_update_frequency != 1):
-            if self.timestepping_method != 'euler':
-                raise Exception('Local extrapolation and flux updating only supported with euler timestepping')
-            if self.compute_fluxes_method != 'DE':
-                raise Exception('Local extrapolation and flux updating only supported for discontinuous flow algorithms')
-
-
-    def get_compute_fluxes_method(self):
+    def get_compute_fluxes_method(self) -> str:
         """Get method for computing fluxes.
 
         See set_compute_fluxes_method for possible choices.
@@ -1333,39 +1780,7 @@ class Domain(Generic_Domain):
 
 
 
-    def set_distribute_to_vertices_and_edges_method(self, flag='original'):
-        """Set method for computing fluxes.
-
-        Currently
-           original
-           tsunami
-        """
-        distribute_to_vertices_and_edges_methods = ['original',  'tsunami', 'DE']
-
-        if flag in distribute_to_vertices_and_edges_methods:
-            self.distribute_to_vertices_and_edges_method = flag
-        else:
-            msg = 'Unknown distribute_to_vertices_and_edges_method. \nPossible choices are:\n'+ \
-            ', '.join(distribute_to_vertices_and_edges_methods)+'.'
-            raise Exception(msg)
-
-
-
-
-
-    def get_distribute_to_vertices_and_edges_method(self):
-        """Get method for distribute_to_vertices_and_edges.
-
-        See set_distribute_to_vertices_and_edges_method for possible choices.
-        """
-
-        return self.distribute_to_vertices_and_edges_method
-
-
-
-
-
-    def set_flow_algorithm(self, algorithm='DE0'):
+    def set_flow_algorithm(self, algorithm: str = 'DE0') -> None:
         """Set combination of slope limiting and time stepping
 
         Currently
@@ -1383,7 +1798,7 @@ class Domain(Generic_Domain):
 
 
         flow_algorithms = ['DE0', 'DE1', 'DE2', \
-                           'DE0_7', 'DE1_7']
+                           'DE0_7', 'DE1_7', 'DE_ader2']
 
         if algorithm in flow_algorithms:
             self.flow_algorithm = algorithm
@@ -1407,8 +1822,11 @@ class Domain(Generic_Domain):
         if self.flow_algorithm == 'DE1_7':
             self._set_DE1_7_defaults()
 
+        if self.flow_algorithm == 'DE_ader2':
+            self._set_DE_ader2_defaults()
 
-    def get_flow_algorithm(self):
+
+    def get_flow_algorithm(self) -> str:
         """
         Get method used for timestepping and spatial discretisation
 
@@ -1434,7 +1852,7 @@ class Domain(Generic_Domain):
     #     else:
     #         raise Exception('undefined compute_fluxes method')
 
-    def set_extrapolate_velocity(self, flag=True):
+    def set_extrapolate_velocity(self, flag: bool = True) -> None:
         """ Extrapolation routine uses momentum by default,
         can change to velocity extrapolation which
         seems to work better.
@@ -1445,18 +1863,7 @@ class Domain(Generic_Domain):
         elif flag is False:
             self.extrapolate_velocity_second_order = False
 
-    def set_use_edge_limiter(self, flag=True):
-        """ Extrapolation routine uses vertex values by default,
-        for limiting, can change to edge limiting which
-        seems to work better in some cases.
-        """
-
-        if flag is True:
-            self.use_edge_limiter = True
-        elif flag is False:
-            self.use_edge_limiter = False
-
-    def set_low_froude(self, low_froude=0):
+    def set_low_froude(self, low_froude: int = 0) -> None:
         """ For low Froude problems the standard flux calculations
         can lead to excessive damping. Set low_froude to 1 or 2 for
         flux calculations which minimize the damping in this case.
@@ -1466,7 +1873,7 @@ class Domain(Generic_Domain):
 
         self.low_froude = low_froude
 
-    def set_use_optimise_dry_cells(self, flag=True):
+    def set_use_optimise_dry_cells(self, flag: bool = True) -> None:
         """ Try to optimize calculations where region is dry
         """
 
@@ -1478,7 +1885,7 @@ class Domain(Generic_Domain):
 
 
 
-    def set_use_kinematic_viscosity(self, flag=True):
+    def set_use_kinematic_viscosity(self, flag: bool = True) -> None:
 
         from anuga.operators.kinematic_viscosity_operator import Kinematic_viscosity_operator
 
@@ -1498,7 +1905,48 @@ class Domain(Generic_Domain):
 
 
 
-    def set_beta(self, beta):
+    def set_collect_max_quantities(self,
+                               update_frequency=1,
+                               collection_start_time=0.,
+                               velocity_zero_height=None,
+                               store_to_sww=True) -> Collect_max_quantities_operator:
+        """Create (or return existing) Collect_max_quantities_operator on this domain.
+
+        Tracks running maxima of stage, depth, speed, and momentum magnitude
+        (||(uh, vh)||) over the simulation.  Call once before domain.evolve().
+
+        Parameters
+        ----------
+        update_frequency : int
+            Update maxima every this many timesteps (default 1).
+        collection_start_time : float
+            Only collect after this simulation time (default 0).
+        velocity_zero_height : float or None
+            Zero velocity below this depth; defaults to minimum_allowed_height.
+        store_to_sww : bool
+            If True (default), write running maxima to the SWW file every yield
+            step as centroid quantities max_stage_c, max_depth_c, max_speed_c,
+            max_uh_c.
+
+        Returns
+        -------
+        Collect_max_quantities_operator
+        """
+        from anuga.operators.collect_max_quantities_operator import \
+            Collect_max_quantities_operator
+
+        if self.max_quantities_operator is None:
+            self.max_quantities_operator = Collect_max_quantities_operator(
+                self,
+                update_frequency=update_frequency,
+                collection_start_time=collection_start_time,
+                velocity_zero_height=velocity_zero_height,
+                store_to_sww=store_to_sww,
+            )
+        return self.max_quantities_operator
+
+
+    def set_beta(self, beta: float) -> None:
         """Shorthand to assign one constant value [0,2] to all limiters.
         0 Corresponds to first order, where as larger values make use of
         the second order scheme.
@@ -1517,7 +1965,8 @@ class Domain(Generic_Domain):
         self.quantities['ymomentum'].beta = beta
 
 
-    def set_betas(self, beta_w, beta_w_dry, beta_uh, beta_uh_dry, beta_vh, beta_vh_dry):
+    def set_betas(self, beta_w: float, beta_w_dry: float, beta_uh: float,
+                  beta_uh_dry: float, beta_vh: float, beta_vh_dry: float) -> None:
         """Assign beta values in the range  [0,2] to all limiters.
         0 Corresponds to first order, where as larger values make use of
         the second order scheme.
@@ -1536,7 +1985,7 @@ class Domain(Generic_Domain):
         self.quantities['ymomentum'].beta = beta_vh
 
 
-    def set_store_vertices_uniquely(self, flag=True, reduction=None):
+    def set_store_vertices_uniquely(self, flag: bool = True, reduction: Callable | None = None) -> None:
         """Decide whether vertex values should be stored uniquely as
         computed in the model (True) or whether they should be reduced to one
         value per vertex using self.reduction (False).
@@ -1551,7 +2000,7 @@ class Domain(Generic_Domain):
             self.reduction = mean
             #self.reduction = min  #Looks better near steep slopes
 
-    def set_store_vertices_smoothly(self, flag=True, reduction=None):
+    def set_store_vertices_smoothly(self, flag: bool = True, reduction: Callable | None = None) -> None:
         """Decide whether vertex values should be stored smoothly (one value per vertex)
         or uniquely as
         computed in the model (False).
@@ -1566,7 +2015,7 @@ class Domain(Generic_Domain):
             self.reduction = mean
             #self.reduction = min  #Looks better near steep slopes
 
-    def set_minimum_storable_height(self, minimum_storable_height):
+    def set_minimum_storable_height(self, minimum_storable_height: float) -> None:
         """Set the minimum depth that will be written to an SWW file.
 
         minimum_storable_height  minimum allowed SWW depth is in meters
@@ -1578,12 +2027,12 @@ class Domain(Generic_Domain):
         self.minimum_storable_height = minimum_storable_height
 
 
-    def get_minimum_storable_height(self):
+    def get_minimum_storable_height(self) -> float:
 
         return self.minimum_storable_height
 
 
-    def set_minimum_allowed_height(self, minimum_allowed_height):
+    def set_minimum_allowed_height(self, minimum_allowed_height: float) -> None:
         """Set minimum depth that will be recognised in the numerical scheme.
 
         minimum_allowed_height  minimum allowed depth in meters
@@ -1603,11 +2052,29 @@ class Domain(Generic_Domain):
 
 
 
-    def get_minimum_allowed_height(self):
+    def get_minimum_allowed_height(self) -> float:
 
         return self.minimum_allowed_height
 
-    def set_maximum_allowed_speed(self, maximum_allowed_speed):
+    def set_negative_volume_warning_fraction(self, fraction: float) -> None:
+        """Set the fraction of the total domain water volume that must be added by
+        clamping negative-depth cells to zero depth in a single timestep before
+        update_conserved_quantities() emits a "possible loss of conservation"
+        warning.
+
+        Clamping a few cells by a near-zero depth is normal in wetting/drying and
+        involves negligible volume, so the default (see
+        anuga.config.negative_volume_warning_fraction) avoids warning on almost
+        every step. Set to 0.0 to warn whenever any volume is added.
+        """
+
+        self.negative_volume_warning_fraction = fraction
+
+    def get_negative_volume_warning_fraction(self) -> float:
+
+        return self.negative_volume_warning_fraction
+
+    def set_maximum_allowed_speed(self, maximum_allowed_speed: float) -> None:
         """Set the maximum particle speed that is allowed in water shallower
         than minimum_allowed_height.
 
@@ -1619,7 +2086,7 @@ class Domain(Generic_Domain):
 
         self.maximum_allowed_speed = maximum_allowed_speed
 
-    def set_points_file_block_line_size(self, points_file_block_line_size):
+    def set_points_file_block_line_size(self, points_file_block_line_size: int) -> None:
         """
         """
 
@@ -1627,7 +2094,7 @@ class Domain(Generic_Domain):
 
 
     # FIXME: Probably obsolete in its curren form
-    def set_quantities_to_be_stored(self, q):
+    def set_quantities_to_be_stored(self, q: dict[str, int] | list[str] | None) -> None:
         """Specify which quantities will be stored in the SWW file.
 
         q must be either:
@@ -1670,7 +2137,8 @@ class Domain(Generic_Domain):
         assert isinstance(q, dict)
         self.quantities_to_be_stored = q
 
-    def get_wet_elements(self, indices=None, minimum_height=None):
+    def get_wet_elements(self, indices: list[int] | num.ndarray | None = None,
+                         minimum_height: float | None = None) -> num.ndarray:
         """Return indices for elements where h > minimum_allowed_height
 
         Optional argument:
@@ -1700,7 +2168,84 @@ class Domain(Generic_Domain):
                                    num.arange(len(depth)))
         return wet_indices
 
-    def get_maximum_inundation_elevation(self, indices=None, minimum_height=None):
+    def load_balance_statistics(self, minimum_height: float | None = None) -> dict:
+        """Return load balance statistics for this domain (single-rank version).
+
+        For a parallel domain use :meth:`Parallel_domain.load_balance_statistics`
+        which gathers across all MPI ranks via Allgather.  This serial version
+        returns a dict with length-1 arrays so the interface is identical.
+
+        Parameters
+        ----------
+        minimum_height : float, optional
+            Depth threshold for "wet" classification.  Defaults to
+            ``anuga.config.minimum_allowed_height``.
+
+        Returns
+        -------
+        dict
+            Keys and shapes are the same as the parallel version::
+
+                n_full           int[1]   total triangle count
+                n_ghost          int[1]   0 (no ghost triangles in serial)
+                n_wet_full       int[1]   wet triangle count
+                wet_fraction     float[1] n_wet_full / n_full
+                ghost_fraction   float[1] 0.0
+                wall_time        float[1] total wall time since evolve() started
+                comm_time        float[1] 0.0
+                reduce_wait_time float[1] 0.0
+                compute_time     float[1] same as wall_time
+                imbalance_ratio  float    1.0
+                wet_compute_corr float    nan
+        """
+        from time import time as walltime
+        from anuga.config import minimum_allowed_height as default_mah
+
+        if minimum_height is None:
+            minimum_height = default_mah
+
+        n_full = self.get_number_of_triangles()
+        stage_c = self.get_quantity('stage').centroid_values
+        elev_c  = self.get_quantity('elevation').centroid_values
+        n_wet   = int(num.sum((stage_c - elev_c) > minimum_height))
+
+        w_time = walltime() - self.evolve_start_walltime
+
+        return {
+            'n_full':           num.array([n_full], dtype=int),
+            'n_ghost':          num.array([0],      dtype=int),
+            'n_wet_full':       num.array([n_wet],  dtype=int),
+            'wet_fraction':     num.array([n_wet / n_full if n_full > 0 else 0.0]),
+            'ghost_fraction':   num.array([0.0]),
+            'wall_time':        num.array([w_time]),
+            'comm_time':        num.array([0.0]),
+            'reduce_wait_time': num.array([0.0]),
+            'compute_time':     num.array([w_time]),
+            'imbalance_ratio':  1.0,
+            'wet_compute_corr': float('nan'),
+        }
+
+    def print_load_balance_statistics(self, minimum_height: float | None = None) -> None:
+        """Print a load balance summary to stdout.
+
+        For a single-process domain this just reports wet fraction and
+        triangle count.  The parallel override prints a per-rank table.
+
+        Parameters
+        ----------
+        minimum_height : float, optional
+            Passed through to :meth:`load_balance_statistics`.
+        """
+        stats = self.load_balance_statistics(minimum_height=minimum_height)
+        n      = stats['n_full'][0]
+        n_wet  = stats['n_wet_full'][0]
+        wf     = stats['wet_fraction'][0]
+        w_time = stats['wall_time'][0]
+        print(f"Load balance: triangles={n}, wet={n_wet} ({100*wf:.1f}%), "
+              f"wall_time={w_time:.3f}s")
+
+    def get_maximum_inundation_elevation(self, indices: list[int] | num.ndarray | None = None,
+                                         minimum_height: float | None = None) -> float:
         """Return highest elevation where h > 0
 
         Optional argument:
@@ -1716,7 +2261,7 @@ class Domain(Generic_Domain):
         return self.get_quantity('elevation').\
                    get_maximum_value(indices=wet_elements)
 
-    def get_maximum_inundation_location(self, indices=None):
+    def get_maximum_inundation_location(self, indices: list[int] | num.ndarray | None = None) -> tuple[float, float]:
         """Return location of highest elevation where h > 0
 
         Optional argument:
@@ -1732,22 +2277,92 @@ class Domain(Generic_Domain):
         return self.get_quantity('elevation').\
                    get_maximum_location(indices=wet_elements)
 
+    def get_global_wet_element_count(self, indices: list[int] | num.ndarray | None = None,
+                                     minimum_height: float | None = None) -> int:
+        """Return total number of wet elements across all MPI ranks.
 
-    def get_water_volume(self):
+        Optional arguments:
+            indices: set of element ids that the operation applies to
+            minimum_height: threshold for considering an element wet
+
+        Usage:
+            count = get_global_wet_element_count()
+
+        Note: This performs MPI reduction, so all ranks get the same result.
+        """
+        from anuga import numprocs
+
+        wet_indices = self.get_wet_elements(indices, minimum_height)
+        local_count = len(wet_indices)
+
+        if numprocs == 1:
+            return local_count
+
+        from mpi4py import MPI
+        global_count = MPI.COMM_WORLD.allreduce(local_count, op=MPI.SUM)
+        return global_count
+
+    def get_global_max_stage(self, indices: list[int] | num.ndarray | None = None) -> float:
+        """Return maximum stage value across all MPI ranks.
+
+        Optional argument:
+            indices: set of element ids that the operation applies to
+
+        Usage:
+            max_stage = get_global_max_stage()
+
+        Note: This performs MPI reduction, so all ranks get the same result.
+        """
+        from anuga import numprocs
+
+        stage = self.get_quantity('stage')
+        local_max = stage.get_maximum_value(indices)
+
+        if numprocs == 1:
+            return local_max
+
+        from mpi4py import MPI
+        global_max = MPI.COMM_WORLD.allreduce(local_max, op=MPI.MAX)
+        return global_max
+
+    def get_global_max_speed(self) -> float:
+        """Return maximum speed across all MPI ranks.
+
+        Usage:
+            max_speed = get_global_max_speed()
+
+        Note: This performs MPI reduction, so all ranks get the same result.
+        """
+        from anuga import numprocs
+        import numpy as num
+
+        if self.max_speed is None:
+            return 0.0
+
+        local_max = num.max(self.max_speed)
+
+        if numprocs == 1:
+            return local_max
+
+        from mpi4py import MPI
+        global_max = MPI.COMM_WORLD.allreduce(local_max, op=MPI.MAX)
+        return global_max
+
+    def get_water_volume(self) -> float:
 
         from anuga import numprocs
 
-        #print self.evolved_called
-
-        if not self.evolved_called:
+        # GPU path: compute volume directly on GPU (avoids expensive D2H sync)
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+            from anuga.shallow_water.sw_domain_gpu_ext import compute_water_volume_gpu
+            volume = compute_water_volume_gpu(self.gpu_interface.gpu_dom)
+        elif not self.evolved_called:
             Stage = self.quantities['stage']
             Elev =  self.quantities['elevation']
             h_c = Stage.centroid_values - Elev.centroid_values
-            #print h_c
             from anuga import Quantity
             Height = Quantity(self)
             Height.set_values(h_c, location='centroids')
-            #print Height.centroid_values
             volume = Height.get_integral()
         elif self.get_using_discontinuous_elevation():
             Height = self.quantities['height']
@@ -1762,29 +2377,14 @@ class Domain(Generic_Domain):
             self.volume_history.append(volume)
             return volume
 
-        # isolated parallel code
-        from anuga import myid, send, receive, barrier
-
-        if myid == 0:
-            water_volume = volume
-            for i in range(1,numprocs):
-                remote_volume = receive(i)
-                water_volume = water_volume + remote_volume
-        else:
-            send(volume,0)
-
-        #barrier()
-
-        if myid == 0:
-            for i in range(1,numprocs):
-                send(water_volume,i)
-        else:
-            water_volume = receive(0)
+        # Use MPI_Allreduce instead of manual gather-broadcast
+        from mpi4py import MPI
+        water_volume = MPI.COMM_WORLD.allreduce(volume, op=MPI.SUM)
 
         self.volume_history.append(water_volume)
         return water_volume
 
-    def get_boundary_flux_integral(self):
+    def get_boundary_flux_integral(self) -> float:
         """Compute the boundary flux integral.
 
         Should work in parallel
@@ -1802,27 +2402,13 @@ class Domain(Generic_Domain):
         if numprocs == 1:
             return flux_integral
 
-        # isolate parallel code
-        from anuga import myid, send, receive, barrier
-
-        if myid == 0:
-            for i in range(1,numprocs):
-                remote_flux_integral = receive(i)
-                flux_integral = flux_integral + remote_flux_integral
-        else:
-            send(flux_integral,0)
-
-        #barrier()
-
-        if myid == 0:
-            for i in range(1,numprocs):
-                send(flux_integral,i)
-        else:
-            flux_integral = receive(0)
+        # Use MPI_Allreduce instead of manual gather-broadcast
+        from mpi4py import MPI
+        flux_integral = MPI.COMM_WORLD.allreduce(flux_integral, op=MPI.SUM)
 
         return flux_integral
 
-    def get_fractional_step_volume_integral(self):
+    def get_fractional_step_volume_integral(self) -> float:
         """Compute the integrated flows from fractional steps.
 
         This requires that the fractional step operators update the fractional_step_volume_integral.
@@ -1837,27 +2423,13 @@ class Domain(Generic_Domain):
         if numprocs == 1:
             return flux_integral
 
-        # isolate parallel code
-        from anuga import myid, send, receive, barrier
-
-        if myid == 0:
-            for i in range(1,numprocs):
-                remote_flux_integral = receive(i)
-                flux_integral = flux_integral + remote_flux_integral
-        else:
-            send(flux_integral,0)
-
-        #barrier()
-
-        if myid == 0:
-            for i in range(1,numprocs):
-                send(flux_integral,i)
-        else:
-            flux_integral = receive(0)
+        # Use MPI_Allreduce instead of manual gather-broadcast
+        from mpi4py import MPI
+        flux_integral = MPI.COMM_WORLD.allreduce(flux_integral, op=MPI.SUM)
 
         return flux_integral
 
-    def get_flow_through_cross_section(self, polyline, verbose=False):
+    def get_flow_through_cross_section(self, polyline: ArrayLike, verbose: bool = False) -> float:
         """Get the total flow through an arbitrary poly line.
 
         This is a run-time equivalent of the function with same name
@@ -1879,9 +2451,9 @@ class Domain(Generic_Domain):
         return cross_section.get_flow_through_cross_section()
 
 
-    def get_energy_through_cross_section(self, polyline,
-                                         kind='total',
-                                         verbose=False):
+    def get_energy_through_cross_section(self, polyline: ArrayLike,
+                                         kind: str = 'total',
+                                         verbose: bool = False) -> float:
         """Obtain average energy head [m] across specified cross section.
 
         Inputs:
@@ -1913,7 +2485,7 @@ class Domain(Generic_Domain):
         return cross_section.get_energy_through_cross_section(kind)
 
 
-    def check_integrity(self):
+    def check_integrity(self) -> None:
         """ Run integrity checks on shallow water domain. """
         Generic_Domain.check_integrity(self)
 
@@ -1925,14 +2497,6 @@ class Domain(Generic_Domain):
         msg = 'Third conserved quantity must be "ymomentum"'
         assert self.conserved_quantities[2] == 'ymomentum', msg
 
-
-    #@profile
-    def extrapolate_second_order_sw(self):
-        """Fast version of extrapolation from centroids to edges"""
-
-        # FIXME (Ole): This might be an obsolute function (it was migrated from from the old c extension)
-        from .sw_domain_orig_ext import extrapolate_second_order_sw
-        extrapolate_second_order_sw(self)
 
     #@profile
     def compute_fluxes(self):
@@ -1961,6 +2525,7 @@ class Domain(Generic_Domain):
         # procedure
 
         nvtxRangePush("compute_fluxes")
+        self._ensure_gpu_interface()
         # Choose the correct extension module
         if self.multiprocessor_mode == MULTIPROCESSOR_OPENMP:
             from .sw_domain_openmp_ext import compute_fluxes_ext_central
@@ -1988,16 +2553,144 @@ class Domain(Generic_Domain):
         """
 
         nvtxRangePush('update_boundary')
-        for tag in self.tag_boundary_cells:
-            B = self.boundary_map[tag]
 
-            if B is None:
-                continue
+        # GPU mode - use GPU boundary functions if all boundaries are GPU-supported
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+            from anuga.shallow_water.sw_domain_gpu_ext import (
+                evaluate_reflective_boundary_gpu,
+                evaluate_dirichlet_boundary_gpu,
+                evaluate_transmissive_boundary_gpu,
+                set_transmissive_n_zero_t_stage,
+                evaluate_transmissive_n_zero_t_boundary_gpu,
+                set_time_boundary_values,
+                evaluate_time_boundary_gpu,
+                set_file_boundary_values_from_domain,
+                evaluate_file_boundary_gpu,
+                set_absorbing_wave_value,
+                evaluate_absorbing_wave_boundary_gpu,
+                set_characteristic_wave_value,
+                evaluate_characteristic_wave_boundary_gpu,
+                set_flather_value,
+                evaluate_flather_boundary_gpu,
+                boundary_edge_sync,
+                sync_boundary_values,
+                init_boundary_edge_sync,
+            )
+            import numpy as np
+            gpu_dom = self.gpu_interface.gpu_dom
 
-            boundary_segment_edges = self.tag_boundary_cells[tag]
+            # Lazily initialize GPU boundary info
+            GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
+                                  'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
+                                  'Time_boundary', 'File_boundary', 'Field_boundary',
+                                  'Absorbing_wave_boundary', 'Characteristic_wave_boundary',
+                                  'Flather_external_stage_zero_velocity_boundary'}
 
-            B.evaluate_segment(self, boundary_segment_edges)
-        
+            if not hasattr(self, '_gpu_boundary_info_initialized'):
+                self._gpu_cpu_tags = []
+                self._gpu_all_on_gpu = True
+                self._gpu_transmissive_n_zero_t_boundaries = []
+                self._gpu_time_boundaries = []
+                self._gpu_absorbing_wave_boundaries = []
+                self._gpu_characteristic_wave_boundaries = []
+                self._gpu_flather_boundaries = []
+
+                for tag, B in self.boundary_map.items():
+                    if B is not None:
+                        btype = B.__class__.__name__
+                        if btype not in GPU_BOUNDARY_TYPES:
+                            self._gpu_cpu_tags.append(tag)
+                            self._gpu_all_on_gpu = False
+                        elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
+                            self._gpu_transmissive_n_zero_t_boundaries.append(B)
+                        elif btype == 'Time_boundary':
+                            self._gpu_time_boundaries.append(B)
+                        elif btype == 'Absorbing_wave_boundary':
+                            self._gpu_absorbing_wave_boundaries.append(B)
+                        elif btype == 'Characteristic_wave_boundary':
+                            self._gpu_characteristic_wave_boundaries.append(B)
+                        elif btype == 'Flather_external_stage_zero_velocity_boundary':
+                            self._gpu_flather_boundaries.append(B)
+
+                # Set up boundary edge sync if we have ANY CPU-evaluated boundaries
+                if not self._gpu_all_on_gpu:
+                    boundary_cell_ids = np.unique(self.boundary_cells).astype(np.intc)
+                    init_boundary_edge_sync(gpu_dom, boundary_cell_ids)
+
+                self._gpu_boundary_info_initialized = True
+
+            if self._gpu_all_on_gpu:
+                # All boundaries are GPU-supported - evaluate entirely on GPU
+                evaluate_reflective_boundary_gpu(gpu_dom)
+                evaluate_dirichlet_boundary_gpu(gpu_dom)
+                evaluate_transmissive_boundary_gpu(gpu_dom)
+
+                # Handle transmissive_n_zero_t boundaries (need Python function call for stage)
+                for B in self._gpu_transmissive_n_zero_t_boundaries:
+                    stage_val = B.get_boundary_values()
+                    try:
+                        stage_val = float(stage_val)
+                    except (TypeError, ValueError):
+                        stage_val = float(stage_val[0])
+                    set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
+                evaluate_transmissive_n_zero_t_boundary_gpu(gpu_dom)
+
+                # Handle Time_boundary (need Python function call for values)
+                self._push_gpu_time_boundary_values(gpu_dom)
+                evaluate_time_boundary_gpu(gpu_dom)
+
+                # Handle File_boundary / Field_boundary (per-edge values from SWW interpolation)
+                set_file_boundary_values_from_domain(gpu_dom, self)
+                evaluate_file_boundary_gpu(gpu_dom)
+
+                # Handle Absorbing_wave_boundary (scalar wave stage updated each timestep)
+                for B in self._gpu_absorbing_wave_boundaries:
+                    value = B.get_boundary_values()
+                    try:
+                        wave_val = float(value)
+                    except (TypeError, ValueError):
+                        wave_val = float(value[0])
+                    set_absorbing_wave_value(gpu_dom, wave_val)
+                evaluate_absorbing_wave_boundary_gpu(gpu_dom)
+
+                # Handle Characteristic_wave_boundary (scalar perturbation updated each timestep)
+                for B in self._gpu_characteristic_wave_boundaries:
+                    value = B.get_boundary_values()
+                    try:
+                        perturb = float(value)
+                    except (TypeError, ValueError):
+                        perturb = float(value[0])
+                    set_characteristic_wave_value(gpu_dom, perturb)
+                evaluate_characteristic_wave_boundary_gpu(gpu_dom)
+
+                for B in self._gpu_flather_boundaries:
+                    value = B.get_boundary_values()
+                    try:
+                        stage_val = float(value)
+                    except (TypeError, ValueError):
+                        stage_val = float(value[0])
+                    set_flather_value(gpu_dom, stage_val)
+                evaluate_flather_boundary_gpu(gpu_dom)
+            else:
+                # Some boundaries need CPU - sync edge values, evaluate on CPU, sync back
+                boundary_edge_sync(gpu_dom)
+                for tag in self.tag_boundary_cells:
+                    B = self.boundary_map[tag]
+                    if B is not None:
+                        B.evaluate_segment(self, self.tag_boundary_cells[tag])
+                sync_boundary_values(gpu_dom)
+        else:
+            # CPU mode - evaluate boundaries on CPU
+            for tag in self.tag_boundary_cells:
+                B = self.boundary_map[tag]
+
+                if B is None:
+                    continue
+
+                boundary_segment_edges = self.tag_boundary_cells[tag]
+
+                B.evaluate_segment(self, boundary_segment_edges)
+
         nvtxRangePop()
 
 
@@ -2006,22 +2699,145 @@ class Domain(Generic_Domain):
         they should be defined in Domain subclass and appended to
         the list self.forcing_terms
         """
-    
+
         # The parameter self.flux_timestep should be updated
         # by the forcing_terms to ensure stability but it isn't
         # currently.
 
         nvtxRangePush('compute_forcing_terms')
 
-        for f in self.forcing_terms:
-            f(self)
+        self._ensure_gpu_interface()
+
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU:
+            # GPU mode: use GPU Manning friction, fall back to CPU for others.
+            # Forcing terms may be plain functions (with __name__) or callable
+            # operator objects (Rainfall, Wind_stress, ...) which have none.
+            for f in self.forcing_terms:
+                if getattr(f, '__name__', None) == 'manning_friction_semi_implicit':
+                    self.gpu_interface.manning_friction_kernel(self)
+                else:
+                    # Other forcing terms (rain, etc.) run on CPU
+                    # Need to sync from device, run, sync back
+                    self.gpu_interface.sync_from_device()
+                    f(self)
+                    self.gpu_interface.sync_to_device()
+        else:
+            for f in self.forcing_terms:
+                f(self)
 
         nvtxRangePop()
+
+    def _warn_unsupported_mode2_forcing(self):
+        """Warn (once) if forcing terms other than Manning friction are present
+        in mode 2.
+
+        The mode-2 C step loop applies forcing in C and only handles Manning
+        friction, so Python ``forcing_terms`` (e.g. the Rainfall / Wind_stress /
+        Barometric_pressure forcing-function classes) are NOT applied — they are
+        silently skipped. Use the equivalent operators instead. This converts
+        that silent correctness gap into a loud, actionable message.
+        """
+        if getattr(self, '_warned_mode2_forcing', False):
+            return
+        self._warned_mode2_forcing = True
+        ignored = [getattr(f, '__name__', None) or f.__class__.__name__
+                   for f in self.forcing_terms
+                   if getattr(f, '__name__', None) != 'manning_friction_semi_implicit']
+        if ignored:
+            import warnings
+            warnings.warn(
+                "multiprocessor_mode=2 ('unified') applies forcing in C and only "
+                "handles Manning friction; these Python forcing terms are NOT "
+                f"applied and are silently skipped: {ignored}. Use the equivalent "
+                "operators instead — Rate_operator.rainfall()/inflow(), "
+                "Wind_stress_operator, Barometric_pressure_operator.",
+                stacklevel=2)
+
+    def _warn_mode2_degenerate_protection(self):
+        """Warn (once) that mode 2 does not run the degenerate-timestep protection.
+
+        `apply_protection_against_isolated_degenerate_timesteps()` damps the
+        momentum of triangles whose timestep is anomalously small. It is reached
+        only from `update_timestep()`, and mode 2 ('unified') never gets there:
+        the C step loops return before it, and the Python-orchestrated GPU loops
+        that do call it find a host `max_speed` that the device never syncs back
+        (the flux kernel writes the device copy), so the routine's own
+        `max(max_speed) < 10` guard returns immediately.
+
+        The feature is default-off (`config.protect_against_isolated_degenerate_timesteps`),
+        so the sharp edge is a user who turns it on under GPU offload and gets no
+        protection AND no warning. This makes it visible, as mode 2 already does
+        for unsupported forcing terms.
+        """
+        if getattr(self, '_warned_mode2_degenerate_protection', False):
+            return
+        if not self.protect_against_isolated_degenerate_timesteps:
+            return
+        if self.multiprocessor_mode != MULTIPROCESSOR_GPU:
+            return
+
+        self._warned_mode2_degenerate_protection = True
+        import warnings
+        warnings.warn(
+            "protect_against_isolated_degenerate_timesteps is True, but "
+            "multiprocessor_mode=2 ('unified') does not implement it: no "
+            "isolated-degenerate-triangle damping will be applied. Use "
+            "domain.set_multiprocessor_mode(1) ('legacy') if you need this "
+            "protection.",
+            stacklevel=2)
+
+    def set_boundary(self, boundary_map):
+        """Associate boundary objects with tagged segments (see base class).
+
+        Mode-2 ('unified') captures a device-side boundary classification and
+        the per-edge Dirichlet/Time/File/... mappings when the GPU interface is
+        first built. A later set_boundary() — e.g. switching a tag from
+        Reflective to Dirichlet partway through a simulation — must invalidate
+        those caches, otherwise the stale boundary keeps being applied on the
+        device and the new condition is silently ignored.
+        """
+        super().set_boundary(boundary_map)
+
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+            # Preserve current conserved-quantity state before tearing the
+            # interface down. In CPU-no-offload mode host arrays alias the
+            # device; the sync makes this correct for the offload case too.
+            try:
+                self.gpu_interface.sync_from_device()
+            except Exception:
+                pass
+            self.gpu_interface = None
+            if hasattr(self, '_gpu_boundary_info_initialized'):
+                del self._gpu_boundary_info_initialized
+            # Rebuild immediately from the new boundary map so subsequent
+            # mode-2 steps see a valid interface.
+            self._ensure_gpu_interface()
 
     def distribute_to_vertices_and_edges(self, distribute_to_vertices=True):
         """ extrapolate centroid values to vertices and edges"""
 
         nvtxRangePush('distribute_to_vertices_and_edges')
+
+        # Build a deferred mode-2 device interface on demand (a default-'unified'
+        # domain may reach here, e.g. from a test, without going through evolve()).
+        self._ensure_gpu_interface()
+
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+            # Output path (yieldsteps / direct reads). This method is NOT on the
+            # mode-2 stepping path (the C RK loop extrapolates on the device
+            # itself); it exists to make vertex/edge values readable from Python
+            # (SWW writer, inundation queries, tests). The gpu edge kernel does
+            # NOT compute vertex values, so sync centroids from the device and
+            # run the host (openmp) protect + extrapolate, which produces edges
+            # AND vertices. The host protect does not affect the device
+            # trajectory — the next C step re-protects on the device.
+            self.gpu_interface.sync_from_device()
+            from .sw_domain_openmp_ext import (protect_new,
+                                               extrapolate_second_order_edge_sw)
+            protect_new(self)
+            extrapolate_second_order_edge_sw(self, distribute_to_vertices=distribute_to_vertices)
+            nvtxRangePop()
+            return
 
         # Do protection step
         self.protect_against_infinitesimal_and_negative_heights()
@@ -2030,13 +2846,11 @@ class Domain(Generic_Domain):
         # Choose the correct extension module
         if self.multiprocessor_mode == MULTIPROCESSOR_OPENMP:
             from .sw_domain_openmp_ext import extrapolate_second_order_edge_sw
-        elif self.multiprocessor_mode == MULTIPROCESSOR_GPU:
-            extrapolate_second_order_edge_sw = self.gpu_interface.extrapolate_second_order_edge_sw_kernel
         else:
             raise Exception('Not implemented')
 
         extrapolate_second_order_edge_sw(self, distribute_to_vertices=distribute_to_vertices)
-        
+
         nvtxRangePop()
 
     def distribute_to_edges(self):
@@ -2060,11 +2874,11 @@ class Domain(Generic_Domain):
         else:
             raise Exception('Not implemented')
 
-        nvtxRangePop()        
+        nvtxRangePop()
 
     def distribute_edges_to_vertices(self):
         """Distribute edge values to vertices.
-        
+
         This is a wrapper for the C implementation of the distribution
         from edges to vertices.
         """
@@ -2081,8 +2895,8 @@ class Domain(Generic_Domain):
             # distribute_edges_to_vertices_ext = self.gpu_interface.distribute_edges_to_vertices_kernel
         else:
             raise Exception('Not implemented')
-        
-        
+
+
         distribute_edges_to_vertices_ext(self)
         nvtxRangePop()
 
@@ -2114,11 +2928,11 @@ class Domain(Generic_Domain):
                 % timestep
             msg += 'even after %d steps of 1 order scheme' \
                 % self.max_smallsteps
-            log.critical(msg)
+            log.info(msg)
             timestep = self.evolve_min_timestep  # Try enforce min_step
 
             stats = self.timestepping_statistics(track_speeds=True)
-            log.critical(stats)
+            log.info(stats)
 
             raise Exception(msg)
 
@@ -2132,111 +2946,9 @@ class Domain(Generic_Domain):
         #       recorded_min_timesteps simply because of we have to yield at a
         #       given time
 
-        # Ensure that final time is not exceeded
-        if self.relative_finaltime is not None and self.relative_time + timestep > self.relative_finaltime:
-            timestep = self.relative_finaltime - self.relative_time
-
-        # Ensure that model time is aligned with yieldsteps
-        if self.relative_time + timestep > self.relative_yieldtime:
-            timestep = self.relative_yieldtime - self.relative_time
+        timestep = self._clip_timestep_to_output_times(timestep, yieldstep, finaltime)
 
         self.timestep = timestep
-
-
-    def distribute_using_edge_limiter(self):
-        """Distribution from centroids to edges specific to the SWW eqn.
-
-        It will ensure that h (w-z) is always non-negative even in the
-        presence of steep bed-slopes by taking a weighted average between shallow
-        and deep cases.
-
-        In addition, all conserved quantities get distributed as per either a
-        constant (order==1) or a piecewise linear function (order==2).
-
-
-        Precondition:
-          All quantities defined at centroids and bed elevation defined at
-          vertices.
-
-        Postcondition
-          Conserved quantities defined at vertices
-        """
-
-        # Remove very thin layers of water
-        self.protect_against_infinitesimal_and_negative_heights()
-
-        for name in self.conserved_quantities:
-            Q = self.quantities[name]
-            if self._order_ == 1:
-                Q.extrapolate_first_order()
-            elif self._order_ == 2:
-                Q.extrapolate_second_order_and_limit_by_edge()
-            else:
-                raise Exception('Unknown order')
-
-        self.balance_deep_and_shallow()
-
-        # Compute edge values by interpolation
-        for name in self.conserved_quantities:
-            Q = self.quantities[name]
-            Q.interpolate_from_vertices_to_edges()
-
-    def distribute_using_vertex_limiter(self):
-        """Distribution from centroids to vertices specific to the SWW equation.
-
-        It will ensure that h (w-z) is always non-negative even in the
-        presence of steep bed-slopes by taking a weighted average between shallow
-        and deep cases.
-
-        In addition, all conserved quantities get distributed as per either a
-        constant (order==1) or a piecewise linear function (order==2).
-
-        FIXME: more explanation about removal of artificial variability etc
-
-        Precondition:
-          All quantities defined at centroids and bed elevation defined at
-          vertices.
-
-        Postcondition
-          Conserved quantities defined at vertices
-        """
-
-        # Remove very thin layers of water
-        self.protect_against_infinitesimal_and_negative_heights()
-
-        # Extrapolate all conserved quantities
-        if self.optimised_gradient_limiter:
-            # MH090605 if second order,
-            # perform the extrapolation and limiting on
-            # all of the conserved quantities
-
-            if (self._order_ == 1):
-                for name in self.conserved_quantities:
-                    Q = self.quantities[name]
-                    Q.extrapolate_first_order()
-            elif self._order_ == 2:
-                self.extrapolate_second_order_sw()
-            else:
-                raise Exception('Unknown order')
-        else:
-            # Old code:
-            for name in self.conserved_quantities:
-                Q = self.quantities[name]
-
-                if self._order_ == 1:
-                    Q.extrapolate_first_order()
-                elif self._order_ == 2:
-                    Q.extrapolate_second_order_and_limit_by_vertex()
-                else:
-                    raise Exception('Unknown order')
-
-        # Take bed elevation into account when water heights are small
-        self.balance_deep_and_shallow()
-
-        # Compute edge values by interpolation
-        for name in self.conserved_quantities:
-            Q = self.quantities[name]
-            Q.interpolate_from_vertices_to_edges()
 
 
     def protect_against_infinitesimal_and_negative_heights(self):
@@ -2265,48 +2977,18 @@ class Domain(Generic_Domain):
             print('Cumulative mass protection: {0} m^3'.format(mass_error))
 
 
-    def balance_deep_and_shallow(self):
-        """Compute linear combination between stage as computed by
-        gradient-limiters limiting using w, and stage computed by
-        gradient-limiters limiting using h (h-limiter).
-
-        The former takes precedence when heights are large compared to the
-        bed slope while the latter takes precedence when heights are
-        relatively small.  Anything in between is computed as a balanced
-        linear combination in order to avoid numerical disturbances which
-        would otherwise appear as a result of hard switching between
-        modes.
-
-        Wrapper for C implementation
-        """
-
-        from .sw_domain_orig_ext import balance_deep_and_shallow \
-            as balance_deep_and_shallow_ext
-
-        # Shortcuts
-        wc = self.quantities['stage'].centroid_values
-        zc = self.quantities['elevation'].centroid_values
-        wv = self.quantities['stage'].vertex_values
-        zv = self.quantities['elevation'].vertex_values
-
-        # Momentums at centroids
-        xmomc = self.quantities['xmomentum'].centroid_values
-        ymomc = self.quantities['ymomentum'].centroid_values
-
-        # Momentums at vertices
-        xmomv = self.quantities['xmomentum'].vertex_values
-        ymomv = self.quantities['ymomentum'].vertex_values
-
-        balance_deep_and_shallow_ext(self,
-                                   wc, zc, wv, zv, wc,
-                                   xmomc, ymomc, xmomv, ymomv)
-
-        nvtxRangePop()
-
-
     def apply_protection_against_isolated_degenerate_timesteps(self):
 
         if self.protect_against_isolated_degenerate_timesteps is False:
+            return
+
+        # Not implemented in mode 2: max_speed is computed on the device and
+        # never synced back, so the histogram below would be built from a stale
+        # host array. Say so and skip, rather than silently damping nothing (or
+        # damping on the strength of stale values) — see
+        # _warn_mode2_degenerate_protection().
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU:
+            self._warn_mode2_degenerate_protection()
             return
 
         # FIXME (Ole): Make this configurable
@@ -2349,24 +3031,59 @@ class Domain(Generic_Domain):
 
         timestep = self.timestep
 
-        # Update height based on discontinuous elevation 
+        # Update height based on discontinuous elevation
         assert self.get_using_discontinuous_elevation()
 
-        if self.multiprocessor_mode == MULTIPROCESSOR_OPENMP:  
+        # Build (or defer to legacy) the mode-2 device interface, matching the
+        # other mode-2 entry points. A direct call outside evolve() on a
+        # default-'unified' domain would otherwise hit a None gpu_interface.
+        self._ensure_gpu_interface()
+
+        if self.multiprocessor_mode == MULTIPROCESSOR_OPENMP:
             from .sw_domain_openmp_ext import update_conserved_quantities
         elif self.multiprocessor_mode == MULTIPROCESSOR_GPU:
             update_conserved_quantities = self.gpu_interface.update_conserved_quantities_kernel
         else:
             raise Exception('Not implemented')
 
-        num_negative_ids = update_conserved_quantities(self, timestep)
+        num_negative_ids, negative_volume = update_conserved_quantities(self, timestep)
 
-        if num_negative_ids > 0:
-            # FIXME: This only warns the first time -- maybe we should warn whenever loss occurs?
-            import warnings
-            msg = f'{num_negative_ids} negative cells being set to zero depth, possible loss of conservation. \n' +\
-            'Consider using domain.report_water_volume_statistics() to check the extent of the problem'
-            warnings.warn(msg)
+        # Clamping negative-depth cells to zero depth adds water (a conservation
+        # error). A few cells clamped by a near-zero depth is normal in
+        # wetting/drying and involves negligible volume, so warn on the *volume*
+        # added rather than the cell count: only when it is a large enough fraction
+        # of the total water volume (threshold via
+        # set_negative_volume_warning_fraction; 0.0 warns on any added volume).
+        # The absolute floor rejects pure floating-point noise.
+        #
+        # SERIAL ONLY. "Loss of conservation" is a GLOBAL property, so the ratio
+        # must use the whole-domain volume. In parallel this rank sees only its
+        # partition: a nearly-dry sub-domain holds femtolitre-scale noise, so a
+        # local ratio warns spuriously. Getting the global volume would need a
+        # per-substep collective inside this hot function, which is not viable —
+        # update_conserved_quantities is not called in guaranteed lock-step
+        # across ranks (structure operators, euler vs rk2, small/empty
+        # partitions), so any collective here deadlocks (two separate hangs were
+        # traced to exactly this). In parallel, use the periodic global
+        # report_water_volume_statistics() (e.g. the TOML runner's per-yieldstep
+        # water balance) to check conservation instead.
+        from anuga import numprocs
+        if numprocs == 1 and num_negative_ids > 0 \
+                and negative_volume > _negative_volume_noise_floor:
+            total_volume = self.get_water_volume()
+            if total_volume > 0.0 and \
+                    negative_volume > self.negative_volume_warning_fraction * total_volume:
+                import warnings
+                fraction = negative_volume / total_volume
+                msg = (
+                    f'{num_negative_ids} negative cells set to zero depth, adding '
+                    f'{negative_volume:.3g} m^3 ({100.0 * fraction:.3g}% of the '
+                    f'{total_volume:.3g} m^3 in the domain): possible loss of '
+                    'conservation. \nConsider using '
+                    'domain.report_water_volume_statistics() to check the extent '
+                    'of the problem'
+                )
+                warnings.warn(msg)
 
         nvtxRangePop()
 
@@ -2467,9 +3184,9 @@ class Domain(Generic_Domain):
         """
         Calculate the centroid value of x and y momentum from height and velocities.
 
-        This method computes the centroid values of x and y momentum (xmomentum and 
+        This method computes the centroid values of x and y momentum (xmomentum and
         ymomentum) by multiplying the centroid velocities by the centroid height values.
-        The method assumes that the centroids of height and velocities are already 
+        The method assumes that the centroids of height and velocities are already
         up to date.
 
         This is particularly useful for kinematic viscosity calculations where momentum
@@ -2479,12 +3196,12 @@ class Domain(Generic_Domain):
         - xmomentum.centroid_values: product of xvelocity and height at centroids
         - ymomentum.centroid_values: product of yvelocity and height at centroids
 
-        After updating centroid values, the method distributes these values to vertices 
+        After updating centroid values, the method distributes these values to vertices
         and edges via distribute_to_vertices_and_edges().
 
         Notes
         -----
-        This method modifies the centroid_values arrays in-place for both xmomentum 
+        This method modifies the centroid_values arrays in-place for both xmomentum
         and ymomentum quantities.
 
         See Also
@@ -2524,14 +3241,14 @@ class Domain(Generic_Domain):
         self.distribute_to_vertices_and_edges()
 
 
-    
+
 
     def evolve(self,
-               yieldstep=None,
-               outputstep=None,
-               finaltime=None,
-               duration=None,
-               skip_initial_step=False):
+               yieldstep: float | None = None,
+               outputstep: float | None = None,
+               finaltime: float | DateTime | None = None,
+               duration: float | None = None,
+               skip_initial_step: bool = False) -> Iterator[float]:
         """Evolve method from Domain class.
 
         Parameters
@@ -2539,7 +3256,7 @@ class Domain(Generic_Domain):
         yieldstep : float, optional
             Yield every yieldstep time period
         outputstep : float, optional
-            Output to sww file every outputstep time period. outputstep should be 
+            Output to sww file every outputstep time period. outputstep should be
             an integer multiple of yieldstep.
         finaltime : float or datetime, optional
             Evolve until finaltime (can be a float in seconds or a datetime object)
@@ -2586,6 +3303,12 @@ class Domain(Generic_Domain):
         msg = 'Attribute self.beta_w must be in the interval [0, 2]'
         assert 0 <= self.beta_w <= 2.0, msg
 
+        # Build the mode-2 device interface lazily if it was deferred (a
+        # default-'unified' domain constructed before boundaries were set). Must
+        # happen before distribute_to_vertices_and_edges(), which uses the
+        # interface in mode 2.
+        self._ensure_gpu_interface()
+
         # Initial update of vertex and edge values before any STORAGE
         # and or visualisation.
         # This is done again in the initialisation of the Generic_Domain
@@ -2596,8 +3319,19 @@ class Domain(Generic_Domain):
         if self.store is True and (self.get_relative_time() == 0.0 or self.evolved_called is False):
             self.initialise_storage()
 
-        
-    
+        # Eagerly run the mode-2 fractional-step setup (Boyd culvert registration
+        # and CPU-only-operator detection) so its log lines print before the first
+        # yielded step instead of after the t=0 yield. Cached, so the first
+        # apply_fractional_steps() does not repeat it.
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+            self._has_cpu_only_fractional_operators()
+            self._warn_unsupported_mode2_forcing()
+            self._warn_mode2_degenerate_protection()
+
+        # Any riverwall change made before evolve() (or between two evolve()
+        # calls) reaches the device here, before the first step.
+        self._sync_riverwall_to_device()
+
         #nvtx marker
         nvtxRangePush('_evolve_base')
 
@@ -2643,18 +3377,39 @@ class Domain(Generic_Domain):
             # Pass control on to outer loop for more specific actions
             yield(t)
 
+            # The outer loop may have operated a riverwall (set_elevation() and
+            # friends). In mode 2 the device copy is stale until pushed; do it
+            # here so the change takes effect from the next timestep on.
+            self._sync_riverwall_to_device()
+
             self.yieldstep_counter += 1
 
         #nvtx marker
         nvtxRangePop()
 
 
-    def initialise_storage(self):
+    def initialise_storage(self) -> None:
         """Create and initialise self.writer object for storing data.
         Also, save x,y and bed elevation
         """
 
         nvtxRangePush('SWW_file')
+
+        # Erosion operators promote elevation to time-varying storage when they
+        # are created. If it has since been reset to static (flag != 2), the
+        # eroded bed will not be recorded — warn. Skip when the user
+        # deliberately chose static (they were already told; e.g. the TOML
+        # scenario warns at parse time).
+        if getattr(self, '_erosion_present', False) \
+                and self.quantities_to_be_stored.get('elevation') != 2 \
+                and not getattr(self, '_elevation_static_by_user', False):
+            import warnings
+            warnings.warn(
+                'An erosion operator is active but elevation is stored '
+                'statically, so the eroded bed will not appear in the SWW '
+                "output. Set domain.quantities_to_be_stored['elevation'] = 2 "
+                'to store it time-varying.',
+                stacklevel=2)
 
         # Initialise writer
         self.writer = SWW_file(self)
@@ -2665,7 +3420,7 @@ class Domain(Generic_Domain):
         nvtxRangePop()
 
 
-    def store_timestep(self):
+    def store_timestep(self) -> None:
         """Store time dependent quantities and time.
 
         Precondition:
@@ -2677,7 +3432,7 @@ class Domain(Generic_Domain):
         nvtxRangePop()
 
 
-    def sww_merge(self,  *args, **kwargs):
+    def sww_merge(self, *args, **kwargs) -> None:
         """Dummy function for sequential algorithms where the sww produced is the final products.
 
         For parallel runs, a similarly named routine in parallel_shallow_water will merge all the
@@ -2692,6 +3447,70 @@ class Domain(Generic_Domain):
         pass
 
 
+    # Boundary types whose values are produced by a Python callback each step
+    # (Time/File/Field, transmissive-set-stage, and the wave/Flather boundaries).
+    # The single-call C RK loop (_evolve_one_rk*_step_c) sets these on the device
+    # once per step, so with a multi-substep method (RK2/RK3) they are NOT
+    # refreshed between substeps — unlike the legacy (mode-1) solver, which calls
+    # update_boundary() before every substep. For time-varying boundaries this
+    # gives an O(dt) boundary-forcing error (see issue #170). Until the
+    # C RK loop evaluates them per substep, domains using such boundaries are
+    # routed through the Python-orchestrated GPU loop, which refreshes them each
+    # substep and so bit-matches mode-1 (at negligible GPU cost, ~<=4%).
+    _PYTHON_EVALUATED_GPU_BOUNDARY_TYPES = frozenset((
+        'Time_boundary', 'File_boundary', 'Field_boundary',
+        'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
+        'Absorbing_wave_boundary', 'Characteristic_wave_boundary',
+        'Flather_external_stage_zero_velocity_boundary',
+    ))
+
+    def _has_python_evaluated_gpu_boundaries(self):
+        """True if any boundary's value is set from a Python callback each step.
+
+        Single-substep methods (Euler, ADER2) are unaffected — they impose the
+        boundary once per step in both paths — so this is only consulted by the
+        multi-substep RK2/RK3 dispatch.
+        """
+        bmap = getattr(self, 'boundary_map', None) or {}
+        return any(
+            B is not None
+            and B.__class__.__name__ in self._PYTHON_EVALUATED_GPU_BOUNDARY_TYPES
+            for B in bmap.values()
+        )
+
+
+
+    def _push_gpu_time_boundary_values(self, gpu_dom):
+        """Push per-edge Time_boundary values to the device (mode 2).
+
+        Each Time_boundary object carries one spatially-uniform [stage, xmom,
+        ymom] from its time function. The edges of all Time_boundary tags are
+        concatenated in boundary_map order (matching init_time_boundary in the
+        GPU extension), so a single per-edge array addresses every time-boundary
+        edge and multiple Time_boundary objects with different values no longer
+        clobber one another (previously a single global scalar was shared).
+        """
+        import numpy as num
+        from anuga.shallow_water.sw_domain_gpu_ext import set_time_boundary_values
+        stage_vals = []
+        xmom_vals = []
+        ymom_vals = []
+        for tag, B in self.boundary_map.items():
+            if B is not None and B.__class__.__name__ == 'Time_boundary':
+                edges = self.tag_boundary_cells.get(tag, None)
+                if edges is None or len(edges) == 0:
+                    continue
+                ne = len(edges)
+                q = B.get_boundary_values()
+                stage_vals.extend([float(q[0])] * ne)
+                xmom_vals.extend([float(q[1])] * ne)
+                ymom_vals.extend([float(q[2])] * ne)
+        if stage_vals:
+            set_time_boundary_values(
+                gpu_dom,
+                num.ascontiguousarray(stage_vals, dtype=float),
+                num.ascontiguousarray(xmom_vals, dtype=float),
+                num.ascontiguousarray(ymom_vals, dtype=float))
     def evolve_one_euler_step(self, yieldstep, finaltime):
         """One Euler Time Step
         Q^{n+1} = E(h) Q^n
@@ -2699,6 +3518,11 @@ class Domain(Generic_Domain):
         Does not assume that centroid values have been extrapolated to
         vertices and edges
         """
+
+        # GPU mode: dispatch to C Euler loop (eliminates Python round-trip overhead)
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+            self._evolve_one_euler_step_c(yieldstep, finaltime)
+            return
 
         # From centroid values calculate edge
         self.distribute_to_vertices_and_edges(distribute_to_vertices=False)
@@ -2728,18 +3552,37 @@ class Domain(Generic_Domain):
         vertices and edges
         """
 
+        # GPU mode: use C RK loop (faster) or Python-orchestrated GPU loop.
+        # Fall back to the Python-orchestrated loop when a Python-evaluated
+        # (possibly time-varying) boundary is present, so it is refreshed every
+        # substep and matches mode-1 (the C RK loop only sets it once per step).
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+            if self.use_c_rk_loop and not self._has_python_evaluated_gpu_boundaries():
+                self._evolve_one_rk2_step_c(yieldstep, finaltime)
+            else:
+                self._evolve_one_rk2_step_gpu(yieldstep, finaltime)
+            return
+
+        # Fractional-step operators (applied by the evolve loop *after* this step,
+        # before it advances relative_time to t+dt) must see the pre-step time t —
+        # consistent with DE0/DE2/DE_ader2 and the mode-2 GPU loops. The mid-step
+        # set_relative_time() below advances time to t+dt for the substep-2
+        # boundary evaluation, so capture t here and restore it at the end;
+        # otherwise time-varying operators evaluate forcing "one step too far".
+        initial_relative_time = self.get_relative_time()
+
         # Save initial initial conserved quantities values
-        self.backup_conserved_quantities()
+        self.backup_conserved_quantities() # has C, ported to GPU
 
         #==========================================
         # First euler step
         #==========================================
 
         # From centroid values calculate edge values
-        self.distribute_to_vertices_and_edges(distribute_to_vertices=False)
+        self.distribute_to_vertices_and_edges(distribute_to_vertices=False) # has C, ported to GPU
 
         # Apply boundary conditions
-        self.update_boundary()
+        self.update_boundary() # has C, ported to GPU
 
         # Compute fluxes across each element edge
         # In MPI parallel mode this involves an allreduce to find global minimal timestep
@@ -2749,21 +3592,21 @@ class Domain(Generic_Domain):
         self.compute_forcing_terms()
 
         # Update timestep to fit yieldstep and finaltime
-        self.update_timestep(yieldstep, finaltime)
+        self.update_timestep(yieldstep, finaltime) #needs C
 
         # Update centroid values of conserved quantities
-        self.update_conserved_quantities()
+        self.update_conserved_quantities() # has C, ported to GPU
 
         #===========================
         # End of first euler step
         #===========================
 
         # Update time
-        self.set_relative_time(self.get_relative_time() + self.timestep)
+        self.set_relative_time(self.get_relative_time() + self.timestep) # needs C
 
         # Update ghosts
         if self.ghost_layer_width < 4:
-            self.update_ghosts()
+            self.update_ghosts() # needs C
 
         #=========================================
         # Second Euler step using the same timestep
@@ -2794,7 +3637,1325 @@ class Domain(Generic_Domain):
         #========================================
 
         # Combine steps
-        self.saxpy_conserved_quantities(0.5, 0.5)
+        self.saxpy_conserved_quantities(0.5, 0.5) # has C, not ported
+
+        # Restore the pre-step time so fractional-step operators evaluate forcing
+        # at t (not t+dt); the evolve loop advances relative_time to t+dt after
+        # apply_fractional_steps(). Fixes an operator-timing mismatch where DE1
+        # evaluated time-varying operators one step too far, unlike DE0/DE2 and
+        # the mode-2 GPU loops.
+        self.set_relative_time(initial_relative_time)
+
+    def evolve_one_ader2_step(self, yieldstep, finaltime):
+        """One ADER-2 timestep using the local Cauchy-Kovalewski predictor.
+
+        Q^{n+1} = Q^n + dt * R(Q^{n+1/2})
+
+        Uses the fused edge predictor: edge values are shifted to Q^{n+1/2}
+        in-place while centroid values remain at Q^n, eliminating the second
+        extrapolation pass and the backup/saxpy restore pattern.
+
+        Single-flux-call variant: the previous step's CFL timestep is reused
+        for the predictor half-advance.  The first step bootstraps with dt=0
+        (Euler) to establish the initial CFL timestep.
+
+        Cost: 1 flux call + 1 extrapolation + 1 edge C-K predictor (after step 1).
+        Accuracy: 2nd-order in space and time.
+        """
+        # GPU mode: use C loop (faster) or Python-orchestrated GPU loop
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+            if self.use_c_rk_loop:
+                self._evolve_one_ader2_step_c(yieldstep, finaltime)
+            else:
+                self._evolve_one_ader2_step_gpu(yieldstep, finaltime)
+            return
+
+        from .sw_domain_openmp_ext import ader_ck_predictor_edge
+
+        # Bootstrap: prev_dt=0 on first call → Euler step to establish CFL dt
+        if not hasattr(self, '_ader2_prev_dt'):
+            self._ader2_prev_dt = 0.0
+
+        prev_dt = self._ader2_prev_dt
+
+        # Extrapolate Q^n centroids → edges (1 pass; centroids untouched)
+        self.distribute_to_vertices_and_edges(distribute_to_vertices=False)
+        self.update_boundary()
+
+        if prev_dt > 0.0:
+            # Fused edge predictor: shift edge values to Q^{n+1/2}, Q^n in centroids
+            ader_ck_predictor_edge(self, prev_dt * 0.5)
+            # Re-apply boundary conditions to boundary edges
+            self.update_boundary()
+
+        # Single flux call from Q^{n+1/2} edge values (or Q^n on bootstrap step)
+        self.compute_fluxes()
+        self.compute_forcing_terms()
+
+        # Clip to yieldstep / finaltime / evolve_max_timestep.
+        # In MPI parallel mode update_timestep does an Allreduce so that
+        # self.timestep is the global-minimum CFL dt across all ranks.
+        # _ader2_prev_dt must equal the timestep actually taken so that
+        # all ranks use the same predictor half-step next iteration;
+        # saving the local flux_timestep before the Allreduce would give
+        # each rank a different prev_dt, corrupting ghost-boundary edges.
+        self.update_timestep(yieldstep, finaltime)
+
+        # Record the timestep actually taken as prev_dt for the next predictor.
+        self._ader2_prev_dt = self.timestep
+
+        # Q^n centroids are untouched — update directly (no saxpy restore needed)
+        self.update_conserved_quantities()           # Q^{n+1} = Q^n + dt*R(Q^{n+1/2})
+
+    def _evolve_one_ader2_step_gpu(self, yieldstep, finaltime):
+        """Python-orchestrated GPU implementation of ADER-2 step.
+
+        Fallback when the C ADER-2 loop cannot be used (e.g., unsupported
+        boundary types). Prefer _evolve_one_ader2_step_c() for better performance.
+
+        Uses the fused edge predictor with _ader2_prev_dt to match the CPU path
+        exactly (single flux call, no backup/restore of centroid values needed).
+        """
+        from anuga.shallow_water.sw_domain_gpu_ext import (
+            extrapolate_second_order_gpu,
+            protect_gpu,
+            compute_fluxes_gpu,
+            update_conserved_quantities_gpu,
+            ader_ck_predictor_edge_gpu,
+            sync_boundary_values,
+            init_boundary_edge_sync,
+            boundary_edge_sync,
+            exchange_ghosts,
+            evaluate_reflective_boundary_gpu,
+            evaluate_dirichlet_boundary_gpu,
+            evaluate_transmissive_boundary_gpu,
+            set_transmissive_n_zero_t_stage,
+            evaluate_transmissive_n_zero_t_boundary_gpu,
+            set_time_boundary_values,
+            evaluate_time_boundary_gpu,
+            set_file_boundary_values_from_domain,
+            evaluate_file_boundary_gpu,
+            set_absorbing_wave_value,
+            evaluate_absorbing_wave_boundary_gpu,
+            set_characteristic_wave_value,
+            evaluate_characteristic_wave_boundary_gpu,
+            set_flather_value,
+            evaluate_flather_boundary_gpu,
+        )
+        import numpy as np
+
+        gpu_dom = self.gpu_interface.gpu_dom
+
+        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
+                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
+                              'Time_boundary', 'File_boundary', 'Field_boundary',
+                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary',
+                              'Flather_boundary'}
+
+        if not hasattr(self, '_gpu_boundary_info_initialized'):
+            self._gpu_cpu_tags = []
+            self._gpu_all_on_gpu = True
+            cpu_boundary_types = []
+            self._gpu_transmissive_n_zero_t_boundaries = []
+            self._gpu_time_boundaries = []
+            self._gpu_absorbing_wave_boundaries = []
+            self._gpu_characteristic_wave_boundaries = []
+            self._gpu_flather_boundaries = []
+
+            for tag, B in self.boundary_map.items():
+                if B is not None:
+                    btype = B.__class__.__name__
+                    if btype not in GPU_BOUNDARY_TYPES:
+                        self._gpu_cpu_tags.append(tag)
+                        self._gpu_all_on_gpu = False
+                        cpu_boundary_types.append((tag, btype))
+                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
+                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
+                    elif btype == 'Time_boundary':
+                        self._gpu_time_boundaries.append(B)
+                    elif btype == 'Absorbing_wave_boundary':
+                        self._gpu_absorbing_wave_boundaries.append(B)
+                    elif btype == 'Characteristic_wave_boundary':
+                        self._gpu_characteristic_wave_boundaries.append(B)
+                    elif btype == 'Flather_boundary':
+                        self._gpu_flather_boundaries.append(B)
+
+            if not self._gpu_all_on_gpu:
+                boundary_cell_ids = np.unique(self.boundary_cells).astype(np.intc)
+                init_boundary_edge_sync(gpu_dom, boundary_cell_ids)
+                print("WARNING: GPU boundary evaluation disabled - falling back to CPU")
+                print(f"  Unsupported boundary types: {cpu_boundary_types}")
+
+            self._gpu_boundary_info_initialized = True
+
+        # Bootstrap: prev_dt=0 on first call → plain Euler step
+        if not hasattr(self, '_ader2_prev_dt'):
+            self._ader2_prev_dt = 0.0
+        prev_dt = self._ader2_prev_dt
+
+        def _eval_boundaries():
+            if self._gpu_all_on_gpu:
+                evaluate_reflective_boundary_gpu(gpu_dom)
+                evaluate_dirichlet_boundary_gpu(gpu_dom)
+                evaluate_transmissive_boundary_gpu(gpu_dom)
+                for B in self._gpu_transmissive_n_zero_t_boundaries:
+                    stage_val = B.get_boundary_values()
+                    try:
+                        stage_val = float(stage_val)
+                    except (TypeError, ValueError):
+                        stage_val = float(stage_val[0])
+                    set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
+                evaluate_transmissive_n_zero_t_boundary_gpu(gpu_dom)
+                self._push_gpu_time_boundary_values(gpu_dom)
+                evaluate_time_boundary_gpu(gpu_dom)
+                set_file_boundary_values_from_domain(gpu_dom, self)
+                evaluate_file_boundary_gpu(gpu_dom)
+                for B in self._gpu_absorbing_wave_boundaries:
+                    value = B.get_boundary_values()
+                    try:
+                        wave_val = float(value)
+                    except (TypeError, ValueError):
+                        wave_val = float(value[0])
+                    set_absorbing_wave_value(gpu_dom, wave_val)
+                evaluate_absorbing_wave_boundary_gpu(gpu_dom)
+                for B in self._gpu_characteristic_wave_boundaries:
+                    value = B.get_boundary_values()
+                    try:
+                        perturb = float(value)
+                    except (TypeError, ValueError):
+                        perturb = float(value[0])
+                    set_characteristic_wave_value(gpu_dom, perturb)
+                evaluate_characteristic_wave_boundary_gpu(gpu_dom)
+
+                for B in self._gpu_flather_boundaries:
+                    value = B.get_boundary_values()
+                    try:
+                        stage_val = float(value)
+                    except (TypeError, ValueError):
+                        stage_val = float(value[0])
+                    set_flather_value(gpu_dom, stage_val)
+                evaluate_flather_boundary_gpu(gpu_dom)
+            else:
+                boundary_edge_sync(gpu_dom)
+                for tag in self.tag_boundary_cells:
+                    B = self.boundary_map[tag]
+                    if B is not None:
+                        B.evaluate_segment(self, self.tag_boundary_cells[tag])
+                sync_boundary_values(gpu_dom)
+
+        # --- Step 1: extrapolate Q^n → edges + evaluate boundaries ---
+        protect_gpu(gpu_dom)
+        extrapolate_second_order_gpu(gpu_dom)
+        _eval_boundaries()
+
+        if prev_dt > 0.0:
+            # --- Step 2: fused edge C-K predictor → Q^{n+1/2} edges in-place ---
+            # (centroid values unchanged — no backup/restore needed)
+            ader_ck_predictor_edge_gpu(gpu_dom, prev_dt * 0.5)
+            # Re-apply boundaries to boundary edges
+            _eval_boundaries()
+
+        # --- Step 3: single flux call from Q^{n+1/2} edges ---
+        self.flux_timestep = compute_fluxes_gpu(gpu_dom)
+        self.compute_forcing_terms()
+
+        # --- Step 4: Allreduce + yieldstep/finaltime clip ---
+        self.update_timestep(yieldstep, finaltime)
+        self._ader2_prev_dt = self.timestep
+
+        # --- Step 5: update Q^{n+1} = Q^n + timestep * R (no restore needed) ---
+        update_conserved_quantities_gpu(gpu_dom, self.timestep)
+
+        self.set_relative_time(self.get_relative_time() + self.timestep)
+        # Record the CFL-constrained step (pre yield/final cap), matching legacy
+        # update_timestep(), rather than the yield-limited step actually taken.
+        cfl_dt = min(self.CFL * self.flux_timestep, self.evolve_max_timestep)
+        self.recorded_max_timestep = max(cfl_dt, self.recorded_max_timestep)
+        self.recorded_min_timestep = min(cfl_dt, self.recorded_min_timestep)
+
+        # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
+        if self.ghost_layer_width < 4:
+            exchange_ghosts(gpu_dom)
+
+    def _evolve_one_ader2_step_c(self, yieldstep, finaltime):
+        """ADER-2 step executed entirely in C - eliminates Python round-trip overhead.
+
+        Prefer this over _evolve_one_ader2_step_gpu() for better performance.
+        Falls back to _evolve_one_ader2_step_gpu() if any boundary requires CPU.
+        Rate_operators must be applied separately (after this call).
+        """
+        from anuga.shallow_water.sw_domain_gpu_ext import (
+            evolve_one_ader2_step_gpu,
+            set_transmissive_n_zero_t_stage,
+            set_time_boundary_values,
+            set_file_boundary_values_from_domain,
+            set_absorbing_wave_value,
+            set_characteristic_wave_value,
+            set_flather_value,
+        )
+
+        gpu_dom = self.gpu_interface.gpu_dom
+
+        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
+                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
+                              'Time_boundary', 'File_boundary', 'Field_boundary',
+                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary'}
+
+        if not hasattr(self, '_gpu_boundary_info_initialized'):
+            self._gpu_cpu_tags = []
+            self._gpu_all_on_gpu = True
+            cpu_boundary_types = []
+            self._gpu_transmissive_n_zero_t_boundaries = []
+            self._gpu_time_boundaries = []
+            self._gpu_absorbing_wave_boundaries = []
+            self._gpu_characteristic_wave_boundaries = []
+
+            for tag, B in self.boundary_map.items():
+                if B is not None:
+                    btype = B.__class__.__name__
+                    if btype not in GPU_BOUNDARY_TYPES:
+                        self._gpu_cpu_tags.append(tag)
+                        self._gpu_all_on_gpu = False
+                        cpu_boundary_types.append((tag, btype))
+                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
+                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
+                    elif btype == 'Time_boundary':
+                        self._gpu_time_boundaries.append(B)
+                    elif btype == 'Absorbing_wave_boundary':
+                        self._gpu_absorbing_wave_boundaries.append(B)
+                    elif btype == 'Characteristic_wave_boundary':
+                        self._gpu_characteristic_wave_boundaries.append(B)
+
+            if not self._gpu_all_on_gpu:
+                print("WARNING: C ADER-2 loop requires all GPU-supported boundary types")
+                print("  Falling back to Python-orchestrated GPU loop")
+                print(f"  Unsupported types: {cpu_boundary_types}")
+
+            self._gpu_boundary_info_initialized = True
+
+        if not self._gpu_all_on_gpu:
+            return self._evolve_one_ader2_step_gpu(yieldstep, finaltime)
+
+        for B in self._gpu_transmissive_n_zero_t_boundaries:
+            stage_val = B.get_boundary_values()
+            try:
+                stage_val = float(stage_val)
+            except (TypeError, ValueError):
+                stage_val = float(stage_val[0])
+            set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
+
+        self._push_gpu_time_boundary_values(gpu_dom)
+
+        set_file_boundary_values_from_domain(gpu_dom, self)
+
+        for B in self._gpu_absorbing_wave_boundaries:
+            value = B.get_boundary_values()
+            try:
+                wave_val = float(value)
+            except (TypeError, ValueError):
+                wave_val = float(value[0])
+            set_absorbing_wave_value(gpu_dom, wave_val)
+
+        for B in self._gpu_characteristic_wave_boundaries:
+            value = B.get_boundary_values()
+            try:
+                perturb = float(value)
+            except (TypeError, ValueError):
+                perturb = float(value[0])
+            set_characteristic_wave_value(gpu_dom, perturb)
+
+        for B in self._gpu_flather_boundaries:
+            value = B.get_boundary_values()
+            try:
+                stage_val = float(value)
+            except (TypeError, ValueError):
+                stage_val = float(value[0])
+            set_flather_value(gpu_dom, stage_val)
+
+        max_timestep = self._get_max_timestep_to_output_times(yieldstep, finaltime)
+
+        if not hasattr(self, '_ader2_prev_dt'):
+            self._ader2_prev_dt = 0.0
+
+        self.timestep = evolve_one_ader2_step_gpu(gpu_dom, max_timestep, 1, self._ader2_prev_dt)
+        self._ader2_prev_dt = self.timestep
+
+        # Do NOT advance relative_time here — the evolve loop does it after
+        # apply_fractional_steps(); see _evolve_one_euler_step_c for why.
+        # Record the CFL-constrained step (pre yield/final cap), matching legacy
+        # update_timestep(), rather than the yield-limited step actually taken.
+        cfl_dt = gpu_dom.recorded_flux_timestep
+        self.recorded_max_timestep = max(cfl_dt, self.recorded_max_timestep)
+        self.recorded_min_timestep = min(cfl_dt, self.recorded_min_timestep)
+
+        # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
+        if self.ghost_layer_width < 4:
+            from anuga.shallow_water.sw_domain_gpu_ext import exchange_ghosts
+            exchange_ghosts(gpu_dom)
+
+    def _evolve_one_rk2_step_gpu(self, yieldstep, finaltime):
+        """Python-orchestrated GPU implementation of RK2 step.
+
+        This is a fallback for when the C RK2 loop cannot be used (e.g., unsupported
+        boundary types). Prefer _evolve_one_rk2_step_c() for better performance.
+        """
+        from anuga.shallow_water.sw_domain_gpu_ext import (
+            backup_conserved_quantities_gpu,
+            extrapolate_second_order_gpu,
+            protect_gpu,
+            compute_fluxes_gpu,
+            update_conserved_quantities_gpu,
+            saxpy_conserved_quantities_gpu,
+            sync_boundary_values,
+            init_boundary_edge_sync,
+            boundary_edge_sync,
+            exchange_ghosts,
+            evaluate_reflective_boundary_gpu,
+            evaluate_dirichlet_boundary_gpu,
+            evaluate_transmissive_boundary_gpu,
+            set_transmissive_n_zero_t_stage,
+            evaluate_transmissive_n_zero_t_boundary_gpu,
+            set_time_boundary_values,
+            evaluate_time_boundary_gpu,
+            set_file_boundary_values_from_domain,
+            evaluate_file_boundary_gpu,
+            set_absorbing_wave_value,
+            evaluate_absorbing_wave_boundary_gpu,
+            set_characteristic_wave_value,
+            evaluate_characteristic_wave_boundary_gpu,
+            set_flather_value,
+            evaluate_flather_boundary_gpu,
+        )
+        import numpy as np
+
+        gpu_dom = self.gpu_interface.gpu_dom
+
+        # Supported GPU boundary types
+        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
+                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
+                              'Time_boundary', 'File_boundary', 'Field_boundary',
+                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary'}
+
+        # Lazy init: identify which boundaries need CPU evaluation vs GPU
+        if not hasattr(self, '_gpu_boundary_info_initialized'):
+            self._gpu_cpu_tags = []
+            self._gpu_all_on_gpu = True
+            cpu_boundary_types = []
+            self._gpu_transmissive_n_zero_t_boundaries = []
+            self._gpu_time_boundaries = []
+            self._gpu_absorbing_wave_boundaries = []
+            self._gpu_characteristic_wave_boundaries = []
+
+            for tag, B in self.boundary_map.items():
+                if B is not None:
+                    btype = B.__class__.__name__
+                    if btype not in GPU_BOUNDARY_TYPES:
+                        self._gpu_cpu_tags.append(tag)
+                        self._gpu_all_on_gpu = False
+                        cpu_boundary_types.append((tag, btype))
+                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
+                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
+                    elif btype == 'Time_boundary':
+                        self._gpu_time_boundaries.append(B)
+                    elif btype == 'Absorbing_wave_boundary':
+                        self._gpu_absorbing_wave_boundaries.append(B)
+                    elif btype == 'Characteristic_wave_boundary':
+                        self._gpu_characteristic_wave_boundaries.append(B)
+
+            if not self._gpu_all_on_gpu:
+                boundary_cell_ids = np.unique(self.boundary_cells).astype(np.intc)
+                init_boundary_edge_sync(gpu_dom, boundary_cell_ids)
+                print("WARNING: GPU boundary evaluation disabled - falling back to CPU")
+                print(f"  Unsupported boundary types: {cpu_boundary_types}")
+
+            self._gpu_boundary_info_initialized = True
+
+        # Backup for RK2
+        backup_conserved_quantities_gpu(gpu_dom)
+
+        # ==========================================
+        # First Euler step
+        # ==========================================
+
+        protect_gpu(gpu_dom)
+        extrapolate_second_order_gpu(gpu_dom)
+
+        # Evaluate boundaries
+        if self._gpu_all_on_gpu:
+            evaluate_reflective_boundary_gpu(gpu_dom)
+            evaluate_dirichlet_boundary_gpu(gpu_dom)
+            evaluate_transmissive_boundary_gpu(gpu_dom)
+            for B in self._gpu_transmissive_n_zero_t_boundaries:
+                stage_val = B.get_boundary_values()
+                try:
+                    stage_val = float(stage_val)
+                except (TypeError, ValueError):
+                    stage_val = float(stage_val[0])
+                set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
+            evaluate_transmissive_n_zero_t_boundary_gpu(gpu_dom)
+            self._push_gpu_time_boundary_values(gpu_dom)
+            evaluate_time_boundary_gpu(gpu_dom)
+            set_file_boundary_values_from_domain(gpu_dom, self)
+            evaluate_file_boundary_gpu(gpu_dom)
+            for B in self._gpu_absorbing_wave_boundaries:
+                value = B.get_boundary_values()
+                try:
+                    wave_val = float(value)
+                except (TypeError, ValueError):
+                    wave_val = float(value[0])
+                set_absorbing_wave_value(gpu_dom, wave_val)
+            evaluate_absorbing_wave_boundary_gpu(gpu_dom)
+            for B in self._gpu_characteristic_wave_boundaries:
+                value = B.get_boundary_values()
+                try:
+                    perturb = float(value)
+                except (TypeError, ValueError):
+                    perturb = float(value[0])
+                set_characteristic_wave_value(gpu_dom, perturb)
+            evaluate_characteristic_wave_boundary_gpu(gpu_dom)
+
+            for B in self._gpu_flather_boundaries:
+                value = B.get_boundary_values()
+                try:
+                    stage_val = float(value)
+                except (TypeError, ValueError):
+                    stage_val = float(value[0])
+                set_flather_value(gpu_dom, stage_val)
+            evaluate_flather_boundary_gpu(gpu_dom)
+        else:
+            boundary_edge_sync(gpu_dom)
+            for tag in self.tag_boundary_cells:
+                B = self.boundary_map[tag]
+                if B is not None:
+                    B.evaluate_segment(self, self.tag_boundary_cells[tag])
+            sync_boundary_values(gpu_dom)
+
+        # Compute fluxes
+        self.flux_timestep = compute_fluxes_gpu(gpu_dom, 0, 2)
+
+        # Forcing terms
+        self.compute_forcing_terms()
+
+        # Update timestep
+        self.update_timestep(yieldstep, finaltime)
+
+        # Update conserved quantities
+        update_conserved_quantities_gpu(gpu_dom, self.timestep)
+
+        # End of first Euler step
+        self.set_relative_time(self.get_relative_time() + self.timestep)
+
+        # Ghost exchange (MPI)
+        if self.ghost_layer_width < 4:
+            exchange_ghosts(gpu_dom)
+
+        # =========================================
+        # Second Euler step
+        # =========================================
+
+        protect_gpu(gpu_dom)
+        extrapolate_second_order_gpu(gpu_dom)
+
+        # Evaluate boundaries
+        if self._gpu_all_on_gpu:
+            evaluate_reflective_boundary_gpu(gpu_dom)
+            evaluate_dirichlet_boundary_gpu(gpu_dom)
+            evaluate_transmissive_boundary_gpu(gpu_dom)
+            for B in self._gpu_transmissive_n_zero_t_boundaries:
+                stage_val = B.get_boundary_values()
+                try:
+                    stage_val = float(stage_val)
+                except (TypeError, ValueError):
+                    stage_val = float(stage_val[0])
+                set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
+            evaluate_transmissive_n_zero_t_boundary_gpu(gpu_dom)
+            self._push_gpu_time_boundary_values(gpu_dom)
+            evaluate_time_boundary_gpu(gpu_dom)
+            set_file_boundary_values_from_domain(gpu_dom, self)
+            evaluate_file_boundary_gpu(gpu_dom)
+            for B in self._gpu_absorbing_wave_boundaries:
+                value = B.get_boundary_values()
+                try:
+                    wave_val = float(value)
+                except (TypeError, ValueError):
+                    wave_val = float(value[0])
+                set_absorbing_wave_value(gpu_dom, wave_val)
+            evaluate_absorbing_wave_boundary_gpu(gpu_dom)
+            for B in self._gpu_characteristic_wave_boundaries:
+                value = B.get_boundary_values()
+                try:
+                    perturb = float(value)
+                except (TypeError, ValueError):
+                    perturb = float(value[0])
+                set_characteristic_wave_value(gpu_dom, perturb)
+            evaluate_characteristic_wave_boundary_gpu(gpu_dom)
+
+            for B in self._gpu_flather_boundaries:
+                value = B.get_boundary_values()
+                try:
+                    stage_val = float(value)
+                except (TypeError, ValueError):
+                    stage_val = float(value[0])
+                set_flather_value(gpu_dom, stage_val)
+            evaluate_flather_boundary_gpu(gpu_dom)
+        else:
+            boundary_edge_sync(gpu_dom)
+            for tag in self.tag_boundary_cells:
+                B = self.boundary_map[tag]
+                if B is not None:
+                    B.evaluate_segment(self, self.tag_boundary_cells[tag])
+            sync_boundary_values(gpu_dom)
+
+        # Compute fluxes (ignore timestep from second step)
+        compute_fluxes_gpu(gpu_dom, 1, 2)
+
+        # Forcing terms
+        self.compute_forcing_terms()
+
+        # Update conserved quantities
+        update_conserved_quantities_gpu(gpu_dom, self.timestep)
+
+        # RK2 averaging
+        saxpy_conserved_quantities_gpu(gpu_dom, 0.5, 0.5)
+
+        # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
+        if self.ghost_layer_width < 4:
+            exchange_ghosts(gpu_dom)
+
+
+    def _evolve_one_euler_step_gpu(self, yieldstep, finaltime):
+        """Python-orchestrated GPU Euler (DE0) step.
+
+        Fallback for _evolve_one_euler_step_c() when the boundary map contains a
+        type the C Euler loop cannot evaluate on the device (e.g.
+        Transmissive_momentum_set_stage_boundary). GPU-supported boundaries are
+        evaluated on the device; any others are evaluated on the host via
+        evaluate_segment() and synced back. This keeps DE0 results correct
+        (identical to legacy) for every boundary type — the same fallback that
+        rk2/rk3/ader2 already perform. Prefer _evolve_one_euler_step_c() (faster)
+        when all boundaries are GPU-supported.
+        """
+        from anuga.shallow_water.sw_domain_gpu_ext import (
+            extrapolate_second_order_gpu,
+            protect_gpu,
+            compute_fluxes_gpu,
+            update_conserved_quantities_gpu,
+            sync_boundary_values,
+            init_boundary_edge_sync,
+            boundary_edge_sync,
+            exchange_ghosts,
+            evaluate_reflective_boundary_gpu,
+            evaluate_dirichlet_boundary_gpu,
+            evaluate_transmissive_boundary_gpu,
+            set_transmissive_n_zero_t_stage,
+            evaluate_transmissive_n_zero_t_boundary_gpu,
+            set_time_boundary_values,
+            evaluate_time_boundary_gpu,
+            set_file_boundary_values_from_domain,
+            evaluate_file_boundary_gpu,
+            set_absorbing_wave_value,
+            evaluate_absorbing_wave_boundary_gpu,
+            set_characteristic_wave_value,
+            evaluate_characteristic_wave_boundary_gpu,
+        )
+        import numpy as np
+
+        gpu_dom = self.gpu_interface.gpu_dom
+
+        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
+                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
+                              'Time_boundary', 'File_boundary', 'Field_boundary',
+                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary'}
+
+        if not hasattr(self, '_gpu_boundary_info_initialized'):
+            self._gpu_cpu_tags = []
+            self._gpu_all_on_gpu = True
+            cpu_boundary_types = []
+            self._gpu_transmissive_n_zero_t_boundaries = []
+            self._gpu_time_boundaries = []
+            self._gpu_absorbing_wave_boundaries = []
+            self._gpu_characteristic_wave_boundaries = []
+
+            for tag, B in self.boundary_map.items():
+                if B is not None:
+                    btype = B.__class__.__name__
+                    if btype not in GPU_BOUNDARY_TYPES:
+                        self._gpu_cpu_tags.append(tag)
+                        self._gpu_all_on_gpu = False
+                        cpu_boundary_types.append((tag, btype))
+                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
+                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
+                    elif btype == 'Time_boundary':
+                        self._gpu_time_boundaries.append(B)
+                    elif btype == 'Absorbing_wave_boundary':
+                        self._gpu_absorbing_wave_boundaries.append(B)
+                    elif btype == 'Characteristic_wave_boundary':
+                        self._gpu_characteristic_wave_boundaries.append(B)
+
+            if not self._gpu_all_on_gpu:
+                boundary_cell_ids = np.unique(self.boundary_cells).astype(np.intc)
+                init_boundary_edge_sync(gpu_dom, boundary_cell_ids)
+
+            self._gpu_boundary_info_initialized = True
+
+        protect_gpu(gpu_dom)
+        extrapolate_second_order_gpu(gpu_dom)
+
+        if self._gpu_all_on_gpu:
+            evaluate_reflective_boundary_gpu(gpu_dom)
+            evaluate_dirichlet_boundary_gpu(gpu_dom)
+            evaluate_transmissive_boundary_gpu(gpu_dom)
+            for B in self._gpu_transmissive_n_zero_t_boundaries:
+                stage_val = B.get_boundary_values()
+                try:
+                    stage_val = float(stage_val)
+                except (TypeError, ValueError):
+                    stage_val = float(stage_val[0])
+                set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
+            evaluate_transmissive_n_zero_t_boundary_gpu(gpu_dom)
+            self._push_gpu_time_boundary_values(gpu_dom)
+            evaluate_time_boundary_gpu(gpu_dom)
+            set_file_boundary_values_from_domain(gpu_dom, self)
+            evaluate_file_boundary_gpu(gpu_dom)
+            for B in self._gpu_absorbing_wave_boundaries:
+                value = B.get_boundary_values()
+                try:
+                    wave_val = float(value)
+                except (TypeError, ValueError):
+                    wave_val = float(value[0])
+                set_absorbing_wave_value(gpu_dom, wave_val)
+            evaluate_absorbing_wave_boundary_gpu(gpu_dom)
+            for B in self._gpu_characteristic_wave_boundaries:
+                value = B.get_boundary_values()
+                try:
+                    perturb = float(value)
+                except (TypeError, ValueError):
+                    perturb = float(value[0])
+                set_characteristic_wave_value(gpu_dom, perturb)
+            evaluate_characteristic_wave_boundary_gpu(gpu_dom)
+        else:
+            # Host evaluation of any non-GPU boundary type (e.g.
+            # Transmissive_momentum_set_stage_boundary), then sync edge values
+            # back to the device for the flux kernel.
+            boundary_edge_sync(gpu_dom)
+            for tag in self.tag_boundary_cells:
+                B = self.boundary_map[tag]
+                if B is not None:
+                    B.evaluate_segment(self, self.tag_boundary_cells[tag])
+            sync_boundary_values(gpu_dom)
+
+        # Compute fluxes (sets flux_timestep = CFL flux step)
+        self.flux_timestep = compute_fluxes_gpu(gpu_dom)
+
+        # Forcing terms (friction)
+        self.compute_forcing_terms()
+
+        # Update timestep to fit yieldstep/finaltime (also records
+        # recorded_min/max_timestep from the CFL constraint).
+        self.update_timestep(yieldstep, finaltime)
+
+        # Update conserved quantities
+        update_conserved_quantities_gpu(gpu_dom, self.timestep)
+
+        # Do NOT advance relative_time here — the evolve loop advances it after
+        # apply_fractional_steps(); see _evolve_one_euler_step_c for why.
+
+        # Post-step ghost exchange
+        if self.ghost_layer_width < 4:
+            exchange_ghosts(gpu_dom)
+
+
+    def _evolve_one_euler_step_c(self, yieldstep, finaltime):
+        """Euler step executed entirely in C - eliminates Python round-trip overhead.
+
+        All kernel calls (extrapolation, boundaries, fluxes, forcing, update) happen
+        in C with MPI timestep reduction also in C.  Only one Python->C call per step.
+
+        Limitations:
+        - Only supports GPU-evaluated boundary types
+        - Rate_operators must be applied separately (after this call)
+        """
+        from anuga.shallow_water.sw_domain_gpu_ext import (
+            evolve_one_euler_step_gpu,
+            set_transmissive_n_zero_t_stage,
+            set_time_boundary_values,
+            set_file_boundary_values_from_domain,
+            set_absorbing_wave_value,
+            set_characteristic_wave_value,
+            set_flather_value,
+            exchange_ghosts,
+        )
+
+        gpu_dom = self.gpu_interface.gpu_dom
+
+        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
+                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
+                              'Time_boundary', 'File_boundary', 'Field_boundary',
+                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary',
+                              'Flather_boundary'}
+
+        if not hasattr(self, '_gpu_boundary_info_initialized'):
+            self._gpu_cpu_tags = []
+            self._gpu_all_on_gpu = True
+            cpu_boundary_types = []
+            self._gpu_transmissive_n_zero_t_boundaries = []
+            self._gpu_time_boundaries = []
+            self._gpu_absorbing_wave_boundaries = []
+            self._gpu_characteristic_wave_boundaries = []
+            self._gpu_flather_boundaries = []
+
+            for tag, B in self.boundary_map.items():
+                if B is not None:
+                    btype = B.__class__.__name__
+                    if btype not in GPU_BOUNDARY_TYPES:
+                        self._gpu_cpu_tags.append(tag)
+                        self._gpu_all_on_gpu = False
+                        cpu_boundary_types.append((tag, btype))
+                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
+                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
+                    elif btype == 'Time_boundary':
+                        self._gpu_time_boundaries.append(B)
+                    elif btype == 'Absorbing_wave_boundary':
+                        self._gpu_absorbing_wave_boundaries.append(B)
+                    elif btype == 'Characteristic_wave_boundary':
+                        self._gpu_characteristic_wave_boundaries.append(B)
+                    elif btype == 'Flather_boundary':
+                        self._gpu_flather_boundaries.append(B)
+
+            if not self._gpu_all_on_gpu:
+                print("WARNING: C Euler loop requires all GPU-supported boundary types")
+                print("  Falling back to Python-orchestrated GPU loop")
+                print("  Unsupported types: " + str(cpu_boundary_types))
+
+            self._gpu_boundary_info_initialized = True
+
+        # Boundaries the C loop cannot evaluate on the device (e.g.
+        # Transmissive_momentum_set_stage_boundary) are handled by the
+        # Python-orchestrated fallback, which evaluates them on the host and
+        # syncs — matching rk2/rk3/ader2. Without this, those boundaries are
+        # silently ignored in DE0 and results diverge from legacy.
+        if not self._gpu_all_on_gpu:
+            return self._evolve_one_euler_step_gpu(yieldstep, finaltime)
+
+        # Set time-dependent boundary values before calling C function
+        for B in self._gpu_transmissive_n_zero_t_boundaries:
+            stage_val = B.get_boundary_values()
+            try:
+                stage_val = float(stage_val)
+            except (TypeError, ValueError):
+                stage_val = float(stage_val[0])
+            set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
+
+        self._push_gpu_time_boundary_values(gpu_dom)
+
+        set_file_boundary_values_from_domain(gpu_dom, self)
+
+        for B in self._gpu_absorbing_wave_boundaries:
+            value = B.get_boundary_values()
+            try:
+                wave_val = float(value)
+            except (TypeError, ValueError):
+                wave_val = float(value[0])
+            set_absorbing_wave_value(gpu_dom, wave_val)
+
+        for B in self._gpu_characteristic_wave_boundaries:
+            value = B.get_boundary_values()
+            try:
+                perturb = float(value)
+            except (TypeError, ValueError):
+                perturb = float(value[0])
+            set_characteristic_wave_value(gpu_dom, perturb)
+
+        for B in self._gpu_flather_boundaries:
+            value = B.get_boundary_values()
+            try:
+                stage_val = float(value)
+            except (TypeError, ValueError):
+                stage_val = float(value[0])
+            set_flather_value(gpu_dom, stage_val)
+
+        max_timestep = self._get_max_timestep_to_output_times(yieldstep, finaltime)
+
+        # Execute full Euler step in C (includes MPI timestep reduction)
+        self.timestep = evolve_one_euler_step_gpu(gpu_dom, max_timestep, 1)
+
+        # NOTE: do NOT advance relative_time here. The evolve loop advances it
+        # (relative_time = initial_relative_time + timestep) AFTER
+        # apply_fractional_steps(), so advancing it here makes time-dependent
+        # operators (variable-Q inlet, time-varying rate, ...) see the time one
+        # step too far — they would evaluate forcing at t+dt instead of t.
+
+        # Record the CFL-constrained step (pre yield/final cap), matching legacy
+        # update_timestep(), rather than the yield-limited step actually taken.
+        cfl_dt = gpu_dom.recorded_flux_timestep
+        self.recorded_max_timestep = max(cfl_dt, self.recorded_max_timestep)
+        self.recorded_min_timestep = min(cfl_dt, self.recorded_min_timestep)
+
+        # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
+        if self.ghost_layer_width < 4:
+            exchange_ghosts(gpu_dom)
+
+
+    def _evolve_one_rk2_step_c(self, yieldstep, finaltime):
+        """RK2 step executed entirely in C - eliminates Python round-trip overhead.
+
+        This is faster than _evolve_one_rk2_step_gpu() because:
+        - All kernel calls happen in C without Python round-trips
+        - MPI reduction for timestep happens in C
+        - Only one Python->C call per RK2 step
+
+        Limitations:
+        - Only supports GPU-evaluated boundary types
+        - Rate_operators must be applied separately (after this call)
+        """
+        from anuga.shallow_water.sw_domain_gpu_ext import (
+            evolve_one_rk2_step_gpu,
+            set_transmissive_n_zero_t_stage,
+            set_time_boundary_values,
+            set_file_boundary_values_from_domain,
+            set_absorbing_wave_value,
+            set_characteristic_wave_value,
+            set_flather_value,
+        )
+
+        gpu_dom = self.gpu_interface.gpu_dom
+
+        # Supported GPU boundary types
+        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
+                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
+                              'Time_boundary', 'File_boundary', 'Field_boundary',
+                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary',
+                              'Flather_boundary'}
+
+        # Lazy init: identify which boundaries need special handling
+        if not hasattr(self, '_gpu_boundary_info_initialized'):
+            self._gpu_cpu_tags = []
+            self._gpu_all_on_gpu = True
+            cpu_boundary_types = []
+            self._gpu_transmissive_n_zero_t_boundaries = []
+            self._gpu_time_boundaries = []
+            self._gpu_absorbing_wave_boundaries = []
+            self._gpu_characteristic_wave_boundaries = []
+            self._gpu_flather_boundaries = []
+
+            for tag, B in self.boundary_map.items():
+                if B is not None:
+                    btype = B.__class__.__name__
+                    if btype not in GPU_BOUNDARY_TYPES:
+                        self._gpu_cpu_tags.append(tag)
+                        self._gpu_all_on_gpu = False
+                        cpu_boundary_types.append((tag, btype))
+                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
+                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
+                    elif btype == 'Time_boundary':
+                        self._gpu_time_boundaries.append(B)
+                    elif btype == 'Absorbing_wave_boundary':
+                        self._gpu_absorbing_wave_boundaries.append(B)
+                    elif btype == 'Characteristic_wave_boundary':
+                        self._gpu_characteristic_wave_boundaries.append(B)
+                    elif btype == 'Flather_boundary':
+                        self._gpu_flather_boundaries.append(B)
+
+            if not self._gpu_all_on_gpu:
+                print("WARNING: C RK2 loop requires all GPU-supported boundary types")
+                print("  Falling back to Python-orchestrated GPU loop")
+                print(f"  Unsupported types: {cpu_boundary_types}")
+
+            self._gpu_boundary_info_initialized = True
+
+        # If any boundary requires CPU, fall back to Python-orchestrated loop
+        if not self._gpu_all_on_gpu:
+            return self._evolve_one_rk2_step_gpu(yieldstep, finaltime)
+
+        # Set time-dependent boundary values BEFORE calling C function
+        # Python function calls are cheap (~microseconds)
+        for B in self._gpu_transmissive_n_zero_t_boundaries:
+            stage_val = B.get_boundary_values()
+            try:
+                stage_val = float(stage_val)
+            except (TypeError, ValueError):
+                stage_val = float(stage_val[0])
+            set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
+
+        self._push_gpu_time_boundary_values(gpu_dom)
+
+        set_file_boundary_values_from_domain(gpu_dom, self)
+
+        for B in self._gpu_absorbing_wave_boundaries:
+            value = B.get_boundary_values()
+            try:
+                wave_val = float(value)
+            except (TypeError, ValueError):
+                wave_val = float(value[0])
+            set_absorbing_wave_value(gpu_dom, wave_val)
+
+        for B in self._gpu_characteristic_wave_boundaries:
+            value = B.get_boundary_values()
+            try:
+                perturb = float(value)
+            except (TypeError, ValueError):
+                perturb = float(value[0])
+            set_characteristic_wave_value(gpu_dom, perturb)
+
+        for B in self._gpu_flather_boundaries:
+            value = B.get_boundary_values()
+            try:
+                stage_val = float(value)
+            except (TypeError, ValueError):
+                stage_val = float(value[0])
+            set_flather_value(gpu_dom, stage_val)
+
+        max_timestep = self._get_max_timestep_to_output_times(yieldstep, finaltime)
+
+        # Execute full RK2 step in C (includes MPI timestep reduction)
+        # apply_forcing=1 enables Manning friction on GPU
+        self.timestep = evolve_one_rk2_step_gpu(gpu_dom, max_timestep, 1)
+
+        # Do NOT advance relative_time here — the evolve loop does it after
+        # apply_fractional_steps(); see _evolve_one_euler_step_c for why.
+
+        # Record the CFL-constrained step (pre yield/final cap), matching legacy
+        # update_timestep(), rather than the yield-limited step actually taken.
+        cfl_dt = gpu_dom.recorded_flux_timestep
+        self.recorded_max_timestep = max(cfl_dt, self.recorded_max_timestep)
+        self.recorded_min_timestep = min(cfl_dt, self.recorded_min_timestep)
+
+        # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
+        if self.ghost_layer_width < 4:
+            from anuga.shallow_water.sw_domain_gpu_ext import exchange_ghosts
+            exchange_ghosts(gpu_dom)
+
+
+    def _evolve_one_rk3_step_gpu(self, yieldstep, finaltime):
+        """Python-orchestrated GPU implementation of SSP-RK3 step.
+
+        This is a fallback for when the C RK3 loop cannot be used (e.g., unsupported
+        boundary types). Prefer _evolve_one_rk3_step_c() for better performance.
+        """
+        from anuga.shallow_water.sw_domain_gpu_ext import (
+            backup_conserved_quantities_gpu,
+            extrapolate_second_order_gpu,
+            protect_gpu,
+            compute_fluxes_gpu,
+            update_conserved_quantities_gpu,
+            saxpy_conserved_quantities_gpu,
+            saxpy3_conserved_quantities_gpu,
+            sync_boundary_values,
+            init_boundary_edge_sync,
+            boundary_edge_sync,
+            exchange_ghosts,
+            evaluate_reflective_boundary_gpu,
+            evaluate_dirichlet_boundary_gpu,
+            evaluate_transmissive_boundary_gpu,
+            set_transmissive_n_zero_t_stage,
+            evaluate_transmissive_n_zero_t_boundary_gpu,
+            set_time_boundary_values,
+            evaluate_time_boundary_gpu,
+            set_file_boundary_values_from_domain,
+            evaluate_file_boundary_gpu,
+            set_absorbing_wave_value,
+            evaluate_absorbing_wave_boundary_gpu,
+            set_characteristic_wave_value,
+            evaluate_characteristic_wave_boundary_gpu,
+            set_flather_value,
+            evaluate_flather_boundary_gpu,
+        )
+        import numpy as np
+
+        gpu_dom = self.gpu_interface.gpu_dom
+
+        # Supported GPU boundary types
+        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
+                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
+                              'Time_boundary', 'File_boundary', 'Field_boundary',
+                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary'}
+
+        # Lazy init: identify which boundaries need CPU evaluation vs GPU
+        if not hasattr(self, '_gpu_boundary_info_initialized'):
+            self._gpu_cpu_tags = []
+            self._gpu_all_on_gpu = True
+            cpu_boundary_types = []
+            self._gpu_transmissive_n_zero_t_boundaries = []
+            self._gpu_time_boundaries = []
+            self._gpu_absorbing_wave_boundaries = []
+            self._gpu_characteristic_wave_boundaries = []
+
+            for tag, B in self.boundary_map.items():
+                if B is not None:
+                    btype = B.__class__.__name__
+                    if btype not in GPU_BOUNDARY_TYPES:
+                        self._gpu_cpu_tags.append(tag)
+                        self._gpu_all_on_gpu = False
+                        cpu_boundary_types.append((tag, btype))
+                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
+                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
+                    elif btype == 'Time_boundary':
+                        self._gpu_time_boundaries.append(B)
+                    elif btype == 'Absorbing_wave_boundary':
+                        self._gpu_absorbing_wave_boundaries.append(B)
+                    elif btype == 'Characteristic_wave_boundary':
+                        self._gpu_characteristic_wave_boundaries.append(B)
+
+            if not self._gpu_all_on_gpu:
+                boundary_cell_ids = np.unique(self.boundary_cells).astype(np.intc)
+                init_boundary_edge_sync(gpu_dom, boundary_cell_ids)
+                print("WARNING: GPU boundary evaluation disabled - falling back to CPU")
+                print(f"  Unsupported boundary types: {cpu_boundary_types}")
+
+            self._gpu_boundary_info_initialized = True
+
+        def _eval_boundaries():
+            """Evaluate all boundary conditions on GPU (or CPU fallback)."""
+            if self._gpu_all_on_gpu:
+                evaluate_reflective_boundary_gpu(gpu_dom)
+                evaluate_dirichlet_boundary_gpu(gpu_dom)
+                evaluate_transmissive_boundary_gpu(gpu_dom)
+                for B in self._gpu_transmissive_n_zero_t_boundaries:
+                    stage_val = B.get_boundary_values()
+                    try:
+                        stage_val = float(stage_val)
+                    except (TypeError, ValueError):
+                        stage_val = float(stage_val[0])
+                    set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
+                evaluate_transmissive_n_zero_t_boundary_gpu(gpu_dom)
+                self._push_gpu_time_boundary_values(gpu_dom)
+                evaluate_time_boundary_gpu(gpu_dom)
+                set_file_boundary_values_from_domain(gpu_dom, self)
+                evaluate_file_boundary_gpu(gpu_dom)
+                for B in self._gpu_absorbing_wave_boundaries:
+                    value = B.get_boundary_values()
+                    try:
+                        wave_val = float(value)
+                    except (TypeError, ValueError):
+                        wave_val = float(value[0])
+                    set_absorbing_wave_value(gpu_dom, wave_val)
+                evaluate_absorbing_wave_boundary_gpu(gpu_dom)
+                for B in self._gpu_characteristic_wave_boundaries:
+                    value = B.get_boundary_values()
+                    try:
+                        perturb = float(value)
+                    except (TypeError, ValueError):
+                        perturb = float(value[0])
+                    set_characteristic_wave_value(gpu_dom, perturb)
+                evaluate_characteristic_wave_boundary_gpu(gpu_dom)
+
+                for B in self._gpu_flather_boundaries:
+                    value = B.get_boundary_values()
+                    try:
+                        stage_val = float(value)
+                    except (TypeError, ValueError):
+                        stage_val = float(value[0])
+                    set_flather_value(gpu_dom, stage_val)
+                evaluate_flather_boundary_gpu(gpu_dom)
+            else:
+                boundary_edge_sync(gpu_dom)
+                for tag in self.tag_boundary_cells:
+                    B = self.boundary_map[tag]
+                    if B is not None:
+                        B.evaluate_segment(self, self.tag_boundary_cells[tag])
+                sync_boundary_values(gpu_dom)
+
+        initial_relative_time = self.get_relative_time()
+
+        # Backup Q^n
+        backup_conserved_quantities_gpu(gpu_dom)
+
+        # ==========================================
+        # Stage 1: Q^(1) = Q^n + h*L(Q^n)
+        # ==========================================
+
+        protect_gpu(gpu_dom)
+        extrapolate_second_order_gpu(gpu_dom)
+        _eval_boundaries()
+
+        self.flux_timestep = compute_fluxes_gpu(gpu_dom, 0, 3)
+
+        # Forcing terms
+        self.compute_forcing_terms()
+
+        # Update timestep
+        self.update_timestep(yieldstep, finaltime)
+
+        update_conserved_quantities_gpu(gpu_dom, self.timestep)
+
+        self.set_relative_time(initial_relative_time + self.timestep)
+
+        if self.ghost_layer_width < 4:
+            exchange_ghosts(gpu_dom)
+
+        # ==========================================
+        # Stage 2: Q^(2) = Q^(1) + h*L(Q^(1))
+        # ==========================================
+
+        protect_gpu(gpu_dom)
+        extrapolate_second_order_gpu(gpu_dom)
+        _eval_boundaries()
+
+        compute_fluxes_gpu(gpu_dom, 1, 3)
+        self.compute_forcing_terms()
+        update_conserved_quantities_gpu(gpu_dom, self.timestep)
+
+        # Intermediate: Q = 0.25*Q^(2) + 0.75*Q^n
+        saxpy_conserved_quantities_gpu(gpu_dom, 0.25, 0.75)
+
+        self.set_relative_time(initial_relative_time + self.timestep * 0.5)
+
+        if self.ghost_layer_width < 4:
+            exchange_ghosts(gpu_dom)
+
+        # ==========================================
+        # Stage 3: Q^(3) = Q^(1)_mid + h*L(Q^(1)_mid)
+        # ==========================================
+
+        protect_gpu(gpu_dom)
+        extrapolate_second_order_gpu(gpu_dom)
+        _eval_boundaries()
+
+        compute_fluxes_gpu(gpu_dom, 2, 3)
+        self.compute_forcing_terms()
+        update_conserved_quantities_gpu(gpu_dom, self.timestep)
+
+        # Final: Q^{n+1} = (2*Q^(3) + Q^n) / 3
+        saxpy3_conserved_quantities_gpu(gpu_dom, 2.0, 1.0, 3.0)
+
+        # Restore the pre-step time so fractional-step operators evaluate forcing
+        # at t (not t+dt); see evolve_one_rk3_step. The evolve loop advances
+        # relative_time to t+dt after apply_fractional_steps().
+        self.set_relative_time(initial_relative_time)
+
+        # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
+        if self.ghost_layer_width < 4:
+            exchange_ghosts(gpu_dom)
+
+
+    def _evolve_one_rk3_step_c(self, yieldstep, finaltime):
+        """RK3 step executed entirely in C - eliminates Python round-trip overhead.
+
+        This is faster than _evolve_one_rk3_step_gpu() because:
+        - All kernel calls happen in C without Python round-trips
+        - MPI reduction for timestep happens in C
+        - Only one Python->C call per RK3 step
+
+        Limitations:
+        - Only supports GPU-evaluated boundary types
+        - Rate_operators must be applied separately (after this call)
+        """
+        from anuga.shallow_water.sw_domain_gpu_ext import (
+            evolve_one_rk3_step_gpu,
+            set_transmissive_n_zero_t_stage,
+            set_time_boundary_values,
+            set_file_boundary_values_from_domain,
+            set_absorbing_wave_value,
+            set_characteristic_wave_value,
+            set_flather_value,
+        )
+
+        gpu_dom = self.gpu_interface.gpu_dom
+
+        # Supported GPU boundary types
+        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
+                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
+                              'Time_boundary', 'File_boundary', 'Field_boundary',
+                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary',
+                              'Flather_boundary'}
+
+        # Lazy init: identify which boundaries need special handling
+        if not hasattr(self, '_gpu_boundary_info_initialized'):
+            self._gpu_cpu_tags = []
+            self._gpu_all_on_gpu = True
+            cpu_boundary_types = []
+            self._gpu_transmissive_n_zero_t_boundaries = []
+            self._gpu_time_boundaries = []
+            self._gpu_absorbing_wave_boundaries = []
+            self._gpu_characteristic_wave_boundaries = []
+            self._gpu_flather_boundaries = []
+
+            for tag, B in self.boundary_map.items():
+                if B is not None:
+                    btype = B.__class__.__name__
+                    if btype not in GPU_BOUNDARY_TYPES:
+                        self._gpu_cpu_tags.append(tag)
+                        self._gpu_all_on_gpu = False
+                        cpu_boundary_types.append((tag, btype))
+                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
+                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
+                    elif btype == 'Time_boundary':
+                        self._gpu_time_boundaries.append(B)
+                    elif btype == 'Absorbing_wave_boundary':
+                        self._gpu_absorbing_wave_boundaries.append(B)
+                    elif btype == 'Characteristic_wave_boundary':
+                        self._gpu_characteristic_wave_boundaries.append(B)
+                    elif btype == 'Flather_boundary':
+                        self._gpu_flather_boundaries.append(B)
+
+            if not self._gpu_all_on_gpu:
+                print("WARNING: C RK3 loop requires all GPU-supported boundary types")
+                print("  Falling back to Python-orchestrated GPU loop")
+                print(f"  Unsupported types: {cpu_boundary_types}")
+
+            self._gpu_boundary_info_initialized = True
+
+        # If any boundary requires CPU, fall back to Python-orchestrated loop
+        if not self._gpu_all_on_gpu:
+            return self._evolve_one_rk3_step_gpu(yieldstep, finaltime)
+
+        # Set time-dependent boundary values BEFORE calling C function
+        for B in self._gpu_transmissive_n_zero_t_boundaries:
+            stage_val = B.get_boundary_values()
+            try:
+                stage_val = float(stage_val)
+            except (TypeError, ValueError):
+                stage_val = float(stage_val[0])
+            set_transmissive_n_zero_t_stage(gpu_dom, stage_val)
+
+        self._push_gpu_time_boundary_values(gpu_dom)
+
+        set_file_boundary_values_from_domain(gpu_dom, self)
+
+        for B in self._gpu_absorbing_wave_boundaries:
+            value = B.get_boundary_values()
+            try:
+                wave_val = float(value)
+            except (TypeError, ValueError):
+                wave_val = float(value[0])
+            set_absorbing_wave_value(gpu_dom, wave_val)
+
+        for B in self._gpu_characteristic_wave_boundaries:
+            value = B.get_boundary_values()
+            try:
+                perturb = float(value)
+            except (TypeError, ValueError):
+                perturb = float(value[0])
+            set_characteristic_wave_value(gpu_dom, perturb)
+
+        for B in self._gpu_flather_boundaries:
+            value = B.get_boundary_values()
+            try:
+                stage_val = float(value)
+            except (TypeError, ValueError):
+                stage_val = float(value[0])
+            set_flather_value(gpu_dom, stage_val)
+
+        max_timestep = self._get_max_timestep_to_output_times(yieldstep, finaltime)
+
+        # Execute full RK3 step in C (includes MPI timestep reduction)
+        # apply_forcing=1 enables Manning friction on GPU
+        self.timestep = evolve_one_rk3_step_gpu(gpu_dom, max_timestep, 1)
+
+        # Do NOT advance relative_time here — the evolve loop advances it to t+dt
+        # after apply_fractional_steps(), so fractional-step operators evaluate
+        # forcing at the pre-step time t (matching the rk2 C loop, DE0, DE_ader2).
+
+        # Record the CFL-constrained step (pre yield/final cap), matching legacy
+        # update_timestep(), rather than the yield-limited step actually taken.
+        cfl_dt = gpu_dom.recorded_flux_timestep
+        self.recorded_max_timestep = max(cfl_dt, self.recorded_max_timestep)
+        self.recorded_min_timestep = min(cfl_dt, self.recorded_min_timestep)
+
+        # Post-step ghost exchange — update_ghosts() is a no-op in GPU mode
+        if self.ghost_layer_width < 4:
+            from anuga.shallow_water.sw_domain_gpu_ext import exchange_ghosts
+            exchange_ghosts(gpu_dom)
 
 
     def evolve_one_rk3_step(self, yieldstep, finaltime):
@@ -2805,6 +4966,17 @@ class Domain(Generic_Domain):
         Does not assume that centroid values have been extrapolated to
         vertices and edges
         """
+
+        # GPU mode: use C RK loop (faster) or Python-orchestrated GPU loop.
+        # Fall back to the Python-orchestrated loop when a Python-evaluated
+        # (possibly time-varying) boundary is present, so it is refreshed every
+        # substep and matches mode-1 (the C RK loop only sets it once per step).
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+            if self.use_c_rk_loop and not self._has_python_evaluated_gpu_boundaries():
+                self._evolve_one_rk3_step_c(yieldstep, finaltime)
+            else:
+                self._evolve_one_rk3_step_gpu(yieldstep, finaltime)
+            return
 
         # Save initial initial conserved quantities values
         self.backup_conserved_quantities()
@@ -2849,7 +5021,7 @@ class Domain(Generic_Domain):
         # calculated in the first step. Might lead to
         # stability problems but we have not seen any
         # example.
-        #============================================      
+        #============================================
 
         # Update edge values
         self.distribute_to_vertices_and_edges(distribute_to_vertices=False)
@@ -2861,7 +5033,7 @@ class Domain(Generic_Domain):
         # In MPI parallel mode this involves an allreduce to find global minimal timestep
         self.compute_fluxes()
 
-        # Compute forcing terms (friction) 
+        # Compute forcing terms (friction)
         self.compute_forcing_terms()
 
         # Update conserved quantities using timestep from first step
@@ -2909,15 +5081,20 @@ class Domain(Generic_Domain):
         # Combine final and initial values
         # and cleanup
         #=======================================
-        
+
         # self.saxpy_conserved_quantities(2.0/3.0, 1.0/3.0)
         # This caused a roundoff error that created negative water heights
 
         # So do this instead!
         self.saxpy_conserved_quantities(2.0, 1.0, 3.0)
 
-        # Set new time
-        self.set_relative_time(initial_relative_time + self.timestep)
+        # Restore the pre-step time so fractional-step operators (applied by the
+        # evolve loop before it advances relative_time to t+dt) evaluate forcing
+        # at t, not t+dt — consistent with rk2 (DE1), DE0 and DE_ader2. The
+        # mid-step set_relative_time() calls above advance time for the substep
+        # boundary evaluations; the evolve loop sets the final t+dt after
+        # apply_fractional_steps().
+        self.set_relative_time(initial_relative_time)
 
 
     def backup_conserved_quantities(self):
@@ -2926,6 +5103,8 @@ class Domain(Generic_Domain):
         if self.multiprocessor_mode == MULTIPROCESSOR_OPENMP:
             from .sw_domain_openmp_ext import backup_conserved_quantities
             backup_conserved_quantities(self)
+        elif self.multiprocessor_mode == MULTIPROCESSOR_GPU:
+            self.gpu_interface.backup_conserved_quantities_kernel(self)
         else:
             for name in self.conserved_quantities:
                 Q = self.quantities[name]
@@ -2939,6 +5118,12 @@ class Domain(Generic_Domain):
                 c = 1.0
             from .sw_domain_openmp_ext import saxpy_conserved_quantities
             saxpy_conserved_quantities(self, a, b, c)
+        elif self.multiprocessor_mode == MULTIPROCESSOR_GPU:
+            if c is not None:
+                from anuga.shallow_water.sw_domain_gpu_ext import saxpy3_conserved_quantities_gpu
+                saxpy3_conserved_quantities_gpu(self.gpu_interface.gpu_dom, a, b, c)
+            else:
+                self.gpu_interface.saxpy_conserved_quantities_kernel(self, a, b)
         else:
             for name in self.conserved_quantities:
                 Q = self.quantities[name]
@@ -2946,12 +5131,200 @@ class Domain(Generic_Domain):
                 if c is not None:
                     Q.centroid_values[:] = Q.centroid_values / c
 
+    def _has_cpu_only_fractional_operators(self):
+        """Check if any fractional step operators require CPU execution.
+
+        Rate_operators with GPU support don't need CPU sync.
+        boundary_flux_integral_operator is GPU-safe (only reads boundary_flux_sum).
+        Boyd_box_operator/Boyd_pipe_operator are GPU-safe via GPUCulvertManager.
+        Inlet_operator with GPU support doesn't need CPU sync.
+
+        Result is cached after first call since operators don't change during simulation.
+        """
+        # Check cache first
+        if hasattr(self, '_cached_has_cpu_only_ops'):
+            return self._cached_has_cpu_only_ops
+
+        from anuga.operators.rate_operators import Rate_operator
+        from anuga.operators.boundary_flux_integral_operator import boundary_flux_integral_operator
+        from anuga.structures.inlet_operator import Inlet_operator
+        from anuga.structures.gpu_culvert_manager import GPUCulvertManager
+        from anuga.operators.collect_max_quantities_operator import Collect_max_quantities_operator
+
+        # Initialize GPU culvert manager for Boyd operators if needed
+        has_boyd_ops = any(GPUCulvertManager.is_boyd_operator(op)
+                          for op in self.fractional_step_operators)
+        if has_boyd_ops and self.gpu_culvert_manager is None:
+            self.gpu_culvert_manager = GPUCulvertManager(self)
+            self.gpu_culvert_manager.register_all()
+
+        result = False
+        cpu_only_ops = []
+        for op in self.fractional_step_operators:
+            op_name = op.__class__.__name__
+            if isinstance(op, Rate_operator):
+                # Force GPU initialization if not already done (lazy init causes race with caching)
+                if hasattr(op, '_init_gpu') and not getattr(op, '_gpu_initialized', False):
+                    op._init_gpu()
+                # Rate_operator with GPU support doesn't need CPU sync
+                if hasattr(op, '_gpu_initialized') and op._gpu_initialized:
+                    continue  # GPU-accelerated, no sync needed
+            elif isinstance(op, boundary_flux_integral_operator):
+                # boundary_flux_integral_operator only reads boundary_flux_sum (small array)
+                # and accumulates a scalar - doesn't need full centroid sync
+                continue
+            elif isinstance(op, Inlet_operator):
+                # Force GPU initialization if not already done
+                if hasattr(op, '_init_gpu') and not getattr(op, '_gpu_initialized', False):
+                    op._init_gpu()
+                if hasattr(op, '_gpu_initialized') and op._gpu_initialized:
+                    continue  # GPU-accelerated, no sync needed
+            elif isinstance(op, Collect_max_quantities_operator):
+                # GPU kernel reads device-resident quantities and updates device-resident max
+                # arrays; no host centroid sync needed.
+                if hasattr(op, '_init_gpu') and not getattr(op, '_gpu_initialized', False):
+                    op._init_gpu()
+                if hasattr(op, '_gpu_initialized') and op._gpu_initialized:
+                    continue  # GPU-accelerated, no sync needed
+            elif GPUCulvertManager.is_boyd_operator(op):
+                # Handled by GPUCulvertManager (local + cross-boundary via MPI in C)
+                if (self.gpu_culvert_manager is not None
+                        and op in self.gpu_culvert_manager.operators):
+                    continue
+            # All other operators need CPU sync
+            cpu_only_ops.append(op_name)
+            result = True
+
+        rank = getattr(self, 'processor', 0)
+        if result:
+            # Only print GPU sync warning if GPU offload is actually active
+            if getattr(self, 'gpu_offload_active', True):
+                print(f"[Rank {rank}] WARNING: CPU-only fractional operators detected (GPU<->CPU sync every RK2 step):")
+                for name in cpu_only_ops:
+                    print(f"  - {name}")
+        else:
+            # Only print GPU-safe message if GPU offload is actually active
+            if rank == 0 and getattr(self, 'gpu_offload_active', True):
+                print(f"[Rank {rank}] All fractional operators are GPU-safe, no GPU<->CPU sync needed")
+        import sys; sys.stdout.flush()
+
+        self._cached_has_cpu_only_ops = result
+        return result
+
+    def apply_fractional_steps(self):
+        """Override to sync GPU data before fractional step operators run.
+
+        Boyd culvert operators are handled via GPUCulvertManager (batched, only 2 GPU
+        sync points) instead of the per-operator Python loop.
+
+        Operator ORDER matters: fractional-step operators mutate `stage` in sequence, so
+        running them in a different order gives different answers.  Mode 1 runs them in
+        registration order.  Mode 2 must too, or the same script silently disagrees with
+        itself across compute modes — and mode-1-vs-mode-2 agreement is the oracle we use
+        to validate GPU work, so it must not depend on the order a user happened to
+        construct their operators in.
+
+        The batch is therefore fired **at the position of the first culvert in the list**,
+        not before the loop.  When the culverts are registered together — which is what
+        every real script does (towradgi registers 22 in a row) — that is *exactly*
+        registration order, and the batching is untouched, so this costs nothing.
+
+        If culverts are interleaved with other operators, the later ones are still pulled
+        forward to the first culvert's slot (the C batches all registered culverts in one
+        gather/compute/scatter cycle, and there is no unbatched mode-2 culvert path).  We
+        warn in that case rather than diverge silently.  See issue #192.
+        """
+        gpu_mode = (self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None)
+        gpu_culverts_active = (gpu_mode and self.gpu_culvert_manager is not None
+                               and self.gpu_culvert_manager.num_culverts > 0)
+        needs_cpu_sync = False
+
+        if gpu_mode:
+            needs_cpu_sync = self._has_cpu_only_fractional_operators()
+            if needs_cpu_sync:
+                self.gpu_interface.sync_from_device()
+
+            if gpu_culverts_active:
+                self._warn_if_culverts_interleaved()
+
+        # The host copy is already in sync here and gets pushed back below, so an
+        # operator that writes a quantity must not trigger its own round-trip per
+        # call — that would be one full host<->device transfer pair per operator
+        # per timestep.
+        self._gpu_host_writes_suppressed = (gpu_mode and needs_cpu_sync)
+        culverts_done = False
+        try:
+            for operator in self.fractional_step_operators:
+                if gpu_culverts_active and operator in self.gpu_culvert_manager.operators:
+                    # Fire the whole batched culvert cycle in the slot of the FIRST
+                    # culvert, then skip the rest — they were handled by that batch.
+                    if not culverts_done:
+                        self.gpu_culvert_manager.apply_all()
+                        culverts_done = True
+                    continue
+                operator()
+        finally:
+            self._gpu_host_writes_suppressed = False
+
+        # Push the host-side work of any CPU-only operator back to the device. Mode-2
+        # correctness depends on this: without it a CPU-only operator (wind stress,
+        # say) writes only the host arrays and the device never sees it.
+        if gpu_mode and needs_cpu_sync:
+            self.gpu_interface.sync_to_device()
+
+    def _warn_if_culverts_interleaved(self):
+        """Warn once if the Boyd culverts are not contiguous in the operator list.
+
+        The mode-2 culvert batch is a single gather/compute/scatter cycle over every
+        registered culvert, so it can only be fired at one point in the sequence. We fire
+        it where the first culvert sits, which reproduces registration order exactly when
+        the culverts are contiguous. When they are not, the later ones get pulled forward
+        and mode 2 will disagree with mode 1 — say so instead of diverging in silence.
+        """
+
+        if getattr(self, '_culvert_order_checked', False):
+            return
+        self._culvert_order_checked = True
+
+        culvert_ops = self.gpu_culvert_manager.operators
+        positions = [i for i, op in enumerate(self.fractional_step_operators)
+                     if op in culvert_ops]
+        if not positions:
+            return
+
+        contiguous = (positions[-1] - positions[0] + 1) == len(positions)
+        if contiguous:
+            return
+
+        interleaved = [self.fractional_step_operators[i].__class__.__name__
+                       for i in range(positions[0], positions[-1] + 1)
+                       if self.fractional_step_operators[i] not in culvert_ops]
+        import warnings
+        warnings.warn(
+            'mode 2: Boyd culvert operators are not registered contiguously — '
+            f'{sorted(set(interleaved))} sit between them. The GPU applies all culverts '
+            'in one batch at the position of the first, so those operators will run AFTER '
+            'the culverts here but BEFORE some of them in mode 1 (legacy), and the two '
+            'compute modes will not agree. Register the culverts together to avoid this. '
+            '(issue #192)',
+            UserWarning, stacklevel=3)
+
+    def update_ghosts(self, quantities=None):
+        """Override to use GPU ghost exchange when in GPU mode."""
+        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+            # GPU RK2 loop handles ghost exchange internally via exchange_ghosts(gpu_dom)
+            # Don't do another exchange here - it would cause MPI message conflicts
+            pass
+        else:
+            # Fall back to parent implementation
+            super().update_ghosts(quantities)
+
     def timestepping_statistics(self,
-                                track_speeds=False,
-                                triangle_id=None,
-                                relative_time=False,
-                                time_unit='sec',
-                                datetime=False):
+                                track_speeds: bool = False,
+                                triangle_id: int | None = None,
+                                relative_time: bool = False,
+                                time_unit: str = 'sec',
+                                datetime: bool = False) -> str:
         """Return string with time stepping statistics for printing or logging
 
         Parameters
@@ -2961,14 +5334,14 @@ class Domain(Generic_Domain):
         datetime : bool, optional
             Flag to use timestamp or datetime.
         track_speeds : bool, optional
-            Optional boolean keyword that decides whether to report location of 
+            Optional boolean keyword that decides whether to report location of
             smallest timestep as well as a histogram and percentile report.
         relative_time : bool, optional
             Flag to report relative time instead of absolute time.
         triangle_id : int, optional
-            Can be used to specify a particular triangle rather than the one with 
+            Can be used to specify a particular triangle rather than the one with
             the largest speed.
-        
+
         Returns
         -------
         str
@@ -2985,7 +5358,7 @@ class Domain(Generic_Domain):
                                                      time_unit=time_unit,
                                                      datetime=datetime)
 
-        if track_speeds is True:
+        if track_speeds is True and self.max_speed is not None:
             # qwidth determines the text field used for quantities
             qwidth = self.qwidth
 
@@ -3098,7 +5471,7 @@ class Domain(Generic_Domain):
 
         return msg
 
-    def print_timestepping_statistics(self, *args, **kwargs):
+    def print_timestepping_statistics(self, *args, **kwargs) -> None:
         """Print time stepping statistics.
 
         Parameters
@@ -3108,21 +5481,21 @@ class Domain(Generic_Domain):
         datetime : bool, optional
             Flag to use timestamp or datetime.
         track_speed : bool, optional
-            Optional boolean keyword that decides whether to report location of 
+            Optional boolean keyword that decides whether to report location of
             smallest timestep as well as a histogram and percentile report.
         relative_time : bool, optional
             Flag to report relative time instead of absolute time.
         triangle_id : int, optional
-            Can be used to specify a particular triangle rather than the one with 
+            Can be used to specify a particular triangle rather than the one with
             the largest speed.
         """
 
-        msg = self.timestepping_statistics(*args, **kwargs) 
-            
+        msg = self.timestepping_statistics(*args, **kwargs)
+
         print(msg, flush=True)
 
 
-    def compute_boundary_flows(self):
+    def compute_boundary_flows(self) -> tuple[dict[str, float], float, float]:
         """Compute boundary flows at current timestep.
 
         Computes the total inflow and outflow across the domain boundary,
@@ -3192,7 +5565,7 @@ class Domain(Generic_Domain):
         return boundary_flows, total_boundary_inflow, total_boundary_outflow
 
 
-    def compute_total_volume(self):
+    def compute_total_volume(self) -> float:
         """
         Compute total volume (m^3) of water in entire domain
 
@@ -3201,7 +5574,7 @@ class Domain(Generic_Domain):
         return self.get_water_volume()
 
 
-    def volumetric_balance_statistics(self):
+    def volumetric_balance_statistics(self) -> str:
         """Create volumetric balance report suitable for printing or logging.
         """
 
@@ -3233,32 +5606,12 @@ class Domain(Generic_Domain):
 
         return message
 
-    def print_volumetric_balance_statistics(self):
+    def print_volumetric_balance_statistics(self) -> None:
 
         print (self.volumetric_balance_statistics())
 
-    def compute_flux_update_frequency(self):
-        """
-            Update the 'flux_update_frequency' and 'update_extrapolate' variables
-            Used to control updating of fluxes / extrapolation for 'local-time-stepping'
-        """
-
-        nvtxRangePush('compute_flux_update_frequency')
-        # Choose the correct extension module
-        if self.multiprocessor_mode == MULTIPROCESSOR_OPENMP:
-            from .sw_domain_openmp_ext import compute_flux_update_frequency
-        elif self.multiprocessor_mode == MULTIPROCESSOR_GPU:
-            # change over to cuda routines as developed
-            from .sw_domain_openmp_ext import compute_flux_update_frequency
-        else:
-            raise Exception('Not implemented')
-
-
-        compute_flux_update_frequency(self, self.timestep)
-
-        nvtxRangePop()
-
-    def report_water_volume_statistics(self, verbose=True, returnStats=False):
+    def report_water_volume_statistics(self, verbose: bool = True,
+                                       returnStats: bool = False) -> list[float] | None:
         """
         Compute the volume, boundary flux integral, fractional step volume integral, and their difference
 
@@ -3292,7 +5645,7 @@ class Domain(Generic_Domain):
         else:
             return
 
-    def report_cells_with_small_local_timestep(self, threshold_depth=None):
+    def report_cells_with_small_local_timestep(self, threshold_depth: float | None = None) -> None:
         """
         Convenience function to print the locations of cells
         with a small local timestep.
@@ -3333,190 +5686,534 @@ class Domain(Generic_Domain):
             barrier()
         return
 
+    def diagnose_timestep(self,
+                          threshold_dt: float | None = None,
+                          top_n: int = 5,
+                          threshold_depth: float | None = None,
+                          verbose: bool = True) -> dict:
+        """Diagnose CFL-limited timestep and NaN/inf in conserved quantities.
+
+        Computes the CFL-limiting dt per centroid (radius / wave_speed) and
+        reports the cells driving the global minimum. Also scans stage,
+        xmomentum and ymomentum for NaN / inf, which is the usual signature
+        of an ADER-2 (or any) timestepping blow-up. Intended to be called
+        from inside an evolve loop (e.g. each yieldstep) to localise where
+        and when the solver is about to fail.
+
+        Parameters
+        ----------
+        threshold_dt : float, optional
+            If given, a WARNING is emitted whenever the global min local-dt
+            falls below this value. Useful to catch the moment dt collapses.
+        top_n : int
+            Number of worst (smallest-dt) cells per rank to include in the
+            returned dict and printed report.
+        threshold_depth : float, optional
+            Depths below this are clamped when computing speed, to avoid
+            division-by-tiny. Defaults to self.minimum_allowed_height.
+        verbose : bool
+            If True, print a per-rank report.
+
+        Returns
+        -------
+        dict
+            Keys::
+
+              time              relative simulation time
+              current_timestep  self.timestep (last accepted global dt)
+              cfl               self.CFL setting
+              local_min_dt      smallest cell-local CFL dt on this rank
+              global_min_dt     smallest cell-local CFL dt across all ranks
+              local_max_speed   max wave_speed on this rank
+              global_max_speed  max wave_speed across all ranks
+              nan_counts        {'stage': n, 'xmomentum': n, 'ymomentum': n}
+              first_nan_cell    centroid xy of the first NaN/inf cell on
+                                this rank, or None
+              worst_cells       list of dicts (top_n) with keys
+                                {triangle, x, y, depth, speed, local_dt}
+        """
+        from anuga import numprocs
+        from anuga.config import g, epsilon
+
+        if threshold_depth is None:
+            threshold_depth = self.minimum_allowed_height
+
+        stage_c = self.quantities['stage'].centroid_values
+        elev_c = self.quantities['elevation'].centroid_values
+        uh_c = self.quantities['xmomentum'].centroid_values
+        vh_c = self.quantities['ymomentum'].centroid_values
+
+        bad_stage = ~num.isfinite(stage_c)
+        bad_uh = ~num.isfinite(uh_c)
+        bad_vh = ~num.isfinite(vh_c)
+        nan_counts = {
+            'stage':     int(bad_stage.sum()),
+            'xmomentum': int(bad_uh.sum()),
+            'ymomentum': int(bad_vh.sum()),
+        }
+
+        first_nan_cell = None
+        any_bad = bad_stage | bad_uh | bad_vh
+        if any_bad.any():
+            i = int(num.argmax(any_bad))
+            x = self.centroid_coordinates[i, 0] + self.geo_reference.xllcorner
+            y = self.centroid_coordinates[i, 1] + self.geo_reference.yllcorner
+            first_nan_cell = (float(x), float(y), i)
+
+        # Local CFL dt per cell. Mask NaNs out so argmin/min are meaningful.
+        d = stage_c - elev_c
+        d_safe = num.where(num.isfinite(d), num.maximum(d, threshold_depth),
+                           threshold_depth)
+        speed_h = num.sqrt(uh_c * uh_c + vh_c * vh_c) / d_safe
+        speed_h = num.where(num.isfinite(speed_h), speed_h, 0.0)
+        speed_h = speed_h * (d > threshold_depth)
+        grav_speed = num.sqrt(g * d_safe)
+        wave_speed = num.abs(speed_h) + grav_speed
+
+        local_dt = self.radii / num.maximum(wave_speed, epsilon)
+        # Don't let NaN cells dominate the argmin
+        local_dt = num.where(num.isfinite(local_dt), local_dt, num.inf)
+
+        local_min_dt = float(local_dt.min())
+        local_max_speed = float(num.nanmax(wave_speed)) if wave_speed.size else 0.0
+
+        order = num.argsort(local_dt)[:max(top_n, 1)]
+        worst_cells = []
+        for idx in order:
+            i = int(idx)
+            worst_cells.append({
+                'triangle': i,
+                'x': float(self.centroid_coordinates[i, 0]
+                           + self.geo_reference.xllcorner),
+                'y': float(self.centroid_coordinates[i, 1]
+                           + self.geo_reference.yllcorner),
+                'depth': float(d[i]),
+                'speed': float(wave_speed[i]),
+                'local_dt': float(local_dt[i]),
+            })
+
+        if numprocs > 1:
+            from mpi4py import MPI
+            comm = MPI.COMM_WORLD
+            global_min_dt = comm.allreduce(local_min_dt, op=MPI.MIN)
+            global_max_speed = comm.allreduce(local_max_speed, op=MPI.MAX)
+            global_nan = {
+                k: comm.allreduce(v, op=MPI.SUM) for k, v in nan_counts.items()
+            }
+        else:
+            global_min_dt = local_min_dt
+            global_max_speed = local_max_speed
+            global_nan = dict(nan_counts)
+
+        result = {
+            'time':             self.get_time(),
+            'current_timestep': self.timestep,
+            'cfl':              self.CFL,
+            'local_min_dt':     local_min_dt,
+            'global_min_dt':    global_min_dt,
+            'local_max_speed':  local_max_speed,
+            'global_max_speed': global_max_speed,
+            'nan_counts':       nan_counts,
+            'global_nan_counts': global_nan,
+            'first_nan_cell':   first_nan_cell,
+            'worst_cells':      worst_cells,
+        }
+
+        if verbose:
+            from anuga.parallel import myid
+            for i in range(numprocs):
+                if myid == i:
+                    print(f'  [diagnose_timestep] rank {myid} t={result["time"]:.3f}')
+                    print(f'    domain.timestep={self.timestep:.6e}  CFL={self.CFL}')
+                    print(f'    local  min cell-dt = {local_min_dt:.6e}   max wave_speed = {local_max_speed:.4f}')
+                    if numprocs > 1:
+                        print(f'    global min cell-dt = {global_min_dt:.6e}   max wave_speed = {global_max_speed:.4f}')
+                    total_bad = sum(nan_counts.values())
+                    if total_bad:
+                        print(f'    NaN/inf cells: stage={nan_counts["stage"]} '
+                              f'xmom={nan_counts["xmomentum"]} '
+                              f'ymom={nan_counts["ymomentum"]}')
+                        if first_nan_cell is not None:
+                            fx, fy, fi = first_nan_cell
+                            print(f'    first bad cell: tri={fi} at ({fx:.2f}, {fy:.2f})')
+                    for c in worst_cells:
+                        print(f'    tri {c["triangle"]:>7}  '
+                              f'xy=({c["x"]:.2f}, {c["y"]:.2f})  '
+                              f'depth={c["depth"]:.4f}  speed={c["speed"]:.4f}  '
+                              f'local_dt={c["local_dt"]:.6e}')
+                    if threshold_dt is not None and global_min_dt < threshold_dt:
+                        print(f'    WARNING: global min cell-dt {global_min_dt:.3e} '
+                              f'< threshold {threshold_dt:.3e}')
+                    sys.stdout.flush()
+                barrier()
+
+        return result
+
 # =======================================================================
 # PETE: NEW METHODS FOR FOR PARALLEL STRUCTURES. Note that we assume the
 # first "number_of_full_[nodes|triangles]" are full [nodes|triangles]
 # For full triangles it is possible to enquire self.tri_full_flag == True
 # =======================================================================
 
-    def get_number_of_full_triangles(self, *args, **kwargs):
+    def get_number_of_full_triangles(self, *args, **kwargs) -> int:
         return self.number_of_full_triangles
 
-    def get_full_centroid_coordinates(self, *args, **kwargs):
+    def get_full_centroid_coordinates(self, *args, **kwargs) -> num.ndarray:
         C = self.mesh.get_centroid_coordinates(*args, **kwargs)
         return C[:self.number_of_full_triangles, :]
 
-    def get_full_vertex_coordinates(self, *args, **kwargs):
+    def get_full_vertex_coordinates(self, *args, **kwargs) -> num.ndarray:
         V = self.mesh.get_vertex_coordinates(*args, **kwargs)
         return V[:3*self.number_of_full_triangles,:]
 
-    def get_full_triangles(self, *args, **kwargs):
+    def get_full_triangles(self, *args, **kwargs) -> num.ndarray:
         T = self.mesh.get_triangles(*args, **kwargs)
         return T[:self.number_of_full_triangles,:]
 
-    def get_full_nodes(self, *args, **kwargs):
+    def get_full_nodes(self, *args, **kwargs) -> num.ndarray:
         N = self.mesh.get_nodes(*args, **kwargs)
         return N[:self.number_of_full_nodes,:]
 
-    def get_tri_map(self):
+    def get_tri_map(self) -> num.ndarray | None:
         return self.tri_map
 
-    def get_inv_tri_map(self):
+    def get_inv_tri_map(self) -> num.ndarray | None:
         return self.inv_tri_map
 
 # ==============================================================================
 # Multiprocessor Mode (1=openmp, 2=cupy (in development))
 # ==============================================================================
 
-    def set_multiprocessor_mode(self, multiprocessor_mode=1):
+    # User-facing *per-domain* compute mode. This is the only genuinely
+    # per-domain choice — it selects the internal ``multiprocessor_mode``:
+    #   'legacy'  -> mode 1: sw_domain_openmp_ext solver + serial-Python operators
+    #   'unified' -> mode 2: the unified gpu_ext C kernels (solver + operators)
+    # Whether 'unified' runs on CPU or offloads to a GPU is NOT a per-domain
+    # property: it is a *process-global* OpenMP offload setting controlled by
+    # the module function ``set_gpu_offload()`` (and only possible on a GPU
+    # build). On a CPU-only build, 'unified' simply runs CPU-multicore.
+    COMPUTE_MODES = ('legacy', 'unified')
+
+    def _mode2_mpi_available(self) -> bool:
+        """True if ``sw_domain_gpu_ext`` was built with real C MPI support.
+
+        Mode 2 ('unified') performs its halo exchange at the C level
+        (``exchange_ghosts``). Without an MPI-enabled build that exchange is a
+        silent no-op, so a multi-rank 'unified' run would compute wrong results —
+        the selector falls back to 'legacy' (Python MPI exchange) in that case.
+        Serial (single-rank) 'unified' needs no MPI and is unaffected.
         """
-        Set multiprocessor mode 
-         1. openmp (in development)
-         2. cupy (in development)
-        """
-
-        if multiprocessor_mode not in [MULTIPROCESSOR_OPENMP, MULTIPROCESSOR_GPU]:
-            raise ValueError('Invalid multiprocessor mode. Must be one of [1,2] (openmp, cupy)')
-
-        self.multiprocessor_mode = multiprocessor_mode
-
-        if self.multiprocessor_mode == MULTIPROCESSOR_GPU:
-            self.set_gpu_interface()
-
-    def get_multiprocessor_mode(self):
-        """
-        Get multiprocessor mode 
-        
-        1. openmp (in development)
-        2. cupy (in development)
-        """
-        return self.multiprocessor_mode 
-
-    def set_omp_num_threads(self, omp_num_threads=None, verbose=True):
-        """
-        Set the number of OpenMP threads to use for multithread processing.
-        If OMP_NUM_THREADS is not set, this will set it to the specified 
-        omp_num_threads value.
-        By default omp_num_threads is set to 1, other, it will use the default setting.
-        """
-
-        import os
-        if omp_num_threads is None:
-            # Use the environment setting
-            omp_num_threads = os.environ.get('OMP_NUM_THREADS', None)
-            if verbose:
-                print(f'Using OMP_NUM_THREADS from environment: {omp_num_threads}')
-
-
-        if omp_num_threads is None:
-            omp_num_threads = 1  # Default to 1 if not set
-
         try:
-            omp_num_threads = int(omp_num_threads)
-        except ValueError:
-            raise ValueError('OMP_NUM_THREADS must be an integer')            
+            from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext
+            return bool(gpu_ext.gpu_has_mpi())
+        except Exception:
+            return False
 
-        # Set the number of OpenMP threads
-        self.omp_num_threads = omp_num_threads
-        from .sw_domain_openmp_ext import set_omp_num_threads as set_omp_num_threads_ext
-        set_omp_num_threads_ext(omp_num_threads)
+    def compute_capabilities(self) -> dict:
+        """Report which compute backends this build/run supports.
+
+        Returns a dict with::
+
+            'gpu_offload'     : bool - process can offload mode-2 to a GPU device
+                                       (build supports it, device present, offload
+                                       not disabled); see set_gpu_offload()
+            'num_gpu_devices' : int  - number of offload devices visible
+            'mpi'             : bool - gpu_ext built with C MPI ('unified' parallel ok)
+            'modes'           : list - per-domain modes available ('unified' only
+                                       when the gpu_ext extension is importable)
+        """
+        try:
+            from anuga.shallow_water import sw_domain_gpu_ext as gpu_ext  # noqa: F401
+            unified = True
+            ndev = int(gpu_ext.get_num_gpu_devices())
+            mpi = bool(gpu_ext.gpu_has_mpi())
+        except Exception:
+            unified, ndev, mpi = False, 0, False
+        modes = ['legacy'] + (['unified'] if unified else [])
+        return {'gpu_offload': gpu_offload_enabled(), 'num_gpu_devices': ndev,
+                'mpi': mpi, 'modes': modes}
+
+    def set_compute_mode(self, mode: str = 'unified', verbose: bool = False) -> None:
+        """Select this domain's compute mode (per-domain).
+
+        This is a per-domain setting — different domains in one script may use
+        different modes. Whether 'unified' uses a GPU is a separate, process-wide
+        decision (see :func:`set_gpu_offload`), because OpenMP target offload is
+        a process-level runtime setting, not a per-domain one.
+
+        Under MPI, 'unified' requires a gpu_ext built with MPI; otherwise this
+        falls back to 'legacy' (whose Python MPI exchange is correct in parallel)
+        with a rank-0 warning. The active mode is recorded in
+        ``self.compute_mode``; the original request in
+        ``self.requested_compute_mode``.
+
+        Parameters
+        ----------
+        mode : {'legacy', 'unified'}
+            - ``'legacy'`` — mode 1: the ``sw_domain_openmp_ext`` solver with
+              serial-Python fractional-step operators.
+            - ``'unified'`` — mode 2: the unified ``sw_domain_gpu_ext`` C kernels
+              (solver and operators). Runs CPU-multicore by default; offloads to
+              a GPU only when GPU offload is enabled process-wide via
+              :func:`anuga.set_gpu_offload` on a GPU-capable build.
+        """
+        import warnings
+
+        if mode not in self.COMPUTE_MODES:
+            raise ValueError(
+                f"Invalid compute mode {mode!r}. Must be one of {self.COMPUTE_MODES}.")
+
+        requested = mode
+        if mode == 'unified':
+            # Parallel guard: 'unified' exchanges ghosts at the C level, a silent
+            # no-op without an MPI-enabled gpu_ext build. Under MPI that gives
+            # wrong results, so fall back to 'legacy' (Python MPI exchange).
+            try:
+                from anuga import numprocs
+            except Exception:
+                numprocs = 1
+            if numprocs > 1 and not self._mode2_mpi_available():
+                try:
+                    from anuga import myid
+                except Exception:
+                    myid = 0
+                if myid == 0:
+                    warnings.warn(
+                        f"compute mode 'unified' selected under MPI ({numprocs} ranks) but "
+                        "this ANUGA build's sw_domain_gpu_ext was compiled without MPI; the "
+                        "C-level ghost exchange would be a silent no-op and give wrong "
+                        "parallel results. Falling back to 'legacy' (mode 1, Python MPI "
+                        "exchange). Rebuild with MPI to run 'unified' in parallel.",
+                        stacklevel=2)
+                mode = 'legacy'
+
+        self.requested_compute_mode = requested
+        self.compute_mode = mode
+
+        if mode == 'legacy':
+            self.multiprocessor_mode = MULTIPROCESSOR_OPENMP
+            self.use_c_rk_loop = False
+        else:  # 'unified' -> mode 2 (unified gpu_ext kernels)
+            self.multiprocessor_mode = MULTIPROCESSOR_GPU
+            self.use_c_rk_loop = True
+            # Build the device interface now if boundaries are ready; otherwise
+            # defer to the first evolve(). Boundaries are typically set AFTER
+            # construction, so a default-'unified' domain must not require them
+            # at __init__ time.
+            if self._boundaries_ready():
+                self.set_gpu_interface()
 
         if verbose:
-            print(f'Setting omp_num_threads to {omp_num_threads}')
+            print(f"Compute mode: requested {requested!r} -> active {self.compute_mode!r} "
+                  f"(multiprocessor_mode={self.multiprocessor_mode}, "
+                  f"gpu_offload={'on' if gpu_offload_enabled() else 'off'})")
 
+    def _boundaries_ready(self) -> bool:
+        """True if real boundary objects are set — required to build the gpu_ext
+        device interface. After distribute() boundary_map may be
+        ``{'exterior': None, 'ghost': None}`` (not None but no real boundaries).
+        """
+        bmap = getattr(self, 'boundary_map', None)
+        return bool(bmap) and any(b is not None for b in bmap.values())
+
+    def _ensure_gpu_interface(self) -> None:
+        """Build a deferred mode-2 device interface on demand.
+
+        For a default-'unified' domain the interface is built lazily (boundaries
+        are set after construction). Build it the first time a mode-2 path needs
+        it. If boundaries are still not set — e.g. a test that pokes the domain
+        without a full boundary setup — fall back to 'legacy' so the operation
+        can proceed rather than hit a None gpu_interface.
+        """
+        if self.multiprocessor_mode != MULTIPROCESSOR_GPU or self.gpu_interface is not None:
+            return
+        if self._boundaries_ready():
+            self.set_gpu_interface()
+        else:
+            self.set_compute_mode('legacy')
+
+    def get_compute_mode(self) -> str:
+        """Return the active per-domain compute mode: 'legacy' or 'unified'."""
+        return getattr(self, 'compute_mode', 'legacy')
+
+    def set_multiprocessor_mode(self, multiprocessor_mode: int = 1) -> None:
+        """
+        Set multiprocessor mode (legacy integer API).
+
+        1. openmp - Python RK loop (use_c_rk_loop=False)
+        2. gpu/mpi - C RK loop (use_c_rk_loop=True)
+
+        Thin wrapper over :meth:`set_compute_mode`: 1 maps to ``'legacy'``, 2 to
+        ``'unified'``. Whether 'unified' offloads to a GPU is a separate,
+        process-wide choice — see :func:`anuga.set_gpu_offload`. New code should
+        prefer :meth:`set_compute_mode`.
+        """
+        if multiprocessor_mode not in [MULTIPROCESSOR_OPENMP, MULTIPROCESSOR_GPU]:
+            raise ValueError('Invalid multiprocessor mode. Must be one of [1,2] (openmp, gpu/mpi)')
+
+        if multiprocessor_mode == MULTIPROCESSOR_OPENMP:
+            self.set_compute_mode('legacy')
+        else:
+            self.set_compute_mode('unified')
+
+    @property
+    def use_c_rk2_loop(self):
+        """Deprecated: use use_c_rk_loop instead."""
+        import warnings
+        warnings.warn(
+            "use_c_rk2_loop is deprecated; use use_c_rk_loop instead.",
+            DeprecationWarning, stacklevel=2)
+        return self.use_c_rk_loop
+
+    @use_c_rk2_loop.setter
+    def use_c_rk2_loop(self, value):
+        import warnings
+        warnings.warn(
+            "use_c_rk2_loop is deprecated; use use_c_rk_loop instead.",
+            DeprecationWarning, stacklevel=2)
+        self.use_c_rk_loop = value
+
+    def get_multiprocessor_mode(self) -> int:
+        """
+        Get multiprocessor mode
+
+        1. openmp (in development)
+        2. gpu/mpi (in development)
+        """
+        return self.multiprocessor_mode
+
+    @property
+    def omp_num_threads(self) -> int:
+        """The process-wide OpenMP thread count (read-only view).
+
+        OpenMP thread count is a process-level setting, not per-domain, so this
+        reflects the live value set by :func:`anuga.set_omp_num_threads` for
+        *every* domain in the session — including domains constructed before the
+        call. Assigning to it (``domain.omp_num_threads = n``) is kept for
+        backward compatibility and sets the count process-wide.
+        """
+        return get_omp_num_threads()
+
+    @omp_num_threads.setter
+    def omp_num_threads(self, value: int) -> None:
+        set_omp_num_threads(value, verbose=False)
+
+    def set_omp_num_threads(self, omp_num_threads: int | None = None, verbose: bool = True) -> None:
+        """Set the OpenMP thread count (process-wide).
+
+        OpenMP thread count is a process-level setting, not per-domain. This is a
+        thin wrapper that delegates to the module-level
+        :func:`anuga.set_omp_num_threads`; prefer that in new code. Kept for
+        backward compatibility.
+        """
+        set_omp_num_threads(omp_num_threads, verbose=verbose)
+
+
+    @property
+    def gpu(self):
+        """
+        Shortcut to access the GPU interface.
+
+        Returns the gpu_interface object which provides FLOP counters and kernel wrappers.
+        Raises AttributeError if GPU mode is not enabled.
+        """
+        if self.gpu_interface is None:
+            raise AttributeError(
+                "GPU interface not initialized. Call domain.set_multiprocessor_mode(2) first."
+            )
+        return self.gpu_interface
 
     def set_gpu_interface(self):
 
         if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is None:
 
-            # first check that cupy is available
+            # Check that boundaries are properly set before GPU initialization
+            # After distribute(), boundary_map may be {'exterior': None, 'ghost': None}
+            # which is not None but has no actual boundary objects - this causes silent failures
+            if self.boundary_map is None:
+                raise RuntimeError(
+                    "GPU mode requires boundaries to be set before calling set_multiprocessor_mode(2).\n"
+                    "Please call domain.set_boundary({...}) BEFORE domain.set_multiprocessor_mode(2)."
+                )
+
+            has_real_boundary = any(b is not None for b in self.boundary_map.values())
+            if not has_real_boundary:
+                raise RuntimeError(
+                    "GPU mode requires boundaries to be set before calling set_multiprocessor_mode(2).\n"
+                    "Please call domain.set_boundary({...}) BEFORE domain.set_multiprocessor_mode(2).\n"
+                    f"Current boundary_map has no boundary objects: {list(self.boundary_map.keys())}"
+                )
+
+            # Reconcile deeply-dry cells (stage < bed) to stage = bed before the initial
+            # state is synced to the device. A dry cell should carry stage = bed
+            # (depth 0); mode 1 reaches that via its per-step protect on the very first
+            # step, but the mode-2 device path only converges to it gradually (halving
+            # the deficit each step, ~a dozen steps to close a large stage<<bed gap).
+            # While it converges, any forcing applied to those cells — an Inlet_operator,
+            # rainfall — is absorbed into raising the sub-bed stage rather than making
+            # water depth, and is lost, leaving a permanent startup mass deficit
+            # (issue #200). Clamping stage up to bed here is mass-neutral (depth stays 0)
+            # and a no-op for wet cells, and makes mode 2 start already reconciled.
+            stage_c = self.quantities['stage'].centroid_values
+            bed_c = self.quantities['elevation'].centroid_values
+            if (stage_c < bed_c).any():
+                self.set_quantity('stage', num.maximum(stage_c, bed_c),
+                                  location='centroids')
+
+            # Try OpenMP target offloading interface first
+            try:
+                from .sw_domain_gpu_omp import GPU_OMP_interface
+                self.gpu_interface = GPU_OMP_interface(self)
+                self.gpu_interface.setup()
+                # Only print from rank 0
+                from anuga import myid, numprocs
+                omp_num_threads = os.environ.get('OMP_NUM_THREADS', '1')
+                # Offload is a process-wide decision (set_gpu_offload), resolved
+                # against the build. False on a CPU-only build: 'unified' is CPU
+                # multicore, not GPU.
+                self.gpu_offload_active = gpu_offload_enabled()
+                if myid == 0:
+                    device_id = self.gpu_interface.gpu_dom.device_id
+
+                    # The number of GPUs the runtime can actually see — NOT numprocs.
+                    try:
+                        from anuga.shallow_water.sw_domain_gpu_ext import get_num_gpu_devices
+                        num_devices = get_num_gpu_devices()
+                    except Exception:
+                        num_devices = -1
+
+                    for line in gpu_startup_banner(numprocs, num_devices, device_id,
+                                                   self.gpu_offload_active, omp_num_threads):
+                        print(line)
+                return
+            except Exception as e:
+                print(f'OpenMP GPU interface not available: {e}')
+
+            # Fall back to CUDA/CuPy interface
             try:
                 import cupy as cp
                 test_cupy_array = cp.array([1,2,3])
-
-            except (ImportError, Exception):
-                print('+==============================================================================+')
-                print('|                                                                              |')
-                print('| WARNING: cupy or gpu not available, so falling back to multiprocessor_mode 1 |')
-                print('|                                                                              |')
-                print('+==============================================================================+')
-                self.set_multiprocessor_mode(1)
+                from .sw_domain_cuda import GPU_interface
+                self.gpu_interface = GPU_interface(self)
+                self.gpu_interface.allocate_gpu_arrays()
+                self.gpu_interface.compile_gpu_kernels()
                 return
+            except Exception:
+                pass
 
-            from .sw_domain_cuda import GPU_interface
-            self.gpu_interface = GPU_interface(self)
-            self.gpu_interface.allocate_gpu_arrays()
-            self.gpu_interface.compile_gpu_kernels()
-           
-        
+            # No GPU available
+            from anuga import myid
+            if myid == 0:
+                print('+==============================================================================+')
+                print('| WARNING: GPU not available, falling back to multiprocessor_mode 1 (OpenMP)  |')
+                print('+==============================================================================+')
+            self.set_multiprocessor_mode(1)
+
+
 
 ################################################################################
 # End of class Shallow Water Domain
 ################################################################################
-
-
-
-################################################################################
-# Module functions for gradient limiting
-################################################################################
-
-
-def distribute_using_vertex_limiter(domain):
-    """Distribution from centroids to vertices specific to the SWW equation.
-
-    It will ensure that h (w-z) is always non-negative even in the
-    presence of steep bed-slopes by taking a weighted average between shallow
-    and deep cases.
-
-    In addition, all conserved quantities get distributed as per either a
-    constant (order==1) or a piecewise linear function (order==2).
-
-    FIXME: more explanation about removal of artificial variability etc
-
-    Precondition:
-      All quantities defined at centroids and bed elevation defined at
-      vertices.
-
-    Postcondition
-      Conserved quantities defined at vertices
-    """
-
-    # Remove very thin layers of water
-    domain.protect_against_infinitesimal_and_negative_heights()
-
-    # Extrapolate all conserved quantities
-    if domain.optimised_gradient_limiter:
-        # MH090605 if second order,
-        # perform the extrapolation and limiting on
-        # all of the conserved quantities
-
-        if domain._order_ == 1:
-            for name in domain.conserved_quantities:
-                Q = domain.quantities[name]
-                Q.extrapolate_first_order()
-        elif domain._order_ == 2:
-            domain.extrapolate_second_order_sw()
-        else:
-            raise Exception('Unknown order')
-    else:
-        # Old code:
-        for name in domain.conserved_quantities:
-            Q = domain.quantities[name]
-
-            if domain._order_ == 1:
-                Q.extrapolate_first_order()
-            elif domain._order_ == 2:
-                Q.extrapolate_second_order_and_limit_by_vertex()
-            else:
-                raise Exception('Unknown order')
-
-    # Take bed elevation into account when water heights are small
-    domain.balance_deep_and_shallow()
-
-    # Compute edge values by interpolation
-    for name in domain.conserved_quantities:
-        Q = domain.quantities[name]
-        Q.interpolate_from_vertices_to_edges()
 
 
 

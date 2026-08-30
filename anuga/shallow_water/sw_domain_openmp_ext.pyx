@@ -1,4 +1,4 @@
-#cython: wraparound=False, boundscheck=False, cdivision=True, profile=False, nonecheck=False, overflowcheck=False, cdivision_warnings=False, unraisable_tracebacks=False
+#cython: wraparound=False, boundscheck=False, cdivision=True, profile=False, nonecheck=False, overflowcheck=False, cdivision_warnings=False, unraisable_tracebacks=False, warn.unused=False
 
 import cython
 from libc.stdint cimport int64_t as anuga_int
@@ -23,8 +23,8 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		anuga_int extrapolate_velocity_second_order
 		anuga_int low_froude
 		anuga_int timestep_fluxcalls
-		anuga_int max_flux_update_frequency
 		anuga_int ncol_riverwall_hydraulic_properties
+		anuga_int nrow_riverwall_hydraulic_properties
 
 		double epsilon
 		double H0
@@ -85,18 +85,12 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double* stage_explicit_update
 		double* xmom_explicit_update
 		double* ymom_explicit_update
-		anuga_int* flux_update_frequency
-		anuga_int* update_next_flux
-		anuga_int* update_extrapolation
-		double* edge_timestep
 		double* edge_flux_work
 		double* neigh_work
 		double* pressuregrad_work
 		double* x_centroid_work
 		double* y_centroid_work
 		double* boundary_flux_sum
-		anuga_int* allow_timestep_increase
-
 		anuga_int* edge_river_wall_counter
 		double* riverwall_elevation
 		anuga_int* riverwall_rowIndex
@@ -119,9 +113,9 @@ cdef extern from "sw_domain_openmp.c" nogil:
 	void _openmp_set_omp_num_threads(anuga_int num_threads)
 	double _openmp_compute_fluxes_central(domain* D, double timestep)
 	double _openmp_protect(domain* D)
-	void _openmp_extrapolate_second_order_sw(domain* D)
 	void _openmp_extrapolate_second_order_edge_sw(domain* D)
 	anuga_int _openmp_fix_negative_cells(domain* D)
+	double _openmp_negative_cells_volume(domain* D)
 	anuga_int _openmp_gravity(domain *D)
 	anuga_int _openmp_gravity_wb(domain *D) 
 	anuga_int _openmp_update_conserved_quantities(domain* D, double timestep)
@@ -131,16 +125,19 @@ cdef extern from "sw_domain_openmp.c" nogil:
 	anuga_int _openmp_saxpy_conserved_quantities(domain *D, double a, double b, double c)
 	anuga_int _openmp_backup_conserved_quantities(domain *D)
 	void _openmp_distribute_edges_to_vertices(domain *D)
+	void _openmp_ader_ck_predictor(domain *D, double dt)
+	void _openmp_ader_ck_predictor_edge(domain *D, double dt)
 	# FIXME SR: Change over to domain* D argument ?
 	void _openmp_manning_friction_flat(double g, double eps, anuga_int N, double* w, double* zv, double* uh, double* vh, double* eta, double* xmom, double* ymom)
 	void _openmp_manning_friction_sloped(double g, double eps, anuga_int N, double* x, double* w, double* zv, double* uh, double* vh, double* eta, double* xmom_update, double* ymom_update)
 	void _openmp_manning_friction_sloped_edge_based(double g, double eps, anuga_int N, double* x, double* w, double* zv, double* uh, double* vh, double* eta, double* xmom_update, double* ymom_update)
 	void _openmp_evaluate_reflective_segment(domain *D, anuga_int N, anuga_int *edge_ptr, anuga_int *vol_ids_ptr, anuga_int *edge_ids_ptr)
-	anuga_int __flux_function_central(double* ql, double* qr, double h_left,
-	double h_right, double hle, double hre, double n1, double n2,
-	double epsilon, double ze, double g,
-	double* edgeflux, double* max_speed, double* pressure_flux,
-	anuga_int low_froude)
+	anuga_int __openmp__flux_function_central(double q_left0, double q_left1, double q_left2,
+	double q_right0, double q_right1, double q_right2,
+	double h_left, double h_right, double hle, double hre,
+	double n1, double n2, double epsilon, double ze, double g,
+	double* edgeflux0, double* edgeflux1, double* edgeflux2,
+	double* max_speed, double* pressure_flux, anuga_int low_froude)
 
 
 cdef anuga_int pointer_flag = 0
@@ -159,9 +156,12 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.extrapolate_velocity_second_order = domain_py_object.extrapolate_velocity_second_order
 	D.low_froude = domain_py_object.low_froude
 	D.timestep_fluxcalls = domain_py_object.timestep_fluxcalls
-	D.max_flux_update_frequency = domain_py_object.max_flux_update_frequency
 
 	D.ncol_riverwall_hydraulic_properties = riverwallData.ncol_hydraulic_properties
+	try:
+		D.nrow_riverwall_hydraulic_properties = len(riverwallData.names)
+	except:
+		D.nrow_riverwall_hydraulic_properties = 0
 
 	D.epsilon = domain_py_object.epsilon
 	D.H0 = domain_py_object.H0
@@ -197,11 +197,6 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 	cdef anuga_int[::1]  number_of_boundaries
 	cdef anuga_int[:,::1] surrogate_neighbours
 	cdef double[::1]   max_speed
-	cdef anuga_int[::1]  flux_update_frequency
-	cdef anuga_int[::1]  update_next_flux
-	cdef anuga_int[::1]  update_extrapolation
-	cdef anuga_int[::1]  allow_timestep_increase
-	cdef double[::1]   edge_timestep
 	cdef double[::1]   edge_flux_work
 	cdef double[::1]   neigh_work
 	cdef double[::1]   pressuregrad_work
@@ -246,14 +241,20 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 	areas = domain_py_object.areas
 	D.areas = &areas[0]
 
-	edge_flux_type = domain_py_object.edge_flux_type
-	D.edge_flux_type = &edge_flux_type[0]
+	if domain_py_object.edge_flux_type is not None:
+		edge_flux_type = domain_py_object.edge_flux_type
+		D.edge_flux_type = &edge_flux_type[0]
+	else:
+		D.edge_flux_type = NULL
 
 	tri_full_flag = domain_py_object.tri_full_flag
 	D.tri_full_flag = &tri_full_flag[0]
 
-	already_computed_flux = domain_py_object.already_computed_flux
-	D.already_computed_flux = &already_computed_flux[0,0]
+	if domain_py_object.already_computed_flux is not None:
+		already_computed_flux = domain_py_object.already_computed_flux
+		D.already_computed_flux = &already_computed_flux[0,0]
+	else:
+		D.already_computed_flux = NULL
 
 	vertex_coordinates = domain_py_object.vertex_coordinates
 	D.vertex_coordinates = &vertex_coordinates[0,0]
@@ -270,29 +271,23 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 	number_of_boundaries = domain_py_object.number_of_boundaries
 	D.number_of_boundaries = &number_of_boundaries[0]
 
-	flux_update_frequency = domain_py_object.flux_update_frequency
-	D.flux_update_frequency = &flux_update_frequency[0]
+	if domain_py_object.edge_flux_work is not None:
+		edge_flux_work = domain_py_object.edge_flux_work
+		D.edge_flux_work = &edge_flux_work[0]
+	else:
+		D.edge_flux_work = NULL
 
-	update_next_flux = domain_py_object.update_next_flux
-	D.update_next_flux = &update_next_flux[0]
+	if domain_py_object.neigh_work is not None:
+		neigh_work = domain_py_object.neigh_work
+		D.neigh_work = &neigh_work[0]
+	else:
+		D.neigh_work = NULL
 
-	update_extrapolation = domain_py_object.update_extrapolation
-	D.update_extrapolation = &update_extrapolation[0]
-
-	allow_timestep_increase = domain_py_object.allow_timestep_increase
-	D.allow_timestep_increase = &allow_timestep_increase[0]
-
-	edge_timestep = domain_py_object.edge_timestep
-	D.edge_timestep = &edge_timestep[0]
-
-	edge_flux_work = domain_py_object.edge_flux_work
-	D.edge_flux_work = &edge_flux_work[0]
-
-	neigh_work = domain_py_object.neigh_work
-	D.neigh_work = &neigh_work[0]
-
-	pressuregrad_work = domain_py_object.pressuregrad_work
-	D.pressuregrad_work = &pressuregrad_work[0]
+	if domain_py_object.pressuregrad_work is not None:
+		pressuregrad_work = domain_py_object.pressuregrad_work
+		D.pressuregrad_work = &pressuregrad_work[0]
+	else:
+		D.pressuregrad_work = NULL
 
 	x_centroid_work = domain_py_object.x_centroid_work
 	D.x_centroid_work = &x_centroid_work[0]
@@ -303,8 +298,11 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 	boundary_flux_sum = domain_py_object.boundary_flux_sum
 	D.boundary_flux_sum = &boundary_flux_sum[0]
 
-	edge_river_wall_counter = domain_py_object.edge_river_wall_counter
-	D.edge_river_wall_counter  = &edge_river_wall_counter[0]
+	if domain_py_object.edge_river_wall_counter is not None:
+		edge_river_wall_counter = domain_py_object.edge_river_wall_counter
+		D.edge_river_wall_counter = &edge_river_wall_counter[0]
+	else:
+		D.edge_river_wall_counter = NULL
 
 	#------------------------------------------------------
 	# Quantity structures
@@ -462,6 +460,10 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 		
 
 	D.ncol_riverwall_hydraulic_properties = riverwallData.ncol_hydraulic_properties
+	try:
+		D.nrow_riverwall_hydraulic_properties = len(riverwallData.names)
+	except:
+		D.nrow_riverwall_hydraulic_properties = 0
 
 #===============================================================================
 # DomainStruct: Cython wrapper for domain struct
@@ -586,9 +588,6 @@ cdef class Domain_C_struct:
 			print("beta_vh: %g -> %g" % (S.beta_vh, D.beta_vh))
 		if D.beta_vh_dry != S.beta_vh_dry:
 			print("beta_vh_dry: %g -> %g" % (S.beta_vh_dry, D.beta_vh_dry))
-		if D.max_flux_update_frequency != S.max_flux_update_frequency:
-			print("max_flux_update_frequency: %d -> %d"
-				  % (S.max_flux_update_frequency, D.max_flux_update_frequency))
 		if D.ncol_riverwall_hydraulic_properties != S.ncol_riverwall_hydraulic_properties:
 			print("ncol_riverwall_hydraulic_properties: %d -> %d"
 				  % (S.ncol_riverwall_hydraulic_properties,
@@ -754,22 +753,6 @@ cdef class Domain_C_struct:
 			print("ymom_explicit_update: %#x -> %#x"
 				  % (<uintptr_t>S.ymom_explicit_update,
 					 <uintptr_t>D.ymom_explicit_update))
-		if <uintptr_t>D.flux_update_frequency != <uintptr_t>S.flux_update_frequency:
-			print("flux_update_frequency: %#x -> %#x"
-				  % (<uintptr_t>S.flux_update_frequency,
-					 <uintptr_t>D.flux_update_frequency))
-		if <uintptr_t>D.update_next_flux != <uintptr_t>S.update_next_flux:
-			print("update_next_flux: %#x -> %#x"
-				  % (<uintptr_t>S.update_next_flux,
-					 <uintptr_t>D.update_next_flux))
-		if <uintptr_t>D.update_extrapolation != <uintptr_t>S.update_extrapolation:
-			print("update_extrapolation: %#x -> %#x"
-				  % (<uintptr_t>S.update_extrapolation,
-					 <uintptr_t>D.update_extrapolation))
-		if <uintptr_t>D.edge_timestep != <uintptr_t>S.edge_timestep:
-			print("edge_timestep: %#x -> %#x"
-				  % (<uintptr_t>S.edge_timestep,
-					 <uintptr_t>D.edge_timestep))
 		if <uintptr_t>D.edge_flux_work != <uintptr_t>S.edge_flux_work:
 			print("edge_flux_work: %#x -> %#x"
 				  % (<uintptr_t>S.edge_flux_work,
@@ -794,10 +777,6 @@ cdef class Domain_C_struct:
 			print("boundary_flux_sum: %#x -> %#x"
 				  % (<uintptr_t>S.boundary_flux_sum,
 					 <uintptr_t>D.boundary_flux_sum))
-		if <uintptr_t>D.allow_timestep_increase != <uintptr_t>S.allow_timestep_increase:
-			print("allow_timestep_increase: %#x -> %#x"
-				  % (<uintptr_t>S.allow_timestep_increase,
-					 <uintptr_t>D.allow_timestep_increase))
 		if <uintptr_t>D.edge_river_wall_counter != <uintptr_t>S.edge_river_wall_counter:
 			print("edge_river_wall_counter: %#x -> %#x"
 				  % (<uintptr_t>S.edge_river_wall_counter,
@@ -926,6 +905,11 @@ def setup_Domain_C_struct(object domain_py_object, update_domain_c_struct=False)
 	"""
 	Setup the Domain_C_struct on the Python Domain object.
 	"""
+	# Ensure work arrays are allocated before the C struct reads their pointers.
+	# They are kept None at domain creation to avoid cold virtual pages during
+	# distribute(); _ensure_work_arrays() allocates them on the first evolve call.
+	if hasattr(domain_py_object, '_ensure_work_arrays'):
+		domain_py_object._ensure_work_arrays()
 	domain_py_object._Domain_C_struct = Domain_C_struct(domain_py_object)
 
 def update_Domain_C_struct(object domain_py_object):
@@ -966,14 +950,14 @@ def extrapolate_second_order_sw(object domain_py_object, update_domain_c_struct=
 	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=update_domain_c_struct)
 
 	with nogil:
-		_openmp_extrapolate_second_order_sw(D)
+		_openmp_extrapolate_second_order_edge_sw(D)
 
 def distribute_to_edges(object domain_py_object, update_domain_c_struct=False):
 
 	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=update_domain_c_struct)
 
 	with nogil:
-		_openmp_extrapolate_second_order_sw(D)
+		_openmp_extrapolate_second_order_edge_sw(D)
 
 def distribute_to_edges_and_vertices(object domain_py_object, 
                                     distribute_to_vertices=True, 
@@ -1023,10 +1007,6 @@ def protect_new(object domain_py_object, update_domain_c_struct=False):
 
 
 	return mass_error
-
-def compute_flux_update_frequency(object domain_py_object, double timestep):
-
-	pass
 
 def manning_friction_flat_semi_implicit(object domain_py_object, update_domain_c_struct=False):
 	
@@ -1112,13 +1092,16 @@ def update_conserved_quantities(object domain_py_object,
                                 update_domain_c_struct=False):
 
 	cdef anuga_int num_negative_cells
+	cdef double negative_volume
 	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=update_domain_c_struct)
 
 	with nogil:
 		_openmp_update_conserved_quantities(D, timestep)
+		# Measure the deficit volume BEFORE the clamp erases it (stage->bed).
+		negative_volume = _openmp_negative_cells_volume(D)
 		num_negative_cells = _openmp_fix_negative_cells(D)
 
-	return num_negative_cells
+	return num_negative_cells, negative_volume
 
 def saxpy_conserved_quantities(object domain_py_object, 
                                double a, double b, double c,
@@ -1135,7 +1118,29 @@ def backup_conserved_quantities(object domain_py_object, update_domain_c_struct=
 	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=update_domain_c_struct)
 
 	with nogil:
-		_openmp_backup_conserved_quantities(D)	
+		_openmp_backup_conserved_quantities(D)
+
+def ader_ck_predictor(object domain_py_object, double dt, update_domain_c_struct=False):
+	"""ADER Cauchy-Kovalewski predictor: advance centroids by dt in-place.
+	Call after distribute_to_vertices_and_edges(); uses edge values to recover
+	cell slopes, then evaluates SWE time derivatives locally.
+	"""
+	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=update_domain_c_struct)
+
+	with nogil:
+		_openmp_ader_ck_predictor(D, dt)
+
+def ader_ck_predictor_edge(object domain_py_object, double dt, update_domain_c_struct=False):
+	"""Fused ADER-2 predictor: shift edge values to Q^{n+1/2}, centroids unchanged.
+
+	Equivalent to ader_ck_predictor() followed by distribute_to_vertices_and_edges(),
+	but faster: skips the full extrapolation pass and leaves Q^n in centroids so no
+	backup/saxpy restore is needed in evolve_one_ader2_step().
+	"""
+	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=update_domain_c_struct)
+
+	with nogil:
+		_openmp_ader_ck_predictor_edge(D, dt)
 
 def evaluate_reflective_segment(object domain_py_object, 
                                 np.ndarray[np.int64_t, ndim=1, mode="c"] segment_edges not None, 
@@ -1187,12 +1192,13 @@ def flux_function_central(
 	h0 = H0 * H0
 	limiting_threshold = 10 * H0
 
-	err = __flux_function_central(
-		&ql[0], &qr[0],
-		h_left, h_right, hle, hre, normal[0], normal[1],
-		epsilon, ze, g,
-		&edgeflux[0], &max_speed, &pressure_flux,
-		low_froude
+	err = __openmp__flux_function_central(
+		ql[0], ql[1], ql[2],
+		qr[0], qr[1], qr[2],
+		h_left, h_right, hle, hre,
+		normal[0], normal[1], epsilon, ze, g,
+		&edgeflux[0], &edgeflux[1], &edgeflux[2],
+		&max_speed, &pressure_flux, low_froude
 	)
 
 	assert err >= 0, "Discontinuous Elevation"

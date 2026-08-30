@@ -7,6 +7,7 @@ dependencies:
   - pip
   - affine
   - cartopy
+  - contextily
   - cython
   - dill
   - rasterio
@@ -30,6 +31,7 @@ dependencies:
   - pymetis
   - pyproj
   - pytest
+  - pytest-regressions
   - scipy
   - utm
   - wheel

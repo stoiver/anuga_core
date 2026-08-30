@@ -18,6 +18,26 @@ from anuga.operators.base_operator import Operator
 from anuga import Region
 
 
+def _mark_domain_erosion(domain):
+    """Flag *domain* as having an erosion operator and default its elevation
+    storage to time-varying.
+
+    Erosion changes the bed every timestep; if elevation is stored statically
+    the SWW (and any raster derived from it) shows the initial terrain forever.
+    So promote ``quantities_to_be_stored['elevation']`` from static (1) to
+    dynamic (2) — unless the user deliberately forced static
+    (``domain._elevation_static_by_user``). The ``_erosion_present`` flag lets
+    ``Domain.initialise_storage`` warn if elevation still ends up static.
+    """
+    qts = getattr(domain, 'quantities_to_be_stored', None)
+    if not isinstance(qts, dict):
+        return
+    domain._erosion_present = True
+    if qts.get('elevation') != 2 and \
+            not getattr(domain, '_elevation_static_by_user', False):
+        qts['elevation'] = 2
+
+
 class Erosion_operator(Operator, Region):
     """
     Simple erosion operator in a region (careful to maintain continuitiy of elevation)
@@ -45,7 +65,11 @@ class Erosion_operator(Operator, Region):
 
         Operator.__init__(self, domain, description, label, logging, verbose)
 
-
+        # Erosion changes the bed every timestep, so elevation must be stored
+        # time-varying (flag 2) or the SWW records only the initial terrain.
+        # Default to dynamic storage unless the user deliberately chose static;
+        # initialise_storage() warns if it ends up static regardless.
+        _mark_domain_erosion(self.domain)
 
         Region.__init__(self, domain,
                         indices=indices,
@@ -87,8 +111,8 @@ class Erosion_operator(Operator, Region):
         # Some extras for reporting
         #-----------------------------------------
         self.max_change = 0
-        
-        
+
+
 
     def update_quantities(self):
         """Update the vertex values of the quantities to model erosion
@@ -115,10 +139,10 @@ class Erosion_operator(Operator, Region):
             #--------------------------------------
             ind = self.indices
             m = num.sqrt(self.xmom_c[ind]**2 + self.ymom_c[ind]**2)
-            
+
             if self.domain.get_using_discontinuous_elevation():
                 m = num.where(m>self.threshold, m, 0.0)
-    
+
                 de = m*dt
                 height = self.stage_c[ind] - self.elev_c[ind]
                 self.elev_c[ind] = num.amax(num.maximum(self.elev_v[ind] - de, self.base), axis=1)
@@ -126,7 +150,7 @@ class Erosion_operator(Operator, Region):
             else:
                 m = num.vstack((m,m,m)).T  # Stack up m to apply to vertices
                 m = num.where(m>self.threshold, m, 0.0)
-    
+
                 de = m*dt
                 self.elev_v[ind] = num.amax(num.maximum(self.elev_v[ind] - de, self.base), axis=1)
 
@@ -171,22 +195,22 @@ class Erosion_operator(Operator, Region):
         # Cleanup elevation and stage quantity values
         #-----------------------------------------
         self.clean_up_elevation_stage()
-        
-        
-        
-        
+
+
+
+
     def clean_up_elevation_stage(self):
-        
+
         #----------------------------------------------
         # Don't need to clean up if using discontinuous
         # elevation
         #----------------------------------------------
         if self.domain.get_using_discontinuous_elevation():
-            return 
-        
-        
+            return
+
+
         #-----------------------------------------------
-        # Clean up to conserve volume and make elevation 
+        # Clean up to conserve volume and make elevation
         # continuous
         #-----------------------------------------------
         if self.indices is None:
@@ -221,7 +245,7 @@ class Erosion_operator(Operator, Region):
                 # with this to get it working in both Python2 and Python3
                 res = num.sum(self.elev_v[vidd // 3, vidd % 3]) / non
                 self.elev_v[vidd // 3, vidd % 3] = res
-                
+
 
 
             #--------------------------------------
@@ -242,7 +266,7 @@ class Erosion_operator(Operator, Region):
         """If Operator is applied independently on each cell and
         so is parallel safe.
         """
-        
+
         if self.domain.get_using_discontinuous_elevation():
             return True
         else:
@@ -340,13 +364,12 @@ class Erosion_operator(Operator, Region):
         ## Plot full triangles
         n = int(len(fx1) / 3)
         triang = num.array(list(range(0, 3*n)))
-        triang.shape = (n, 3)
+        triang = triang.reshape(n, 3)
         print(triang)
         plt.triplot(fx1, fy1, triang, 'go-')
 
 
 
-        self.vols
         #plt.plot()
 
         #-------------------------------------------
@@ -365,7 +388,7 @@ class Erosion_operator(Operator, Region):
         ## Plot full triangles
         n = int(len(fx0) / 3)
         triang = num.array(list(range(0,3*n)))
-        triang.shape = (n, 3)
+        triang = triang.reshape(n, 3)
         print(triang)
         plt.triplot(fx0, fy0, triang, 'bo-')
 
@@ -386,7 +409,7 @@ class Erosion_operator(Operator, Region):
         ## Plot full triangles
         n = int(len(fx0) / 3)
         triang = num.array(list(range(0,3*n)))
-        triang.shape = (n, 3)
+        triang = triang.reshape(n, 3)
         print(triang)
         plt.triplot(fx0, fy0, triang, 'bo-')
 
@@ -401,7 +424,7 @@ class Erosion_operator(Operator, Region):
         plt.plot(fx2,fy2,'yo')
 
         #plt.tripcolor(fx,fy, triang, Z)
-        
+
         ## Plot ghost triangles
         #n = int(len(gx)/3)
         #if n > 0:
@@ -512,7 +535,7 @@ class Polygonal_erosion_operator(Erosion_operator):
 #===============================================================================
 class Bed_shear_erosion_operator(Erosion_operator):
     """
-    Local version of erosion confined to a region with the erosion controlled 
+    Local version of erosion confined to a region with the erosion controlled
     by a factor multiplied by Bed Shear
 
 
@@ -530,7 +553,7 @@ class Bed_shear_erosion_operator(Erosion_operator):
                  label = None,
                  logging = False,
                  verbose = False):
-                 
+
 
         Erosion_operator.__init__(self,
                  domain,
@@ -544,7 +567,7 @@ class Bed_shear_erosion_operator(Erosion_operator):
                  label=label,
                  logging=logging,
                  verbose=verbose)
-        
+
         self.shear_factor = shear_factor
 
 
@@ -554,7 +577,7 @@ class Bed_shear_erosion_operator(Erosion_operator):
         """
         import numpy as num
 
-        
+
         t = self.get_time()
         dt = self.get_timestep()
 
@@ -573,7 +596,7 @@ class Bed_shear_erosion_operator(Erosion_operator):
 
         self.WLev_gx = WLev.x_gradient
         self.WLev_gy = WLev.y_gradient
-        
+
 
         updated = True
 
@@ -589,10 +612,10 @@ class Bed_shear_erosion_operator(Erosion_operator):
             #--------------------------------------
             # Update all three vertices for each cell
             #--------------------------------------
-            
+
             ind = self.indices
             shear_factor = self.shear_factor
-            
+
             # These arrays, m,d and v will be shape (len(ids),1)
             m = num.sqrt(self.xmom_c[ind]**2 + self.ymom_c[ind]**2)  # abs Momentum
             d= (self.stage_c[ind]-self.elev_c[ind]) # Depth
@@ -604,12 +627,12 @@ class Bed_shear_erosion_operator(Erosion_operator):
 
             bedslope = num.sqrt(self.elev_gx[ind]**2 + self.elev_gy[ind]**2)
             EN_slope = num.sqrt(self.WLev_gx[ind]**2 + self.WLev_gy[ind]**2)
-            
+
             # Implement  Bed Shear term based on BED SLOPE
             es=EN_slope
             bedshearBs=1000*9.81*d*bedslope  # ro*g*h*bedslope , { Bed Slope  or  Energy Slope ??} in N/m**2
             bsbs = bedshearBs
-            
+
             # Implement Bed Shear term based on ENERGY SLOPE
             bedshearEs=1000*9.81*d*EN_slope  # ro*g*h*EN_slope , { Energy Slope ??}
             bses = bedshearEs
@@ -624,11 +647,11 @@ class Bed_shear_erosion_operator(Erosion_operator):
 
             if self.domain.get_using_discontinuous_elevation():
                 height = self.stage_c[ind] - self.elev_c[ind]
-                
-                limiting = v 
+
+                limiting = v
                 # de will have a value of 0.0 (and hence no effect) if limiting <= threshold
                 de = num.where(limiting > self.threshold, de, 0.0)
-    
+
                 # Ensure we don't erode below self.base level
                 self.elev_c[ind] = num.maximum(self.elev_c[ind] - de, self.base)
 
@@ -641,12 +664,12 @@ class Bed_shear_erosion_operator(Erosion_operator):
                 #bses = num.vstack((bses,bses,bses)).T
                 #es = num.vstack((es,es,es)).T
                 de = num.vstack((de,de,de)).T
-                
-                
+
+
                 limiting = v # Make the limiting trigger Velocity? or Momentum... or Shear ??
                 # de will have a value of 0.0 (and hence no effect) if limiting <= threshold
                 de = num.where(limiting > self.threshold, de, 0.0)
-    
+
                 # Ensure we don't erode below self.base level
                 self.elev_v[ind] = num.maximum(self.elev_v[ind] - de, self.base)
 
@@ -659,14 +682,14 @@ class Flat_slice_erosion_operator(Erosion_operator):
     Local version of erosion confined to a polygon
     Erosion slices only in horizontal plane to a target level and only impacts
     existing elevations above that target, leaving values below the target un affected
-    
+
     """
 
 
     def __init__(self, domain,
-                 threshold=0.0, 
-                 base=0.0, 
-                 elevation=None, 
+                 threshold=0.0,
+                 base=0.0,
+                 elevation=None,
                  indices=None,
                  polygon=None,
                  center=None,
@@ -675,7 +698,7 @@ class Flat_slice_erosion_operator(Erosion_operator):
                  label = None,
                  logging = False,
                  verbose = False):
-                 
+
 
         Erosion_operator.__init__(self,
                  domain,
@@ -689,9 +712,9 @@ class Flat_slice_erosion_operator(Erosion_operator):
                  label=label,
                  logging=logging,
                  verbose=verbose)
-        
+
         self.elevation = elevation
-        
+
 
 
 
@@ -720,7 +743,7 @@ class Flat_slice_erosion_operator(Erosion_operator):
             #--------------------------------------
 
             ind = self.indices
-            
+
             if self.domain.get_using_discontinuous_elevation():
                 try:
                     height = self.stage_c[ind] - self.elev_c[ind]
@@ -746,16 +769,16 @@ class Flat_fill_slice_erosion_operator(Erosion_operator):
     Local version of erosion confined to a polygon
     Erosion slices only in horizontal plane to a target level and only impacts
     existing elevations above that target, leaving values below the target un affected
-    
-    
+
+
 
 
     """
 
     def __init__(self, domain,
-                 threshold=0.0, 
-                 base=0.0, 
-                 elevation=None, 
+                 threshold=0.0,
+                 base=0.0,
+                 elevation=None,
                  indices=None,
                  polygon=None,
                  center=None,
@@ -764,7 +787,7 @@ class Flat_fill_slice_erosion_operator(Erosion_operator):
                  label = None,
                  logging = False,
                  verbose = False):
-                 
+
 
         Erosion_operator.__init__(self,
                  domain,
@@ -778,7 +801,7 @@ class Flat_fill_slice_erosion_operator(Erosion_operator):
                  label=label,
                  logging=logging,
                  verbose=verbose)
-        
+
         self.elevation = elevation
 
     def update_quantities(self):
@@ -789,7 +812,7 @@ class Flat_fill_slice_erosion_operator(Erosion_operator):
         t = self.get_time()
         dt = self.get_timestep()
 
-        
+
 
         updated = True
 
@@ -807,7 +830,7 @@ class Flat_fill_slice_erosion_operator(Erosion_operator):
             #--------------------------------------
 
             ind = self.indices
-            
+
             if self.domain.get_using_discontinuous_elevation():
 
                 try:

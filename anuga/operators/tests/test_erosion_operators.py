@@ -1,7 +1,8 @@
 """  Test erosion operators
 """
 
-import unittest, os
+import unittest
+import os
 import anuga
 from anuga import Domain
 from anuga import Reflective_boundary
@@ -87,7 +88,7 @@ class Test_erosion_operators(unittest.TestCase):
         Height = Stage - Elevation
 
         sum2 = num.sum(Height)
-        
+
         #pprint( domain.quantities['elevation'].centroid_values )
         #pprint( domain.quantities['stage'].centroid_values )
         #print domain.quantities['xmomentum'].centroid_values
@@ -96,9 +97,9 @@ class Test_erosion_operators(unittest.TestCase):
         assert sum1 == sum2
         assert num.allclose(domain.quantities['stage'].centroid_values, stage_ex)
         assert num.allclose(domain.quantities['xmomentum'].centroid_values, 2.0)
-        assert num.allclose(domain.quantities['ymomentum'].centroid_values, 3.0)        
+        assert num.allclose(domain.quantities['ymomentum'].centroid_values, 3.0)
 
-            
+
 def make_domain():
     """4-triangle domain, 1m water over 0.5m elevation."""
     a = [0.0, 0.0]; b = [0.0, 2.0]; c = [2.0, 0.0]
@@ -119,7 +120,6 @@ class Test_erosion_operator_variants(unittest.TestCase):
         self.domain = make_domain()
 
     def tearDown(self):
-        import os
         try:
             os.remove('domain.sww')
         except OSError:
@@ -177,7 +177,6 @@ class Test_circular_operators(unittest.TestCase):
         self.domain = make_domain()
 
     def tearDown(self):
-        import os
         try:
             os.remove('domain.sww')
         except OSError:
@@ -219,6 +218,115 @@ class Test_circular_operators(unittest.TestCase):
         # At least one centroid should be at or above 1.0 (elevation=0.5, stage >= elev)
         self.assertTrue(num.any(stage_vals >= 1.0),
                         "At least one stage centroid value should be >= 1.0")
+
+
+class Test_set_quantity_operator_extra(unittest.TestCase):
+    """Additional tests for Set_quantity_operator methods."""
+
+    def setUp(self):
+        self.domain = rectangular_cross_domain(2, 2)
+        self.domain.set_quantity('elevation', 0.0)
+        self.domain.set_quantity('stage', 1.0)
+
+    def _make_op(self):
+        from anuga.operators.set_quantity_operator import Set_quantity_operator
+        return Set_quantity_operator(self.domain, 'friction', value=0.03)
+
+    def test_parallel_safe(self):
+        """parallel_safe returns True (line 77)."""
+        self.assertTrue(self._make_op().parallel_safe())
+
+    def test_statistics(self):
+        """statistics returns string (lines 81-83)."""
+        msg = self._make_op().statistics()
+        self.assertIsInstance(msg, str)
+
+    def test_timestepping_statistics(self):
+        """timestepping_statistics returns string (line 91)."""
+        msg = self._make_op().timestepping_statistics()
+        self.assertIsInstance(msg, str)
+
+    def test_call_all_triangles(self):
+        """Call with indices=None updates friction (set_quantity.py lines 109-117)."""
+        from anuga.operators.set_quantity_operator import Set_quantity_operator
+        import numpy as num
+        op = Set_quantity_operator(self.domain, 'friction', value=0.05, indices=None)
+        self.domain.timestep = 1.0
+        op()
+        self.assertTrue(num.allclose(
+            self.domain.quantities['friction'].centroid_values, 0.05))
+
+    def test_call_specific_indices(self):
+        """Call with specific indices updates those friction values (set_quantity.py lines 125-133)."""
+        from anuga.operators.set_quantity_operator import Set_quantity_operator
+        import numpy as num
+        op = Set_quantity_operator(self.domain, 'friction', value=0.07, indices=[0, 1])
+        self.domain.timestep = 1.0
+        op()
+
+    def test_call_empty_indices(self):
+        """Empty indices → early return (set_quantity.py line 99)."""
+        from anuga.operators.set_quantity_operator import Set_quantity_operator
+        op = Set_quantity_operator(self.domain, 'friction', value=0.05, indices=[])
+        self.domain.timestep = 1.0
+        op()  # should return early
+
+    def test_pass_region_object(self):
+        """Passing a Region object uses lines 48-49 in set_quantity.py."""
+        from anuga.operators.set_quantity_operator import Set_quantity_operator
+        from anuga import Region
+        region = Region(self.domain, indices=[0, 1, 2])
+        op = Set_quantity_operator(self.domain, 'friction', value=0.04, region=region)
+        self.assertIsNotNone(op)
+
+
+class Test_erosion_elevation_storage(unittest.TestCase):
+    """Erosion operators default elevation to time-varying SWW storage."""
+
+    def _domain(self):
+        domain = rectangular_cross_domain(6, 6)
+        domain.set_boundary(
+            {b: Reflective_boundary(domain) for b in domain.get_boundary_tags()})
+        return domain
+
+    def test_operator_promotes_elevation_to_time_varying(self):
+        from anuga.operators.erosion_operators import Circular_erosion_operator
+        domain = self._domain()
+        # Default is static (1); creating an erosion operator promotes to
+        # dynamic (2) and flags the domain.
+        self.assertEqual(domain.quantities_to_be_stored['elevation'], 1)
+        Circular_erosion_operator(domain, center=(0.5, 0.5), radius=0.2)
+        self.assertEqual(domain.quantities_to_be_stored['elevation'], 2)
+        self.assertTrue(getattr(domain, '_erosion_present', False))
+
+    def test_respects_explicit_static(self):
+        from anuga.operators.erosion_operators import Circular_erosion_operator
+        domain = self._domain()
+        # A deliberate static choice is honoured (not promoted).
+        domain._elevation_static_by_user = True
+        domain.quantities_to_be_stored['elevation'] = 1
+        Circular_erosion_operator(domain, center=(0.5, 0.5), radius=0.2)
+        self.assertEqual(domain.quantities_to_be_stored['elevation'], 1)
+
+    def test_warns_when_reset_to_static_before_storage(self):
+        import tempfile
+        from anuga.operators.erosion_operators import Circular_erosion_operator
+        domain = self._domain()
+        domain.set_name('erosion_storage_warn')
+        Circular_erosion_operator(domain, center=(0.5, 0.5), radius=0.2)
+        # User resets to static AFTER the operator promoted it.
+        domain.quantities_to_be_stored['elevation'] = 1
+        cwd = os.getcwd()
+        tmp = tempfile.mkdtemp()
+        try:
+            os.chdir(tmp)
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter('always')
+                domain.initialise_storage()
+            msgs = ' '.join(str(x.message) for x in w)
+            self.assertIn('eroded bed', msgs)
+        finally:
+            os.chdir(cwd)
 
 
 if __name__ == "__main__":

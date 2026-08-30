@@ -12,6 +12,11 @@ from anuga.utilities.parallel_abstraction import pypar_available, barrier
 
 from anuga.parallel.sequential_distribute import sequential_distribute_dump
 from anuga.parallel.sequential_distribute import sequential_distribute_load
+from anuga.parallel.sequential_distribute import sequential_mesh_dump
+from anuga.parallel.sequential_distribute import sequential_mesh_load
+from anuga.parallel.sequential_distribute import uniform_refine_domain
+from anuga.parallel.sequential_distribute import sequential_mesh_refine
+from anuga.parallel.sequential_distribute import create_parallel_mesh
 
 # ANUGA parallel engine (only load if pypar can)
 if pypar_available:
@@ -1120,7 +1125,7 @@ def mpicmd(script_name='echo', numprocs=3):
 
     extra_options = mpi_extra_options()
 
-    return "mpiexec -np %d  %s  python -m mpi4py %s" % (numprocs, extra_options, script_name)  
+    return "mpiexec -np %d  %s  python -m mpi4py %s" % (numprocs, extra_options, script_name)
 
 def mpi_extra_options():
 

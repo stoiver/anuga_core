@@ -21,9 +21,9 @@ a 10 by 10 mesh, with the bottom left corner at (0,0).
 
     domain = anuga.rectangular_cross_domain(10, 10)
 
-Check here for full documentation of the :func:`rectangular_cross_domain` function 
-and check the :doc:`../../examples/script_simple_example` 
-or :doc:`../../examples/notebook_simple_example` for examples of how to use it.
+See the :func:`rectangular_cross_domain` API for the full argument list, and the
+:doc:`../examples/script_simple_example` or
+:doc:`../examples/notebook_simple_example` for worked examples.
 
 `create_domain_from_regions`
 ----------------------------
@@ -43,8 +43,8 @@ different boundary conditions to be applied to different segments.
 
 
 Other polygons are the interior polygons that define the regions within the domain. 
-These other polygons can be used to define regions with different refinenment 
-levels and holes in the domain. 
+These other polygons can be used to define regions with different refinement
+levels and holes in the domain.
 
 The following example creates a domain with a rectangular boundary 20m by 10m with 
 boundary tags on the 4 sides of the rectangle, and the mesh having a maximum triangle 
@@ -71,24 +71,27 @@ area of 0.2 m^2.
 
 
 
-Check here for full documentation of the :func:`create_domain_from_regions` function 
-and check the :doc:`../../examples/notebook_create_domain_from_regions` for an example of how to use it.
+See the :func:`create_domain_from_regions` API for the full argument list, and the
+:doc:`../examples/notebook_create_domain_from_regions` for a worked example.
 
 
 .. seealso::
+
+   :doc:`flow_algorithms`
+      How to choose between DE0, DE1, DE_ader2, and DE2 — trade-offs between
+      cost, accuracy, and robustness.
 
    :doc:`coordinate_reference`
       How to attach a coordinate reference system (UTM zone, national grid,
       or arbitrary local CRS) to a domain via :class:`Geo_reference`.
 
-   `ANUGA User Manual — Chapter 7: The Domain
-   <https://github.com/anuga-community/anuga_user_manual>`_
+   `ANUGA User Manual — Chapter 7: The Domain <https://github.com/anuga-community/anuga_user_manual>`_
       Covers domain construction in depth, including mesh generation from
       polygon regions, geo-referencing, flow algorithm choices, and domain
       attributes.
 
-Reference
----------
+.. seealso::
 
-.. autofunction:: rectangular_cross_domain
-.. autofunction:: create_domain_from_regions
+   :ref:`api_domain` — full API of the domain-creation functions
+   (``rectangular_cross_domain``, ``create_domain_from_regions``) and the
+   ``Domain`` methods.
