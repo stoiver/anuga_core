@@ -56,11 +56,33 @@ docker build -f docker/Dockerfile.gpu \
   --build-arg ANUGA_VERSION="$(python _git_version.py)" -t anuga:gpu .
 ```
 
-### Published (pre-release) image
+### Published images
+
+Both images are published by `docker-publish.yml`, which is **manual
+(`workflow_dispatch`) only**. It used to build the CPU image automatically on a
+GitHub Release, but that races the PyPI upload — both fire on the same event,
+and the CPU image installs ANUGA *from PyPI*, so the new version isn't there
+yet. Run it after PyPI has the release, passing `anuga_version`:
+
+```bash
+gh workflow run docker-publish.yml --ref main \
+  -f anuga_version=4.0.0 -f image_tag=4.0.0 -f mark_latest=true
+```
+
+The workflow refuses to build if that version isn't on PyPI, and the image
+asserts the installed version matches the pin, so a mislabelled image can't be
+produced silently (see issue #248).
+
+```bash
+docker pull ghcr.io/anuga-community/anuga:4.0.0-cpu     # released CPU image
+docker pull ghcr.io/anuga-community/anuga:latest-cpu    # newest CPU image
+```
+
+Every tag carries a `-cpu` / `-gpu` suffix — there is deliberately no bare
+`latest`, so a pull is never ambiguous about which variant it gets.
 
 The GPU image is built from the **develop** branch (v4.0 line), which isn't
-released yet — so it's published to GHCR under a **pre-release** tag, not
-`latest`:
+released yet — so it's published to GHCR under a **pre-release** tag:
 
 ```bash
 docker pull ghcr.io/anuga-community/anuga:develop-gpu     # branch channel
@@ -69,9 +91,9 @@ docker pull ghcr.io/anuga-community/anuga:develop-gpu     # branch channel
 
 Publishing a container from develop is fine — it's an artifact, not a source
 release. The `docker-publish.yml` workflow (manual `workflow_dispatch`,
-`build_gpu=true`) tags `develop-gpu` + `sha-<short>-gpu`; version tags + `latest`
-only appear on a GitHub Release. Until CI has a big enough runner for the ~15 GB
-NVHPC base, the reliable path is to **build locally and push**:
+`build_gpu=true`) tags `develop-gpu` + `sha-<short>-gpu`. Until CI has a big
+enough runner for the ~15 GB NVHPC base, the reliable path is to **build locally
+and push**:
 
 ```bash
 docker build -f docker/Dockerfile.gpu \
@@ -85,12 +107,39 @@ docker push ghcr.io/anuga-community/anuga:develop-gpu
 require an org **owner**:
 1. Allow public packages org-wide: **Org Settings → "Code, planning, and
    automation" → Packages** → enable public packages.
-2. On the package: **Package settings → Danger Zone → Change visibility → Public**
-   (also link it to `anuga_core` via *Manage Actions access* so the workflow can
-   update it).
+2. On the package: **Package settings → Danger Zone → Change visibility → Public**.
 
 `ghcr.io/anuga-community/anuga:develop-gpu` is currently **published and public**
 (anonymous `docker pull` verified).
+
+#### A package pushed by hand is not writable by CI
+
+This bites exactly once, and the error is opaque, so it is worth knowing before
+it happens. A hand-pushed package (the `docker push` above, authenticated with a
+personal access token) is owned by the **org** but is not associated with any
+repository. `GITHUB_TOKEN` therefore has no write access to it, whatever
+`permissions:` the workflow requests, and `docker-publish.yml` fails at the push
+step with:
+
+```
+ERROR: denied: permission_denied: write_package
+```
+
+Grant the repository access once:
+
+> **Package settings → Manage Actions access → Add repository →** `anuga_core`,
+> role **Write**
+
+**Write**, not Admin: the workflow only uploads new versions. Admin additionally
+allows *deleting* published versions, which is only needed if a retention job is
+added later to prune the `<untagged>` manifests that accumulate as tags are
+rebuilt.
+
+After the first successful Actions push the package links itself to the
+repository (`docker/metadata-action` stamps `org.opencontainers.image.source`),
+and no further intervention is needed. This is what blocked the first CPU image:
+the package had been created by hand on 2026-08-03, so every later CI push was
+refused until the repository was granted Write.
 
 Verify offload actually reaches the GPU (needs `--gpus all`):
 
