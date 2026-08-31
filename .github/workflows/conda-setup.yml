@@ -163,6 +163,30 @@ jobs:
           conda activate anuga_env
           pip install --no-build-isolation -v .
 
+      # Diagnostics for #255: Windows 3.11-3.13 segfault at pytest startup while
+      # 3.10 and 3.14 pass, with no identifiable change in code, mpi4py, msmpi
+      # or the runner image. Comparing a green run against a red one needs the
+      # SOLVED environment, not just the handful of packages the install steps
+      # happen to echo -- that gap is what stalled diagnosis. Runs on Windows
+      # only, and always(), so a red job still uploads its environment.
+      - name: Record the solved environment (Windows, #255)
+        if: always() && runner.os == 'Windows'
+        shell: bash -el {0}
+        run: |
+          conda activate anuga_env
+          conda list --explicit > "conda-explicit-py${{ matrix.python-version }}.txt" || true
+          conda list                > "conda-list-py${{ matrix.python-version }}.txt"     || true
+          echo "=== solved env: $(wc -l < "conda-explicit-py${{ matrix.python-version }}.txt") lines ==="
+
+      - name: Upload the solved environment (Windows, #255)
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: conda-env-windows-py${{ matrix.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: conda-*-py${{ matrix.python-version }}.txt
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Test package (fast — PR feedback)
         if: github.event_name == 'pull_request'
         shell: bash -el {0}
