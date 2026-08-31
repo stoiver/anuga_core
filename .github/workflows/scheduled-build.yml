@@ -33,10 +33,15 @@ permissions:
   contents: read
 
 jobs:
-  # The matrix is deliberately trimmed to the oldest and newest supported
-  # Python, across all three OSes. Both historic breakages were platform- or
-  # toolchain-shaped rather than Python-version-shaped, so OS coverage is what
-  # earns its keep here; push/PR runs still cover every version.
+  # Linux and macOS run the oldest and newest supported Python: their historic
+  # breakages were toolchain-shaped rather than version-shaped, so OS coverage
+  # is what earns its keep and push/PR runs still cover every version.
+  #
+  # Windows runs ALL FIVE. That is not symmetry for its own sake -- on
+  # 2026-08-31 Python 3.11/3.12/3.13 began segfaulting at pytest startup on
+  # Windows while 3.10 and 3.14 stayed green (#255), so this watchdog ran green
+  # through a real breakage. Windows is where version-specific faults actually
+  # appear here, and the trimmed matrix had a hole exactly in the middle.
   main:
     name: main
     uses: ./.github/workflows/conda-setup.yml
@@ -51,12 +56,29 @@ jobs:
       ref: develop
       python_versions: ${{ inputs.python_versions || '["3.10", "3.14"]' }}
 
+  # The versions the jobs above skip, on Windows only -- see #255.
+  main-windows:
+    name: main (windows, mid versions)
+    uses: ./.github/workflows/conda-setup.yml
+    with:
+      ref: main
+      python_versions: '["3.11", "3.12", "3.13"]'
+      os_list: '["windows-latest"]'
+
+  develop-windows:
+    name: develop (windows, mid versions)
+    uses: ./.github/workflows/conda-setup.yml
+    with:
+      ref: develop
+      python_versions: '["3.11", "3.12", "3.13"]'
+      os_list: '["windows-latest"]'
+
   # A red run in the Actions tab is what already failed us — nobody was looking.
   # Turn a failure into an issue, and keep updating that one issue rather than
   # filing a new one every night.
   report:
     name: Report failure
-    needs: [main, develop]
+    needs: [main, develop, main-windows, develop-windows]
     if: failure()
     runs-on: ubuntu-latest
     permissions:
@@ -70,6 +92,8 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           MAIN_RESULT: ${{ needs.main.result }}
           DEVELOP_RESULT: ${{ needs.develop.result }}
+          MAIN_WIN_RESULT: ${{ needs['main-windows'].result }}
+          DEVELOP_WIN_RESULT: ${{ needs['develop-windows'].result }}
         run: |
           set -euo pipefail
           TITLE="Scheduled build failing"
@@ -80,6 +104,8 @@ jobs:
             "|---|---|" \
             "| \`main\` | \`${MAIN_RESULT}\` |" \
             "| \`develop\` | \`${DEVELOP_RESULT}\` |" \
+            "| \`main\` (windows 3.11-3.13) | \`${MAIN_WIN_RESULT}\` |" \
+            "| \`develop\` (windows 3.11-3.13) | \`${DEVELOP_WIN_RESULT}\` |" \
             "" \
             "Run: ${RUN_URL}" \
             "" \
