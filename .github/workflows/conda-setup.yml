@@ -112,6 +112,23 @@ jobs:
            # msmpi: Microsoft MPI — standard Windows MPI on conda-forge; provides
            # mpi.h under Library/include and is picked up by meson.build automatically.
            conda install -c conda-forge -n anuga_env msmpi mpi4py
+           # PIN (#255): hold netcdf4 at the _104 build series on Windows.
+           #
+           # conda-forge stopped building py312/py313 variants of netcdf4 1.7.4
+           # after _104 -- the _105.._109 series exists only for py311 and py314.
+           # The solver therefore resolves the **py311** build into py312/py313
+           # environments, and loading that _netCDF4.pyd segfaults the
+           # interpreter: `python -c "import netCDF4"` alone dies with exit 139,
+           # no ANUGA and no pytest involved.
+           #
+           # _104 has a matching build for every Python we test, and pulls the
+           # coherent older stack (hdf5 1.14.6 / libnetcdf 4.10.0) that Python
+           # 3.10 has been passing on throughout.
+           #
+           # TEMPORARY. Remove once conda-forge publishes py312/py313 builds of
+           # the current series, or fixes the constraints so a mismatched build
+           # cannot be selected.
+           conda install -c conda-forge -n anuga_env "netcdf4=1.7.4=*_104"
 
            # conda install -c conda-forge -n anuga_env compilers
            # The compilers package on windows which uses clang. We run into
