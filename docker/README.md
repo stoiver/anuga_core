@@ -2,10 +2,14 @@
 
 Two images:
 
-| Image | Base | ANUGA source | Use |
-|-------|------|--------------|-----|
-| `anuga:cpu` | `python:3.12-slim` | PyPI wheel | CPU runs; small, fast; CPU AWS Batch |
-| `anuga:gpu` | `nvcr.io/nvidia/nvhpc:*-devel` | built from this checkout with `nvc` | GPU offload; local Blackwell laptop **and** AWS GPU instances |
+| Image | Base | ANUGA source | Pull / disk | Use |
+|-------|------|--------------|-------------|-----|
+| `anuga:cpu` | `python:3.12-slim` | PyPI wheel | 0.3 / 1.7 GB | CPU runs; CPU AWS Batch |
+| `anuga:gpu` | `nvidia/cuda:*-base` (multi-stage; built under `nvhpc:*-devel`) | built from this checkout with `nvc` | 0.6 / 2.7 GB | GPU offload; local Blackwell laptop **and** AWS GPU instances |
+
+Both are **MPI-capable** (`mpirun` + `mpi4py`), so `anuga.parallel` works in
+either. Sizes measured 2026-08-30; the GPU figure is the published
+`Dockerfile.gpu.mpi`, with full `cc70..cc120` coverage.
 
 Both share `anuga-entrypoint.sh`: a headless entrypoint that optionally syncs
 input from S3, runs the command you pass, and syncs `output/` back to S3 —
@@ -91,12 +95,29 @@ docker pull ghcr.io/anuga-community/anuga:develop-gpu     # branch channel
 
 Publishing a container from develop is fine — it's an artifact, not a source
 release. The `docker-publish.yml` workflow (manual `workflow_dispatch`,
-`build_gpu=true`) tags `develop-gpu` + `sha-<short>-gpu`. Until CI has a big
-enough runner for the ~15 GB NVHPC base, the reliable path is to **build locally
-and push**:
+`build_gpu=true`) tags `develop-gpu` + `sha-<short>-gpu`.
+
+**CI builds the GPU image fine** — this used to say a free runner was too small
+for the ~15 GB NVHPC base, and that is no longer true. Measured 2026-08-30 on a
+standard `ubuntu-latest`: the published (multi-stage) image builds and pushes in
+**13–15 minutes** against a 6 h limit, with **118 GB** free after the cleanup
+step. The old figure came from the single-stage `Dockerfile.gpu`, which shipped
+the whole devel SDK; the published image no longer does. So prefer the workflow:
 
 ```bash
-docker build -f docker/Dockerfile.gpu \
+gh workflow run docker-publish.yml --ref main \
+  -f build_gpu=true -f anuga_version=4.0.0 -f image_tag=4.0.0 -f mark_latest=true
+```
+
+`gpu_dockerfile` selects the variant — `Dockerfile.gpu.mpi` (the default, and
+what is published), `Dockerfile.gpu.slim` (same GPU coverage, ~0.14 GB smaller,
+no MPI) or `Dockerfile.gpu` (the original single-stage devel image, ~35× larger;
+keep for debugging, do not publish).
+
+To build locally anyway — for a quick iteration, or an ECR push:
+
+```bash
+docker build -f docker/Dockerfile.gpu.mpi \
   --build-arg ANUGA_VERSION="$(python _git_version.py)" \
   -t ghcr.io/anuga-community/anuga:develop-gpu .
 echo "$GHCR_PAT" | docker login ghcr.io -u <user> --password-stdin
@@ -234,9 +255,10 @@ Each user runs this in **their own AWS account and pays for their own usage**.
 
 **Image source:** by default it pulls the public GHCR image
 (`ghcr.io/anuga-community/anuga:develop-gpu`). Add **`--ecr`** to use the private
-in-region ECR image `…dkr.ecr.<region>.amazonaws.com/anuga:gpu-slim` instead —
-the ~459 MB slim build, so the instance's cold-start pull drops from ~16.7 GB to
-~0.5 GB. The script builds the URI from your account + region, grants the
+in-region ECR image `…dkr.ecr.<region>.amazonaws.com/anuga:gpu-slim` instead.
+Note the size argument for this has largely gone: the public GHCR image is now
+the multi-stage build at ~0.6 GB, not the ~16.7 GB devel image, so ECR now buys
+in-region pull latency and egress rather than a 30x size saving. The script builds the URI from your account + region, grants the
 instance role `AmazonEC2ContainerRegistryReadOnly`, and logs the instance in to
 ECR before pulling. Override the repo:tag with `--ecr-repo anuga:<tag>`, or pass
 a full ECR URI via `--image …` (auto-detected). Push the image first (below).
@@ -311,16 +333,21 @@ docker push "$AWS_ACCOUNT.dkr.ecr.$AWS_REGION.amazonaws.com/anuga:gpu-slim"
   ```
   (The images set `HOME=/tmp` so `--user` runs have a writable config dir. With
   compose, `export UID GID` first — see the header of docker-compose.yml.)
-- **Image size:** the devel-based GPU image (`Dockerfile.gpu`) is ~50 GB
-  (~16.7 GB compressed to pull). `Dockerfile.gpu.slim` is a multi-stage build
-  (CUDA **-base** image + copied NVHPC redistributable libs + the venv) that is
-  **~2.15 GB (459 MB compressed)** — ~37x smaller to pull, slashing storage and
-  AWS cold-start time. Validated on the cc120 laptop: `import anuga` and a real
-  GPU-offload evolve both work. OpenMP-target offload needs only `libnvomp`
-  (from the redist copy) plus the host driver (`--gpus`), not `libcudart`, so
-  the CUDA `-base` image is enough. Build with
-  `docker build -f docker/Dockerfile.gpu.slim -t anuga:gpu-slim .`. Further
-  shrink is possible by trimming the redist libs to the `ldd` set.
+- **Image size:** measured 2026-08-30, full multi-arch (`cc70..cc120`) builds:
+
+  | Dockerfile | pull | on disk | published? |
+  |---|---|---|---|
+  | `Dockerfile.gpu.mpi` | 0.60 GB | 2.66 GB | **yes — this is `:*-gpu`** |
+  | `Dockerfile.gpu.slim` | 0.46 GB | 2.12 GB | no (same GPU coverage, no MPI) |
+  | `Dockerfile.gpu` | 15.94 GB | ~50 GB | no — debugging only |
+
+  The single-stage `Dockerfile.gpu` ships the entire NVHPC devel SDK: two layers
+  of 9.2 GB and 6.2 GB against 0.25 GB of actual ANUGA. The multi-stage builds
+  copy only the venv plus the NVHPC redistributable libs onto a CUDA **-base**
+  image — OpenMP-target offload needs `libnvomp` and the host driver (`--gpus`),
+  not `libcudart`. MPI costs 0.14 GB over slim, which is why it is simply
+  included rather than kept as a separate image. Further shrink is possible by
+  trimming the redist libs to the `ldd` set.
 - **Version string:** `.git` is excluded from the build context, so a
   source-built GPU image reports `0.0.0+unknown` for `anuga.__version__`
   (cosmetic; the code is the checkout's).
