@@ -151,9 +151,9 @@ jobs:
           echo "=== mpi.h search under CONDA_PREFIX ==="
           find "$CONDA_PREFIX/include" "$CONDA_PREFIX/Library/include" -name "mpi.h" 2>/dev/null || echo "mpi.h not found under $CONDA_PREFIX/include or Library/include"
           echo "=== mpi4py config ==="
-          python -c "import mpi4py; print('get_include:', mpi4py.get_include()); import json; print('get_config:', mpi4py.get_config())"
+          python -c "import mpi4py; print('get_include:', mpi4py.get_include()); import json; print('get_config:', mpi4py.get_config())" || echo "mpi4py not installed (EXPERIMENT arm A)"
           echo "=== mpi4py location ==="
-          python -c "import mpi4py, os; print(os.path.dirname(mpi4py.__file__))"
+          python -c "import mpi4py, os; print(os.path.dirname(mpi4py.__file__))" || echo "mpi4py not installed (EXPERIMENT arm A)"
 
       - name: Install anuga package
         shell: bash -el {0}
