@@ -40,4 +40,5 @@ license: Apache License, Version 2.0
 # than left stale (it read 2022-06-26 through three releases). The `commit:`
 # pin was dropped for the same reason: the tag identifies the release.
 version: 4.0.0
+date-released: '2026-08-30'
 
