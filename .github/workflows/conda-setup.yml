@@ -32,6 +32,10 @@ on:
         description: 'JSON list of Python versions to run.'
         type: string
         default: '["3.10", "3.11", "3.12", "3.13", "3.14"]'
+      os_list:
+        description: 'JSON list of runners. Lets a caller cover one OS more deeply than the others.'
+        type: string
+        default: '["ubuntu-latest", "macos-latest", "windows-latest"]'
 
 jobs:
   test_conda:
@@ -40,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ["ubuntu-latest", "macos-latest", "windows-latest"]
+        os: ${{ fromJSON(inputs.os_list || '["ubuntu-latest", "macos-latest", "windows-latest"]') }}
 
         # 2026/04/05: dropped 3.8 -- numpy>=2.0.0 (required by anuga) requires Python>=3.9
         # 2026/04/06: dropped 3.9 -- X | Y union type syntax requires Python>=3.10
@@ -108,6 +112,23 @@ jobs:
            # msmpi: Microsoft MPI — standard Windows MPI on conda-forge; provides
            # mpi.h under Library/include and is picked up by meson.build automatically.
            conda install -c conda-forge -n anuga_env msmpi mpi4py
+           # PIN (#255): hold netcdf4 at the _104 build series on Windows.
+           #
+           # conda-forge stopped building py312/py313 variants of netcdf4 1.7.4
+           # after _104 -- the _105.._109 series exists only for py311 and py314.
+           # The solver therefore resolves the **py311** build into py312/py313
+           # environments, and loading that _netCDF4.pyd segfaults the
+           # interpreter: `python -c "import netCDF4"` alone dies with exit 139,
+           # no ANUGA and no pytest involved.
+           #
+           # _104 has a matching build for every Python we test, and pulls the
+           # coherent older stack (hdf5 1.14.6 / libnetcdf 4.10.0) that Python
+           # 3.10 has been passing on throughout.
+           #
+           # TEMPORARY. Remove once conda-forge publishes py312/py313 builds of
+           # the current series, or fixes the constraints so a mismatched build
+           # cannot be selected.
+           conda install -c conda-forge -n anuga_env "netcdf4=1.7.4=*_104"
 
            # conda install -c conda-forge -n anuga_env compilers
            # The compilers package on windows which uses clang. We run into
@@ -158,6 +179,48 @@ jobs:
         run: |
           conda activate anuga_env
           pip install --no-build-isolation -v .
+
+      # Diagnostics for #255: Windows 3.11-3.13 segfault at pytest startup while
+      # 3.10 and 3.14 pass, with no identifiable change in code, mpi4py, msmpi
+      # or the runner image. Comparing a green run against a red one needs the
+      # SOLVED environment, not just the handful of packages the install steps
+      # happen to echo -- that gap is what stalled diagnosis. Runs on Windows
+      # only, and always(), so a red job still uploads its environment.
+      - name: Record the solved environment (Windows, #255)
+        if: always() && runner.os == 'Windows'
+        shell: bash -el {0}
+        run: |
+          conda activate anuga_env
+          conda list --explicit > "conda-explicit-py${{ matrix.python-version }}.txt" || true
+          conda list                > "conda-list-py${{ matrix.python-version }}.txt"     || true
+          echo "=== solved env: $(wc -l < "conda-explicit-py${{ matrix.python-version }}.txt") lines ==="
+
+      # Decisive isolation test for #255. The segfault's stack is
+      #   test_sww2vtu.py -> sww2vtu.py -> netCDF4/__init__.py:11 -> create_module
+      # i.e. it dies loading _netCDF4.pyd. If importing netCDF4 on its own also
+      # segfaults, then ANUGA and pytest are irrelevant and this is purely a bad
+      # netCDF4/hdf5/libnetcdf combination -- a known netCDF4 failure mode on
+      # win-64, where the DLL bundling is the fragile part.
+      # continue-on-error so this reports without masking the real test result.
+      - name: Probe netCDF4 in isolation (Windows, #255)
+        if: always() && runner.os == 'Windows'
+        continue-on-error: true
+        shell: bash -el {0}
+        run: |
+          conda activate anuga_env
+          echo "--- versions (segfault here => purely environmental) ---"
+          python -c "import netCDF4; print('netCDF4', netCDF4.__version__, '| hdf5', netCDF4.__hdf5libversion__, '| libnetcdf', netCDF4.__netcdf4libversion__)"
+          echo "--- import of the module that triggers it ---"
+          python -c "import anuga.file_conversion.sww2vtu as m; print('sww2vtu imported OK')"
+
+      - name: Upload the solved environment (Windows, #255)
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: conda-env-windows-py${{ matrix.python-version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: conda-*-py${{ matrix.python-version }}.txt
+          if-no-files-found: warn
+          retention-days: 30
 
       - name: Test package (fast — PR feedback)
         if: github.event_name == 'pull_request'
