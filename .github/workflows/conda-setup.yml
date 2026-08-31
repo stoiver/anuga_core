@@ -107,7 +107,9 @@ jobs:
                "libstdcxx=16.1.0=hae5796f_2"
            # msmpi: Microsoft MPI — standard Windows MPI on conda-forge; provides
            # mpi.h under Library/include and is picked up by meson.build automatically.
-           conda install -c conda-forge -n anuga_env msmpi mpi4py
+           # EXPERIMENT (#255): mpi4py removed on Windows to test whether it is
+           # implicated in the pytest-startup segfault on 3.11-3.13. Not for merge.
+           echo "EXPERIMENT: skipping msmpi/mpi4py install on Windows" 
 
            # conda install -c conda-forge -n anuga_env compilers
            # The compilers package on windows which uses clang. We run into
