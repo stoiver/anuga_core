@@ -118,6 +118,41 @@ struct domain {
     double* xmom_backup_values;
     double* ymom_backup_values;
 
+    /* ------------------------------------------------------------------
+     * Generic passive tracers (sediment concentration, salinity, ...).
+     *
+     * Appended at the END of the struct on purpose so every pre-existing
+     * field keeps its offset and the cache layout of the hot arrays is
+     * untouched. Adding a member anywhere else silently shifts the offset of
+     * everything after it, and the Cython extensions are not rebuilt when
+     * this header changes -- so the failure is a wrong binary, not a
+     * compile error.
+     *
+     * number_of_tracers == 0 is the ordinary case and must cost nothing:
+     * the flux kernel guards all tracer work behind a single test on this
+     * loop-invariant integer.
+     *
+     * Layout is tracer-major:
+     *   centroid[s*n + k]          n = number_of_elements
+     *   edge    [s*3n + 3k + i]
+     *   boundary[s*boundary_length + m]
+     *   explicit_update[s*n + k]
+     * ------------------------------------------------------------------ */
+    anuga_int number_of_tracers;
+    double* tracer_centroid_values;
+    double* tracer_edge_values;
+    double* tracer_boundary_values;
+    double* tracer_explicit_update;
+    /* m = h*c, the CONSERVED tracer variable. Integrated by
+     * update/backup/saxpy exactly like stage; tracer_centroid_values (c) is
+     * DERIVED from it each substep, exactly as height is derived from stage. */
+    double* tracer_conserved_values;
+    double* tracer_backup_values;
+    /* Reconstruction aggressiveness for tracers, analogous to beta_w for stage.
+     * 0.0 => first order; >0 => limited second order. Appended at the very end
+     * so no previously-existing field offset moves. */
+    double beta_tracer;
+
 };
 
 

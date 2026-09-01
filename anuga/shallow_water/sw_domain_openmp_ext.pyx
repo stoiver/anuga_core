@@ -19,6 +19,14 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		anuga_int number_of_elements
 		anuga_int boundary_length
 		anuga_int number_of_riverwall_edges
+		anuga_int number_of_tracers
+		double beta_tracer
+		double* tracer_centroid_values
+		double* tracer_edge_values
+		double* tracer_boundary_values
+		double* tracer_explicit_update
+		double* tracer_conserved_values
+		double* tracer_backup_values
 		anuga_int optimise_dry_cells
 		anuga_int extrapolate_velocity_second_order
 		anuga_int low_froude
@@ -152,6 +160,11 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.number_of_elements = domain_py_object.number_of_elements
 	D.boundary_length = domain_py_object.boundary_length
 	D.number_of_riverwall_edges = domain_py_object.number_of_riverwall_edges
+	# Generic tracers. The struct is PyMem_Malloc'd (not zeroed), so this
+	# MUST be set on every fill or the flux kernel guard reads garbage.
+	D.number_of_tracers = getattr(domain_py_object, 'number_of_tracers', 0)
+	# 0.0 => first order; >0 => limited second order (see sw_domain.h)
+	D.beta_tracer = getattr(domain_py_object, 'beta_tracer', 1.0)
 	D.optimise_dry_cells = domain_py_object.optimise_dry_cells
 	D.extrapolate_velocity_second_order = domain_py_object.extrapolate_velocity_second_order
 	D.low_froude = domain_py_object.low_froude
@@ -307,6 +320,30 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 	#------------------------------------------------------
 	# Quantity structures
 	#------------------------------------------------------
+	# Generic tracer arrays. Owned by the Python Domain as C-contiguous
+	# (ns, ...) float64 arrays; NULL when no tracers are registered.
+	cdef double[:, ::1] tr2
+	if getattr(domain_py_object, 'number_of_tracers', 0) > 0:
+		tr2 = domain_py_object.tracer_centroid_values
+		D.tracer_centroid_values = &tr2[0, 0]
+		tr2 = domain_py_object.tracer_edge_values
+		D.tracer_edge_values = &tr2[0, 0]
+		tr2 = domain_py_object.tracer_boundary_values
+		D.tracer_boundary_values = &tr2[0, 0]
+		tr2 = domain_py_object.tracer_explicit_update
+		D.tracer_explicit_update = &tr2[0, 0]
+		tr2 = domain_py_object.tracer_conserved_values
+		D.tracer_conserved_values = &tr2[0, 0]
+		tr2 = domain_py_object.tracer_backup_values
+		D.tracer_backup_values = &tr2[0, 0]
+	else:
+		D.tracer_centroid_values = NULL
+		D.tracer_edge_values = NULL
+		D.tracer_boundary_values = NULL
+		D.tracer_explicit_update = NULL
+		D.tracer_conserved_values = NULL
+		D.tracer_backup_values = NULL
+
 	quantities = domain_py_object.quantities
 	stage = quantities["stage"]
 	xmomentum = quantities["xmomentum"]

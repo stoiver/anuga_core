@@ -27,6 +27,8 @@ void core_extrapolate_second_order_edge(struct domain *D) {
     anuga_int extrapolate_velocity_second_order = D->extrapolate_velocity_second_order;
 
     // Parameters for hfactor computation (wet-dry limiting)
+    const anuga_int n_tracers_x = D->number_of_tracers;
+
     double a_tmp = 0.3;
     double b_tmp = 0.1;
     double c_tmp = 1.0 / (a_tmp - b_tmp);
@@ -58,6 +60,19 @@ void core_extrapolate_second_order_edge(struct domain *D) {
 
     anuga_int * restrict surrogate_neighbours = D->surrogate_neighbours;
     anuga_int * restrict number_of_boundaries = D->number_of_boundaries;
+
+    // Generic passive tracers. n_tracers == 0 in every ordinary run; keep only
+    // the loop-invariant count live in the common path.
+    const anuga_int n_tracers = D->number_of_tracers;
+    const double beta_tracer = D->beta_tracer;
+    // See the note above core_compute_fluxes_central: on a GPU build these must
+    // be loaded at function scope, because D is not mapped inside the 'omp
+    // target' regions below; on a CPU build they stay inside the guard.
+#ifndef CPU_ONLY_MODE
+    double * restrict t_cons = D->tracer_conserved_values;
+    double * restrict t_cv   = D->tracer_centroid_values;
+    double * restrict t_ev   = D->tracer_edge_values;
+#endif
     double * restrict x_centroid_work = D->x_centroid_work;
     double * restrict y_centroid_work = D->y_centroid_work;
 
@@ -85,6 +100,19 @@ void core_extrapolate_second_order_edge(struct domain *D) {
 
         xmom_cv[k] = xmom_out * inv_dk;
         ymom_cv[k] = ymom_out * inv_dk;
+
+        // Derive tracer concentration c = m/h from the conserved m, exactly as
+        // height is derived from stage above. Dry cells carry no concentration.
+        if (n_tracers_x > 0) {
+#ifdef CPU_ONLY_MODE
+            double * restrict t_cons = D->tracer_conserved_values;
+            double * restrict t_cv   = D->tracer_centroid_values;
+#endif
+            double inv_h = is_dry ? 0.0 : (1.0 / dk);
+            for (anuga_int s = 0; s < n_tracers_x; s++) {
+                t_cv[s * n + k] = t_cons[s * n + k] * inv_h;
+            }
+        }
     }
 
     // Step 2: Main extrapolation loop
@@ -155,6 +183,19 @@ void core_extrapolate_second_order_edge(struct domain *D) {
                 ymom_ev[k3 + i] = ymom_c;
                 height_ev[k3 + i] = height_c;
                 bed_ev[k3 + i] = bed_c;
+            }
+
+            if (n_tracers > 0) {
+#ifdef CPU_ONLY_MODE
+                double * restrict t_cv = D->tracer_centroid_values;
+                double * restrict t_ev = D->tracer_edge_values;
+#endif
+                for (anuga_int sidx = 0; sidx < n_tracers; sidx++) {
+                    double tc = t_cv[sidx * n + k];
+                    t_ev[sidx * 3 * n + k3 + 0] = tc;
+                    t_ev[sidx * 3 * n + k3 + 1] = tc;
+                    t_ev[sidx * 3 * n + k3 + 2] = tc;
+                }
             }
 
         } else if (num_boundaries <= 1) {
@@ -231,6 +272,32 @@ void core_extrapolate_second_order_edge(struct domain *D) {
             ymom_ev[k3 + 1] = edge_vals[1];
             ymom_ev[k3 + 2] = edge_vals[2];
 
+            // Tracers. Reconstruct c (the intensive variable) rather than the
+            // conserved h*c: the limiter then bounds each edge value by the
+            // cell-and-neighbour range of c, which is what preserves positivity
+            // and prevents spurious extrema where h varies sharply.
+            if (n_tracers > 0) {
+#ifdef CPU_ONLY_MODE
+                double * restrict t_cv = D->tracer_centroid_values;
+                double * restrict t_ev = D->tracer_edge_values;
+#endif
+                double beta_t = beta_tracer * hfactor;
+                for (anuga_int sidx = 0; sidx < n_tracers; sidx++) {
+                    anuga_int off = sidx * n;
+                    if (beta_t > 0.0) {
+                        gpu_calc_edge_values_with_gradient(
+                            t_cv[off + k], t_cv[off + k0], t_cv[off + k1], t_cv[off + sn2],
+                            dxv0, dxv1, dxv2, dyv0, dyv1, dyv2,
+                            dx1, dx2, dy1, dy2, inv_area2, beta_t, edge_vals);
+                    } else {
+                        gpu_set_constant_edge_values(t_cv[off + k], edge_vals);
+                    }
+                    t_ev[sidx * 3 * n + k3 + 0] = edge_vals[0];
+                    t_ev[sidx * 3 * n + k3 + 1] = edge_vals[1];
+                    t_ev[sidx * 3 * n + k3 + 2] = edge_vals[2];
+                }
+            }
+
         } else {
             // Number of boundaries == 2
             // One internal neighbour, gradient is in direction of neighbour's centroid
@@ -295,6 +362,30 @@ void core_extrapolate_second_order_edge(struct domain *D) {
             ymom_ev[k3 + 0] = ymom_cv[k] + dqv[0];
             ymom_ev[k3 + 1] = ymom_cv[k] + dqv[1];
             ymom_ev[k3 + 2] = ymom_cv[k] + dqv[2];
+
+            // Tracers, 1D gradient toward the one internal neighbour
+            if (n_tracers > 0) {
+#ifdef CPU_ONLY_MODE
+                double * restrict t_cv = D->tracer_centroid_values;
+                double * restrict t_ev = D->tracer_edge_values;
+#endif
+                for (anuga_int sidx = 0; sidx < n_tracers; sidx++) {
+                    anuga_int off = sidx * n;
+                    double tk = t_cv[off + k];
+                    if (beta_tracer > 0.0) {
+                        dq1 = t_cv[off + kn] - tk;
+                        gpu_compute_dqv_from_gradient(dq1, grad_dx2, grad_dy2,
+                                                      dxv0, dxv1, dxv2, dyv0, dyv1, dyv2, dqv);
+                        gpu_compute_qmin_qmax_from_dq1(dq1, &qmin, &qmax);
+                        gpu_limit_gradient(dqv, qmin, qmax, beta_tracer);
+                    } else {
+                        dqv[0] = 0.0; dqv[1] = 0.0; dqv[2] = 0.0;
+                    }
+                    t_ev[sidx * 3 * n + k3 + 0] = tk + dqv[0];
+                    t_ev[sidx * 3 * n + k3 + 1] = tk + dqv[1];
+                    t_ev[sidx * 3 * n + k3 + 2] = tk + dqv[2];
+                }
+            }
         }
 
         // Convert velocity edge values back to momentum if needed
@@ -377,6 +468,7 @@ void core_distribute_edges_to_vertices(struct domain *D) {
 
 void core_update_conserved_quantities(struct domain *D, double timestep) {
     anuga_int n = D->number_of_elements;
+    const anuga_int n_tracers = D->number_of_tracers;
 
     double * restrict stage_cv = D->stage_centroid_values;
     double * restrict xmom_cv = D->xmom_centroid_values;
@@ -389,6 +481,20 @@ void core_update_conserved_quantities(struct domain *D, double timestep) {
     double * restrict stage_siu = D->stage_semi_implicit_update;
     double * restrict xmom_siu = D->xmom_semi_implicit_update;
     double * restrict ymom_siu = D->ymom_semi_implicit_update;
+
+    // Tracer pointers are hoisted to FUNCTION SCOPE here, not loaded inside the
+    // n_tracers > 0 guard as in the flux kernel. On a GPU build OMP_PARALLEL_LOOP
+    // is 'omp target teams loop', and D itself is NOT mapped to the device, so a
+    // D->member load inside the loop reads a host address on the device: the
+    // tracer update silently does nothing (m never changes, while the flux
+    // kernel still fills explicit_update). Hoisting lets the pointer values be
+    // captured as firstprivate scalars and address-translated. The flux kernel's
+    // in-guard loading is a CPU hot-loop optimisation (HANDOVER 2.4, +2.26%% at
+    // Ns=0) and does not apply to these much cheaper elementwise loops.
+#ifndef CPU_ONLY_MODE
+    double * restrict t_cons = D->tracer_conserved_values;
+    double * restrict t_eu   = D->tracer_explicit_update;
+#endif
 
     OMP_PARALLEL_LOOP
     for (anuga_int k = 0; k < n; k++) {
@@ -429,6 +535,20 @@ void core_update_conserved_quantities(struct domain *D, double timestep) {
         stage_siu[k] = 0.0;
         xmom_siu[k] = 0.0;
         ymom_siu[k] = 0.0;
+
+        // Tracers: integrate the conserved m = h*c. No semi-implicit term and
+        // deliberately NO clamping -- clamping would break exact conservation.
+        // Positivity is instead a property of the upwind flux under CFL, and is
+        // asserted by the tests rather than enforced here.
+        if (n_tracers > 0) {
+#ifdef CPU_ONLY_MODE
+            double * restrict t_cons = D->tracer_conserved_values;
+            double * restrict t_eu   = D->tracer_explicit_update;
+#endif
+            for (anuga_int s = 0; s < n_tracers; s++) {
+                t_cons[s * n + k] += timestep * t_eu[s * n + k];
+            }
+        }
     }
 }
 
@@ -438,6 +558,7 @@ void core_update_conserved_quantities(struct domain *D, double timestep) {
 
 void core_backup_conserved_quantities(struct domain *D) {
     anuga_int n = D->number_of_elements;
+    const anuga_int n_tracers = D->number_of_tracers;
 
     double * restrict stage_cv = D->stage_centroid_values;
     double * restrict xmom_cv = D->xmom_centroid_values;
@@ -447,11 +568,35 @@ void core_backup_conserved_quantities(struct domain *D) {
     double * restrict xmom_bk = D->xmom_backup_values;
     double * restrict ymom_bk = D->ymom_backup_values;
 
+    // Tracer pointers are hoisted to FUNCTION SCOPE here, not loaded inside the
+    // n_tracers > 0 guard as in the flux kernel. On a GPU build OMP_PARALLEL_LOOP
+    // is 'omp target teams loop', and D itself is NOT mapped to the device, so a
+    // D->member load inside the loop reads a host address on the device: the
+    // tracer update silently does nothing (m never changes, while the flux
+    // kernel still fills explicit_update). Hoisting lets the pointer values be
+    // captured as firstprivate scalars and address-translated. The flux kernel's
+    // in-guard loading is a CPU hot-loop optimisation (HANDOVER 2.4, +2.26%% at
+    // Ns=0) and does not apply to these much cheaper elementwise loops.
+#ifndef CPU_ONLY_MODE
+    double * restrict t_cons = D->tracer_conserved_values;
+    double * restrict t_bk   = D->tracer_backup_values;
+#endif
+
     OMP_PARALLEL_LOOP
     for (anuga_int k = 0; k < n; k++) {
         stage_bk[k] = stage_cv[k];
         xmom_bk[k] = xmom_cv[k];
         ymom_bk[k] = ymom_cv[k];
+
+        if (n_tracers > 0) {
+#ifdef CPU_ONLY_MODE
+            double * restrict t_cons = D->tracer_conserved_values;
+            double * restrict t_bk   = D->tracer_backup_values;
+#endif
+            for (anuga_int s = 0; s < n_tracers; s++) {
+                t_bk[s * n + k] = t_cons[s * n + k];
+            }
+        }
     }
 }
 
@@ -461,6 +606,7 @@ void core_backup_conserved_quantities(struct domain *D) {
 
 void core_saxpy_conserved_quantities(struct domain *D, double a, double b, double c) {
     anuga_int n = D->number_of_elements;
+    const anuga_int n_tracers = D->number_of_tracers;
 
     double * restrict stage_cv = D->stage_centroid_values;
     double * restrict xmom_cv = D->xmom_centroid_values;
@@ -470,12 +616,38 @@ void core_saxpy_conserved_quantities(struct domain *D, double a, double b, doubl
     double * restrict xmom_bk = D->xmom_backup_values;
     double * restrict ymom_bk = D->ymom_backup_values;
 
+    // Tracer pointers are hoisted to FUNCTION SCOPE here, not loaded inside the
+    // n_tracers > 0 guard as in the flux kernel. On a GPU build OMP_PARALLEL_LOOP
+    // is 'omp target teams loop', and D itself is NOT mapped to the device, so a
+    // D->member load inside the loop reads a host address on the device: the
+    // tracer update silently does nothing (m never changes, while the flux
+    // kernel still fills explicit_update). Hoisting lets the pointer values be
+    // captured as firstprivate scalars and address-translated. The flux kernel's
+    // in-guard loading is a CPU hot-loop optimisation (HANDOVER 2.4, +2.26%% at
+    // Ns=0) and does not apply to these much cheaper elementwise loops.
+#ifndef CPU_ONLY_MODE
+    double * restrict t_cons = D->tracer_conserved_values;
+    double * restrict t_bk   = D->tracer_backup_values;
+#endif
+
     // Standard SAXPY: Q = a*Q + b*Q_backup
     OMP_PARALLEL_LOOP
     for (anuga_int k = 0; k < n; k++) {
         stage_cv[k] = a * stage_cv[k] + b * stage_bk[k];
         xmom_cv[k] = a * xmom_cv[k] + b * xmom_bk[k];
         ymom_cv[k] = a * ymom_cv[k] + b * ymom_bk[k];
+
+        // SAXPY must act on the CONSERVED m, not on c: h differs between RK
+        // stages, so averaging c would not average the transported mass.
+        if (n_tracers > 0) {
+#ifdef CPU_ONLY_MODE
+            double * restrict t_cons = D->tracer_conserved_values;
+            double * restrict t_bk   = D->tracer_backup_values;
+#endif
+            for (anuga_int s = 0; s < n_tracers; s++) {
+                t_cons[s * n + k] = a * t_cons[s * n + k] + b * t_bk[s * n + k];
+            }
+        }
     }
 
     // Apply c scaling if needed: Q = Q / c
@@ -488,6 +660,12 @@ void core_saxpy_conserved_quantities(struct domain *D, double a, double b, doubl
             stage_cv[k] *= c_inv;
             xmom_cv[k] *= c_inv;
             ymom_cv[k] *= c_inv;
+            if (n_tracers > 0) {
+#ifdef CPU_ONLY_MODE
+                double * restrict t_cons = D->tracer_conserved_values;
+#endif
+                for (anuga_int s = 0; s < n_tracers; s++) t_cons[s * n + k] *= c_inv;
+            }
         }
     }
 }
@@ -962,6 +1140,33 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
     anuga_int * restrict riverwall_rowIndex = D->riverwall_rowIndex;
     double * restrict riverwall_hydraulic_properties = D->riverwall_hydraulic_properties;
 
+    // Generic passive tracers.  n_tracers == 0 in every ordinary run;
+    // all tracer work below is guarded on this loop-invariant integer.
+    const anuga_int n_tracers = D->number_of_tracers;
+
+// Tracer base pointers: WHERE they are loaded is build-dependent, and both
+// choices are load-bearing.
+//
+//   CPU build  -- load them INSIDE the n_tracers > 0 guard. Hoisting them to
+//                 function scope keeps them live across the hot loop and cost
+//                 +2.26% on the CPU path at Ns=0 (HANDOVER.md 2.4). Only the
+//                 benchmark caught that; every correctness test passed.
+//   GPU build  -- the loops below are 'omp target' regions and D is NOT mapped
+//                 to the device, so a D->member load inside the region reads a
+//                 host address on the device. The tracer work then silently
+//                 does nothing: no crash, explicit_update stays zero on the
+//                 device, and m never moves. They must be loaded at function
+//                 scope so the pointer VALUES are captured as firstprivate
+//                 scalars and address-translated via the present table.
+//
+// So: hoisted declarations under #ifndef CPU_ONLY_MODE, in-guard declarations
+// under #ifdef CPU_ONLY_MODE. The loop bodies are identical either way.
+#ifndef CPU_ONLY_MODE
+    double * restrict t_eu = D->tracer_explicit_update;
+    double * restrict t_ev = D->tracer_edge_values;
+    double * restrict t_bv = D->tracer_boundary_values;
+#endif
+
     // Reduction variables
     double local_timestep = 1.0e+100;
     double boundary_flux_sum_substep = 0.0;
@@ -981,6 +1186,12 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
         stage_eu[k] = 0.0;
         xmom_eu[k] = 0.0;
         ymom_eu[k] = 0.0;
+        if (n_tracers > 0) {
+#ifdef CPU_ONLY_MODE
+            double * restrict t_eu = D->tracer_explicit_update;
+#endif
+            for (anuga_int s = 0; s < n_tracers; s++) t_eu[s * n + k] = 0.0;
+        }
 
         // Get centroid values for this element
         double hc = height_cv[k];
@@ -1129,6 +1340,36 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
             xmom_eu[k] += edgeflux[1];
             ymom_eu[k] += edgeflux[2];
 
+            // --- Passive tracer advection -------------------------------
+            // edgeflux[0] is the water mass flux through this edge, already
+            // multiplied by -length.  Sign convention after that negation:
+            //     edgeflux[0] < 0  ->  OUTflow from k, donor is k
+            //     edgeflux[0] > 0  ->  INflow  to   k, donor is the neighbour
+            // Using the same edgeflux[0] for both cells sharing the edge makes
+            // tracer mass conservation structural, independent of cell sizes.
+            if (n_tracers > 0) {
+#ifdef CPU_ONLY_MODE
+                double * restrict t_ev = D->tracer_edge_values;
+                double * restrict t_bv = D->tracer_boundary_values;
+                double * restrict t_eu = D->tracer_explicit_update;
+#endif
+                const anuga_int t_bl = D->boundary_length;
+                const double wflux = edgeflux[0];
+                const int    inflow = (wflux > 0.0);
+                for (anuga_int s = 0; s < n_tracers; s++) {
+                    double c_up;
+                    if (inflow) {
+                        c_up = is_boundary
+                             ? t_bv[s * t_bl + (-neighbour - 1)]
+                             : t_ev[s * 3 * n + neighbour * 3 + neighbour_edges[ki]];
+                    } else {
+                        c_up = t_ev[s * 3 * n + ki];
+                    }
+                    t_eu[s * n + k] += wflux * c_up;
+                }
+            }
+            // -------------------------------------------------------------
+
             // Boundary flux tracking: if this cell is not a ghost, and the neighbour
             // is a boundary condition OR a ghost cell, add the flux to boundary integral
             if (tri_full_flag != NULL) {
@@ -1163,6 +1404,12 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
         stage_eu[k] *= inv_area;
         xmom_eu[k] *= inv_area;
         ymom_eu[k] *= inv_area;
+        if (n_tracers > 0) {
+#ifdef CPU_ONLY_MODE
+            double * restrict t_eu = D->tracer_explicit_update;
+#endif
+            for (anuga_int s = 0; s < n_tracers; s++) t_eu[s * n + k] *= inv_area;
+        }
 
     } // End element loop
 

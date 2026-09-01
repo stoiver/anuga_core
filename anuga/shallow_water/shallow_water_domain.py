@@ -665,6 +665,23 @@ class Domain(Generic_Domain):
         self._Domain_C_struct = None
 
         #-------------------------------
+        # Generic passive tracers (see add_tracer).
+        #
+        # Ns = 0 is the default and costs nothing: the kernels read
+        # number_of_tracers and skip the tracer work entirely, and the six
+        # arrays below are passed to the C struct as NULL.
+        #-------------------------------
+        self.number_of_tracers = 0
+        self.beta_tracer = 1.0
+        self._tracer_names = []
+        self.tracer_centroid_values = None      # c            (ns, N)
+        self.tracer_edge_values = None          # c at edges   (ns, 3N)
+        self.tracer_boundary_values = None      # c at bdry    (ns, boundary_length)
+        self.tracer_explicit_update = None      # dm/dt        (ns, N)
+        self.tracer_conserved_values = None     # m = h*c      (ns, N)
+        self.tracer_backup_values = None        # m backup     (ns, N)
+
+        #-------------------------------
         # If environment variable OMP_NUM_THREADS is not set,
         # then set to default (1 thread). If a value is given to
         # the method, then it will override the default.
@@ -806,6 +823,158 @@ class Domain(Generic_Domain):
         self._Domain_C_struct = None
         # Force the mode-2 device interface to be rebuilt on demand.
         self.gpu_interface = None
+
+    #------------------------------------------------
+    # Generic passive tracers
+    #------------------------------------------------
+    _TRACER_ARRAYS = ('tracer_centroid_values', 'tracer_edge_values',
+                      'tracer_boundary_values', 'tracer_explicit_update',
+                      'tracer_conserved_values', 'tracer_backup_values')
+
+    def add_tracer(self, name, beta=None, initial_value=0.0):
+        """Register a passive tracer named `name` and return its index.
+
+        A tracer is a depth-averaged concentration `c` advected with the water
+        flux.  The conserved variable is `m = h*c`; `c` is derived from it each
+        substep, exactly as height is derived from stage.
+
+        Parameters
+        ----------
+        name : str
+            Identifier for the tracer.  Must be unique on this domain.
+        beta : float, optional
+            Edge-reconstruction limiter coefficient.  0 selects first order,
+            > 0 a limited second-order reconstruction.  **This is a single
+            value shared by every tracer** (the C struct carries one
+            `beta_tracer` scalar), so passing a value that disagrees with an
+            already-registered tracer is an error rather than a silent
+            last-writer-wins.  Defaults to leaving the current value alone.
+        initial_value : float or array-like, optional
+            Initial concentration `c`.  A scalar fills the domain; an array
+            must have one value per cell.  `m = h*c` is seeded consistently.
+
+        Returns
+        -------
+        int
+            The tracer's index, i.e. its row in the `(ns, ...)` arrays.
+
+        Notes
+        -----
+        Registering a tracer **reallocates** all six tracer arrays, so any
+        reference held to one of them beforehand becomes stale.  Add every
+        tracer before seeding values, or re-fetch via `get_tracer`.
+        """
+        if not isinstance(name, str) or not name:
+            raise ValueError('tracer name must be a non-empty string')
+        if name in self._tracer_names:
+            raise ValueError(
+                'a tracer named %r is already registered (index %d)'
+                % (name, self._tracer_names.index(name)))
+
+        if beta is not None:
+            beta = float(beta)
+            if beta < 0.0:
+                raise ValueError('beta must be >= 0, got %g' % beta)
+            # One scalar serves all tracers, so a second, different value would
+            # silently change the reconstruction of the tracers already added.
+            if self.number_of_tracers > 0 and beta != self.beta_tracer:
+                raise ValueError(
+                    'beta_tracer is shared by all tracers on a domain: cannot '
+                    'add %r with beta=%g while existing tracers use beta=%g'
+                    % (name, beta, self.beta_tracer))
+            self.beta_tracer = beta
+
+        N = self.number_of_elements
+        ns = self.number_of_tracers
+        shapes = {
+            'tracer_centroid_values':  (ns + 1, N),
+            'tracer_edge_values':      (ns + 1, 3 * N),
+            'tracer_boundary_values':  (ns + 1, self.boundary_length),
+            'tracer_explicit_update':  (ns + 1, N),
+            'tracer_conserved_values': (ns + 1, N),
+            'tracer_backup_values':    (ns + 1, N),
+        }
+
+        # Grow each array by one row, preserving the tracers already there.
+        # The kernels index these as centroid[s*N + k] etc., so they must stay
+        # C-contiguous float64 -- num.zeros gives both.
+        for attr in self._TRACER_ARRAYS:
+            new = num.zeros(shapes[attr], dtype=num.float64)
+            if ns > 0:
+                old = getattr(self, attr)
+                new[:ns] = old
+            setattr(self, attr, new)
+
+        index = ns
+        self._tracer_names.append(name)
+        self.number_of_tracers = ns + 1
+
+        # THE TRAP: the C struct is built once and cached, and evolve() never
+        # passes update_domain_c_struct=True. Without this line a tracer
+        # registered after the struct exists is invisible to the kernels --
+        # no error, the tracer simply never moves. It also now holds pointers
+        # into the arrays we just replaced. Invalidate so the next call
+        # rebuilds it against the new arrays.
+        self._Domain_C_struct = None
+
+        # Same argument on the device side: the GPU interface has the OLD
+        # tracer arrays mapped (or none at all, if it was built at Ns=0), and
+        # the arrays it points at have just been freed. Tear it down so it is
+        # rebuilt and re-mapped against the new ones. _ensure_gpu_interface()
+        # recreates it on demand.
+        self.gpu_interface = None
+        # NB: this flag is tested with hasattr, not for truthiness (see
+        # update_boundary), so it must be DELETED, not set False -- setting it
+        # False would skip the re-initialisation that defines _gpu_all_on_gpu.
+        if hasattr(self, '_gpu_boundary_info_initialized'):
+            del self._gpu_boundary_info_initialized
+
+        if initial_value is not None:
+            self.set_tracer(name, initial_value)
+
+        return index
+
+    def get_tracer_index(self, name):
+        """Return the row index of tracer `name`."""
+        try:
+            return self._tracer_names.index(name)
+        except ValueError:
+            raise ValueError('no tracer named %r; registered tracers are %r'
+                             % (name, list(self._tracer_names)))
+
+    def get_tracer_names(self):
+        """Return the registered tracer names, in index order."""
+        return list(self._tracer_names)
+
+    def _tracer_depth(self):
+        """Cell depth h = stage - elevation, floored at zero."""
+        h = (self.quantities['stage'].centroid_values
+             - self.quantities['elevation'].centroid_values)
+        return num.maximum(h, 0.0)
+
+    def get_tracer(self, name):
+        """Return the concentration `c` of tracer `name`, one value per cell."""
+        return self.tracer_centroid_values[self.get_tracer_index(name)]
+
+    def set_tracer(self, name, values):
+        """Set the concentration `c` of tracer `name`.
+
+        Seeds both `c` and the conserved `m = h*c`, which must agree: setting
+        `c` alone leaves the conserved variable stale and the first substep
+        overwrites `c` from it.
+        """
+        s = self.get_tracer_index(name)
+        # asarray, not ascontiguousarray: the latter promotes a 0-d scalar to
+        # shape (1,), which would defeat the scalar branch below.
+        c = num.asarray(values, dtype=num.float64)
+        if c.ndim == 0:
+            c = num.full(self.number_of_elements, float(c))
+        elif c.shape != (self.number_of_elements,):
+            raise ValueError(
+                'tracer %r: expected a scalar or %d values, got shape %r'
+                % (name, self.number_of_elements, c.shape))
+        self.tracer_centroid_values[s] = c
+        self.tracer_conserved_values[s] = self._tracer_depth() * c
 
     def update_domain_c_struct(self):
         """Update the C domain structure from the Python Domain object.
