@@ -147,6 +147,30 @@ class SWW_file(Data_format):
                 static_c_quantities.append(q+'_c')
                 self._overwrite_c_quantities.append(q+'_c')
 
+        # Passive tracers, and therefore suspended sediment classes, which are
+        # tracers with settling parameters (see Domain.add_sediment_class).
+        #
+        # Tracers are NOT Quantity objects: they live in one contiguous
+        # (n_tracers, N) block so the C kernel can stride them and the device
+        # can map them in one go. They are deliberately kept out of
+        # domain.quantities -- that dict is walked by the solver, not just by
+        # this writer (mesh reordering rewrites vertex/edge/gradient arrays,
+        # set_beta pushes a per-quantity beta where tracers share one scalar),
+        # so registering a view there would put tracers in the path of
+        # machinery that assumes a real Quantity.
+        #
+        # They are centroid quantities, so they take the same route as a flag-3
+        # quantity: one dynamic <name>_c variable, no vertex storage, nothing
+        # interpolated that the solver never computed.
+        self._tracer_names = list(getattr(domain, '_tracer_names', []) or [])
+        if self._tracer_names and getattr(domain, 'store_tracers', True):
+            for name in self._tracer_names:
+                cname = name + '_c'
+                if cname not in dynamic_c_quantities:
+                    dynamic_c_quantities.append(cname)
+        else:
+            self._tracer_names = []
+
         # NetCDF file definition
         fid = NetCDFFile(self.filename, mode)
         if mode[0] == 'w':
@@ -406,8 +430,17 @@ class SWW_file(Data_format):
                 dynamic_quantities[name] = A
 
             for name in self.writer.dynamic_c_quantities:
-                Q = domain.quantities[name[:-2]]
-                dynamic_quantities_centroid[name] = Q.centroid_values
+                base = name[:-2]
+                if base in self._tracer_names:
+                    # A tracer: a row of the (n_tracers, N) block, not a
+                    # Quantity. The block is REALLOCATED by add_tracer, so it
+                    # is looked up on the domain each step rather than cached.
+                    s_idx = domain._tracer_names.index(base)
+                    dynamic_quantities_centroid[name] = \
+                        domain.tracer_centroid_values[s_idx]
+                else:
+                    Q = domain.quantities[base]
+                    dynamic_quantities_centroid[name] = Q.centroid_values
 
             # Store dynamic quantities
             slice_index = self.writer.store_quantities(fid,
