@@ -29,23 +29,35 @@ New work should use `domain.add_tracer()`.
 Run baseline and prototype on the SAME build configuration — see the rebuild
 warning in ../../../Projects/Sediment_Transport/HANDOVER.md.
 
-## Where the sediment tests went
+## Where the tests went
 
-The sediment suites that used to live here are now proper pytest modules in
-`anuga/shallow_water/tests/test_sediment_*.py`, so CI runs them and pointing
-pytest at this directory no longer matters:
+Everything in this directory that was a `test_*.py` is now a pytest module in
+`anuga/shallow_water/tests/`, so CI runs it:
 
-    pytest anuga/shallow_water/tests/test_sediment_*.py
-    pytest anuga/shallow_water/tests/test_sediment_*.py --run-fast   # skip the
-                                                                    # convergence
-                                                                    # studies
+    test_tracers.py          test_tracers_gpu.py       (tracers, via develop #270)
+    test_sediment_*.py                                 (sediment, 15 modules)
 
-The mode 1 / mode 2 comparisons are collected in `test_sediment_gpu.py`, which
-skips itself on a GPU-offload build unless `ANUGA_GPU_TESTS_ISOLATED=1` is set
--- the NVHPC runtime aborts a process that builds many mode-2 domains.
+Run them with
 
-What remains here is the tracer work: the five kernel suites above, the
-registration API test, and the Ns=0 benchmark harness (`bench_tracer.py`,
-`compare.py`), which is a TIMING gate rather than a correctness test and so
-does not belong in the pytest suite. Its equivalents are converted on the
-`develop_tracers` branch.
+    pytest anuga/shallow_water/tests/test_tracers*.py
+    pytest anuga/shallow_water/tests/test_sediment_*.py --run-fast
+
+The `*_gpu.py` modules collect every mode 1 / mode 2 comparison. They skip
+themselves on a GPU-offload build unless `ANUGA_GPU_TESTS_ISOLATED=1` is set --
+the NVHPC runtime aborts a process that builds many mode-2 domains.
+
+## What is left here
+
+The Ns=0 benchmark harness, which is a TIMING gate rather than a correctness
+test and so does not belong in the pytest suite:
+
+    OMP_NUM_THREADS=1 python bench_tracer.py --size large --mode 1
+    python compare.py baseline.json prototype.json
+
+It exists to answer one question: does carrying the tracer machinery cost
+anything when no tracers are registered? It has earned its keep -- it caught a
++2.88% regression from hoisting pointer loads out of a guard, at a point when
+every correctness test was green.
+
+`run_parallel_tracer.py` drives the MPI halo exchange, which pytest does not
+cover either.
