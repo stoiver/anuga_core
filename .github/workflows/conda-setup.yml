@@ -114,20 +114,34 @@ jobs:
            conda install -c conda-forge -n anuga_env msmpi mpi4py
            # PIN (#255): hold netcdf4 at the _104 build series on Windows.
            #
-           # conda-forge stopped building py312/py313 variants of netcdf4 1.7.4
-           # after _104 -- the _105.._109 series exists only for py311 and py314.
-           # The solver therefore resolves the **py311** build into py312/py313
-           # environments, and loading that _netCDF4.pyd segfaults the
-           # interpreter: `python -c "import netCDF4"` alone dies with exit 139,
-           # no ANUGA and no pytest involved.
+           # WHAT WE KNOW: from 2026-08-31, Windows CI on Python 3.11-3.13 died
+           # with exit 139 loading _netCDF4.pyd -- eventually even for a bare
+           # `python -c "import netCDF4"`, with no ANUGA and no pytest. 3.10 and
+           # 3.14 were unaffected. This pin makes CI green again (15/15).
            #
-           # _104 has a matching build for every Python we test, and pulls the
-           # coherent older stack (hdf5 1.14.6 / libnetcdf 4.10.0) that Python
-           # 3.10 has been passing on throughout.
+           # WHY IT WORKS: unknown. An earlier version of this comment blamed
+           # conda-forge for resolving a py311 build into py312/py313 envs. That
+           # was WRONG -- netcdf4 moved to an ABI3 build, so one build covering
+           # 3.11-3.13 is intended (conda-forge/netcdf4-feedstock#195, closed as
+           # not-a-bug after we could not reproduce it either).
            #
-           # TEMPORARY. Remove once conda-forge publishes py312/py313 builds of
-           # the current series, or fixes the constraints so a mismatched build
-           # cannot be selected.
+           # WHAT IS RULED OUT, all probed on windows-latest/py3.12 in
+           # https://github.com/stoiver/anuga-ci-lab and all importing netCDF4
+           # FINE with the exact build we blamed (_109 + hdf5 2.2.0 +
+           # libnetcdf 4.10.1):
+           #   * python + netcdf4 alone
+           #   * + rasterio/fiona (i.e. GDAL and its own hdf5/netcdf)
+           #   * our full environments/environment_3.12.yml
+           #   * + the pinned mingw toolchain below
+           #   * + msmpi/mpi4py  (also ruled out by removing mpi4py entirely)
+           #   * + ANUGA itself built and pip-installed
+           # So the trigger is something this CI job does that the lab does not,
+           # and it has not been found. The pin is a stopgap over a live unknown,
+           # not a fix.
+           #
+           # TEMPORARY -- see #263. There is no upstream event to wait for. The
+           # test is simply to remove this line and see whether Windows 3.11-3.13
+           # stay green.
            conda install -c conda-forge -n anuga_env "netcdf4=1.7.4=*_104"
 
            # conda install -c conda-forge -n anuga_env compilers
