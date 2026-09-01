@@ -201,7 +201,7 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.number_of_elements = domain_py_object.number_of_elements
 	D.boundary_length = domain_py_object.boundary_length
 	D.number_of_riverwall_edges = domain_py_object.number_of_riverwall_edges
-	# SPIKE: generic tracers. The struct is PyMem_Malloc'd (not zeroed), so this
+	# Generic tracers. The struct is PyMem_Malloc'd (not zeroed), so this
 	# MUST be set on every fill or the flux kernel guard reads garbage.
 	# Sediment: MUST be set explicitly in BOTH pyx files. struct domain is
 	# PyMem_Malloc'd and never zeroed, and a garbage n_sediment_classes makes
@@ -398,7 +398,7 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 	#------------------------------------------------------
 	# Quantity structures
 	#------------------------------------------------------
-	# SPIKE: generic tracer arrays. Owned by the Python Domain as C-contiguous
+	# Generic tracer arrays. Owned by the Python Domain as C-contiguous
 	# (ns, ...) float64 arrays; NULL when no tracers are registered.
 	cdef double[:, ::1] tr2
 	cdef double[::1] sed1

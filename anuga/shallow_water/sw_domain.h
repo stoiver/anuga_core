@@ -121,9 +121,12 @@ struct domain {
     /* ------------------------------------------------------------------
      * Generic passive tracers (sediment concentration, salinity, ...).
      *
-     * SPIKE: prototype for the sediment add-on.  Appended at the END of the
-     * struct on purpose so every pre-existing field keeps its offset and the
-     * cache layout of the hot arrays is untouched.
+     * Appended at the END of the struct on purpose so every pre-existing
+     * field keeps its offset and the cache layout of the hot arrays is
+     * untouched. Adding a member anywhere else silently shifts the offset of
+     * everything after it, and the Cython extensions are not rebuilt when
+     * this header changes -- so the failure is a wrong binary, not a
+     * compile error.
      *
      * number_of_tracers == 0 is the ordinary case and must cost nothing:
      * the flux kernel guards all tracer work behind a single test on this

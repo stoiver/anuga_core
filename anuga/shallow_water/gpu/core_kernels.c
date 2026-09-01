@@ -62,7 +62,7 @@ void core_extrapolate_second_order_edge(struct domain *D) {
     anuga_int * restrict number_of_boundaries = D->number_of_boundaries;
 
     // Generic passive tracers. n_tracers == 0 in every ordinary run; keep only
-    // the loop-invariant count live in the common path (see SPIKE notes).
+    // the loop-invariant count live in the common path.
     const anuga_int n_tracers = D->number_of_tracers;
     const double beta_tracer = D->beta_tracer;
     // See the note above core_compute_fluxes_central: on a GPU build these must
@@ -2127,7 +2127,7 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
     anuga_int * restrict riverwall_rowIndex = D->riverwall_rowIndex;
     double * restrict riverwall_hydraulic_properties = D->riverwall_hydraulic_properties;
 
-    // Generic passive tracers (SPIKE).  n_tracers == 0 in every ordinary run;
+    // Generic passive tracers.  n_tracers == 0 in every ordinary run;
     // all tracer work below is guarded on this loop-invariant integer.
     const anuga_int n_tracers = D->number_of_tracers;
 
@@ -2327,7 +2327,7 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
             xmom_eu[k] += edgeflux[1];
             ymom_eu[k] += edgeflux[2];
 
-            // --- Passive tracer advection (SPIKE) -------------------------
+            // --- Passive tracer advection -------------------------------
             // edgeflux[0] is the water mass flux through this edge, already
             // multiplied by -length.  Sign convention after that negation:
             //     edgeflux[0] < 0  ->  OUTflow from k, donor is k

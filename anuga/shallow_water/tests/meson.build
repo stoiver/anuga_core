@@ -15,6 +15,8 @@ python_sources = [
 'test_sw_domain_openmp.py',
 'test_DE_gpu_omp.py',
 'test_compute_mode.py',
+'test_tracers.py',
+'test_tracers_gpu.py',
 'test_sediment_paths.py',
 'test_sediment_rdycore_erosion.py',
 'test_sediment_rdycore_benchmarks.py',

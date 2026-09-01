@@ -6,11 +6,24 @@
 #     buffers, no host staging),
 #   * the HPC-X OpenMPI + UCX runtime copied into the runtime stage.
 #
-# Kept SEPARATE from anuga:gpu-slim on purpose.  The MPI runtime adds several
-# hundred MB (ompi ~235 MB + ucx ~285 MB before trimming) and the slim image
-# exists to keep AWS cold-start pulls fast.  Single-GPU instances (g4dn.xlarge,
-# g6.xlarge) cannot use multi-rank GPU anyway — mode 2 requires one rank per
-# GPU — so use gpu-slim there and this image on multi-GPU nodes.
+# This is the PUBLISHED GPU image (ghcr.io …:<version>-gpu).
+#
+# It was originally kept separate from anuga:gpu-slim because the MPI runtime
+# "adds several hundred MB" — ompi ~235 MB + ucx ~285 MB *before* the trimming
+# below.  Measured after trimming, on a full multi-arch build (2026-08-30):
+#
+#     gpu.slim   0.46 GB compressed / 2.12 GB on disk
+#     gpu.mpi    0.60 GB compressed / 2.66 GB on disk
+#
+# i.e. MPI costs 0.14 GB on a pull, against 15.94 GB for the old single-stage
+# devel image.  At that price the split is not worth its complexity: MPI-capable
+# is a superset, nothing about it degrades single-GPU use, and one image is
+# simpler to build, publish and document.  gpu.slim remains for anyone who wants
+# the smallest possible pull for a large single-GPU fleet.
+#
+# Note single-GPU instances (g4dn.xlarge, g6.xlarge) still cannot use multi-rank
+# GPU — mode 2 requires one rank per GPU — they simply run this image as one
+# rank.
 #
 # MPI comes from the NVHPC base's bundled HPC-X, which is built CUDA-aware
 # (ompi_info: mpi_built_with_cuda_support:value:true).  There is one HPC-X per
