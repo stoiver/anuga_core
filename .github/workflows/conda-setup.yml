@@ -193,24 +193,6 @@ jobs:
           conda list                > "conda-list-py${{ matrix.python-version }}.txt"     || true
           echo "=== solved env: $(wc -l < "conda-explicit-py${{ matrix.python-version }}.txt") lines ==="
 
-      # Decisive isolation test for #255. The segfault's stack is
-      #   test_sww2vtu.py -> sww2vtu.py -> netCDF4/__init__.py:11 -> create_module
-      # i.e. it dies loading _netCDF4.pyd. If importing netCDF4 on its own also
-      # segfaults, then ANUGA and pytest are irrelevant and this is purely a bad
-      # netCDF4/hdf5/libnetcdf combination -- a known netCDF4 failure mode on
-      # win-64, where the DLL bundling is the fragile part.
-      # continue-on-error so this reports without masking the real test result.
-      - name: Probe netCDF4 in isolation (Windows, #255)
-        if: always() && runner.os == 'Windows'
-        continue-on-error: true
-        shell: bash -el {0}
-        run: |
-          conda activate anuga_env
-          echo "--- versions (segfault here => purely environmental) ---"
-          python -c "import netCDF4; print('netCDF4', netCDF4.__version__, '| hdf5', netCDF4.__hdf5libversion__, '| libnetcdf', netCDF4.__netcdf4libversion__)"
-          echo "--- import of the module that triggers it ---"
-          python -c "import anuga.file_conversion.sww2vtu as m; print('sww2vtu imported OK')"
-
       - name: Upload the solved environment (Windows, #255)
         if: always() && runner.os == 'Windows'
         uses: actions/upload-artifact@v7
