@@ -1,5 +1,5 @@
 <!--
-Draft announcement for the 4.0.0rc1 soak, to Ole, Rudy, Petar and Jorge.
+Draft announcement for the 4.0.0rc1 soak, to Ole, Rudy, Petar, david and Jorge.
 Written 2026-08-23; RC published to TestPyPI the same day (21 artifacts,
 cp310-cp314, Linux/macOS/Windows + sdist).
 
@@ -10,7 +10,7 @@ before sending. See claude/RELEASE_PLAN_4.0.0.md Phase 2.
 
 Subject: ANUGA 4.0.0rc1 available for testing on TestPyPI
 
-Hi Ole, Rudy, Petar, Jorge,
+Hi Ole, Rudy, Petar, David, Jorge,
 
 A release candidate for ANUGA 4.0.0 is up on TestPyPI and I'd appreciate a look
 before we tag. This is the first release off the develop line since 3.3.10 —
@@ -79,7 +79,7 @@ is (it prints the bed range across each inlet; near zero means unaffected).
 What I'd find most useful
 -------------------------
 
-* Ole, Rudy — run a model you know well and tell me if anything moved that
+* Rudy and David — run a model you know well and tell me if anything moved that
   shouldn't have. Structures on sloping ground are the place to look first
   (see above). A view on whether the removals and deprecations are the right
   call for a 4.0 would also be welcome.
@@ -94,6 +94,7 @@ What I'd find most useful
   Second, the GPU path on your RTX card if you have time — it's had a lot of
   work and only limited hardware coverage.
 * Jorge — anything on the parallel/MPI side.
+* Ole — anything in general.
 
 Please don't use this for production work; it's a release candidate and 4.0.0rc1
 sorts before 4.0.0, so a plain "pip install anuga" won't pick it up.
