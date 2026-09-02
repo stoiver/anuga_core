@@ -16,6 +16,7 @@ python_sources = [
 'test_DE_gpu_omp.py',
 'test_compute_mode.py',
 'test_tracers.py',
+'test_tracers_sww.py',
 'test_tracers_unsupported_paths.py',
 'test_tracers_gpu.py',
 'test_forcing.py',
