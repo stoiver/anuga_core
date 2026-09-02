@@ -213,6 +213,22 @@ def distribute(domain, verbose=False, debug=False, parameters = None):
       in the parallel domain instances
     """
 
+    # Tracers are not Quantity objects, so the "copy in quantity data" loop
+    # below cannot see them: the sub-domains would be built with no tracers at
+    # all, losing the names, the shared beta and every value. The per-timestep
+    # ghost exchange (communicate_tracer_ghosts) already exists and assumes
+    # they are present on every rank, which this never arranges. Refuse until
+    # #278 carries them across.
+    #
+    # Checked before the numprocs == 1 bypass would return: a serial run is
+    # unaffected either way, and failing here rather than later keeps the
+    # message close to the cause.
+    if getattr(domain, 'number_of_tracers', 0) > 0 and numprocs > 1:
+        raise NotImplementedError(
+            'distribute() cannot yet carry tracers to the sub-domains, so a '
+            'parallel run of a domain with %d tracer(s) would silently lose '
+            'them. See issue #278.' % domain.number_of_tracers)
+
     if not pypar_available or numprocs == 1 : return domain # Bypass
 
 

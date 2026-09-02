@@ -561,6 +561,18 @@ class Generic_Domain:
         self.tri_full_flag = self.tri_full_flag[new_order]
         self.number_of_full_triangles = int(num.sum(self.tri_full_flag))
 
+        # Tracers are not Quantity objects, so the loop below cannot see them
+        # and their (ns, N) / (ns, 3N) blocks would keep the OLD ordering while
+        # the mesh moved underneath -- cell k's concentration landing on
+        # whichever triangle used to be at k. Silent, and wrong. Refuse until
+        # #277 implements the permutation.
+        if getattr(self, 'number_of_tracers', 0) > 0:
+            raise NotImplementedError(
+                'reorder() cannot yet permute tracer arrays, so reordering a '
+                'domain with %d tracer(s) would silently misalign them with '
+                'the mesh. See issue #277. Reorder before adding tracers, or '
+                'do not reorder.' % self.number_of_tracers)
+
         # --- quantities ---
         # Reorder centroid_values and any cached per-triangle arrays.
         # vertex_values and edge_values are recomputed each timestep by
