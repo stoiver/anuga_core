@@ -109,6 +109,8 @@ cdef extern from "gpu_domain.h" nogil:
         double* tracer_explicit_update
         double* tracer_conserved_values
         double* tracer_backup_values
+        double* tracer_boundary_flux
+        double* tracer_boundary_flux_sum
         int64_t ncol_riverwall_hydraulic_properties
         int64_t nrow_riverwall_hydraulic_properties
         int64_t* edge_flux_type
@@ -818,6 +820,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     # and dereference all six, so a NULL here is CUDA_ERROR_ILLEGAL_ADDRESS on
     # the device, not a degraded result. gpu_domain_core.c maps them.
     cdef double[:, ::1] tr2
+    cdef double[::1] tr1
     if D.number_of_tracers > 0:
         tr2 = domain_object.tracer_centroid_values
         D.tracer_centroid_values = &tr2[0, 0]
@@ -831,6 +834,10 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.tracer_conserved_values = &tr2[0, 0]
         tr2 = domain_object.tracer_backup_values
         D.tracer_backup_values = &tr2[0, 0]
+        tr2 = domain_object.tracer_boundary_flux
+        D.tracer_boundary_flux = &tr2[0, 0]
+        tr1 = domain_object.tracer_boundary_flux_sum
+        D.tracer_boundary_flux_sum = &tr1[0]
     else:
         D.tracer_centroid_values = NULL
         D.tracer_edge_values = NULL
@@ -838,6 +845,8 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.tracer_explicit_update = NULL
         D.tracer_conserved_values = NULL
         D.tracer_backup_values = NULL
+        D.tracer_boundary_flux = NULL
+        D.tracer_boundary_flux_sum = NULL
 
     # Extract riverwall arrays (may be empty if no riverwalls)
     D.number_of_riverwall_edges = getattr(domain_object, 'number_of_riverwall_edges', 0)

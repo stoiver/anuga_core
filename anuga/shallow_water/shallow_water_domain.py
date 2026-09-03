@@ -683,6 +683,17 @@ class Domain(Generic_Domain):
         self.tracer_explicit_update = None      # dm/dt        (ns, N)
         self.tracer_conserved_values = None     # m = h*c      (ns, N)
         self.tracer_backup_values = None        # m backup     (ns, N)
+        self.tracer_boundary_flux = None        # d(mass)/dt across the
+                                                # domain boundary, per cell,
+                                                # accumulated by the kernel (ns, N)
+        # Per-substep totals of the above, (max_time_substeps * ns), mirroring
+        # boundary_flux_sum for water; and the running time integral, which
+        # tracer_flux_integral_operator advances with the timestepping method's
+        # own weights. _tracer_initial_mass is the baseline a conservation
+        # check is measured against.
+        self.tracer_boundary_flux_sum = None
+        self._tracer_flux_integral = None
+        self._tracer_initial_mass = None
 
         #-------------------------------
         # If environment variable OMP_NUM_THREADS is not set,
@@ -832,7 +843,8 @@ class Domain(Generic_Domain):
     #------------------------------------------------
     _TRACER_ARRAYS = ('tracer_centroid_values', 'tracer_edge_values',
                       'tracer_boundary_values', 'tracer_explicit_update',
-                      'tracer_conserved_values', 'tracer_backup_values')
+                      'tracer_conserved_values', 'tracer_backup_values',
+                      'tracer_boundary_flux')
 
     def add_tracer(self, name, beta=None, initial_value=0.0):
         """Register a passive tracer named `name` and return its index.
@@ -896,11 +908,28 @@ class Domain(Generic_Domain):
             'tracer_explicit_update':  (ns + 1, N),
             'tracer_conserved_values': (ns + 1, N),
             'tracer_backup_values':    (ns + 1, N),
+            'tracer_boundary_flux':    (ns + 1, N),
         }
 
         # Grow each array by one row, preserving the tracers already there.
         # The kernels index these as centroid[s*N + k] etc., so they must stay
         # C-contiguous float64 -- num.zeros gives both.
+        # The per-substep totals and the running integral are sized by tracer
+        # count, not by cells, so they are rebuilt here rather than in the loop
+        # below. The integral and the baseline mass are PRESERVED across a
+        # later add_tracer: a tracer registered mid-setup must not silently
+        # reset another tracer's accounting.
+        max_substeps = len(self.boundary_flux_sum)
+        new_sum = num.zeros((ns + 1) * max_substeps, dtype=num.float64)
+        new_int = num.zeros(ns + 1, dtype=num.float64)
+        new_m0 = num.zeros(ns + 1, dtype=num.float64)
+        if ns > 0 and self._tracer_flux_integral is not None:
+            new_int[:ns] = self._tracer_flux_integral
+            new_m0[:ns] = self._tracer_initial_mass
+        self.tracer_boundary_flux_sum = new_sum
+        self._tracer_flux_integral = new_int
+        self._tracer_initial_mass = new_m0
+
         for attr in self._TRACER_ARRAYS:
             new = num.zeros(shapes[attr], dtype=num.float64)
             if ns > 0:
@@ -934,6 +963,20 @@ class Domain(Generic_Domain):
 
         if initial_value is not None:
             self.set_tracer(name, initial_value)
+
+        # The operator that turns the kernel's per-substep boundary totals into
+        # a time integral. Registered here rather than left to the user: without
+        # it get_tracer_boundary_flux_integral() would silently read zero, which
+        # is exactly the failure a conservation check exists to catch.
+        from anuga.operators.tracer_flux_integral_operator import (
+            tracer_flux_integral_operator)
+        if not any(isinstance(op, tracer_flux_integral_operator)
+                   for op in self.fractional_step_operators):
+            tracer_flux_integral_operator(self)
+
+        # Baseline for check_tracer_conservation, taken AFTER the initial value
+        # is seeded so it is the mass actually present at t = 0.
+        self._tracer_initial_mass[index] = self.get_tracer_mass(name)
 
         return index
 
@@ -1027,6 +1070,63 @@ class Domain(Generic_Domain):
         idx = num.asarray(self.tag_boundary_cells[tag], dtype=num.intp)
         return self.tracer_boundary_values[s, idx]
 
+    def get_tracer_mass(self, name):
+        """Total mass of tracer `name` in the domain: the integral of m = h*c.
+
+        The tracer analogue of `get_water_volume`. Summed over owned cells only
+        and reduced across ranks, so it is the whole-domain figure in parallel
+        as well as in serial.
+        """
+        s = self.get_tracer_index(name)
+        m = self.tracer_conserved_values[s]           # m = h*c per cell
+        areas = self.areas
+        if self.tri_full_flag is not None:
+            mass = float(num.sum(m * areas * (self.tri_full_flag == 1)))
+        else:
+            mass = float(num.sum(m * areas))
+
+        from anuga import numprocs
+        if numprocs == 1:
+            return mass
+        from mpi4py import MPI
+        return MPI.COMM_WORLD.allreduce(mass, op=MPI.SUM)
+
+    def get_tracer_boundary_flux_integral(self, name):
+        """Net tracer mass that has crossed the domain boundary, since t=0.
+
+        Positive is INTO the domain, matching the sign of the water balance.
+        The tracer analogue of `get_boundary_flux_integral`, and the other half
+        of a mass budget:
+
+            mass(t) - mass(0) == boundary_flux_integral(t)
+
+        to within the timestepping error, for a domain with no source terms.
+        `check_tracer_conservation` does exactly that comparison.
+
+        The kernel accumulates the per-edge boundary flux into a per-cell array
+        each substep; `tracer_flux_integral_operator` applies the timestepping
+        method's own weights and zeroes it, exactly as
+        `boundary_flux_integral_operator` does for water.
+        """
+        s = self.get_tracer_index(name)
+        return float(self._tracer_flux_integral[s])
+
+    def check_tracer_conservation(self, name):
+        """Return (change_in_mass, boundary_flux_integral, discrepancy).
+
+        For a domain with no tracer source terms the first two should agree, so
+        the discrepancy is the conservation error. On a CLOSED domain the flux
+        integral is zero and this reduces to "did the mass stay constant".
+
+        Returns absolute quantities, not a relative error: for a tracer that is
+        zero almost everywhere a relative measure is meaningless, and the caller
+        knows the scale that matters.
+        """
+        s = self.get_tracer_index(name)
+        change = self.get_tracer_mass(name) - self._tracer_initial_mass[s]
+        flux = self.get_tracer_boundary_flux_integral(name)
+        return change, flux, change - flux
+
     def get_tracer_index(self, name):
         """Return the row index of tracer `name`."""
         try:
@@ -1055,6 +1155,12 @@ class Domain(Generic_Domain):
         Seeds both `c` and the conserved `m = h*c`, which must agree: setting
         `c` alone leaves the conserved variable stale and the first substep
         overwrites `c` from it.
+
+        Because `m = h*c`, this reads the CURRENT depth: set `stage` and
+        `elevation` before the tracer, not after.
+
+        Called before the run starts, this also rebases the conservation
+        baseline (see `check_tracer_conservation`); called mid-run it does not.
         """
         s = self.get_tracer_index(name)
         # asarray, not ascontiguousarray: the latter promotes a 0-d scalar to
@@ -1068,6 +1174,20 @@ class Domain(Generic_Domain):
                 % (name, self.number_of_elements, c.shape))
         self.tracer_centroid_values[s] = c
         self.tracer_conserved_values[s] = self._tracer_depth() * c
+
+        # Setting the field before the run starts IS the initial condition, so
+        # rebase the conservation baseline on it. Without this, the common
+        # add_tracer(name) / set_tracer(name, field) pairing would leave the
+        # baseline at the mass add_tracer seeded and check_tracer_conservation
+        # would report the difference as a conservation error.
+        #
+        # Mid-run a set_tracer is a genuine intervention that really does break
+        # the budget, so leave the baseline alone there and let it show up as a
+        # discrepancy rather than silently absorbing it.
+        if (self._tracer_initial_mass is not None
+                and s < len(self._tracer_initial_mass)
+                and self.relative_time == self.evolve_starttime):
+            self._tracer_initial_mass[s] = self.get_tracer_mass(name)
 
     def update_domain_c_struct(self):
         """Update the C domain structure from the Python Domain object.
@@ -5415,6 +5535,8 @@ class Domain(Generic_Domain):
 
         from anuga.operators.rate_operators import Rate_operator
         from anuga.operators.boundary_flux_integral_operator import boundary_flux_integral_operator
+        from anuga.operators.tracer_flux_integral_operator import (
+            tracer_flux_integral_operator)
         from anuga.structures.inlet_operator import Inlet_operator
         from anuga.structures.gpu_culvert_manager import GPUCulvertManager
         from anuga.operators.collect_max_quantities_operator import Collect_max_quantities_operator
@@ -5440,6 +5562,13 @@ class Domain(Generic_Domain):
             elif isinstance(op, boundary_flux_integral_operator):
                 # boundary_flux_integral_operator only reads boundary_flux_sum (small array)
                 # and accumulates a scalar - doesn't need full centroid sync
+                continue
+            elif isinstance(op, tracer_flux_integral_operator):
+                # Same shape as the water one: reads the small per-substep
+                # tracer_boundary_flux_sum, which the kernel writes on the HOST,
+                # and accumulates into a per-tracer scalar. The per-cell scratch
+                # it totals lives and is zeroed on the device, so no centroid
+                # sync is needed here either.
                 continue
             elif isinstance(op, Inlet_operator):
                 # Force GPU initialization if not already done

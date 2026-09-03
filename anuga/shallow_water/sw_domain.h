@@ -148,6 +148,23 @@ struct domain {
      * DERIVED from it each substep, exactly as height is derived from stage. */
     double* tracer_conserved_values;
     double* tracer_backup_values;
+    /* Per-cell accumulation of tracer flux across DOMAIN BOUNDARY edges, for
+     * conservation accounting; (n_tracers, N), same layout as the rest.
+     *
+     * Per-cell rather than a scalar reduction on purpose. The water equivalent
+     * uses reduction(+:boundary_flux_sum_substep), but the tracer version would
+     * need a runtime-length ARRAY reduction, reduction(+:t[0:ns]), which is
+     * unproven on nvc GPU targets. Each cell only ever writes its own edges, so
+     * accumulating per cell needs no reduction and no atomics, and the sum is
+     * taken on the host at yield time.
+     *
+     * Sign follows edgeflux[0]: positive is INTO the domain. */
+    double* tracer_boundary_flux;
+    /* Per-substep, per-tracer totals of the above; (timestep_fluxcalls,
+     * n_tracers), mirroring boundary_flux_sum for water. Filled by ns SCALAR
+     * reductions after the flux loop -- one per tracer, which every target
+     * supports -- rather than one array reduction inside it. */
+    double* tracer_boundary_flux_sum;
     /* Reconstruction aggressiveness for tracers, analogous to beta_w for stage.
      * 0.0 => first order; >0 => limited second order. Appended at the very end
      * so no previously-existing field offset moves. */
