@@ -127,3 +127,48 @@ def test_set_tracer_mid_run_is_not_silently_absorbed():
     _, _, disc = d.check_tracer_conservation('c')
     assert abs(disc - added) < 1e-10 * added, \
         'mid-run set_tracer was rebased away instead of showing as a discrepancy'
+
+
+def _fed(n=16):
+    """Water enters on the left; the domain itself starts clean."""
+    d = anuga.rectangular_cross_domain(n, n)
+    d.set_quantity('elevation', 0.0)
+    d.set_quantity('stage', 1.0)
+    d.set_quantity('xmomentum', 0.5)
+    Bi = anuga.Dirichlet_boundary([1.0, 0.5, 0.0])
+    Bo = anuga.Transmissive_boundary(d)
+    Br = anuga.Reflective_boundary(d)
+    d.set_boundary({'left': Bi, 'right': Bo, 'top': Br, 'bottom': Br})
+    return d
+
+
+def test_tracer_arriving_on_an_inflow_is_counted_as_it_enters():
+    """The other sign of the budget: set_tracer_boundary feeding a clean domain.
+
+    Pairs the two halves -- a prescribed inflow concentration is only applied
+    where water flows in, and what it brings has to appear in the integral.
+    """
+    d = _fed()
+    d.add_tracer('c', initial_value=0.0)
+    d.set_tracer_boundary('c', 'left', 1.0)
+    assert d.get_tracer_mass('c') == 0.0
+
+    for _ in d.evolve(yieldstep=0.25, finaltime=1.0):
+        pass
+    change, flux, disc = d.check_tracer_conservation('c')
+
+    assert change > 0.0, 'no tracer entered through the inflow'
+    assert flux > 0.0, 'net flux should be inward'
+    assert abs(disc) < 1e-10 * abs(change), \
+        'inflow budget does not balance: change %g vs flux %g' % (change, flux)
+
+
+def test_an_unset_inflow_boundary_brings_nothing():
+    """The documented default: an unset boundary carries c = 0."""
+    d = _fed()
+    d.add_tracer('c', initial_value=0.0)      # deliberately no set_tracer_boundary
+    for _ in d.evolve(yieldstep=0.25, finaltime=1.0):
+        pass
+    change, flux, _ = d.check_tracer_conservation('c')
+    assert abs(change) < 1e-14, 'clean water carried tracer in'
+    assert abs(flux) < 1e-14
