@@ -841,10 +841,28 @@ class Domain(Generic_Domain):
     #------------------------------------------------
     # Generic passive tracers
     #------------------------------------------------
-    _TRACER_ARRAYS = ('tracer_centroid_values', 'tracer_edge_values',
-                      'tracer_boundary_values', 'tracer_explicit_update',
-                      'tracer_conserved_values', 'tracer_backup_values',
-                      'tracer_boundary_flux')
+    # Every tracer block, and how it is INDEXED -- which is what fixes both its
+    # shape and the way reorder() has to permute it:
+    #
+    #   'cell'      one value per triangle       -> (ns, N)
+    #   'edge'      three values per triangle    -> (ns, 3N)
+    #   'boundary'  one value per boundary edge  -> (ns, boundary_length)
+    #
+    # Single source of truth on purpose: add_tracer sizes the arrays from this
+    # and _reorder_tracer_arrays permutes from it, so a new block cannot be
+    # added without declaring how it is indexed. Tracers are deliberately not
+    # Quantity objects (#276), which means anything walking domain.quantities
+    # misses them -- #277 was exactly that omission, in reorder().
+    _TRACER_ARRAY_KINDS = {
+        'tracer_centroid_values':  'cell',
+        'tracer_edge_values':      'edge',
+        'tracer_boundary_values':  'boundary',
+        'tracer_explicit_update':  'cell',
+        'tracer_conserved_values': 'cell',
+        'tracer_backup_values':    'cell',
+        'tracer_boundary_flux':    'cell',
+    }
+    _TRACER_ARRAYS = tuple(_TRACER_ARRAY_KINDS)
 
     def add_tracer(self, name, beta=None, initial_value=0.0):
         """Register a passive tracer named `name` and return its index.
@@ -875,7 +893,7 @@ class Domain(Generic_Domain):
 
         Notes
         -----
-        Registering a tracer **reallocates** all six tracer arrays, so any
+        Registering a tracer **reallocates** every tracer array, so any
         reference held to one of them beforehand becomes stale.  Add every
         tracer before seeding values, or re-fetch via `get_tracer`.
         """
@@ -901,15 +919,9 @@ class Domain(Generic_Domain):
 
         N = self.number_of_elements
         ns = self.number_of_tracers
-        shapes = {
-            'tracer_centroid_values':  (ns + 1, N),
-            'tracer_edge_values':      (ns + 1, 3 * N),
-            'tracer_boundary_values':  (ns + 1, self.boundary_length),
-            'tracer_explicit_update':  (ns + 1, N),
-            'tracer_conserved_values': (ns + 1, N),
-            'tracer_backup_values':    (ns + 1, N),
-            'tracer_boundary_flux':    (ns + 1, N),
-        }
+        widths = {'cell': N, 'edge': 3 * N, 'boundary': self.boundary_length}
+        shapes = {attr: (ns + 1, widths[kind])
+                  for attr, kind in self._TRACER_ARRAY_KINDS.items()}
 
         # Grow each array by one row, preserving the tracers already there.
         # The kernels index these as centroid[s*N + k] etc., so they must stay
@@ -1126,6 +1138,91 @@ class Domain(Generic_Domain):
         change = self.get_tracer_mass(name) - self._tracer_initial_mass[s]
         flux = self.get_tracer_boundary_flux_integral(name)
         return change, flux, change - flux
+
+    def _reorder_tracer_arrays(self, new_order, inv_order,
+                               old_boundary_enumeration):
+        """Permute the tracer blocks onto a reordered mesh (issue #277).
+
+        Called by `Generic_Domain.reorder` after the mesh has been renumbered
+        but while `inv_order` and the pre-reorder boundary enumeration are
+        still available. A no-op on a domain with no tracers.
+
+        Permutes IN PLACE. The C domain struct holds raw pointers into these
+        buffers, so rebinding the attributes would leave the struct addressing
+        the old memory.
+        """
+        ns = self.number_of_tracers
+        if ns == 0:
+            return
+
+        N = self.number_of_elements
+        new_order = num.asarray(new_order, dtype=int)
+
+        # Belt and braces: a block added to _TRACER_ARRAYS without a kind would
+        # otherwise be skipped here and silently keep the old ordering, which
+        # is the exact failure #277 was.
+        unclassified = [a for a in self._TRACER_ARRAYS
+                        if a not in self._TRACER_ARRAY_KINDS]
+        if unclassified:
+            raise NotImplementedError(
+                'tracer array(s) %s have no entry in _TRACER_ARRAY_KINDS, so '
+                'reorder() does not know how to permute them; classify them '
+                'as cell/edge/boundary' % ', '.join(sorted(unclassified)))
+
+        bperm = None
+
+        for attr in self._TRACER_ARRAYS:
+            arr = getattr(self, attr, None)
+            if arr is None:
+                continue
+            kind = self._TRACER_ARRAY_KINDS[attr]
+
+            if kind == 'cell':
+                # new[:, i] = old[:, new_order[i]], matching the convention the
+                # quantities use. Fancy indexing copies before the assignment,
+                # so this does not alias.
+                arr[:] = arr[:, new_order]
+            elif kind == 'edge':
+                # (ns, 3N) -> (ns, N, 3), permute triangles, flatten back. The
+                # same reshape-permute-ravel the (3N,) arrays get in reorder().
+                arr[:] = arr.reshape(ns, N, 3)[:, new_order, :].reshape(ns, 3 * N)
+            elif kind == 'boundary':
+                if bperm is None:
+                    bperm = self._boundary_permutation(old_boundary_enumeration,
+                                                       inv_order)
+                arr[:] = arr[:, bperm]
+            else:
+                raise NotImplementedError(
+                    'unknown tracer array kind %r for %r' % (kind, attr))
+
+    def _boundary_permutation(self, old_boundary_enumeration, inv_order):
+        """Map each NEW boundary index to the old index of the same edge.
+
+        `build_boundary_neighbours` numbers boundary edges by their position in
+        the sorted (triangle, edge) order, so renumbering triangles renumbers
+        the boundary as well. Quantities do not care -- `update_boundary`
+        refills their boundary values from the Boundary objects every timestep
+        -- but `tracer_boundary_values` is written once by
+        `set_tracer_boundary` and then just read, so it has to be carried
+        across by hand.
+
+        Returns an index array `bperm` with `bperm[new_j] = old_j`, so that
+        `new_values = old_values[bperm]`.
+        """
+        new_boundary_enumeration = self.mesh.boundary_enumeration
+        M = len(new_boundary_enumeration)
+        if len(old_boundary_enumeration) != M:
+            raise RuntimeError(
+                'boundary edge count changed during reorder (%d -> %d); the '
+                'tracer boundary values cannot be carried across'
+                % (len(old_boundary_enumeration), M))
+
+        bperm = num.empty(M, dtype=int)
+        for (old_id, edge), old_j in old_boundary_enumeration.items():
+            # The same physical edge, addressed by the triangle's new number.
+            new_j = new_boundary_enumeration[int(inv_order[old_id]), edge]
+            bperm[new_j] = old_j
+        return bperm
 
     def get_tracer_index(self, name):
         """Return the row index of tracer `name`."""
