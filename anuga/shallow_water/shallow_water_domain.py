@@ -674,6 +674,9 @@ class Domain(Generic_Domain):
         self.number_of_tracers = 0
         self.beta_tracer = 1.0
         self._tracer_names = []
+        # (tracer index, boundary tag) -> callable, for time-varying
+        # inflow concentrations. See set_tracer_boundary().
+        self._tracer_boundary_functions = {}
         self.tracer_centroid_values = None      # c            (ns, N)
         self.tracer_edge_values = None          # c at edges   (ns, 3N)
         self.tracer_boundary_values = None      # c at bdry    (ns, boundary_length)
@@ -933,6 +936,96 @@ class Domain(Generic_Domain):
             self.set_tracer(name, initial_value)
 
         return index
+
+    def set_tracer_boundary(self, name, tag, value):
+        """Concentration that tracer `name` brings in across boundary `tag`.
+
+        Only used where water FLOWS IN. The flux kernel picks the upwind value
+        edge by edge from the sign of the water flux:
+
+            inflow  (n.U into the domain)   ->  this boundary value
+            outflow (n.U out of the domain) ->  the interior edge value
+
+        so there is nothing to set for an outflow, and nothing that can be set:
+        prescribing a concentration on an outflow would over-determine the
+        advection, and the kernel would ignore it anyway. A boundary that only
+        ever lets water out therefore needs no call at all, and one that
+        alternates gets Dirichlet-on-inflow / transmissive-on-outflow
+        automatically -- the characteristic condition, without a switch.
+
+        Parameters
+        ----------
+        name : str
+            A registered tracer.
+        tag : str
+            A boundary tag, as used by `set_boundary`.
+        value : float, array-like, or callable
+            A scalar applies to every edge carrying `tag`. An array must have
+            one value per edge of that tag, ordered as
+            `domain.tag_boundary_cells[tag]`. A callable is evaluated as
+            `value(t)` at each timestep and must return a scalar or such an
+            array, for a time-varying inflow.
+
+        Notes
+        -----
+        UNSET BOUNDARIES BRING c = 0. The array is zero-filled at
+        `add_tracer`, so with no call here an inflow carries clean water. That
+        is a modelling assumption, not a neutral default: for salinity or
+        suspended sediment it is usually wrong, and it is invisible in the
+        output. It is preserved because changing it would silently alter
+        existing results, but set it explicitly wherever water enters.
+        """
+        s = self.get_tracer_index(name)
+
+        if tag not in self.tag_boundary_cells:
+            raise ValueError(
+                'no boundary tagged %r on this domain; known tags: %s'
+                % (tag, sorted(self.tag_boundary_cells)))
+
+        idx = num.asarray(self.tag_boundary_cells[tag], dtype=num.intp)
+
+        if callable(value):
+            # Re-evaluated each timestep by update_tracer_boundary_values().
+            self._tracer_boundary_functions[(s, tag)] = value
+            self._apply_tracer_boundary(s, idx, value(self.get_time()), tag)
+        else:
+            self._tracer_boundary_functions.pop((s, tag), None)
+            self._apply_tracer_boundary(s, idx, value, tag)
+
+    def _apply_tracer_boundary(self, s, idx, value, tag):
+        """Write one tracer's boundary values for the edges of one tag."""
+        v = num.asarray(value, dtype=num.float64)
+        if v.ndim == 0:
+            self.tracer_boundary_values[s, idx] = float(v)
+        elif v.shape == idx.shape:
+            self.tracer_boundary_values[s, idx] = v
+        else:
+            raise ValueError(
+                'tracer boundary %r on tag %r: expected a scalar or %d values '
+                '(one per edge of that tag), got shape %r'
+                % (self._tracer_names[s], tag, idx.size, v.shape))
+
+    def update_tracer_boundary_values(self):
+        """Re-evaluate any callable tracer boundary values for this time.
+
+        Called from the evolve loop alongside update_boundary(). A no-op unless
+        set_tracer_boundary() was given a callable, so a domain with constant
+        boundary concentrations pays nothing.
+        """
+        if not self._tracer_boundary_functions:
+            return
+        t = self.get_time()
+        for (s, tag), f in self._tracer_boundary_functions.items():
+            idx = num.asarray(self.tag_boundary_cells[tag], dtype=num.intp)
+            self._apply_tracer_boundary(s, idx, f(t), tag)
+
+    def get_tracer_boundary(self, name, tag):
+        """Return the boundary concentrations of `name` on `tag`."""
+        s = self.get_tracer_index(name)
+        if tag not in self.tag_boundary_cells:
+            raise ValueError('no boundary tagged %r on this domain' % tag)
+        idx = num.asarray(self.tag_boundary_cells[tag], dtype=num.intp)
+        return self.tracer_boundary_values[s, idx]
 
     def get_tracer_index(self, name):
         """Return the row index of tracer `name`."""
@@ -2722,6 +2815,12 @@ class Domain(Generic_Domain):
         """
 
         nvtxRangePush('update_boundary')
+
+        # Time-varying tracer inflow concentrations, if any. Hooked here rather
+        # than at update_boundary()'s eight call sites in generic_domain, and a
+        # no-op unless set_tracer_boundary() was given a callable.
+        if self.number_of_tracers > 0:
+            self.update_tracer_boundary_values()
 
         # GPU mode - use GPU boundary functions if all boundaries are GPU-supported
         if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
