@@ -6,8 +6,11 @@
 name: Build and Publish to PyPI
 
 on:
+  # develop omitted: the pull_request trigger below already builds every wheel
+  # against the merge result, so building them again on merge is 21 jobs for
+  # an answer we have. Publishing is gated on the release event regardless.
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
     branches: [main, develop]
   release:
@@ -25,6 +28,19 @@ on:
         description: 'Version for this build, e.g. 4.0.0rc1. Required when publish_to=testpypi. Empty = derive from git describe.'
         type: string
         default: ''
+
+# One run per ref: updating a branch supersedes the run already going for it,
+# rather than leaving both to finish for a result nobody will read. Applies to
+# an open PR getting a fixup and to a directly-worked branch getting a second
+# push alike.
+#
+# Two things are never cancelled, because there is no later run coming to
+# replace them: a push to main, and a release publish (whose ref is the tag,
+# not main, so it needs saying separately).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: >-
+    ${{ github.event_name != 'release' && github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
