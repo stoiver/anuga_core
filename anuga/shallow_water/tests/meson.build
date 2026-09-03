@@ -34,6 +34,7 @@ python_sources = [
 'test_sediment_exner.py',
 'test_sediment_bedload.py',
 'test_sediment_sww_storage.py',
+'test_sediment_sww_output.py',
 'test_sediment_cohesive.py',
 'test_sediment_friction.py',
 'test_sediment_shear_closure.py',
