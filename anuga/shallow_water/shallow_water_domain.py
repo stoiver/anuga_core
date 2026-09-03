@@ -1231,7 +1231,37 @@ class Domain(Generic_Domain):
         if hasattr(self, '_gpu_boundary_info_initialized'):
             del self._gpu_boundary_info_initialized
 
+        # The bed can now move, so elevation must be stored per timestep.
+        self._sync_elevation_storage()
+
         return index
+
+    def _sync_elevation_storage(self):
+        """Store elevation per timestep once the bed can move.
+
+        The bedload and bed-exchange kernels write the bed in place --
+        `bed_centroid_values` and `bed_edge_values` ARE the `elevation`
+        Quantity's arrays (see sw_domain_openmp_ext.pyx) -- so an evolving bed
+        is a time-varying quantity. But `quantities_to_be_stored` defaults to
+        `'elevation': 1`, and flag 1 means write it ONCE (sww.py sorts flag 1
+        into `static_quantities`). The sww then records the initial bed and
+        silently omits every change to it.
+
+        That is worse than an obviously missing variable: the output looks
+        complete, and the bed in it is plausible but wrong. So upgrade to
+        flag 2 as soon as a domain has both sediment classes and an evolving
+        bed.
+
+        Only the default is upgraded. Flags 3 and 4 are deliberate choices
+        (centroid-only, and overwrite-each-yieldstep), so they are left alone
+        rather than silently rewritten. The flag is never downgraded either:
+        turning bed evolution back off leaves elevation stored dynamically,
+        which costs space but cannot mislead.
+        """
+        if self.n_sediment_classes <= 0 or not self.sediment_bed_evolution:
+            return
+        if self.quantities_to_be_stored.get('elevation') == 1:
+            self.quantities_to_be_stored['elevation'] = 2
 
     def set_angle_of_repose(self, angle=None, relax=1.0, max_sweeps=50):
         """Relax bed slopes steeper than `angle` by moving material downslope.
@@ -1672,6 +1702,8 @@ class Domain(Generic_Domain):
             self.sediment_c_pack = float(c_pack)
         if bed_evolution is not None:
             self.sediment_bed_evolution = bool(bed_evolution)
+            # May have just been turned on after the classes were registered.
+            self._sync_elevation_storage()
         if rho_w is not None:
             if rho_w <= 0.0:
                 raise ValueError('rho_w must be > 0, got %g' % rho_w)
