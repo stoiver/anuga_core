@@ -78,7 +78,7 @@ def test_the_values_are_keyed_by_slot_not_by_name():
     assert num.allclose(q[TRACER_QUANTITY_PREFIX + '1'], 0.25)
 
 
-def test_partition_mesh_includes_the_tracers(): 
+def test_partition_mesh_includes_the_tracers():
     """They must ride the same reordering as stage and friction."""
     d = _with_tracers()
     before = _wedge(d).copy()
