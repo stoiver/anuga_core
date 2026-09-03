@@ -146,3 +146,127 @@ def test_depth_is_consistent_with_stage_in_both_modes(evolved):
         h = (d.quantities['stage'].centroid_values
              - d.quantities['elevation'].centroid_values)
         assert h.min() > -1e-10, '%s: negative depth %.3e' % (nm, h.min())
+
+
+# The draining case: a flat bed with the water already moving toward an open
+# right wall, so a large fraction of the tracer is flushed out. The point is to
+# move enough that a boundary integral which silently read zero could not still
+# look "close enough" -- a gently draining domain loses a fraction of a percent
+# and would not discriminate.
+DRAIN_FINALTIME = 60.0
+DRAIN_DEPTH = 2.0
+DRAIN_SPEED = 2.0
+
+
+def _drain_wedge(d):
+    """A tracer field that varies in space, so a permutation cannot hide in it."""
+    return 0.2 + 0.8 * d.centroid_coordinates[:, 0] / LEN
+
+
+def _build_draining(mode, field=None):
+    """Same problem, but the right wall is open so tracer leaves the domain.
+
+    `field` gives a spatially varying initial concentration; the default is
+    uniform, which is what the budget tests want (the total is what matters)
+    but useless for anything comparing cell by cell.
+    """
+    d = rectangular_cross_domain(NXY, NXY, len1=LEN, len2=LEN)
+    d.set_flow_algorithm('DE0')
+    d.set_low_froude(0)
+    d.store = False
+    d.set_quantity('elevation', 0.0)
+    d.set_quantity('stage', DRAIN_DEPTH)
+    d.set_quantity('xmomentum', DRAIN_DEPTH * DRAIN_SPEED)
+    d.set_quantity('ymomentum', 0.0)
+    Br = Reflective_boundary(d)
+    Bt = anuga.Transmissive_boundary(d)
+    d.set_boundary({'left': Br, 'top': Br, 'bottom': Br, 'right': Bt})
+    d.add_tracer('c', beta=1.0)
+    d.set_tracer('c', 1.0 if field is None else field(d))
+    d.set_multiprocessor_mode(mode)
+    return d
+
+
+@pytest.fixture(scope='module')
+def drained():
+    if not gpu_available():
+        pytest.skip('GPU OpenMP interface not available: %s' % _gpu_error)
+
+    cpu = _build_draining(1)
+    cpu.evolve_to_end(finaltime=DRAIN_FINALTIME)
+
+    gpu = _build_draining(2)
+    if getattr(gpu, 'multiprocessor_mode', None) != 2:
+        pytest.fail('mode 2 did not engage: multiprocessor_mode=%r'
+                    % getattr(gpu, 'multiprocessor_mode', None))
+    from anuga.shallow_water.sw_domain_gpu_ext import sync_to_device
+    sync_to_device(gpu.gpu_interface.gpu_dom)
+    gpu.evolve_to_end(finaltime=DRAIN_FINALTIME)
+    return cpu, gpu
+
+
+def test_the_tracer_budget_balances_on_the_device(drained):
+    """The mode-2 boundary accounting must be real, not a silent zero.
+
+    `tracer_boundary_flux` is written inside the flux kernel's `omp target`
+    region, so it is subject to the same trap the module docstring describes:
+    load its base pointer off `D` inside the region and the accumulation
+    silently does nothing, leaving an integral of exactly 0.0 while the mass
+    still changes. Asserting the budget balances catches that.
+    """
+    for nm, d in zip(('mode 1', 'mode 2'), drained):
+        change, flux, disc = d.check_tracer_conservation('c')
+        assert change < -0.05 * d.get_tracer_mass('c'), \
+            '%s: too little tracer left for this to be a real test' % nm
+        assert flux != 0.0, '%s: boundary flux integral is exactly zero' % nm
+        assert abs(disc) < 1e-10 * abs(change), \
+            '%s: budget does not balance (change %g, flux %g)' % (nm, change, flux)
+
+
+def test_the_two_modes_agree_on_the_budget(drained):
+    cpu, gpu = drained
+    c1, f1, _ = cpu.check_tracer_conservation('c')
+    c2, f2, _ = gpu.check_tracer_conservation('c')
+    assert abs(c1 - c2) < 1e-10 * max(abs(c1), 1.0), 'mass change disagrees'
+    assert abs(f1 - f2) < 1e-10 * max(abs(f1), 1.0), 'flux integral disagrees'
+
+
+def _build_reordered(mode, seed=3):
+    """As _build_draining, but with the triangles renumbered first (#277).
+
+    reorder() permutes the tracer blocks in place; the device mapping happens
+    afterwards, at evolve time, so mode 2 must see the permuted data.
+    """
+    # A varying field, and mode set below -- after the reorder.
+    d = _build_draining(mode=1, field=_drain_wedge)
+    rng = np.random.default_rng(seed)
+    d.reorder(rng.permutation(len(d)))
+    d.set_multiprocessor_mode(mode)
+    return d
+
+
+def _sorted_by_centroid(d):
+    xy = d.centroid_coordinates
+    return d.get_tracer('c')[np.lexsort((xy[:, 1], xy[:, 0]))]
+
+
+def test_a_reordered_domain_gives_the_same_answer_on_the_device():
+    if not gpu_available():
+        pytest.skip('GPU OpenMP interface not available: %s' % _gpu_error)
+
+    ref = _build_draining(1, field=_drain_wedge)
+    ref.evolve_to_end(finaltime=DRAIN_FINALTIME)
+
+    gpu = _build_reordered(2)
+    if getattr(gpu, 'multiprocessor_mode', None) != 2:
+        pytest.fail('mode 2 did not engage: multiprocessor_mode=%r'
+                    % getattr(gpu, 'multiprocessor_mode', None))
+    from anuga.shallow_water.sw_domain_gpu_ext import sync_to_device
+    sync_to_device(gpu.gpu_interface.gpu_dom)
+    gpu.evolve_to_end(finaltime=DRAIN_FINALTIME)
+
+    a = _sorted_by_centroid(ref)
+    b = _sorted_by_centroid(gpu)
+    assert np.ptp(a) > 1e-6, 'field too flat to discriminate'
+    assert np.abs(a - b).max() < 1e-10, \
+        'reordering changed the answer on the device'
