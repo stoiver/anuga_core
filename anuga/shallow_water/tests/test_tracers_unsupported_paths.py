@@ -1,15 +1,16 @@
-"""The two paths that would silently mishandle tracers must refuse instead.
+"""The paths that would silently mishandle tracers must refuse instead.
 
-Both stem from the same root: tracers are not Quantity objects, so machinery
-that walks `domain.quantities` does not see them.
+Tracers are not Quantity objects, so machinery that walks `domain.quantities`
+does not see them:
 
-  reorder()    permutes every quantity but no tracer array, leaving the tracer
-               fields misaligned with the mesh (#277)
   distribute() copies state by walking quantities, so the sub-domains would be
                built with no tracers at all (#278)
 
-Until those are implemented, both raise. These tests exist so the guards cannot
-be removed without replacing them.
+It raises until that is implemented. This test exists so the guard cannot be
+removed without replacing it.
+
+reorder() had the same problem (#277) and now permutes the tracer blocks
+properly -- see test_tracers_reorder.py.
 """
 
 import numpy as num
@@ -34,25 +35,6 @@ def test_reorder_without_tracers_still_works():
     order = num.arange(n - 1, -1, -1)      # reverse
     d.reorder(order)                        # must not raise
     assert len(d) == n
-
-
-def test_reorder_with_tracers_refuses():
-    d = _domain()
-    d.add_tracer('salinity', initial_value=0.02)
-    order = num.arange(len(d) - 1, -1, -1)
-    with pytest.raises(NotImplementedError) as e:
-        d.reorder(order)
-    msg = str(e.value)
-    assert '277' in msg, 'the error should name the issue'
-    assert 'misalign' in msg
-
-
-def test_reorder_error_counts_the_tracers():
-    d = _domain()
-    d.add_tracer('a')
-    d.add_tracer('b')
-    with pytest.raises(NotImplementedError, match='2 tracer'):
-        d.reorder(num.arange(len(d) - 1, -1, -1))
 
 
 def test_distribute_with_tracers_refuses():
