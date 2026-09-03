@@ -1165,6 +1165,7 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
     double * restrict t_eu = D->tracer_explicit_update;
     double * restrict t_ev = D->tracer_edge_values;
     double * restrict t_bv = D->tracer_boundary_values;
+    double * restrict t_bf = D->tracer_boundary_flux;
 #endif
 
     // Reduction variables
@@ -1352,10 +1353,17 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
                 double * restrict t_ev = D->tracer_edge_values;
                 double * restrict t_bv = D->tracer_boundary_values;
                 double * restrict t_eu = D->tracer_explicit_update;
+                double * restrict t_bf = D->tracer_boundary_flux;
 #endif
                 const anuga_int t_bl = D->boundary_length;
                 const double wflux = edgeflux[0];
                 const int    inflow = (wflux > 0.0);
+                /* Conservation accounting: record what crosses a DOMAIN boundary edge,
+                 * on the same terms the water balance uses -- a real boundary, and this
+                 * cell owned rather than a ghost. A ghost cell's copy of the edge
+                 * belongs to its owner, so counting it here would double it. */
+                const int count_bdry = (t_bf != NULL) && is_boundary
+                    && (tri_full_flag == NULL || tri_full_flag[k] == 1);
                 for (anuga_int s = 0; s < n_tracers; s++) {
                     double c_up;
                     if (inflow) {
@@ -1366,6 +1374,10 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
                         c_up = t_ev[s * 3 * n + ki];
                     }
                     t_eu[s * n + k] += wflux * c_up;
+                    if (count_bdry) {
+                        /* Same sign as edgeflux[0]: positive is inflow. */
+                        t_bf[s * n + k] += wflux * c_up;
+                    }
                 }
             }
             // -------------------------------------------------------------
@@ -1416,6 +1428,37 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
     // Store boundary flux sum for this substep
     if (D->boundary_flux_sum != NULL && substep_count < timestep_fluxcalls) {
         D->boundary_flux_sum[substep_count] = boundary_flux_sum_substep;
+    }
+
+    /* Same, per tracer. The main loop accumulated per cell so it needed no
+     * reduction; total it here with ONE SCALAR REDUCTION PER TRACER, which is
+     * a pattern every target supports, instead of the runtime-length array
+     * reduction the main loop would have required. n_tracers is small, and the
+     * whole block is skipped when there are none. The scratch is zeroed in the
+     * same pass, ready for the next substep. */
+    if (n_tracers > 0 && D->tracer_boundary_flux != NULL
+            && D->tracer_boundary_flux_sum != NULL
+            && substep_count < timestep_fluxcalls) {
+#ifdef CPU_ONLY_MODE
+        /* The GPU build has this hoisted to function scope (see the note on
+         * tracer base pointers above); the CPU build loads it in-guard inside
+         * the element loop, so it needs its own here. */
+        double * restrict t_bf = D->tracer_boundary_flux;
+#endif
+        for (anuga_int s = 0; s < n_tracers; s++) {
+            double tsum = 0.0;
+            const anuga_int off = s * n;
+#ifdef CPU_ONLY_MODE
+            #pragma omp parallel for reduction(+:tsum)
+#else
+            #pragma omp target teams distribute parallel for reduction(+:tsum)
+#endif
+            for (anuga_int k = 0; k < n; k++) {
+                tsum += t_bf[off + k];
+                t_bf[off + k] = 0.0;
+            }
+            D->tracer_boundary_flux_sum[substep_count * n_tracers + s] = tsum;
+        }
     }
 
     // Return timestep (only meaningful on first substep)
