@@ -38,6 +38,18 @@ def _shuffled(n, seed=7):
     return rng.permutation(n)
 
 
+def test_reorder_without_tracers_still_works():
+    """The tracer hook must not disturb the ordinary path.
+
+    Kept from test_tracers_unsupported_paths.py, which is retired now that
+    both paths it guarded (#277 here, #278 in distribute) are implemented.
+    """
+    d = _domain()
+    n = len(d)
+    d.reorder(num.arange(n - 1, -1, -1))       # reverse; must not raise
+    assert len(d) == n
+
+
 def test_reorder_with_tracers_no_longer_refuses():
     d = _domain()
     d.add_tracer('salinity', initial_value=0.02)

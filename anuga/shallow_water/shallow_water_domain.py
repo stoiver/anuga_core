@@ -988,7 +988,7 @@ class Domain(Generic_Domain):
 
         # Baseline for check_tracer_conservation, taken AFTER the initial value
         # is seeded so it is the mass actually present at t = 0.
-        self._tracer_initial_mass[index] = self.get_tracer_mass(name)
+        self._tracer_initial_mass[index] = self._local_tracer_mass(index)
 
         return index
 
@@ -1013,7 +1013,10 @@ class Domain(Generic_Domain):
         name : str
             A registered tracer.
         tag : str
-            A boundary tag, as used by `set_boundary`.
+            A boundary tag, as used by `set_boundary`. On a distributed
+            sub-domain a tag this rank owns no part of is silently ignored,
+            so the same call works on every rank; in serial an unknown tag
+            is an error.
         value : float, array-like, or callable
             A scalar applies to every edge carrying `tag`. An array must have
             one value per edge of that tag, ordered as
@@ -1033,6 +1036,13 @@ class Domain(Generic_Domain):
         s = self.get_tracer_index(name)
 
         if tag not in self.tag_boundary_cells:
+            if self._is_subdomain():
+                # After distribute() a tag lives only on the ranks that own a
+                # piece of it, so 'not here' is the normal case, not an error.
+                # Same convention as set_boundary, which ignores a tag the
+                # domain does not use. In SERIAL there is no such excuse, so a
+                # missing tag is still reported -- it can only be a typo.
+                return
             raise ValueError(
                 'no boundary tagged %r on this domain; known tags: %s'
                 % (tag, sorted(self.tag_boundary_cells)))
@@ -1078,9 +1088,43 @@ class Domain(Generic_Domain):
         """Return the boundary concentrations of `name` on `tag`."""
         s = self.get_tracer_index(name)
         if tag not in self.tag_boundary_cells:
+            if self._is_subdomain():
+                # This rank owns none of that boundary; it has no values for
+                # it, which is not the same thing as the tag being wrong.
+                return num.zeros(0, dtype=num.float64)
             raise ValueError('no boundary tagged %r on this domain' % tag)
         idx = num.asarray(self.tag_boundary_cells[tag], dtype=num.intp)
         return self.tracer_boundary_values[s, idx]
+
+    def _is_subdomain(self):
+        """True if this domain is one rank's piece of a distributed domain."""
+        return getattr(self, 'numproc', 1) > 1
+
+    def _local_tracer_mass(self, s):
+        """This rank's share of tracer `s`: owned cells only, NO reduction.
+
+        Deliberately collective-free. The conservation baseline is captured
+        during setup, inside add_tracer and set_tracer -- and on a parallel run
+        that happens on rank 0 alone, before distribute() has handed the domain
+        out. A collective there would block forever waiting for ranks that are
+        not in that code at all.
+
+        Ghost cells are excluded, so summing this across ranks gives the
+        whole-domain figure exactly once.
+        """
+        m = self.tracer_conserved_values[s]           # m = h*c per cell
+        areas = self.areas
+        if self.tri_full_flag is not None:
+            return float(num.sum(m * areas * (self.tri_full_flag == 1)))
+        return float(num.sum(m * areas))
+
+    def _reduce_over_ranks(self, value):
+        """Sum a per-rank scalar over the communicator. Collective."""
+        from anuga import numprocs
+        if numprocs == 1:
+            return value
+        from mpi4py import MPI
+        return MPI.COMM_WORLD.allreduce(value, op=MPI.SUM)
 
     def get_tracer_mass(self, name):
         """Total mass of tracer `name` in the domain: the integral of m = h*c.
@@ -1088,20 +1132,12 @@ class Domain(Generic_Domain):
         The tracer analogue of `get_water_volume`. Summed over owned cells only
         and reduced across ranks, so it is the whole-domain figure in parallel
         as well as in serial.
+
+        COLLECTIVE in parallel, like `get_water_volume`: every rank must call
+        it, or the ones that do will block.
         """
         s = self.get_tracer_index(name)
-        m = self.tracer_conserved_values[s]           # m = h*c per cell
-        areas = self.areas
-        if self.tri_full_flag is not None:
-            mass = float(num.sum(m * areas * (self.tri_full_flag == 1)))
-        else:
-            mass = float(num.sum(m * areas))
-
-        from anuga import numprocs
-        if numprocs == 1:
-            return mass
-        from mpi4py import MPI
-        return MPI.COMM_WORLD.allreduce(mass, op=MPI.SUM)
+        return self._reduce_over_ranks(self._local_tracer_mass(s))
 
     def get_tracer_boundary_flux_integral(self, name):
         """Net tracer mass that has crossed the domain boundary, since t=0.
@@ -1119,9 +1155,13 @@ class Domain(Generic_Domain):
         each substep; `tracer_flux_integral_operator` applies the timestepping
         method's own weights and zeroes it, exactly as
         `boundary_flux_integral_operator` does for water.
+
+        Reduced across ranks, matching `get_boundary_flux_integral` for water:
+        each rank counts only the boundary edges of the cells it owns, so the
+        per-rank integrals sum to the whole-domain figure. COLLECTIVE.
         """
         s = self.get_tracer_index(name)
-        return float(self._tracer_flux_integral[s])
+        return self._reduce_over_ranks(float(self._tracer_flux_integral[s]))
 
     def check_tracer_conservation(self, name):
         """Return (change_in_mass, boundary_flux_integral, discrepancy).
@@ -1133,9 +1173,16 @@ class Domain(Generic_Domain):
         Returns absolute quantities, not a relative error: for a tracer that is
         zero almost everywhere a relative measure is meaningless, and the caller
         knows the scale that matters.
+
+        COLLECTIVE in parallel: every rank must call it.
         """
         s = self.get_tracer_index(name)
-        change = self.get_tracer_mass(name) - self._tracer_initial_mass[s]
+        # The baseline is a per-rank number (see _local_tracer_mass), so the
+        # difference is formed locally and reduced once. Reducing the two
+        # separately would be wrong after a distribute(), where each rank's
+        # baseline covers only its own cells.
+        change = self._reduce_over_ranks(
+            self._local_tracer_mass(s) - self._tracer_initial_mass[s])
         flux = self.get_tracer_boundary_flux_integral(name)
         return change, flux, change - flux
 
@@ -1284,7 +1331,7 @@ class Domain(Generic_Domain):
         if (self._tracer_initial_mass is not None
                 and s < len(self._tracer_initial_mass)
                 and self.relative_time == self.evolve_starttime):
-            self._tracer_initial_mass[s] = self.get_tracer_mass(name)
+            self._tracer_initial_mass[s] = self._local_tracer_mass(s)
 
     def update_domain_c_struct(self):
         """Update the C domain structure from the Python Domain object.
