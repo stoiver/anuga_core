@@ -24,23 +24,45 @@ LEN = 500.0
 _KERNEL_SRC = os.path.join(os.path.dirname(anuga.__file__),
                            'shallow_water', 'gpu', 'core_kernels.c')
 # Only present in a source checkout; a wheel install has no .c files.
-pytestmark = pytest.mark.skipif(
-    not os.path.exists(_KERNEL_SRC),
-    reason='kernel source not available (needed to read the fitted coefficients)')
+#
+# This has to abort the module at COLLECTION time, not mark its tests skipped:
+# the coefficients are read at import (below), so a pytestmark skipif still
+# lets that import run and the whole session dies on a collection error --
+# every test in the run, not just this file. An editable install never shows
+# it, because there the .c file is right there in the source tree.
+if not os.path.exists(_KERNEL_SRC):
+    pytest.skip('kernel source not available (needed to read the fitted '
+                'coefficients)', allow_module_level=True)
 
 
 def _fit_from_kernel():
-    src = open(_KERNEL_SRC).read()
-    rows = re.findall(r'\{([-+0-9.e]+), ([-+0-9.e]+), ([-+0-9.e]+), ([-+0-9.e]+)\},',
-                      src)
-    coeffs = np.array([[float(v) for v in r] for r in rows[:7]])
-    limits = {k: float(re.search(r'#define ANUGA_ROUSE_%s\s+([0-9.e+-]+)' % k,
-                                 src).group(1))
-              for k in ('Z_LO', 'Z_HI', 'AH_LO', 'AH_HI')}
+    """Read the fit's coefficients out of the kernel source.
+
+    Returns None if the source is there but does not contain the fit -- a
+    checkout whose kernel predates it, say. Anything raising here would raise
+    during COLLECTION and take the whole session down with it, so the caller
+    turns a None into a module-level skip instead.
+    """
+    try:
+        src = open(_KERNEL_SRC).read()
+        rows = re.findall(r'\{([-+0-9.e]+), ([-+0-9.e]+), ([-+0-9.e]+), ([-+0-9.e]+)\},',
+                          src)
+        coeffs = np.array([[float(v) for v in r] for r in rows[:7]])
+        limits = {k: float(re.search(r'#define ANUGA_ROUSE_%s\s+([0-9.e+-]+)' % k,
+                                     src).group(1))
+                  for k in ('Z_LO', 'Z_HI', 'AH_LO', 'AH_HI')}
+    except (OSError, AttributeError, ValueError, IndexError):
+        return None
+    if coeffs.shape != (7, 4):
+        return None
     return coeffs, limits
 
 
-COEFFS, LIMITS = _fit_from_kernel()
+_FIT = _fit_from_kernel()
+if _FIT is None:
+    pytest.skip('the Rouse fit could not be read from the kernel source',
+                allow_module_level=True)
+COEFFS, LIMITS = _FIT
 
 
 def dstar_fit(Z, a_h):
