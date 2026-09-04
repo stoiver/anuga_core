@@ -9,6 +9,12 @@ than read domain.tracer_centroid_values. c is only recomputed during
 extrapolation, at the START of a step, so by the time a fractional-step
 operator runs it is one step behind the conserved m that was just written.
 max_stage has no such problem, stage being conserved itself.
+
+These are white-box tests: they read op.max_tracer, which is HOST state. In
+mode 2 the maxima live on the device and that array is only filled when the
+operator stores to the sww, so every domain here pins itself to legacy -- the
+pattern CLAUDE.md describes for tests that inspect internal update arrays. The
+mode-2 path is covered in test_tracers_gpu.py, which syncs first.
 """
 
 import numpy as num
@@ -36,6 +42,7 @@ def _domain(n=6):
     d.set_tracer('salinity', num.where(x < 20.0, 1.0, 0.0))
     d.set_tracer_boundary('salinity', 'left', 0.0)   # clean water follows
     d.store = False
+    d.set_compute_mode('legacy')     # reads host-side operator state
     return d
 
 
@@ -48,6 +55,7 @@ def test_no_tracers_means_no_tracer_maxima():
     d = anuga.rectangular_cross_domain(4, 4)
     b = anuga.Reflective_boundary(d)
     d.set_boundary({'left': b, 'right': b, 'top': b, 'bottom': b})
+    d.set_compute_mode('legacy')
     op = Collect_max_quantities_operator(d)
     assert op.max_tracer.shape == (0, len(d))
 
@@ -113,6 +121,7 @@ def test_a_dry_cell_carries_no_concentration():
     d.set_boundary({'left': b, 'right': b, 'top': b, 'bottom': b})
     d.add_tracer('salinity', initial_value=1.0)
     d.store = False
+    d.set_compute_mode('legacy')
     op = Collect_max_quantities_operator(d)
     _run(d, finaltime=1.0)
     assert num.allclose(op.max_tracer[0], 0.0), \
