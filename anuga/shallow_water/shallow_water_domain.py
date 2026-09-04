@@ -6858,7 +6858,15 @@ class Domain(Generic_Domain):
         # Push the host-side work of any CPU-only operator back to the device. Mode-2
         # correctness depends on this: without it a CPU-only operator (wind stress,
         # say) writes only the host arrays and the device never sees it.
-        if gpu_mode and needs_cpu_sync:
+        # Re-check the interface: gpu_mode was decided BEFORE the operators ran,
+        # and an operator is allowed to invalidate it mid-loop. set_tracer_source
+        # does exactly that -- it rebinds the source array, so the C struct and
+        # the device mapping have to be rebuilt -- and an operator that calls it
+        # every step (a manufactured source, say) leaves nothing here to sync to.
+        # Skipping is correct rather than merely safe: a rebuilt interface is
+        # populated from the host arrays, so the host-side writes are picked up
+        # anyway.
+        if gpu_mode and needs_cpu_sync and self.gpu_interface is not None:
             self.gpu_interface.sync_to_device()
 
     def _warn_if_culverts_interleaved(self):

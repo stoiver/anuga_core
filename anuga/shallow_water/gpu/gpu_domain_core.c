@@ -794,6 +794,18 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
             tr_eu[0:ns*n], tr_qv[0:ns*n], tr_bk[0:ns*n], \
             tr_bf[0:ns*n])
 
+        // The external source [G-3] is OPTIONAL -- the array is allocated only
+        // when set_tracer_source is first called -- so it is mapped on its own
+        // rather than with the block above, which is always present. It is read
+        // by the source kernel, so leaving it unmapped is an unmapped host
+        // address on the device: the source then contributes exactly nothing
+        // and the answer is silently short of it. (set_tracer_source discards
+        // the interface when it allocates, so the rebuild passes through here.)
+        if (GD->D.tracer_external_source != NULL) {
+            double *tr_es = GD->D.tracer_external_source;
+            #pragma omp target enter data map(to: tr_es[0:ns*n])
+        }
+
         // Boundary values are sized by boundary_length, which is zero on a
         // domain with no boundary edges -- mapping a zero-length array is not
         // meaningful, so follow the same nb > 0 guard the other bv arrays use.
@@ -1247,6 +1259,10 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
             tr_cv[0:ns*n], tr_ev[0:ns*3*n], \
             tr_eu[0:ns*n], tr_qv[0:ns*n], tr_bk[0:ns*n], \
             tr_bf[0:ns*n])
+        if (GD->D.tracer_external_source != NULL) {
+            double *tr_es = GD->D.tracer_external_source;
+            #pragma omp target exit data map(delete: tr_es[0:ns*n])
+        }
         if (nb > 0) {
             double *tr_bv = GD->D.tracer_boundary_values;
             #pragma omp target exit data map(delete: tr_bv[0:ns*nb])
