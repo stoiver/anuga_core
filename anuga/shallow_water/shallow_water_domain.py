@@ -903,6 +903,20 @@ class Domain(Generic_Domain):
             raise ValueError(
                 'a tracer named %r is already registered (index %d)'
                 % (name, self._tracer_names.index(name)))
+        # A tracer is written to the sww as <name>_c, which is exactly the
+        # variable a quantity's centroid values go to. A tracer named 'stage'
+        # would therefore OVERWRITE the stage in the output -- no error, and a
+        # file whose stage is silently something else. Reserve the names.
+        if name in self.quantities:
+            raise ValueError(
+                'a tracer cannot be named %r: that is a quantity on this '
+                'domain, and both are written to the sww as %s_c, so the '
+                'tracer would overwrite it' % (name, name))
+        if name.startswith('max_'):
+            raise ValueError(
+                "a tracer cannot be named %r: names beginning 'max_' are "
+                'reserved for the running maxima that '
+                'Collect_max_quantities_operator writes' % name)
 
         if beta is not None:
             beta = float(beta)

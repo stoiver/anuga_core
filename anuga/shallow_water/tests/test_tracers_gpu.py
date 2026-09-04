@@ -270,3 +270,70 @@ def test_a_reordered_domain_gives_the_same_answer_on_the_device():
     assert np.ptp(a) > 1e-6, 'field too flat to discriminate'
     assert np.abs(a - b).max() < 1e-10, \
         'reordering changed the answer on the device'
+
+
+def _build_for_max(mode, seed=5):
+    """A plume that washes out, so the running max differs from the final field."""
+    d = rectangular_cross_domain(NXY, NXY, len1=LEN, len2=LEN)
+    d.set_flow_algorithm('DE0')
+    d.set_low_froude(0)
+    d.store = False
+    d.set_quantity('elevation', 0.0)
+    d.set_quantity('stage', DRAIN_DEPTH)
+    d.set_quantity('xmomentum', DRAIN_DEPTH * DRAIN_SPEED)
+    Br = Reflective_boundary(d)
+    Bt = anuga.Transmissive_boundary(d)
+    d.set_boundary({'left': anuga.Dirichlet_boundary(
+                        [DRAIN_DEPTH, DRAIN_DEPTH * DRAIN_SPEED, 0.0]),
+                    'top': Br, 'bottom': Br, 'right': Bt})
+    d.add_tracer('c', beta=1.0)
+    x = d.centroid_coordinates[:, 0]
+    d.set_tracer('c', np.where(x < LEN / 4, 1.0, 0.0))
+    d.set_tracer_boundary('c', 'left', 0.0)
+    from anuga.operators.collect_max_quantities_operator import (
+        Collect_max_quantities_operator)
+    op = Collect_max_quantities_operator(d)
+    d.set_multiprocessor_mode(mode)
+    return d, op
+
+
+def test_the_tracer_maxima_agree_between_the_modes():
+    """The max kernel derives c = m/h on the device, as the host path does.
+
+    Reading tracer_centroid_values there would be doubly wrong: stale by a
+    step, and -- since D is not mapped inside an omp target region -- a host
+    address on the device.
+    """
+    if not gpu_available():
+        pytest.skip('GPU OpenMP interface not available: %s' % _gpu_error)
+
+    cpu, cpu_op = _build_for_max(1)
+    cpu.evolve_to_end(finaltime=DRAIN_FINALTIME)
+
+    gpu, gpu_op = _build_for_max(2)
+    if getattr(gpu, 'multiprocessor_mode', None) != 2:
+        pytest.fail('mode 2 did not engage: multiprocessor_mode=%r'
+                    % getattr(gpu, 'multiprocessor_mode', None))
+    from anuga.shallow_water.sw_domain_gpu_ext import (sync_to_device,
+                                                       get_max_tracers_gpu)
+    sync_to_device(gpu.gpu_interface.gpu_dom)
+    gpu.evolve_to_end(finaltime=DRAIN_FINALTIME)
+    get_max_tracers_gpu(gpu.gpu_interface.gpu_dom, gpu_op.max_tracer)
+
+    a, b = cpu_op.max_tracer[0], gpu_op.max_tracer[0]
+    assert np.ptp(a) > 1e-6, 'the maximum field is flat; this proves nothing'
+    assert np.abs(a - b).max() < 1e-10, \
+        'the modes disagree on the tracer maximum by %g' % np.abs(a - b).max()
+
+
+def test_the_device_maximum_is_never_below_the_final_field():
+    if not gpu_available():
+        pytest.skip('GPU OpenMP interface not available: %s' % _gpu_error)
+
+    gpu, op = _build_for_max(2)
+    from anuga.shallow_water.sw_domain_gpu_ext import (sync_to_device,
+                                                       get_max_tracers_gpu)
+    sync_to_device(gpu.gpu_interface.gpu_dom)
+    gpu.evolve_to_end(finaltime=DRAIN_FINALTIME)
+    get_max_tracers_gpu(gpu.gpu_interface.gpu_dom, op.max_tracer)
+    assert np.all(op.max_tracer[0] >= gpu.get_tracer('c') - 1e-12)

@@ -13,6 +13,7 @@ python_sources = [
 'run_create_culvert_bridge_operator.py',
 'test_numerical_tools.py',
 'test_plot_utils.py',
+'test_plot_utils_tracers.py',
 'test_quantity_setting_functions.py',
 'test_sparse.py',
 'test_spatialInputUtil.py',

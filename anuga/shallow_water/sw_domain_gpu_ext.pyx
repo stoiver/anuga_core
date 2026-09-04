@@ -156,6 +156,8 @@ cdef extern from "gpu_domain.h" nogil:
         double *max_depth
         double *max_speed
         double *max_uh
+        double *max_tracer
+        int n_tracers
         int initialized
         int mapped
 
@@ -385,6 +387,7 @@ cdef extern from "gpu_domain.h" nogil:
     void gpu_max_quantities_get(gpu_domain *GD,
                                 double *out_stage, double *out_depth,
                                 double *out_speed, double *out_uh)
+    void gpu_max_tracers_get(gpu_domain *GD, double *out_tracer)
     void gpu_max_quantities_finalize(gpu_domain *GD)
 
     # FLOP counters (Gordon Bell performance profiling)
@@ -2309,6 +2312,21 @@ def get_max_quantities_gpu(GPUDomain gpu_dom,
     gpu_max_quantities_get(&gpu_dom.GD,
                            &max_stage[0], &max_depth[0],
                            &max_speed[0], &max_uh[0])
+
+
+def get_max_tracers_gpu(GPUDomain gpu_dom,
+                        np.ndarray[double, ndim=2, mode="c"] max_tracer):
+    """
+    Sync the per-tracer running maxima from device to host.
+
+    max_tracer must be (n_tracers, number_of_elements) and C-contiguous --
+    the same layout the tracer arrays use, which is what the kernel writes.
+    Like get_max_quantities_gpu this is a device-to-host transfer; call it
+    only at yield steps or on export.
+    """
+    if max_tracer.shape[0] == 0:
+        return
+    gpu_max_tracers_get(&gpu_dom.GD, &max_tracer[0, 0])
 
 
 def finalize_max_quantities_gpu(GPUDomain gpu_dom):

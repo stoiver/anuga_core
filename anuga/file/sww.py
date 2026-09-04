@@ -180,7 +180,8 @@ class SWW_file(Data_format):
             self.writer = Write_sww(static_quantities,
                                     dynamic_quantities,
                                     static_c_quantities,
-                                    dynamic_c_quantities)
+                                    dynamic_c_quantities,
+                                    tracer_names=self._tracer_names)
 
             self.writer.store_header(fid,
                                      domain.starttime,
@@ -581,7 +582,8 @@ class Write_sww(Write_sts):
                  static_quantities,
                  dynamic_quantities,
                  static_c_quantities=None,
-                 dynamic_c_quantities=None):
+                 dynamic_c_quantities=None,
+                 tracer_names=None):
         """Initialise Write_sww with two (or 4) list af quantity names:
 
         static_quantities (e.g. elevation or friction):
@@ -598,11 +600,21 @@ class Write_sww(Write_sts):
             Stored every timestep in a 2D array with
             dimensions number_of_triangles X number_of_timesteps
 
+        tracer_names (e.g. ['salinity', 'sand']):
+            Which of the dynamic_c_quantities are tracers. Recorded on the
+            file as a global attribute so a reader can tell `salinity_c`
+            from `stage_c` -- both are <name>_c and nothing else
+            distinguishes them. Written even when empty, so an old file
+            (no attribute at all) is distinguishable from a new one that
+            simply has no tracers.
+
         """
         self.static_quantities = static_quantities
         self.dynamic_quantities = dynamic_quantities
         self.static_c_quantities = static_c_quantities if static_c_quantities is not None else []
         self.dynamic_c_quantities = dynamic_c_quantities if dynamic_c_quantities is not None else []
+
+        self.tracer_names = list(tracer_names) if tracer_names else []
 
         self.store_centroids = False
         if static_c_quantities or dynamic_c_quantities:
@@ -637,6 +649,10 @@ class Write_sww(Write_sts):
 
         outfile.institution = institution
         outfile.description = description
+        # Which dynamic centroid variables are tracers (space separated, and
+        # '' when there are none). Lets a reader pick the tracers out without
+        # having to keep a list of every quantity name that is not one.
+        outfile.tracer_names = ' '.join(self.tracer_names)
 
         # For sww compatibility
         if smoothing is True:

@@ -2,6 +2,7 @@
 A module to allow interactive plotting in a Jupyter notebook of quantities and mesh
 associated with an ANUGA domain and SWW file.
 """
+import functools
 import warnings
 import numpy as np
 import os
@@ -846,6 +847,31 @@ class SWW_plotter:
 
         self.time = p.variables['time'][:]
 
+        # Tracers -- and suspended sediment classes, which are tracers -- are
+        # stored one dynamic centroid variable each. The file names them in a
+        # tracer_names attribute, since <name>_c is indistinguishable from
+        # stage_c otherwise.
+        from anuga.utilities.plot_utils import _tracer_names_from
+        self.tracers = {}
+        self.max_tracers = {}
+        self._tracer_frame_count = {}
+        for _tname in _tracer_names_from(p):
+            if _tname + '_c' not in p.variables:
+                continue
+            self.tracers[_tname] = p.variables[_tname + '_c'][:]
+            self._tracer_frame_count[_tname] = 0
+            # Named attribute and bound save method per tracer, so a caller
+            # that drives this class by attribute name -- anuga_sww_gui does
+            # -- reaches a tracer the same way it reaches stage.
+            setattr(self, 'tracer_' + _tname, self.tracers[_tname])
+            setattr(self, 'save_tracer_%s_frame' % _tname,
+                    functools.partial(self._save_tracer_frame, _tname))
+            if 'max_' + _tname + '_c' in p.variables:
+                self.max_tracers[_tname] = p.variables['max_' + _tname + '_c'][:]
+                setattr(self, 'max_tracer_' + _tname, self.max_tracers[_tname])
+                setattr(self, 'save_max_tracer_%s_frame' % _tname,
+                        functools.partial(self._save_max_tracer_frame, _tname))
+
         # Load precomputed max quantities if stored by Collect_max_quantities_operator
         pvars = p.variables
         self._max_depth_c      = pvars['max_depth_c'][:] if 'max_depth_c' in pvars else None
@@ -891,6 +917,69 @@ class SWW_plotter:
     # Frame rendering helpers (figure reuse)
     #------------------------------------------
 
+
+    #------------------------------------------
+    # Tracer procedures
+    #
+    # One pair of methods for every tracer rather than a hand-written pair
+    # per name: a tracer is user-defined, so there is no fixed list to write
+    # out. __init__ binds `save_tracer_<name>_frame` for each.
+    #------------------------------------------
+    def _tracer_frame(self, tracer, frame, figsize, dpi, vmin, vmax,
+                      cmap='viridis', basemap=False, alpha=1.0,
+                      basemap_provider=BASEMAP_DEFAULT,
+                      xlim=None, ylim=None, smooth=False,
+                      show_elev=False, elev_levels=10, show_mesh=False):
+        return self._animated_frame(
+            frame, 'tracer_' + tracer, self.tracers[tracer][frame, :],
+            tracer, figsize, dpi, vmin, vmax, cmap, basemap, alpha,
+            basemap_provider, xlim=xlim, ylim=ylim, smooth=smooth,
+            show_elev=show_elev, elev_levels=elev_levels, show_mesh=show_mesh)
+
+    def _save_tracer_frame(self, tracer, frame=-1, figsize=(10, 6), dpi=160,
+                           vmin=0.0, vmax=1.0, cmap='viridis', basemap=False,
+                           alpha=1.0, basemap_provider=BASEMAP_DEFAULT,
+                           xlim=None, ylim=None, smooth=False,
+                           show_elev=False, elev_levels=10, show_mesh=False):
+        frame_num = self._tracer_frame_count[tracer]
+        fig, ax = self._tracer_frame(tracer, frame, figsize, dpi, vmin, vmax,
+                                     cmap, basemap, alpha, basemap_provider,
+                                     xlim=xlim, ylim=ylim, smooth=smooth,
+                                     show_elev=show_elev,
+                                     elev_levels=elev_levels,
+                                     show_mesh=show_mesh)
+        fname = '%s_tracer_%s_%010d.png' % (self.name, tracer, frame_num)
+        if self.plot_dir is None:
+            fig.savefig(fname)
+        else:
+            fig.savefig(os.path.join(self.plot_dir, fname))
+        plt.close(fig)
+        self._tracer_frame_count[tracer] += 1
+
+    def _save_max_tracer_frame(self, tracer, frame=None, figsize=(10, 6),
+                               dpi=160, vmin=0.0, vmax=1.0, cmap='viridis',
+                               basemap=False, alpha=1.0,
+                               basemap_provider=BASEMAP_DEFAULT,
+                               xlim=None, ylim=None, smooth=False,
+                               show_elev=False, elev_levels=10,
+                               show_mesh=False):
+        """The running maximum, if the run stored one. Time-independent, so
+        `frame` is accepted and ignored, as for the other max quantities."""
+        data = self.max_tracers[tracer]
+        # Stored flag-4, i.e. overwritten each yield step: the last slice is
+        # the maximum over the whole run.
+        values = data[-1, :] if data.ndim == 2 else data
+        fig, ax = self._animated_frame(
+            -1, 'max_tracer_' + tracer, values, 'Max ' + tracer,
+            figsize, dpi, vmin, vmax, cmap, basemap, alpha, basemap_provider,
+            xlim=xlim, ylim=ylim, smooth=smooth, show_elev=show_elev,
+            elev_levels=elev_levels, show_mesh=show_mesh)
+        fname = self.name + '_max_tracer_%s_0000000000.png' % tracer
+        if self.plot_dir is None:
+            fig.savefig(fname)
+        else:
+            fig.savefig(os.path.join(self.plot_dir, fname))
+        plt.close(fig)
 
     def _animated_frame(self, frame, qty_name, qty_data, qty_label,
                         figsize, dpi, vmin, vmax, cmap, basemap, alpha,
