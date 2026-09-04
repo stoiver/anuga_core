@@ -674,6 +674,9 @@ class Domain(Generic_Domain):
         self.number_of_tracers = 0
         self.beta_tracer = 1.0
         self._tracer_names = []
+        # (tracer index, boundary tag) -> callable, for time-varying
+        # inflow concentrations. See set_tracer_boundary().
+        self._tracer_boundary_functions = {}
         self.tracer_centroid_values = None      # c            (ns, N)
         self.tracer_edge_values = None          # c at edges   (ns, 3N)
         self.tracer_boundary_values = None      # c at bdry    (ns, boundary_length)
@@ -763,6 +766,17 @@ class Domain(Generic_Domain):
         self.sediment_manning_ll = 0.065
         self.sediment_wilson_bed = 0
         self.sediment_wilson_D = 1.0e-3
+        self.tracer_boundary_flux = None        # d(mass)/dt across the
+                                                # domain boundary, per cell,
+                                                # accumulated by the kernel (ns, N)
+        # Per-substep totals of the above, (max_time_substeps * ns), mirroring
+        # boundary_flux_sum for water; and the running time integral, which
+        # tracer_flux_integral_operator advances with the timestepping method's
+        # own weights. _tracer_initial_mass is the baseline a conservation
+        # check is measured against.
+        self.tracer_boundary_flux_sum = None
+        self._tracer_flux_integral = None
+        self._tracer_initial_mass = None
 
         #-------------------------------
         # If environment variable OMP_NUM_THREADS is not set,
@@ -910,9 +924,28 @@ class Domain(Generic_Domain):
     #------------------------------------------------
     # Generic passive tracers
     #------------------------------------------------
-    _TRACER_ARRAYS = ('tracer_centroid_values', 'tracer_edge_values',
-                      'tracer_boundary_values', 'tracer_explicit_update',
-                      'tracer_conserved_values', 'tracer_backup_values')
+    # Every tracer block, and how it is INDEXED -- which is what fixes both its
+    # shape and the way reorder() has to permute it:
+    #
+    #   'cell'      one value per triangle       -> (ns, N)
+    #   'edge'      three values per triangle    -> (ns, 3N)
+    #   'boundary'  one value per boundary edge  -> (ns, boundary_length)
+    #
+    # Single source of truth on purpose: add_tracer sizes the arrays from this
+    # and _reorder_tracer_arrays permutes from it, so a new block cannot be
+    # added without declaring how it is indexed. Tracers are deliberately not
+    # Quantity objects (#276), which means anything walking domain.quantities
+    # misses them -- #277 was exactly that omission, in reorder().
+    _TRACER_ARRAY_KINDS = {
+        'tracer_centroid_values':  'cell',
+        'tracer_edge_values':      'edge',
+        'tracer_boundary_values':  'boundary',
+        'tracer_explicit_update':  'cell',
+        'tracer_conserved_values': 'cell',
+        'tracer_backup_values':    'cell',
+        'tracer_boundary_flux':    'cell',
+    }
+    _TRACER_ARRAYS = tuple(_TRACER_ARRAY_KINDS)
 
     def add_tracer(self, name, beta=None, initial_value=0.0):
         """Register a passive tracer named `name` and return its index.
@@ -943,7 +976,7 @@ class Domain(Generic_Domain):
 
         Notes
         -----
-        Registering a tracer **reallocates** all six tracer arrays, so any
+        Registering a tracer **reallocates** every tracer array, so any
         reference held to one of them beforehand becomes stale.  Add every
         tracer before seeding values, or re-fetch via `get_tracer`.
         """
@@ -969,18 +1002,29 @@ class Domain(Generic_Domain):
 
         N = self.number_of_elements
         ns = self.number_of_tracers
-        shapes = {
-            'tracer_centroid_values':  (ns + 1, N),
-            'tracer_edge_values':      (ns + 1, 3 * N),
-            'tracer_boundary_values':  (ns + 1, self.boundary_length),
-            'tracer_explicit_update':  (ns + 1, N),
-            'tracer_conserved_values': (ns + 1, N),
-            'tracer_backup_values':    (ns + 1, N),
-        }
+        widths = {'cell': N, 'edge': 3 * N, 'boundary': self.boundary_length}
+        shapes = {attr: (ns + 1, widths[kind])
+                  for attr, kind in self._TRACER_ARRAY_KINDS.items()}
 
         # Grow each array by one row, preserving the tracers already there.
         # The kernels index these as centroid[s*N + k] etc., so they must stay
         # C-contiguous float64 -- num.zeros gives both.
+        # The per-substep totals and the running integral are sized by tracer
+        # count, not by cells, so they are rebuilt here rather than in the loop
+        # below. The integral and the baseline mass are PRESERVED across a
+        # later add_tracer: a tracer registered mid-setup must not silently
+        # reset another tracer's accounting.
+        max_substeps = len(self.boundary_flux_sum)
+        new_sum = num.zeros((ns + 1) * max_substeps, dtype=num.float64)
+        new_int = num.zeros(ns + 1, dtype=num.float64)
+        new_m0 = num.zeros(ns + 1, dtype=num.float64)
+        if ns > 0 and self._tracer_flux_integral is not None:
+            new_int[:ns] = self._tracer_flux_integral
+            new_m0[:ns] = self._tracer_initial_mass
+        self.tracer_boundary_flux_sum = new_sum
+        self._tracer_flux_integral = new_int
+        self._tracer_initial_mass = new_m0
+
         for attr in self._TRACER_ARRAYS:
             new = num.zeros(shapes[attr], dtype=num.float64)
             if ns > 0:
@@ -1014,6 +1058,20 @@ class Domain(Generic_Domain):
 
         if initial_value is not None:
             self.set_tracer(name, initial_value)
+
+        # The operator that turns the kernel's per-substep boundary totals into
+        # a time integral. Registered here rather than left to the user: without
+        # it get_tracer_boundary_flux_integral() would silently read zero, which
+        # is exactly the failure a conservation check exists to catch.
+        from anuga.operators.tracer_flux_integral_operator import (
+            tracer_flux_integral_operator)
+        if not any(isinstance(op, tracer_flux_integral_operator)
+                   for op in self.fractional_step_operators):
+            tracer_flux_integral_operator(self)
+
+        # Baseline for check_tracer_conservation, taken AFTER the initial value
+        # is seeded so it is the mass actually present at t = 0.
+        self._tracer_initial_mass[index] = self._local_tracer_mass(index)
 
         return index
 
@@ -1947,6 +2005,284 @@ class Domain(Generic_Domain):
     def get_sediment_names(self):
         """Return the registered sediment class names, in index order."""
         return list(self._sediment_names)
+    def set_tracer_boundary(self, name, tag, value):
+        """Concentration that tracer `name` brings in across boundary `tag`.
+
+        Only used where water FLOWS IN. The flux kernel picks the upwind value
+        edge by edge from the sign of the water flux:
+
+            inflow  (n.U into the domain)   ->  this boundary value
+            outflow (n.U out of the domain) ->  the interior edge value
+
+        so there is nothing to set for an outflow, and nothing that can be set:
+        prescribing a concentration on an outflow would over-determine the
+        advection, and the kernel would ignore it anyway. A boundary that only
+        ever lets water out therefore needs no call at all, and one that
+        alternates gets Dirichlet-on-inflow / transmissive-on-outflow
+        automatically -- the characteristic condition, without a switch.
+
+        Parameters
+        ----------
+        name : str
+            A registered tracer.
+        tag : str
+            A boundary tag, as used by `set_boundary`. On a distributed
+            sub-domain a tag this rank owns no part of is silently ignored,
+            so the same call works on every rank; in serial an unknown tag
+            is an error.
+        value : float, array-like, or callable
+            A scalar applies to every edge carrying `tag`. An array must have
+            one value per edge of that tag, ordered as
+            `domain.tag_boundary_cells[tag]`. A callable is evaluated as
+            `value(t)` at each timestep and must return a scalar or such an
+            array, for a time-varying inflow.
+
+        Notes
+        -----
+        UNSET BOUNDARIES BRING c = 0. The array is zero-filled at
+        `add_tracer`, so with no call here an inflow carries clean water. That
+        is a modelling assumption, not a neutral default: for salinity or
+        suspended sediment it is usually wrong, and it is invisible in the
+        output. It is preserved because changing it would silently alter
+        existing results, but set it explicitly wherever water enters.
+        """
+        s = self.get_tracer_index(name)
+
+        if tag not in self.tag_boundary_cells:
+            if self._is_subdomain():
+                # After distribute() a tag lives only on the ranks that own a
+                # piece of it, so 'not here' is the normal case, not an error.
+                # Same convention as set_boundary, which ignores a tag the
+                # domain does not use. In SERIAL there is no such excuse, so a
+                # missing tag is still reported -- it can only be a typo.
+                return
+            raise ValueError(
+                'no boundary tagged %r on this domain; known tags: %s'
+                % (tag, sorted(self.tag_boundary_cells)))
+
+        idx = num.asarray(self.tag_boundary_cells[tag], dtype=num.intp)
+
+        if callable(value):
+            # Re-evaluated each timestep by update_tracer_boundary_values().
+            self._tracer_boundary_functions[(s, tag)] = value
+            self._apply_tracer_boundary(s, idx, value(self.get_time()), tag)
+        else:
+            self._tracer_boundary_functions.pop((s, tag), None)
+            self._apply_tracer_boundary(s, idx, value, tag)
+
+    def _apply_tracer_boundary(self, s, idx, value, tag):
+        """Write one tracer's boundary values for the edges of one tag."""
+        v = num.asarray(value, dtype=num.float64)
+        if v.ndim == 0:
+            self.tracer_boundary_values[s, idx] = float(v)
+        elif v.shape == idx.shape:
+            self.tracer_boundary_values[s, idx] = v
+        else:
+            raise ValueError(
+                'tracer boundary %r on tag %r: expected a scalar or %d values '
+                '(one per edge of that tag), got shape %r'
+                % (self._tracer_names[s], tag, idx.size, v.shape))
+
+    def update_tracer_boundary_values(self):
+        """Re-evaluate any callable tracer boundary values for this time.
+
+        Called from the evolve loop alongside update_boundary(). A no-op unless
+        set_tracer_boundary() was given a callable, so a domain with constant
+        boundary concentrations pays nothing.
+        """
+        if not self._tracer_boundary_functions:
+            return
+        t = self.get_time()
+        for (s, tag), f in self._tracer_boundary_functions.items():
+            idx = num.asarray(self.tag_boundary_cells[tag], dtype=num.intp)
+            self._apply_tracer_boundary(s, idx, f(t), tag)
+
+    def get_tracer_boundary(self, name, tag):
+        """Return the boundary concentrations of `name` on `tag`."""
+        s = self.get_tracer_index(name)
+        if tag not in self.tag_boundary_cells:
+            if self._is_subdomain():
+                # This rank owns none of that boundary; it has no values for
+                # it, which is not the same thing as the tag being wrong.
+                return num.zeros(0, dtype=num.float64)
+            raise ValueError('no boundary tagged %r on this domain' % tag)
+        idx = num.asarray(self.tag_boundary_cells[tag], dtype=num.intp)
+        return self.tracer_boundary_values[s, idx]
+
+    def _is_subdomain(self):
+        """True if this domain is one rank's piece of a distributed domain."""
+        return getattr(self, 'numproc', 1) > 1
+
+    def _local_tracer_mass(self, s):
+        """This rank's share of tracer `s`: owned cells only, NO reduction.
+
+        Deliberately collective-free. The conservation baseline is captured
+        during setup, inside add_tracer and set_tracer -- and on a parallel run
+        that happens on rank 0 alone, before distribute() has handed the domain
+        out. A collective there would block forever waiting for ranks that are
+        not in that code at all.
+
+        Ghost cells are excluded, so summing this across ranks gives the
+        whole-domain figure exactly once.
+        """
+        m = self.tracer_conserved_values[s]           # m = h*c per cell
+        areas = self.areas
+        if self.tri_full_flag is not None:
+            return float(num.sum(m * areas * (self.tri_full_flag == 1)))
+        return float(num.sum(m * areas))
+
+    def _reduce_over_ranks(self, value):
+        """Sum a per-rank scalar over the communicator. Collective."""
+        from anuga import numprocs
+        if numprocs == 1:
+            return value
+        from mpi4py import MPI
+        return MPI.COMM_WORLD.allreduce(value, op=MPI.SUM)
+
+    def get_tracer_mass(self, name):
+        """Total mass of tracer `name` in the domain: the integral of m = h*c.
+
+        The tracer analogue of `get_water_volume`. Summed over owned cells only
+        and reduced across ranks, so it is the whole-domain figure in parallel
+        as well as in serial.
+
+        COLLECTIVE in parallel, like `get_water_volume`: every rank must call
+        it, or the ones that do will block.
+        """
+        s = self.get_tracer_index(name)
+        return self._reduce_over_ranks(self._local_tracer_mass(s))
+
+    def get_tracer_boundary_flux_integral(self, name):
+        """Net tracer mass that has crossed the domain boundary, since t=0.
+
+        Positive is INTO the domain, matching the sign of the water balance.
+        The tracer analogue of `get_boundary_flux_integral`, and the other half
+        of a mass budget:
+
+            mass(t) - mass(0) == boundary_flux_integral(t)
+
+        to within the timestepping error, for a domain with no source terms.
+        `check_tracer_conservation` does exactly that comparison.
+
+        The kernel accumulates the per-edge boundary flux into a per-cell array
+        each substep; `tracer_flux_integral_operator` applies the timestepping
+        method's own weights and zeroes it, exactly as
+        `boundary_flux_integral_operator` does for water.
+
+        Reduced across ranks, matching `get_boundary_flux_integral` for water:
+        each rank counts only the boundary edges of the cells it owns, so the
+        per-rank integrals sum to the whole-domain figure. COLLECTIVE.
+        """
+        s = self.get_tracer_index(name)
+        return self._reduce_over_ranks(float(self._tracer_flux_integral[s]))
+
+    def check_tracer_conservation(self, name):
+        """Return (change_in_mass, boundary_flux_integral, discrepancy).
+
+        For a domain with no tracer source terms the first two should agree, so
+        the discrepancy is the conservation error. On a CLOSED domain the flux
+        integral is zero and this reduces to "did the mass stay constant".
+
+        Returns absolute quantities, not a relative error: for a tracer that is
+        zero almost everywhere a relative measure is meaningless, and the caller
+        knows the scale that matters.
+
+        COLLECTIVE in parallel: every rank must call it.
+        """
+        s = self.get_tracer_index(name)
+        # The baseline is a per-rank number (see _local_tracer_mass), so the
+        # difference is formed locally and reduced once. Reducing the two
+        # separately would be wrong after a distribute(), where each rank's
+        # baseline covers only its own cells.
+        change = self._reduce_over_ranks(
+            self._local_tracer_mass(s) - self._tracer_initial_mass[s])
+        flux = self.get_tracer_boundary_flux_integral(name)
+        return change, flux, change - flux
+
+    def _reorder_tracer_arrays(self, new_order, inv_order,
+                               old_boundary_enumeration):
+        """Permute the tracer blocks onto a reordered mesh (issue #277).
+
+        Called by `Generic_Domain.reorder` after the mesh has been renumbered
+        but while `inv_order` and the pre-reorder boundary enumeration are
+        still available. A no-op on a domain with no tracers.
+
+        Permutes IN PLACE. The C domain struct holds raw pointers into these
+        buffers, so rebinding the attributes would leave the struct addressing
+        the old memory.
+        """
+        ns = self.number_of_tracers
+        if ns == 0:
+            return
+
+        N = self.number_of_elements
+        new_order = num.asarray(new_order, dtype=int)
+
+        # Belt and braces: a block added to _TRACER_ARRAYS without a kind would
+        # otherwise be skipped here and silently keep the old ordering, which
+        # is the exact failure #277 was.
+        unclassified = [a for a in self._TRACER_ARRAYS
+                        if a not in self._TRACER_ARRAY_KINDS]
+        if unclassified:
+            raise NotImplementedError(
+                'tracer array(s) %s have no entry in _TRACER_ARRAY_KINDS, so '
+                'reorder() does not know how to permute them; classify them '
+                'as cell/edge/boundary' % ', '.join(sorted(unclassified)))
+
+        bperm = None
+
+        for attr in self._TRACER_ARRAYS:
+            arr = getattr(self, attr, None)
+            if arr is None:
+                continue
+            kind = self._TRACER_ARRAY_KINDS[attr]
+
+            if kind == 'cell':
+                # new[:, i] = old[:, new_order[i]], matching the convention the
+                # quantities use. Fancy indexing copies before the assignment,
+                # so this does not alias.
+                arr[:] = arr[:, new_order]
+            elif kind == 'edge':
+                # (ns, 3N) -> (ns, N, 3), permute triangles, flatten back. The
+                # same reshape-permute-ravel the (3N,) arrays get in reorder().
+                arr[:] = arr.reshape(ns, N, 3)[:, new_order, :].reshape(ns, 3 * N)
+            elif kind == 'boundary':
+                if bperm is None:
+                    bperm = self._boundary_permutation(old_boundary_enumeration,
+                                                       inv_order)
+                arr[:] = arr[:, bperm]
+            else:
+                raise NotImplementedError(
+                    'unknown tracer array kind %r for %r' % (kind, attr))
+
+    def _boundary_permutation(self, old_boundary_enumeration, inv_order):
+        """Map each NEW boundary index to the old index of the same edge.
+
+        `build_boundary_neighbours` numbers boundary edges by their position in
+        the sorted (triangle, edge) order, so renumbering triangles renumbers
+        the boundary as well. Quantities do not care -- `update_boundary`
+        refills their boundary values from the Boundary objects every timestep
+        -- but `tracer_boundary_values` is written once by
+        `set_tracer_boundary` and then just read, so it has to be carried
+        across by hand.
+
+        Returns an index array `bperm` with `bperm[new_j] = old_j`, so that
+        `new_values = old_values[bperm]`.
+        """
+        new_boundary_enumeration = self.mesh.boundary_enumeration
+        M = len(new_boundary_enumeration)
+        if len(old_boundary_enumeration) != M:
+            raise RuntimeError(
+                'boundary edge count changed during reorder (%d -> %d); the '
+                'tracer boundary values cannot be carried across'
+                % (len(old_boundary_enumeration), M))
+
+        bperm = num.empty(M, dtype=int)
+        for (old_id, edge), old_j in old_boundary_enumeration.items():
+            # The same physical edge, addressed by the triangle's new number.
+            new_j = new_boundary_enumeration[int(inv_order[old_id]), edge]
+            bperm[new_j] = old_j
+        return bperm
 
     def get_tracer_index(self, name):
         """Return the row index of tracer `name`."""
@@ -1985,32 +2321,6 @@ class Domain(Generic_Domain):
             raise ValueError('tracer %r: expected a scalar or %d values, got %r'
                              % (name, self.number_of_elements, v.shape))
 
-    def set_tracer_boundary(self, name, value):
-        """Prescribe the inflow concentration `c` for tracer `name`.
-
-        Spec 9.3: sediment boundary conditions act through the conserved
-        `h*c`, and a prescribed inflow concentration is the minimum required
-        set. Water entering the domain carries this concentration; water
-        leaving is unaffected, since the flux is upwinded on the water flux.
-
-        A scalar applies to the whole boundary; an array must have one value
-        per boundary edge (`domain.boundary_length`).
-        """
-        s = self.get_tracer_index(name)
-        v = num.asarray(value, dtype=num.float64)
-        if v.ndim == 0:
-            self.tracer_boundary_values[s] = float(v)
-        elif v.shape == (self.boundary_length,):
-            self.tracer_boundary_values[s] = v
-        else:
-            raise ValueError(
-                'tracer %r: expected a scalar or %d boundary values, got %r'
-                % (name, self.boundary_length, v.shape))
-
-    def get_tracer_boundary(self, name):
-        """Return the prescribed boundary concentration for tracer `name`."""
-        return self.tracer_boundary_values[self.get_tracer_index(name)]
-
     def get_tracer_names(self):
         """Return the registered tracer names, in index order."""
         return list(self._tracer_names)
@@ -2031,6 +2341,12 @@ class Domain(Generic_Domain):
         Seeds both `c` and the conserved `m = h*c`, which must agree: setting
         `c` alone leaves the conserved variable stale and the first substep
         overwrites `c` from it.
+
+        Because `m = h*c`, this reads the CURRENT depth: set `stage` and
+        `elevation` before the tracer, not after.
+
+        Called before the run starts, this also rebases the conservation
+        baseline (see `check_tracer_conservation`); called mid-run it does not.
         """
         s = self.get_tracer_index(name)
         # asarray, not ascontiguousarray: the latter promotes a 0-d scalar to
@@ -2044,6 +2360,20 @@ class Domain(Generic_Domain):
                 % (name, self.number_of_elements, c.shape))
         self.tracer_centroid_values[s] = c
         self.tracer_conserved_values[s] = self._tracer_depth() * c
+
+        # Setting the field before the run starts IS the initial condition, so
+        # rebase the conservation baseline on it. Without this, the common
+        # add_tracer(name) / set_tracer(name, field) pairing would leave the
+        # baseline at the mass add_tracer seeded and check_tracer_conservation
+        # would report the difference as a conservation error.
+        #
+        # Mid-run a set_tracer is a genuine intervention that really does break
+        # the budget, so leave the baseline alone there and let it show up as a
+        # discrepancy rather than silently absorbing it.
+        if (self._tracer_initial_mass is not None
+                and s < len(self._tracer_initial_mass)
+                and self.relative_time == self.evolve_starttime):
+            self._tracer_initial_mass[s] = self._local_tracer_mass(s)
 
     def update_domain_c_struct(self):
         """Update the C domain structure from the Python Domain object.
@@ -3791,6 +4121,12 @@ class Domain(Generic_Domain):
         """
 
         nvtxRangePush('update_boundary')
+
+        # Time-varying tracer inflow concentrations, if any. Hooked here rather
+        # than at update_boundary()'s eight call sites in generic_domain, and a
+        # no-op unless set_tracer_boundary() was given a callable.
+        if self.number_of_tracers > 0:
+            self.update_tracer_boundary_values()
 
         # GPU mode - use GPU boundary functions if all boundaries are GPU-supported
         if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
@@ -6386,6 +6722,8 @@ class Domain(Generic_Domain):
 
         from anuga.operators.rate_operators import Rate_operator
         from anuga.operators.boundary_flux_integral_operator import boundary_flux_integral_operator
+        from anuga.operators.tracer_flux_integral_operator import (
+            tracer_flux_integral_operator)
         from anuga.structures.inlet_operator import Inlet_operator
         from anuga.structures.gpu_culvert_manager import GPUCulvertManager
         from anuga.operators.collect_max_quantities_operator import Collect_max_quantities_operator
@@ -6412,6 +6750,13 @@ class Domain(Generic_Domain):
             elif isinstance(op, boundary_flux_integral_operator):
                 # boundary_flux_integral_operator only reads boundary_flux_sum (small array)
                 # and accumulates a scalar - doesn't need full centroid sync
+                continue
+            elif isinstance(op, tracer_flux_integral_operator):
+                # Same shape as the water one: reads the small per-substep
+                # tracer_boundary_flux_sum, which the kernel writes on the HOST,
+                # and accumulates into a per-tracer scalar. The per-cell scratch
+                # it totals lives and is zeroed on the device, so no centroid
+                # sync is needed here either.
                 continue
             elif isinstance(op, Inlet_operator):
                 # Force GPU initialization if not already done

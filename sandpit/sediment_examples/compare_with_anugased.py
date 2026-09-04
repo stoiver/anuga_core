@@ -76,7 +76,7 @@ b.set_shear_closure('depth_slope')
 b.sediment_d_star_mode = 1                      # Rouse, as their fit approximates
 b.add_sediment_class('sand', diameter=D50, rho_s=2650.0, rho_w=1000.0,
                      initial_concentration=CONC)
-b.set_tracer_boundary('sand', CONC)
+b.set_tracer_boundary('sand', 'left', CONC)   # 'left' is the inflow
 zb0 = b.quantities['elevation'].centroid_values.copy()
 b.evolve_to_end(finaltime=FINALTIME)
 dzb = b.quantities['elevation'].centroid_values - zb0

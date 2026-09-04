@@ -6,7 +6,7 @@ non-cohesive erosion route -- see README.md.
 
 Demonstrates
   * add_sediment_class()      registers the class and its operator
-  * set_tracer_boundary()     prescribed inflow concentration (spec 9.3)
+  * set_tracer_boundary()     prescribed inflow concentration, per boundary tag
   * entrainment [E-1], deposition [D-1], Exner bed change [G-4]
 """
 import argparse
@@ -63,7 +63,7 @@ domain.add_sediment_class('sand', diameter=D50, rho_s=2650.0, rho_w=1000.0,
                           initial_concentration=INFLOW_CONC)
 # The domain starts DRY, so the initial concentration washes out immediately;
 # what actually matters is the concentration of the water flowing in.
-domain.set_tracer_boundary('sand', INFLOW_CONC)
+domain.set_tracer_boundary('sand', 'left', INFLOW_CONC)   # 'left' is the inflow
 
 areas = domain.areas
 z0 = domain.quantities['elevation'].centroid_values.copy()

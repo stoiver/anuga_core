@@ -784,9 +784,15 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
         double *tr_eu = GD->D.tracer_explicit_update;
         double *tr_qv = GD->D.tracer_conserved_values;
         double *tr_bk = GD->D.tracer_backup_values;
+        // tracer_boundary_flux is per-cell conservation scratch: the kernel
+        // accumulates into it and totals it per substep, so it belongs with the
+        // rest of the block for the same reason -- the n_tracers > 0 guard
+        // reads it, and a partial mapping is an illegal device address.
+        double *tr_bf = GD->D.tracer_boundary_flux;
         #pragma omp target enter data map(to: \
             tr_cv[0:ns*n], tr_ev[0:ns*3*n], \
-            tr_eu[0:ns*n], tr_qv[0:ns*n], tr_bk[0:ns*n])
+            tr_eu[0:ns*n], tr_qv[0:ns*n], tr_bk[0:ns*n], \
+            tr_bf[0:ns*n])
 
         // Boundary values are sized by boundary_length, which is zero on a
         // domain with no boundary edges -- mapping a zero-length array is not
@@ -1236,9 +1242,11 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
         double *tr_eu = GD->D.tracer_explicit_update;
         double *tr_qv = GD->D.tracer_conserved_values;
         double *tr_bk = GD->D.tracer_backup_values;
+        double *tr_bf = GD->D.tracer_boundary_flux;
         #pragma omp target exit data map(delete: \
             tr_cv[0:ns*n], tr_ev[0:ns*3*n], \
-            tr_eu[0:ns*n], tr_qv[0:ns*n], tr_bk[0:ns*n])
+            tr_eu[0:ns*n], tr_qv[0:ns*n], tr_bk[0:ns*n], \
+            tr_bf[0:ns*n])
         if (nb > 0) {
             double *tr_bv = GD->D.tracer_boundary_values;
             #pragma omp target exit data map(delete: tr_bv[0:ns*nb])
