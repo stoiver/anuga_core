@@ -436,15 +436,18 @@ def test_set_tracer_accepts_a_scalar_or_a_field():
 
 
 def test_the_api_rejects_mistakes():
+    # Deliberately not 'x'/'y': those are quantities on every domain, and a
+    # tracer may not take a quantity's name -- see
+    # test_a_tracer_cannot_be_named_after_a_quantity.
     d = _small_domain()
-    d.add_tracer('x', beta=1.0)
+    d.add_tracer('a', beta=1.0)
     with pytest.raises(ValueError):
-        d.add_tracer('x')                       # duplicate name
+        d.add_tracer('a')                       # duplicate name
     with pytest.raises(ValueError):
-        d.set_tracer('x', np.zeros(len(d) + 1))  # wrong length
+        d.set_tracer('a', np.zeros(len(d) + 1))  # wrong length
     with pytest.raises(ValueError):
         d.set_tracer('nope', 1.0)               # unknown name
     with pytest.raises(ValueError):
         # beta is shared by every tracer, so a conflicting value must be
         # refused rather than silently applied to all of them.
-        d.add_tracer('y', beta=0.0)
+        d.add_tracer('b', beta=0.0)

@@ -394,6 +394,12 @@ struct max_quantities_info {
     double *max_depth;           // [n] device-resident running max depth
     double *max_speed;           // [n] device-resident running max speed
     double *max_uh;              // [n] device-resident running max ||(uh,vh)||
+    // Running max of each tracer's concentration, [n_tracers][n] flattened as
+    // max_tracer[s*n + i], the same layout the tracer arrays themselves use.
+    // NULL and n_tracers == 0 when the domain has no tracers, which is the
+    // common case and costs nothing.
+    double *max_tracer;
+    int n_tracers;
     int initialized;
     int mapped;
 };
@@ -645,6 +651,7 @@ void gpu_max_quantities_update(struct gpu_domain *GD);
 void gpu_max_quantities_get(struct gpu_domain *GD,
                             double *out_stage, double *out_depth,
                             double *out_speed, double *out_uh);
+void gpu_max_tracers_get(struct gpu_domain *GD, double *out_tracer);
 void gpu_max_quantities_finalize(struct gpu_domain *GD);
 
 // Ghost exchange - the key MPI function

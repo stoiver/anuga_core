@@ -19,6 +19,7 @@ python_sources = [
 'test_tracers_boundary.py',
 'test_tracers_sww.py',
 'test_tracers_conservation.py',
+'test_tracers_max.py',
 'test_tracers_reorder.py',
 'test_tracers_distribute.py',
 'test_tracers_gpu.py',
