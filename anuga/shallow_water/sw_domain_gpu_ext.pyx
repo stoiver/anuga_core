@@ -103,6 +103,47 @@ cdef extern from "gpu_domain.h" nogil:
         int64_t number_of_riverwall_edges
         int64_t number_of_tracers
         double beta_tracer
+        int64_t n_sediment_classes
+        double* sediment_settling_velocity
+        double* sediment_d_star
+        double sediment_c_max
+        double* sediment_diameter
+        double* sediment_R
+        double* sediment_tau_c_star
+        double sediment_gamma0
+        int64_t sediment_erosion_mode
+        double sediment_K_partheniades
+        int64_t sediment_deposition_mode
+        double sediment_tau_d
+        double sediment_tau_crit
+        double sediment_K_e
+        double sediment_rho_w
+        int64_t sediment_shear_closure
+        double* tracer_external_source
+        int64_t sediment_d_star_mode
+        double* sediment_reference_height
+        double sediment_a_h_floor
+        double sediment_porosity
+        int64_t sediment_bed_evolution
+        int64_t sediment_bedload_mode
+        double sediment_bedload_K
+        double sediment_bedload_m
+        double sediment_bedload_tau_c_star
+        double* sediment_z_base
+        int64_t sediment_has_z_base
+        double* sediment_repose_dz
+        double sediment_repose_tan
+        double sediment_repose_relax
+        int64_t sediment_repose_max_sweeps
+        double* sediment_source_limited
+        int64_t* sediment_bed_exhausted
+        double* sediment_qbx
+        double* sediment_qby
+        double sediment_c_pack
+        int64_t sediment_friction_mode
+        double sediment_manning_ll
+        int64_t sediment_wilson_bed
+        double sediment_wilson_D
         double* tracer_centroid_values
         double* tracer_edge_values
         double* tracer_boundary_values
@@ -409,6 +450,12 @@ cdef extern from "gpu_domain.h" nogil:
     uint64_t gpu_flop_counters_get_global_total(gpu_domain *GD)
     double gpu_flop_counters_get_global_flops(gpu_domain *GD)
     void gpu_flop_counters_print_global(gpu_domain *GD)
+
+
+cdef extern from "core_kernels.h" nogil:
+    void core_apply_sediment_source(domain* D, double timestep)
+    void core_apply_bedload(domain* D, double timestep)
+    int64_t core_apply_repose(domain* D)
 
 
 cdef extern from "gpu_culvert_operator.h" nogil:
@@ -815,6 +862,89 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     # the kernel guard fire on the device (CUDA_ERROR_ILLEGAL_ADDRESS).
     D.number_of_tracers = getattr(domain_object, 'number_of_tracers', 0)
     D.beta_tracer = getattr(domain_object, 'beta_tracer', 1.0)
+    # Sediment: set explicitly here too -- see the note in
+    # sw_domain_openmp_ext.pyx. Missing the mode-2 initialisation of
+    # number_of_tracers previously produced CUDA_ERROR_ILLEGAL_ADDRESS.
+    D.n_sediment_classes = getattr(domain_object, 'n_sediment_classes', 0)
+    D.sediment_c_max = getattr(domain_object, 'sediment_c_max', 0.3)
+    D.sediment_gamma0 = getattr(domain_object, 'sediment_gamma0', 0.0024)
+    D.sediment_erosion_mode = getattr(domain_object, 'sediment_erosion_mode', 0)
+    D.sediment_K_partheniades = getattr(domain_object, 'sediment_K_partheniades', 1.0e-4)
+    D.sediment_deposition_mode = getattr(domain_object, 'sediment_deposition_mode', 0)
+    D.sediment_tau_d = getattr(domain_object, 'sediment_tau_d', 0.0)
+    D.sediment_tau_crit = getattr(domain_object, 'sediment_tau_crit', 0.088)
+    D.sediment_K_e = getattr(domain_object, 'sediment_K_e', 0.2e-6/0.088**0.5)
+    D.sediment_rho_w = getattr(domain_object, 'sediment_rho_w', 1000.0)
+    D.sediment_shear_closure = getattr(domain_object, 'sediment_shear_closure', 0)
+    D.sediment_d_star_mode = getattr(domain_object, 'sediment_d_star_mode', 0)
+    D.sediment_a_h_floor = getattr(domain_object, 'sediment_a_h_floor', 0.01)
+    D.sediment_c_pack = getattr(domain_object, 'sediment_c_pack', 0.65)
+    D.sediment_porosity = getattr(domain_object, 'sediment_porosity', 0.3)
+    D.sediment_bed_evolution = 1 if getattr(domain_object, 'sediment_bed_evolution', True) else 0
+    D.sediment_bedload_mode = getattr(domain_object, 'sediment_bedload_mode', 0)
+    # [L-5]. Set UNCONDITIONALLY, outside the n_sediment_classes guard
+    # below: the kernels test this flag before dereferencing
+    # sediment_z_base, so leaving it uninitialised makes a NULL
+    # pointer look like a configured base.
+    D.sediment_has_z_base = getattr(domain_object, 'sediment_has_z_base', 0)
+    # spec 7 repose. Scalars again set unconditionally -- the kernel
+    # tests sediment_repose_tan before touching sediment_repose_dz.
+    D.sediment_repose_tan = getattr(domain_object, 'sediment_repose_tan', 0.0)
+    D.sediment_repose_relax = getattr(domain_object, 'sediment_repose_relax', 1.0)
+    D.sediment_repose_max_sweeps = getattr(domain_object, 'sediment_repose_max_sweeps', 0)
+    D.sediment_bedload_K = getattr(domain_object, 'sediment_bedload_K', 3.97)
+    D.sediment_bedload_m = getattr(domain_object, 'sediment_bedload_m', 1.5)
+    D.sediment_bedload_tau_c_star = getattr(domain_object, 'sediment_bedload_tau_c_star', 0.0495)
+    D.sediment_friction_mode = getattr(domain_object, 'sediment_friction_mode', 0)
+    D.sediment_manning_ll = getattr(domain_object, 'sediment_manning_ll', 0.065)
+    D.sediment_wilson_bed = getattr(domain_object, 'sediment_wilson_bed', 0)
+    D.sediment_wilson_D = getattr(domain_object, 'sediment_wilson_D', 1.0e-3)
+    cdef double[::1] sed1
+    cdef double[:,::1] sed2
+    cdef int64_t[::1] sedi
+    if D.n_sediment_classes > 0:
+        sed1 = domain_object.sediment_settling_velocity
+        D.sediment_settling_velocity = &sed1[0]
+        sed1 = domain_object.sediment_d_star
+        D.sediment_d_star = &sed1[0]
+        sed1 = domain_object.sediment_diameter
+        D.sediment_diameter = &sed1[0]
+        sed1 = domain_object.sediment_R
+        D.sediment_R = &sed1[0]
+        sed1 = domain_object.sediment_tau_c_star
+        D.sediment_tau_c_star = &sed1[0]
+        sed1 = domain_object.sediment_reference_height
+        D.sediment_reference_height = &sed1[0]
+        sed1 = domain_object.sediment_qbx
+        D.sediment_qbx = &sed1[0]
+        sed1 = domain_object.sediment_qby
+        D.sediment_qby = &sed1[0]
+        # [L-5]. See the note in the OpenMP binding: the scratch is
+        # dereferenced whenever a class exists, the base only when set.
+        sed2 = domain_object.sediment_source_limited
+        D.sediment_source_limited = &sed2[0,0]
+        sedi = domain_object.sediment_bed_exhausted
+        D.sediment_bed_exhausted = &sedi[0]
+        sed1 = domain_object.sediment_repose_dz
+        D.sediment_repose_dz = &sed1[0]
+        if domain_object.sediment_has_z_base:
+            sed1 = domain_object.sediment_z_base
+            D.sediment_z_base = &sed1[0]
+        else:
+            D.sediment_z_base = NULL
+    else:
+        D.sediment_settling_velocity = NULL
+        D.sediment_d_star = NULL
+        D.sediment_diameter = NULL
+        D.sediment_R = NULL
+        D.sediment_tau_c_star = NULL
+        D.sediment_reference_height = NULL
+        D.sediment_qbx = NULL
+        D.sediment_qby = NULL
+        D.sediment_z_base = NULL
+        D.sediment_source_limited = NULL
+        D.sediment_bed_exhausted = NULL
+        D.sediment_repose_dz = NULL
     # Phase 2: wire the tracer arrays for the device. The pointers must be set
     # whenever number_of_tracers > 0 -- the shared kernels guard on that count
     # and dereference all six, so a NULL here is CUDA_ERROR_ILLEGAL_ADDRESS on
@@ -834,6 +964,11 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.tracer_conserved_values = &tr2[0, 0]
         tr2 = domain_object.tracer_backup_values
         D.tracer_backup_values = &tr2[0, 0]
+        if domain_object.tracer_external_source is not None:
+            tr2 = domain_object.tracer_external_source
+            D.tracer_external_source = &tr2[0, 0]
+        else:
+            D.tracer_external_source = NULL
         tr2 = domain_object.tracer_boundary_flux
         D.tracer_boundary_flux = &tr2[0, 0]
         tr1 = domain_object.tracer_boundary_flux_sum
@@ -845,6 +980,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.tracer_explicit_update = NULL
         D.tracer_conserved_values = NULL
         D.tracer_backup_values = NULL
+        D.tracer_external_source = NULL
         D.tracer_boundary_flux = NULL
         D.tracer_boundary_flux_sum = NULL
 
@@ -2092,6 +2228,27 @@ def saxpy3_conserved_quantities_gpu(GPUDomain gpu_dom, double a, double b, doubl
     computes Q = (2*Q_current + Q_backup) / 3.
     """
     gpu_saxpy3_conserved_quantities(&gpu_dom.GD, a, b, c)
+
+
+def apply_sediment_source_gpu(GPUDomain gpu_dom, double timestep):
+    """Fractional step on the device: apply E-D to m and the bed change to z.
+
+    Runs the same core kernel as mode 1; on a GPU build its loop is an
+    'omp target' region, so the tracer and bed arrays are updated in place on
+    the device with no host round trip. That is what keeps this operator
+    GPU-safe and off the _gpu_host_writes_suppressed fallback path.
+    """
+    core_apply_sediment_source(&gpu_dom.GD.D, timestep)
+
+
+def apply_bedload_gpu(GPUDomain gpu_dom, double timestep):
+    """Bedload divergence [G-5] on the device."""
+    core_apply_bedload(&gpu_dom.GD.D, timestep)
+
+
+def apply_repose_gpu(GPUDomain gpu_dom):
+    """Angle-of-repose relaxation on the device. Returns sweeps used."""
+    return core_apply_repose(&gpu_dom.GD.D)
 
 
 def protect_gpu(GPUDomain gpu_dom):

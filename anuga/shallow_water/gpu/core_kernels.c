@@ -463,6 +463,993 @@ void core_distribute_edges_to_vertices(struct domain *D) {
 
 
 // ============================================================================
+// Near-bed concentration ratio d*(Z)   -- spec 4.3, open item S1a
+// ============================================================================
+//
+// [S-4] is a 1-D quadrature per cell, far too expensive to run inside a kernel
+// every step, so the spec calls for a fitted form. This is that fit.
+//
+// CORRECTION TO [S-4] -- THE TYPO IS IN DL09 AS PUBLISHED, not in PHYSICS_SPEC,
+// which transcribed them faithfully. DL09 Eq 19 gives the Rouse profile factor
+// as ((z-a)/(h-a) . a/z)^Z, which is ZERO at the reference height z = a.
+//
+// Their own paper disproves it: immediately above Eq 19 they write the flux as
+// q_S = c_S(a) * integral( [...]^Z u(z) dz ). Factoring c_S(a) out REQUIRES the
+// bracket to be 1 at z = a; the printed factor is 0 there, giving c_s(a) = 0.
+//
+// The Rouse-Vanoni profile [(h-z)/z . a/(h-a)]^Z rearranges exactly to
+// ((h-z)/(h-a) . a/z)^Z, which is 1 at z = a and 0 at z = h. One glyph: (z-a)
+// is a slip for (h-z). At Z = 2, a/h = 0.005 the printed form gives d* = 41227
+// against 356 corrected -- not a value that appears on their Figure 4, so that
+// figure was evidently computed with the correct profile.
+//
+// The fit below is to the CORRECTED integral. See PHYSICS_SPEC 4.3, Draft 5.
+//
+// FITTED FORM. Near the bed the Rouse profile behaves like z^(-Z), so d*
+// diverges roughly as (a/h)^(-Z). Factoring that out first,
+//
+//     ln d* = -Z ln(a/h) + P(Z, ln(a/h))
+//
+// leaves a mild remainder a low-order polynomial captures well: 28 terms for
+// 0.82 percent max / 0.05 percent mean error. A direct polynomial in
+// (ln Z, ln(a/h)) needs far more terms for far worse accuracy. The structure is
+// what buys it.
+//
+// RANGE. Fitted for Z in [0.01, 2.5] and a/h in [1e-3, 0.15]. Beyond Z ~ 2.5
+// transport is essentially bedload and this ratio is not the right model. The
+// a/h range reaches down to 1e-3 deliberately: the shipped anugaSed operator
+// implies a/h ~ 9.3e-4 (spec 12, D4b), so its regime is reachable when the
+// a >= floor*h floor is relaxed. (9.3e-4 itself clamps to 1e-3, ~7 percent in
+// a/h and so ~7 percent in d* at Z = 1.)
+//
+// OUT-OF-RANGE INPUTS ARE CLAMPED, NOT EXTRAPOLATED -- the spec asks for that
+// explicitly, because a polynomial taken outside its fitted range goes wrong
+// quietly. anugaSed's own 8th-degree fit is extrapolated freely and reaches
+// p(6) = 282088 (spec 12, D4c); this one cannot.
+#define ANUGA_ROUSE_Z_LO   0.01
+#define ANUGA_ROUSE_Z_HI   2.5
+#define ANUGA_ROUSE_AH_LO  1e-3
+#define ANUGA_ROUSE_AH_HI  0.15
+
+static inline double core_rouse_d_star(double Z, double a_h) {
+    /* P(Z, L) = sum_i Z^i (c_i0 + c_i1 L + c_i2 L^2 + c_i3 L^3), L = ln(a/h) */
+    const double C[7][4] = {
+    {+1.097192252266e-03, +9.816426876103e-04, +2.816550608693e-04, +2.216981593577e-05},
+    {+8.152552738643e-01, +2.984288438662e-01, +4.717126357513e-02, +2.488390592718e-03},
+    {-3.858022145865e-02, +7.497943739332e-01, +1.494530687071e-01, +1.016829763599e-02},
+    {-1.416163484237e-01, -6.145585548869e-01, -2.181478641118e-01, -1.989085090511e-02},
+    {+2.441798567588e-02, +2.477861105262e-01, +1.172562489413e-01, +1.380260943049e-02},
+    {+1.714535144604e-02, -4.453006825886e-02, -2.922351673152e-02, -4.300807416335e-03},
+    {-4.557991043496e-03, +2.511784955218e-03, +2.810236330103e-03, +5.048472261972e-04},
+    };
+
+    if (Z < ANUGA_ROUSE_Z_LO) Z = ANUGA_ROUSE_Z_LO;
+    else if (Z > ANUGA_ROUSE_Z_HI) Z = ANUGA_ROUSE_Z_HI;
+    if (a_h < ANUGA_ROUSE_AH_LO) a_h = ANUGA_ROUSE_AH_LO;
+    else if (a_h > ANUGA_ROUSE_AH_HI) a_h = ANUGA_ROUSE_AH_HI;
+
+    const double L = log(a_h);
+    const double L2 = L * L;
+
+    /* Horner in Z over coefficients that are cubics in L. */
+    const double L3 = L2 * L;
+    double P = 0.0;
+    for (int i = 6; i >= 0; i--) {
+        P = P * Z + (C[i][0] + C[i][1] * L + C[i][2] * L2 + C[i][3] * L3);
+    }
+
+    const double d = exp(-Z * L + P);
+    /* DL09: d* is always > 1. Guard the fit against dipping below it. */
+    return (d < 1.0) ? 1.0 : d;
+}
+
+/* tau_b / rho for a cell, under either shear closure (spec 3.1 / 3.4).
+ *
+ *   [T-1]  tau_b/rho = f_c |v|^2          quadratic drag, no equilibrium
+ *                                         assumption
+ *   [T-7]  tau_b/rho = g h S              depth-slope, aSM16 Eqs 6-7
+ *
+ * Returning tau_b/rho rather than tau_b keeps the two interchangeable
+ * everywhere downstream: the Shields stress is tau* = (tau_b/rho)/(R g d), in
+ * which the density cancels, and the dimensional stress the cohesive route
+ * needs is simply rho_w times this.
+ *
+ * S is the bed gradient magnitude from the divergence theorem over the cell's
+ * own edges, so this stays cell-local and offloads. */
+static inline double core_tau_b_over_rho(anuga_int closure, double f_c,
+                                         double vel2, double grav, double h,
+                                         const double * restrict bed_ev,
+                                         const double * restrict normals,
+                                         const double * restrict edgelengths,
+                                         double area, anuga_int k) {
+    if (closure != 1) {
+        return f_c * vel2;                       /* [T-1] */
+    }
+    /* [T-7]: grad z = (1/A) sum_e z_e n_e L_e */
+    double gx = 0.0, gy = 0.0;
+    for (anuga_int i = 0; i < 3; i++) {
+        const double ze = bed_ev[3 * k + i];
+        const double L = edgelengths[3 * k + i];
+        gx += ze * normals[6 * k + 2 * i] * L;
+        gy += ze * normals[6 * k + 2 * i + 1] * L;
+    }
+    if (area > 0.0) {
+        gx /= area;
+        gy /= area;
+    }
+    const double S = sqrt(gx * gx + gy * gy);
+    return grav * h * S;
+}
+
+// ============================================================================
+// Bedload transport and its bed evolution   [G-5]/[K-3], spec 6
+// ============================================================================
+//
+//   [K-1]  q_b* = K tau_x^m                 tau_x = tau* - tau_c*  [T-4]
+//   [K-5]  q_b* = 0.05 tau*^2.5 / f_c       Engelund-Hansen, no threshold
+//   [K-2]  q_b  = q_b* sqrt(R g) d^1.5
+//   [K-4]  q_b is parallel to the bed shear stress, hence to (u, v)
+//   [K-3]  dz/dt = -(1/(1-lambda)) div q_b
+//
+// Unlike the suspended exchange, this is a DIVERGENCE: it moves sediment along
+// the bed rather than between bed and water column, so in a closed domain it
+// redistributes bed material and conserves total bed volume exactly. That is
+// the property to test it with.
+//
+// Two passes, because the divergence at cell k needs its neighbours' q_b:
+// pass 1 fills the per-cell transport vector, pass 2 takes the divergence.
+// Both are ordinary cell loops, so both offload.
+//
+// Edge flux is CENTRED; see the note at the flux itself for why upwinding was
+// tried and rejected. Boundary edges carry zero bedload flux, which is what
+// makes the closed-domain conservation test exact.
+void core_apply_bedload(struct domain *D, double timestep) {
+    const anuga_int mode = D->sediment_bedload_mode;
+    const anuga_int n_classes = D->n_sediment_classes;
+    if (mode == 0 || n_classes <= 0 || timestep <= 0.0) {
+        return;
+    }
+    if (!D->sediment_bed_evolution) {
+        return;   /* fixed bed: bedload would have nowhere to go */
+    }
+
+    const anuga_int n = D->number_of_elements;
+    const double grav = D->g;
+    const double h_eps = D->epsilon;
+    const double minimum_allowed_height = D->minimum_allowed_height;
+    const double one_minus_lambda = 1.0 - D->sediment_porosity;
+    const double K = D->sediment_bedload_K;
+    const double mexp = D->sediment_bedload_m;
+    const double tau_c_b = D->sediment_bedload_tau_c_star;
+    const anuga_int fric_mode = D->sediment_friction_mode;
+    const double n_ll = D->sediment_manning_ll;
+    const anuga_int wbed = D->sediment_wilson_bed;
+    const double wD = D->sediment_wilson_D;
+    const anuga_int shear_closure = D->sediment_shear_closure;
+
+    double * restrict stage_cv = D->stage_centroid_values;
+    double * restrict bed_cv = D->bed_centroid_values;
+    double * restrict bed_ev = D->bed_edge_values;
+    double * restrict xmom_cv = D->xmom_centroid_values;
+    double * restrict ymom_cv = D->ymom_centroid_values;
+    double * restrict friction_cv = D->friction_centroid_values;
+    double * restrict diam = D->sediment_diameter;
+    double * restrict sedR = D->sediment_R;
+    double * restrict qbx = D->sediment_qbx;
+    double * restrict qby = D->sediment_qby;
+    anuga_int * restrict neighbours = D->neighbours;
+    double * restrict normals = D->normals;
+    double * restrict edgelengths = D->edgelengths;
+    double * restrict areas = D->areas;
+    /* [L-5]. Both the flag and the arrays are required; see the note in
+     * core_apply_sediment_source. */
+    double * restrict z_base = D->sediment_z_base;
+    anuga_int * restrict exhausted = D->sediment_bed_exhausted;
+    const anuga_int has_z_base = (D->sediment_has_z_base
+                                  && z_base != NULL && exhausted != NULL);
+
+    if (one_minus_lambda <= 0.0) {
+        return;
+    }
+
+    /* ---- pass 1: the transport vector, summed over classes ---- */
+    OMP_PARALLEL_LOOP
+    for (anuga_int k = 0; k < n; k++) {
+        qbx[k] = 0.0;
+        qby[k] = 0.0;
+
+        const double h = fmax(stage_cv[k] - bed_cv[k], 0.0);
+        if (h <= minimum_allowed_height) {
+            continue;
+        }
+
+        const double denom = h * h + h_eps * h_eps;
+        const double u = (denom > 0.0) ? (xmom_cv[k] * h / denom) : 0.0;
+        const double v = (denom > 0.0) ? (ymom_cv[k] * h / denom) : 0.0;
+        const double vel2 = u * u + v * v;
+        if (vel2 <= 0.0) {
+            continue;
+        }
+        const double speed = sqrt(vel2);
+
+        double f_c;
+        if (fric_mode == 2) {
+            double rel = h / wD;
+            if (!(rel > 1.0)) rel = 1.0;
+            double X;
+            if (wbed == 0)      X = 8.46 * pow(rel, 0.1005);
+            else if (wbed == 1) X = 5.75 * log10(rel) + 3.514;
+            else                X = 5.62 * log10(rel) + 4.0;
+            f_c = 1.0 / (X * X);
+        } else {
+            const double nman = (fric_mode == 1) ? n_ll : friction_cv[k];
+            f_c = grav * nman * nman / cbrt(h);
+        }
+
+        /* Same closure as the suspended source, [T-1] or [T-7]. */
+        const double tbr = core_tau_b_over_rho(shear_closure, f_c, vel2, grav,
+                                               h, bed_ev, normals,
+                                               edgelengths, areas[k], k);
+
+        double q_b_total = 0.0;
+        for (anuga_int s = 0; s < n_classes; s++) {
+            const double Rgd = sedR[s] * grav * diam[s];
+            if (!(Rgd > 0.0)) continue;
+            const double tau_star = tbr / Rgd;
+
+            double q_star;
+            if (mode == 2) {
+                /* [K-5] Engelund-Hansen, total load, NO threshold. Subtracting
+                 * tau_c* here would silently make it a different model. */
+                q_star = (f_c > 0.0) ? 0.05 * pow(tau_star, 2.5) / f_c : 0.0;
+            } else {
+                const double tau_x = tau_star - tau_c_b;
+                q_star = (tau_x > 0.0) ? K * pow(tau_x, mexp) : 0.0;
+            }
+            if (q_star <= 0.0) continue;
+
+            /* [K-2] */
+            q_b_total += q_star * sqrt(sedR[s] * grav) * pow(diam[s], 1.5);
+        }
+
+        if (q_b_total > 0.0) {
+            /* [L-5]. A cell cannot export bed material it does not have.
+             * The limit is applied to the TRANSPORT VECTOR, not to the
+             * divergence: both cells sharing an edge then form their flux
+             * from the same limited q, so the flux stays antisymmetric and
+             * the scheme stays exactly conservative. Clamping the divergence
+             * instead would let one side remove what the other never
+             * received, which creates bed material. */
+            if (has_z_base) {
+                const double avail = bed_cv[k] - z_base[k];
+                const double thickness = (avail > 0.0) ? avail : 0.0;
+                /* The cell's own contribution to its outflow: its half of
+                 * every edge's centred flux, counting only the outgoing
+                 * ones. */
+                double own_out = 0.0;
+                const double ex = q_b_total * u / speed;
+                const double ey = q_b_total * v / speed;
+                for (anuga_int i = 0; i < 3; i++) {
+                    const anuga_int ki = 3 * k + i;
+                    if (neighbours[ki] < 0) continue;
+                    const double qn = 0.5 * (ex * normals[6 * k + 2 * i]
+                                           + ey * normals[6 * k + 2 * i + 1]);
+                    if (qn > 0.0) own_out += qn * edgelengths[ki];
+                }
+                if (own_out > 0.0) {
+                    const double cap = thickness * one_minus_lambda
+                                     * areas[k] / timestep;
+                    if (own_out > cap) {
+                        q_b_total *= cap / own_out;
+                    }
+                }
+            }
+
+            /* [K-4] parallel to (u, v) */
+            qbx[k] = q_b_total * u / speed;
+            qby[k] = q_b_total * v / speed;
+        }
+    }
+
+    /* ---- [L-5] pass 1.5: which cells cannot afford what is about to be
+     * taken from them ----------------------------------------------------
+     *
+     * Flagging cells that have ALREADY reached the base is not enough. A cell
+     * with a millimetre left can be asked for two in a single step and is
+     * only found empty afterwards, which is how the first version of this
+     * overshot its base by 6.1e-6 m on a 1e-2 m layer. So the test is
+     * predictive: form the divergence this step WILL produce and flag the
+     * cell if it cannot pay for it.
+     *
+     * Separate sweep, not folded into pass 2, because pass 2 writes bed
+     * elevation while its neighbours are still reading it -- see the note in
+     * sw_domain.h. This one only reads, so every cell sees the same state.
+     */
+    if (has_z_base) {
+        OMP_PARALLEL_LOOP
+        for (anuga_int k = 0; k < n; k++) {
+            const double avail = bed_cv[k] - z_base[k];
+            if (avail <= 0.0) {
+                exhausted[k] = 1;      /* nothing left to give */
+                continue;
+            }
+            double outflux = 0.0;
+            for (anuga_int i = 0; i < 3; i++) {
+                const anuga_int ki = 3 * k + i;
+                const anuga_int nb = neighbours[ki];
+                if (nb < 0) continue;
+                const double qn = 0.5 *
+                    ((qbx[k] + qbx[nb]) * normals[6 * k + 2 * i]
+                   + (qby[k] + qby[nb]) * normals[6 * k + 2 * i + 1]);
+                outflux += qn * edgelengths[ki];
+            }
+            /* dz this step, if nothing were blocked. */
+            const double drop = (timestep * outflux / areas[k])
+                              / one_minus_lambda;
+            exhausted[k] = (drop > avail) ? 1 : 0;
+        }
+    }
+
+    /* ---- pass 2: divergence, and the bed update ---- */
+    OMP_PARALLEL_LOOP
+    for (anuga_int k = 0; k < n; k++) {
+        const double qx_k = qbx[k];
+        const double qy_k = qby[k];
+        double outflux = 0.0;
+
+        for (anuga_int i = 0; i < 3; i++) {
+            const anuga_int ki = 3 * k + i;
+            const anuga_int nb = neighbours[ki];
+            if (nb < 0) {
+                continue;            /* boundary: no bedload across it */
+            }
+            const double nx = normals[6 * k + 2 * i];
+            const double ny = normals[6 * k + 2 * i + 1];
+
+            /* CENTRED edge flux: q_edge = (q_k + q_nb)/2.
+             *
+             * Exactly conservative -- cell nb forms the same average against
+             * the opposite normal and so removes precisely what k gains -- and,
+             * unlike an upwind donor choice, CONTINUOUS.
+             *
+             * Upwinding was tried first and rejected twice over. Deciding the
+             * donor from each cell's own q.n is not antisymmetric and creates
+             * bed material (measured 1.05e-5 of bed volume in 60 s). Fixing
+             * that by deciding from the averaged vector is conservative but
+             * DISCONTINUOUS: where q_k.n = -q_nb.n, which is exactly a
+             * converging-flow edge, the average passes through zero while the
+             * two candidate fluxes differ by a finite amount, so the donor
+             * flips on roundoff. That put mode 1 and mode 2 1.3e-4 apart.
+             *
+             * The centred flux is also the physically right answer at such an
+             * edge: bedload converging from both sides should deposit there,
+             * not be attributed to one arbitrary donor.
+             *
+             * If oscillations ever appear in an advection-dominated case, the
+             * upgrade is a Rusanov-type flux -- centred plus a dissipation
+             * term in (z_nb - z_k) -- not a bare donor switch. */
+            double qn = 0.5 * ((qx_k + qbx[nb]) * nx
+                             + (qy_k + qby[nb]) * ny);
+
+            /* [L-5]. A cell that cannot pay for this step's removal (pass
+             * 1.5) may gain material but must not lose any, so close every
+             * edge that would take material OUT of it. qn > 0 is outflow from
+             * k, qn < 0 is outflow from nb.
+             *
+             * This is SYMMETRIC, which is the whole point: cell nb reaches
+             * this edge with the opposite normal, hence -qn, and the same
+             * two tests in the same order, so both sides close the same edge
+             * and neither can remove what the other did not give up. That is
+             * what keeps bedload exactly conservative with a base present.
+             * It works on a snapshot taken in pass 1 rather than on live
+             * elevation, because this loop writes elevation as it goes. */
+            if (has_z_base) {
+                if (qn > 0.0 && exhausted[k])  qn = 0.0;
+                if (qn < 0.0 && exhausted[nb]) qn = 0.0;
+            }
+            outflux += qn * edgelengths[ki];
+        }
+
+        /* [K-3]: dz/dt = -(1/(1-lambda)) div q_b, div q_b = outflux/area */
+        const double dz = -(timestep * outflux / areas[k]) / one_minus_lambda;
+        if (dz != 0.0) {
+            bed_cv[k] += dz;
+            const anuga_int k3 = 3 * k;
+            bed_ev[k3 + 0] += dz;
+            bed_ev[k3 + 1] += dz;
+            bed_ev[k3 + 2] += dz;
+        }
+    }
+}
+
+// ============================================================================
+// Angle-of-repose relaxation  (spec 7)
+// ============================================================================
+
+// Diffuse bed material downslope wherever the centroid-to-centroid slope
+// exceeds the critical angle, until it does not.
+//
+// FG21 §2.2.4, who are explicit that this is a NUMERICAL HEURISTIC and not
+// physics: real bed slope failures are advective. It exists to stop the rest of
+// the model breaking on over-steep slopes -- and it has a side effect worth
+// remembering, that it limits the steepness of canyon walls and knickpoints and
+// so suppresses knickpoint retreat that may be real.
+//
+// THE ONLY NON-CELL-LOCAL SEDIMENT KERNEL. A cell's update depends on its
+// neighbours' elevation, which forces two things:
+//
+//   * Jacobi, not Gauss-Seidel. Each sweep reads elevation and writes
+//     increments to a separate array, so no cell sees a neighbour that has
+//     already moved this sweep. Reading live elevation would make the answer
+//     depend on which thread got there first, and mode 1 and mode 2 would
+//     diverge.
+//   * a hard sweep cap, reported to the caller. Relaxation is iterative and a
+//     pathological bed could otherwise spin.
+//
+// MASS IS CONSERVED, which is what makes this different from the older
+// sanddune operator: material removed from an over-steep cell is DEPOSITED ON
+// ITS NEIGHBOUR, never discarded. The mechanism is the same one bedload uses --
+// the transfer is computed per EDGE from data both cells share, so both compute
+// the identical volume and the pair balances exactly:
+//
+//     V = relax (|dz| - tan(theta) d) / (1/A_k + 1/A_nb)
+//
+// which is the volume that brings the pair exactly to the threshold slope when
+// relax = 1: moving V lowers the donor by V/A_donor and raises the receiver by
+// V/A_receiver, closing the excess by V(1/A_k + 1/A_nb).
+//
+// Interacts with [L-5]: material that cannot be scoured cannot slump either, so
+// a transfer is capped by the DONOR's erodible thickness. The cap is a third of
+// it per edge, because a cell has three edges and may be the donor on all of
+// them; a full-thickness cap on each could lower it to three times its
+// available depth in one sweep. The remainder is simply moved on later sweeps.
+//
+// Returns the number of sweeps used. Equal to max_sweeps means the cap was hit
+// and the bed may still be over-steep -- the caller reports that rather than
+// letting it pass silently.
+/* Relative tolerance on the threshold slope; see the note at its use. */
+#define REPOSE_TOL 1.0e-3
+
+anuga_int core_apply_repose(struct domain *D) {
+    const double tan_c = D->sediment_repose_tan;
+    if (!(tan_c > 0.0)) {
+        return 0;                      /* disabled, the default */
+    }
+    if (!D->sediment_bed_evolution) {
+        return 0;                      /* a fixed bed cannot slump */
+    }
+
+    const anuga_int n = D->number_of_elements;
+    const anuga_int max_sweeps = D->sediment_repose_max_sweeps;
+    const double relax = D->sediment_repose_relax;
+
+    double * restrict bed_cv = D->bed_centroid_values;
+    double * restrict bed_ev = D->bed_edge_values;
+    double * restrict dz = D->sediment_repose_dz;
+    double * restrict areas = D->areas;
+    double * restrict cc = D->centroid_coordinates;
+    anuga_int * restrict neighbours = D->neighbours;
+    double * restrict z_base = D->sediment_z_base;
+    const anuga_int has_z_base = (D->sediment_has_z_base && z_base != NULL);
+
+    if (dz == NULL || max_sweeps <= 0) {
+        return 0;
+    }
+
+    anuga_int sweeps = 0;
+    for (anuga_int it = 0; it < max_sweeps; it++) {
+        anuga_int n_steep = 0;
+
+        OMP_PARALLEL_LOOP_REDUCTION_PLUS(n_steep)
+        for (anuga_int k = 0; k < n; k++) {
+            double acc = 0.0;
+            const double z_k = bed_cv[k];
+            const double A_k = areas[k];
+            const double xk = cc[2 * k];
+            const double yk = cc[2 * k + 1];
+
+            for (anuga_int i = 0; i < 3; i++) {
+                const anuga_int nb = neighbours[3 * k + i];
+                if (nb < 0 || nb == k) {
+                    continue;          /* boundary, or a ghost self-reference */
+                }
+                const double dx = xk - cc[2 * nb];
+                const double dy = yk - cc[2 * nb + 1];
+                const double d = sqrt(dx * dx + dy * dy);
+                if (!(d > 0.0)) {
+                    continue;
+                }
+
+                const double z_nb = bed_cv[nb];
+                const double diff = z_k - z_nb;
+                const double adiff = fabs(diff);
+                const double thresh = tan_c * d;
+
+                /* Convergence is ASYMPTOTIC: each sweep removes a fraction of
+                 * the excess, so a strict `> thresh` test is never satisfied
+                 * and the loop runs to its cap every timestep, reporting a
+                 * failure that has not happened. Measured on an over-steep
+                 * cone: 36.84 -> 30.09 degrees against a 30 degree limit in
+                 * 400 sweeps, still "not converged".
+                 *
+                 * So converged means within REPOSE_TOL of the threshold
+                 * slope, which bounds the final angle: at 30 degrees a
+                 * tolerance of 1e-3 in tan leaves at most 30.03 degrees.
+                 * Deliberately not exposed -- it is the kernel's own
+                 * convergence criterion, not a physical parameter, and the
+                 * physical knob (the angle) is already there. */
+                if (!(adiff > thresh * (1.0 + REPOSE_TOL))) {
+                    continue;
+                }
+                n_steep++;
+
+                const double A_nb = areas[nb];
+                const double inv_sum = 1.0 / A_k + 1.0 / A_nb;
+
+                /* The /3 is a STABILITY limit, not a fudge. relax = 1 with no
+                 * divisor brings a single over-steep PAIR exactly to the
+                 * threshold in one sweep -- but a cell has three edges and can
+                 * be the donor on all of them at once, so its total change is
+                 * up to three times what any one edge intended. That is an
+                 * explicit diffusion step past its stability limit: it
+                 * overshoots, creates fresh over-steep edges on the far side,
+                 * and oscillates instead of converging. Observed with relax =
+                 * 0.5 and no divisor: an over-steep cone stalled at 30.09
+                 * degrees against a 30 degree limit and burned all 400 sweeps
+                 * every timestep, so the cap was reported hit on a problem
+                 * that was simply never going to converge.
+                 *
+                 * Dividing by the edge count bounds a cell's total movement by
+                 * relax times its worst excess, which is stable for any
+                 * relax <= 1, and keeps relax meaning what the docstring says
+                 * it means. Both cells divide by the same 3, so the transfer
+                 * stays symmetric and B1 conservation is untouched. */
+                double V = relax * (adiff - thresh) / inv_sum / 3.0;
+
+                /* [L-5]: the donor cannot give up what it may not lose. Both
+                 * cells identify the same donor -- the higher one -- and
+                 * compute the same cap, so the transfer stays symmetric. */
+                if (has_z_base) {
+                    const anuga_int donor = (diff > 0.0) ? k : nb;
+                    const double avail = (bed_cv[donor] - z_base[donor])
+                                       * areas[donor] / 3.0;
+                    if (V > avail) {
+                        V = (avail > 0.0) ? avail : 0.0;
+                    }
+                }
+
+                /* The higher cell gives, the lower receives. */
+                acc += (diff > 0.0) ? (-V / A_k) : (V / A_k);
+            }
+            dz[k] = acc;
+        }
+
+        sweeps = it + 1;
+        if (n_steep == 0) {
+            /* Nothing was over-steep, so nothing was written; stop before
+             * applying a sweep of zeros. */
+            sweeps = it;
+            break;
+        }
+
+        OMP_PARALLEL_LOOP
+        for (anuga_int k = 0; k < n; k++) {
+            const double d = dz[k];
+            if (d != 0.0) {
+                bed_cv[k] += d;
+                const anuga_int k3 = 3 * k;
+                bed_ev[k3 + 0] += d;
+                bed_ev[k3 + 1] += d;
+                bed_ev[k3 + 2] += d;
+            }
+        }
+    }
+
+    return sweeps;
+}
+
+
+// ============================================================================
+// Suspended sediment source terms  (Phase 3)
+// ============================================================================
+
+// Apply the sediment exchange term E_s - D_s of [G-3], and the resulting bed
+// change [G-4], for every registered sediment class.
+//
+// THIS IS A FRACTIONAL STEP. It is called ONCE PER TIMESTEP with the full dt,
+// after the hydrodynamic step, not inside the RK substep loop. So it updates
+// the STATE directly (m and z) rather than contributing to a tendency:
+//
+//     m_s  <-  m_s + dt (E_s - D_s)                       [G-3] source part
+//     z    <-  z   + dt (D - E)/(1 - lambda)              [G-4]
+//
+// The two use the SAME limited source, so the sediment volume leaving
+// suspension equals (1 - lambda) dz exactly and the budget closes by
+// construction, whatever the timestepping method.
+//
+// Stage is deliberately NOT adjusted here: holding w while z rises makes the
+// depth h = w - z fall by exactly dz, which is the quiescent-water behaviour
+// LM15 Example 2 requires (their free surface stays flat while the bed
+// aggrades). The pore space in the new bed is filled from the water column.
+//
+// Phase 3 is the FIXED-BED stage of spec 2.4: the bed does not evolve, there is
+// no bed -> flow feedback and no sediment -> momentum feedback. Deposited mass
+// simply leaves suspension.
+//
+// Deposition is [D-1]:      D_s = d*(Z) . c_s . v_s
+// with d* the near-bed to depth-averaged concentration ratio (1.0 = well
+// mixed). Erosion E_s is Phase 3b and is zero here.
+//
+// TWO LIMITERS, both from spec 4.5, and both applied to the SOURCE TERM rather
+// than by clamping the state -- clamping m would break the exact conservation
+// the transport scheme provides:
+//
+//   [L-1] positivity, mandatory:  F_s^net >= -m_s / dt
+//         deposition can never remove more sediment than is present.
+//   [L-2] concentration ceiling:  c_s <= c_max
+//         applied as a cap on how much a cell may GAIN this step.
+//
+// Called after the flux kernel has filled tracer_explicit_update and before the
+// time integration consumes it, so the source lands in the same dm/dt the
+// integrator already applies.
+void core_apply_sediment_source(struct domain *D, double timestep) {
+    const anuga_int n_classes = D->n_sediment_classes;
+    if (n_classes <= 0 || timestep <= 0.0) {
+        return;
+    }
+
+    const anuga_int n = D->number_of_elements;
+    const double c_max = D->sediment_c_max;
+    const double minimum_allowed_height = D->minimum_allowed_height;
+
+    const double gamma0 = D->sediment_gamma0;
+    const anuga_int erosion_mode = D->sediment_erosion_mode;
+    const double tau_crit = D->sediment_tau_crit;
+    const double K_e = D->sediment_K_e;
+    const double rho_w = D->sediment_rho_w;
+    const double K_p = D->sediment_K_partheniades;
+    const anuga_int dep_mode = D->sediment_deposition_mode;
+    const double tau_d = D->sediment_tau_d;
+    const anuga_int shear_closure = D->sediment_shear_closure;
+    const double h_eps = D->epsilon;
+    const double grav = D->g;
+
+    double * restrict stage_cv = D->stage_centroid_values;
+    double * restrict bed_cv = D->bed_centroid_values;
+    double * restrict xmom_cv = D->xmom_centroid_values;
+    double * restrict ymom_cv = D->ymom_centroid_values;
+    double * restrict friction_cv = D->friction_centroid_values;
+    double * restrict v_s = D->sediment_settling_velocity;
+    double * restrict d_star = D->sediment_d_star;
+    double * restrict diam = D->sediment_diameter;
+    double * restrict sedR = D->sediment_R;
+    double * restrict tau_c_star = D->sediment_tau_c_star;
+    double * restrict a_ref = D->sediment_reference_height;
+    double * restrict bed_ev_r = D->bed_edge_values;
+    double * restrict normals_r = D->normals;
+    double * restrict edgelengths_r = D->edgelengths;
+    double * restrict areas_r = D->areas;
+    const anuga_int d_star_mode = D->sediment_d_star_mode;
+    const double a_h_floor = D->sediment_a_h_floor;
+    const double c_pack = D->sediment_c_pack;
+    const anuga_int fric_mode = D->sediment_friction_mode;
+    const double n_ll = D->sediment_manning_ll;
+    const anuga_int wbed = D->sediment_wilson_bed;
+    const double wD = D->sediment_wilson_D;
+
+    // Hoisted for the same reason as in the update/backup/saxpy kernels: on a
+    // GPU build the loop below is an 'omp target' region and D is NOT mapped to
+    // the device, so a D->member load inside it reads a host address and the
+    // work silently does not happen. See HANDOVER.md 2.4.
+    double * restrict t_cons = D->tracer_conserved_values;
+    double * restrict ext_src = D->tracer_external_source;
+    double * restrict bed_cv_w = D->bed_centroid_values;
+    double * restrict bed_ev_w = D->bed_edge_values;
+    const double one_minus_lambda = 1.0 - D->sediment_porosity;
+    const anuga_int bed_evolves = D->sediment_bed_evolution;
+    /* [L-5]. Hoisted for the same device reason as the tracer pointers.
+     *
+     * The flag alone does not license the dereference: it and the pointer are
+     * set by separate lines of the Cython binding, and when one of them was
+     * missed the flag read as uninitialised garbage, tested true, and this
+     * kernel dereferenced a NULL base. Require both. */
+    double * restrict z_base = D->sediment_z_base;
+    const anuga_int has_z_base = (D->sediment_has_z_base && z_base != NULL);
+    double * restrict src_lim = D->sediment_source_limited;
+
+    OMP_PARALLEL_LOOP
+    for (anuga_int k = 0; k < n; k++) {
+        const double h = fmax(stage_cv[k] - bed_cv[k], 0.0);
+
+        // Dry cells carry no sediment: spec 9.4 sets c_s = 0 below the wet/dry
+        // threshold. Leave the advective tendency untouched and add nothing.
+        if (h <= minimum_allowed_height) {
+            continue;
+        }
+
+        const double inv_h = 1.0 / h;
+        const double m_max = c_max * h;
+        double dz_cell = 0.0;
+        double total_E = 0.0;   /* [L-5]: erosive demand on the bed */
+        double total_D = 0.0;   /* [L-5]: what deposition returns to it */
+
+        // Velocity by the ANUGA depth-limiting form [T-5], the same
+        // regularisation RDy26 A22-A23 adopt. Never a bare (uh)/h.
+        const double denom = h * h + h_eps * h_eps;
+        const double u = (denom > 0.0) ? (xmom_cv[k] * h / denom) : 0.0;
+        const double v = (denom > 0.0) ? (ymom_cv[k] * h / denom) : 0.0;
+        const double vel2 = u * u + v * v;
+
+        // Friction closure, spec 3.3. In EVERY mode f_c varies per cell per
+        // timestep -- through h in [T-6] for the Manning-based modes, and
+        // through the relative submergence h/D for wilson. Recomputed here
+        // rather than cached, which spec 3.3 calls the coupling most easily
+        // missed.
+        double f_c;
+        if (fric_mode == 2) {
+            // wilson [T-8]..[T-10]. W04's equations give X = (8/f_W04)^1/2
+            // with f_W04 the Darcy-Weisbach f; ours is f/8, so f_c = 1/X^2.
+            // See the note in sw_domain.h: taking W04's f_c literally as ours
+            // would make tau_b 8x too large.
+            //
+            // The relations assume the clasts are submerged. Below h = D the
+            // logarithms go to zero or negative and the power law leaves its
+            // calibration, so relative submergence is floored at 1.
+            double rel = h / wD;
+            if (!(rel > 1.0)) rel = 1.0;
+            double X;
+            if (wbed == 0) {
+                X = 8.46 * pow(rel, 0.1005);           /* sand,    [T-8]  */
+            } else if (wbed == 1) {
+                X = 5.75 * log10(rel) + 3.514;         /* gravel,  [T-9]  */
+            } else {
+                X = 5.62 * log10(rel) + 4.0;           /* boulder, [T-10] */
+            }
+            f_c = 1.0 / (X * X);
+        } else {
+            // [T-6] f_c = g n^2 h^(-1/3) == RDy26 A5, with n either the
+            // per-cell user field (constant mode) or the uniform Manning-
+            // Strickler value of [T-14] (larsen_lamb).
+            const double nman = (fric_mode == 1) ? n_ll : friction_cv[k];
+            f_c = grav * nman * nman / cbrt(h);
+        }
+
+        /* tau_b/rho under the selected closure, [T-1] or [T-7]. */
+        const double tbr = core_tau_b_over_rho(shear_closure, f_c, vel2, grav,
+                                               h, bed_ev_r, normals_r,
+                                               edgelengths_r, areas_r[k], k);
+
+        for (anuga_int s = 0; s < n_classes; s++) {
+            const anuga_int idx = s * n + k;
+
+            const double m = t_cons[idx];
+            const double c = m * inv_h;
+
+            // Deposition is computed from a NON-NEGATIVE concentration.
+            //
+            // m can go slightly negative through the ADVECTIVE tendency (the
+            // transport scheme guarantees positivity only under CFL, and the
+            // source is added to a tendency it does not control). Fed through
+            // unguarded, deposition = d* c v_s flips sign and starts ADDING
+            // sediment -- and [L-1] below compounds it, because -m/dt is a
+            // POSITIVE lower bound when m < 0, which forces the source
+            // positive. Together they created 957% of the initial mass in a
+            // deposition-only run. Both paths are guarded here.
+            const double m_pos = (m > 0.0) ? m : 0.0;
+            const double c_pos = m_pos * inv_h;
+
+            // [D-1] deposition. d* is either the constant (P14's d* = 1
+            // limiting case) or the Rouse ratio evaluated per cell.
+            double ds;
+            if (d_star_mode == 0) {
+                ds = d_star[s];
+            } else {
+                // [T-2] u* = |v| sqrt(f_c);  [S-2] Z = v_s / (kappa u*)
+                const double ustar = sqrt(f_c * vel2);
+                const double Z = (ustar > 0.0)
+                               ? v_s[s] / (0.41 * ustar)
+                               : ANUGA_ROUSE_Z_HI;   /* no shear: fully settled */
+                // a/h with the van Rijn-style floor a >= floor*h. The floor is
+                // standard practice and stays on by default, but it is exposed:
+                // it is the single largest divergence from anugaSed, which uses
+                // no floor and so an ~10x smaller a at h = 1 m, giving roughly
+                // 8x more deposition (spec 12, D4b). Set it to 0 to reach that
+                // regime; the fit now covers a/h down to 1e-3.
+                double a_h = a_ref[s] * inv_h;
+                if (a_h < a_h_floor) a_h = a_h_floor;
+                ds = core_rouse_d_star(Z, a_h);
+            }
+            // [L-4] NEAR-BED CONCENTRATION IS BOUNDED BY PACKING.
+            //
+            // [D-1] is D = c_b v_s with c_b = d* c, and nothing in the spec
+            // bounds c_b. It needs bounding. d* comes from the EQUILIBRIUM
+            // Rouse profile, which is not valid as shear vanishes: at rest
+            // u* -> 0, so Z -> infinity and d* -> its clamp (~250 at
+            // a/h = 0.01), making the deposition rate enormous. A lake at rest
+            // then deposits its entire suspended load in under a second,
+            // instead of over the physical h/v_s.
+            //
+            // c_b is a concentration and cannot exceed maximum packing, the
+            // same 0.65 that bounds E* in [E-1]. Capping c_b there keeps the
+            // still-water limit sane while leaving the well-mixed and
+            // moderate-Z regimes untouched, where d* c is far below packing.
+            //
+            // Added in PHYSICS_SPEC Draft 5 as [L-4]; it has no counterpart in
+            // P14, FG21, RDy26, DL09 or aSM16, being required by combining an
+            // equilibrium profile with a transient solver.
+            double deposition;
+            if (dep_mode == 1) {
+                /* [D-2] RDy26's threshold form. tau_d = 0 disables deposition
+                 * entirely -- the hook their passive benchmarks rely on. */
+                const double tau_b_d = rho_w * tbr;
+                deposition = (tau_d > 0.0 && tau_b_d < tau_d)
+                           ? v_s[s] * c_pos * (1.0 - tau_b_d / tau_d)
+                           : 0.0;
+            } else {
+                double c_bed = ds * c_pos;
+                if (c_bed > c_pack) c_bed = c_pack;
+                deposition = c_bed * v_s[s];
+            }
+
+            // [E-1]/[E-2] entrainment, non-cohesive (Shields) route.
+            //
+            //   tau* = f_c |v|^2 / (R g d)   [T-3] -- rho cancels
+            //   S    = tau*/tau_c* - 1
+            //   E*   = 0.65 gamma0 S / (1 + gamma0 S)   saturating
+            //
+            // Below threshold (S <= 0) there is no entrainment at all; this is
+            // a genuine threshold, not a smooth roll-off.
+            double erosion = 0.0;
+            if (erosion_mode == 2) {
+                /* [E-4] Partheniades. K_p is a MASS flux, so divide by the
+                 * class density to get the volume flux the rest of the source
+                 * term works in. rho_s = (R + 1) rho_w. */
+                const double tau_b = rho_w * tbr;
+                if (tau_crit > 0.0 && tau_b > tau_crit) {
+                    const double rho_s = (sedR[s] + 1.0) * rho_w;
+                    if (rho_s > 0.0) {
+                        erosion = (K_p * (tau_b - tau_crit) / tau_crit) / rho_s;
+                    }
+                }
+            } else if (erosion_mode == 1) {
+                /* [E-3] cohesive, Hanson & Simon. DIMENSIONAL excess shear:
+                 * tau_b = rho f_c |v|^2 [T-1], and E = K_e (tau_b - tau_c),
+                 * zero below threshold. Note this is per class only through
+                 * the loop -- tau_c and K_e are bed properties, not grain
+                 * properties, which is precisely the cohesive premise. */
+                const double tau_b = rho_w * tbr;
+                const double excess = tau_b - tau_crit;
+                if (excess > 0.0) {
+                    erosion = K_e * excess;
+                }
+            } else {
+                /* [E-1]/[E-2] non-cohesive, Shields route. */
+                const double Rgd = sedR[s] * grav * diam[s];
+                if (Rgd > 0.0 && tau_c_star[s] > 0.0) {
+                    const double tau_star = tbr / Rgd;
+                    const double S = tau_star / tau_c_star[s] - 1.0;
+                    if (S > 0.0) {
+                        const double gS = gamma0 * S;
+                        erosion = v_s[s] * (0.65 * gS / (1.0 + gS));
+                    }
+                }
+            }
+
+            // Net exchange of [G-3]. Deposition removes, erosion adds.
+            double source = erosion - deposition;
+
+            // [L-1] positivity. The most this term may remove over the step is
+            // exactly the sediment PRESENT, so the state can reach zero but
+            // never go below it. Applied to the SOURCE, not to m.
+            //
+            // m_pos, not m: with m < 0 the bound -m/dt is POSITIVE and would
+            // force the source to inject sediment. The limiter must only ever
+            // restrain removal, never mandate addition.
+            const double min_source = -m_pos / timestep;
+            if (source < min_source) {
+                source = min_source;
+            }
+
+            // [L-2] ceiling. Only ever restrains a GAIN, so it cannot fight
+            // [L-1] above: the two act on opposite signs of the source.
+            if (source > 0.0) {
+                const double max_source = (m_max - m) / timestep;
+                if (source > max_source) {
+                    source = (max_source > 0.0) ? max_source : 0.0;
+                }
+            }
+
+            // Held, not applied. [L-5] below limits the classes TOGETHER
+            // against the cell's erodible thickness, so no class may be
+            // applied until every class's demand on the bed is known.
+            //
+            // The external supply is deliberately NOT folded in here: it is
+            // not a bed exchange, so it must not be scaled by a bed-material
+            // limiter, and it is added in the apply loop instead.
+            src_lim[idx] = source;
+            if (source > 0.0) total_E += source;
+            else              total_D += source;
+        }
+
+        // ---- [L-5] non-erodible base -----------------------------------
+        //
+        // The bed may be lowered to sediment_z_base and no further. Erosion
+        // is a bed-material budget, so the limit belongs on the SOURCE, like
+        // [L-1] and [L-2], and not on z: clamping z after the fact would
+        // leave sediment in the water column that no longer came from
+        // anywhere, which is exactly how [L-1]'s sign bug created 957% of
+        // the initial mass.
+        //
+        // Only the EROSIVE part is scaled. Deposition is not restrained by a
+        // shortage of bed material -- it is what supplies it -- and scaling
+        // it down would suppress the very process that reopens the cell.
+        //
+        // The scale is shared and proportional, so the answer does not depend
+        // on the order the classes were registered. There is no bed
+        // stratigraphy in this model: the bed is not tracked per class, so
+        // no class has a better claim on the last millimetre than another,
+        // and proportional is the only choice that does not invent one.
+        double scale = 1.0;
+        if (has_z_base && bed_evolves && one_minus_lambda > 0.0
+                && total_E > 0.0) {
+            const double avail = bed_cv[k] - z_base[k];
+            const double thickness = (avail > 0.0) ? avail : 0.0;
+            // The largest net removal from the bed this step, as a source.
+            const double S_max = thickness * one_minus_lambda / timestep;
+            if (total_E + total_D > S_max) {
+                scale = (S_max - total_D) / total_E;
+                if (scale < 0.0) scale = 0.0;
+                if (scale > 1.0) scale = 1.0;
+            }
+        }
+
+        // ---- apply ------------------------------------------------------
+        for (anuga_int s = 0; s < n_classes; s++) {
+            const anuga_int idx = s * n + k;
+            double source = src_lim[idx];
+            if (source > 0.0) {
+                source *= scale;
+            }
+
+            // [G-4]. source = E - D, so dz = -source dt/(1-lambda). Taken
+            // from the bed exchange ALONE, before the external supply is
+            // added: sediment introduced from outside the model does not
+            // come out of the bed, so it must not move it.
+            if (bed_evolves && one_minus_lambda > 0.0) {
+                dz_cell += -(timestep * source) / one_minus_lambda;
+            }
+
+            // [G-3] S_ms: external supply, added AFTER the limiters. They
+            // bound bed exchange by what bed and water column can supply;
+            // an external source is neither, and clipping it would also make
+            // a manufactured solution impossible to impose exactly.
+            if (ext_src != NULL) {
+                source += ext_src[idx];
+            }
+
+            // Fractional step: update the state directly with the full dt.
+            t_cons[idx] += timestep * source;
+        }
+        // Raise the bed by dz. The DE algorithms use DISCONTINUOUS elevation,
+        // so edge values are not re-derived from the centroid and must be
+        // shifted too; shifting all three by the same dz preserves the
+        // within-cell bed slope, which is what keeps a flat bed flat. Vertex
+        // values need no action: extrapolation recomputes them from the edges
+        // (bed_vv = bed_ev1 + bed_ev2 - bed_ev0).
+        //
+        // Stage is left alone, so h = w - z falls by exactly dz -- the
+        // quiescent-water behaviour of LM15 Example 2.
+        if (dz_cell != 0.0) {
+            bed_cv_w[k] += dz_cell;
+            const anuga_int k3 = 3 * k;
+            bed_ev_w[k3 + 0] += dz_cell;
+            bed_ev_w[k3 + 1] += dz_cell;
+            bed_ev_w[k3 + 2] += dz_cell;
+        }
+    }
+}
+
+// ============================================================================
 // Update conserved quantities
 // ============================================================================
 

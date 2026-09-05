@@ -794,6 +794,18 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
             tr_eu[0:ns*n], tr_qv[0:ns*n], tr_bk[0:ns*n], \
             tr_bf[0:ns*n])
 
+        // The external source [G-3] is OPTIONAL -- the array is allocated only
+        // when set_tracer_source is first called -- so it is mapped on its own
+        // rather than with the block above, which is always present. It is read
+        // by the source kernel, so leaving it unmapped is an unmapped host
+        // address on the device: the source then contributes exactly nothing
+        // and the answer is silently short of it. (set_tracer_source discards
+        // the interface when it allocates, so the rebuild passes through here.)
+        if (GD->D.tracer_external_source != NULL) {
+            double *tr_es = GD->D.tracer_external_source;
+            #pragma omp target enter data map(to: tr_es[0:ns*n])
+        }
+
         // Boundary values are sized by boundary_length, which is zero on a
         // domain with no boundary edges -- mapping a zero-length array is not
         // meaningful, so follow the same nb > 0 guard the other bv arrays use.
@@ -807,6 +819,38 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
         // HANDOVER.md 2.1. number_of_tracers cannot change over the lifetime
         // of a mapped domain (add_tracer tears the GPU interface down), so the
         // unmap path re-tests the same condition instead.
+    }
+
+    // Map the per-class sediment parameter arrays (Phase 3). Tiny -- one
+    // double per class -- but they are read inside a target region, so they
+    // must be present on the device like everything else.
+    if (GD->D.n_sediment_classes > 0) {
+        anuga_int ncl = GD->D.n_sediment_classes;
+        double *sed_vs = GD->D.sediment_settling_velocity;
+        double *sed_ds = GD->D.sediment_d_star;
+        double *sed_dm = GD->D.sediment_diameter;
+        double *sed_rr = GD->D.sediment_R;
+        double *sed_tc = GD->D.sediment_tau_c_star;
+        double *sed_ar = GD->D.sediment_reference_height;
+        double *sed_qx = GD->D.sediment_qbx;
+        double *sed_qy = GD->D.sediment_qby;
+        #pragma omp target enter data map(to: sed_vs[0:ncl], sed_ds[0:ncl], \
+            sed_dm[0:ncl], sed_rr[0:ncl], sed_tc[0:ncl], sed_ar[0:ncl]) \
+            map(alloc: sed_qx[0:n], sed_qy[0:n])
+
+        // [L-5]. The scratch and the exhaustion snapshot are pure device
+        // workspace, so alloc; the base itself is input and must be copied.
+        // Mapped inside the same n_sediment_classes guard as everything
+        // above, which is what allocates them.
+        double *sed_sl = GD->D.sediment_source_limited;
+        anuga_int *sed_ex = GD->D.sediment_bed_exhausted;
+        double *sed_rdz = GD->D.sediment_repose_dz;
+        #pragma omp target enter data map(alloc: sed_sl[0:ncl*n], \
+            sed_ex[0:n], sed_rdz[0:n])
+        if (GD->D.sediment_has_z_base) {
+            double *sed_zb = GD->D.sediment_z_base;
+            #pragma omp target enter data map(to: sed_zb[0:n])
+        }
     }
 
     // Map halo exchange arrays if we have neighbors
@@ -1215,9 +1259,40 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
             tr_cv[0:ns*n], tr_ev[0:ns*3*n], \
             tr_eu[0:ns*n], tr_qv[0:ns*n], tr_bk[0:ns*n], \
             tr_bf[0:ns*n])
+        if (GD->D.tracer_external_source != NULL) {
+            double *tr_es = GD->D.tracer_external_source;
+            #pragma omp target exit data map(delete: tr_es[0:ns*n])
+        }
         if (nb > 0) {
             double *tr_bv = GD->D.tracer_boundary_values;
             #pragma omp target exit data map(delete: tr_bv[0:ns*nb])
+        }
+    }
+
+    // Unmap the sediment parameter arrays. Same condition as the map path.
+    if (GD->D.n_sediment_classes > 0) {
+        anuga_int ncl = GD->D.n_sediment_classes;
+        double *sed_vs = GD->D.sediment_settling_velocity;
+        double *sed_ds = GD->D.sediment_d_star;
+        double *sed_dm = GD->D.sediment_diameter;
+        double *sed_rr = GD->D.sediment_R;
+        double *sed_tc = GD->D.sediment_tau_c_star;
+        double *sed_ar = GD->D.sediment_reference_height;
+        double *sed_qx = GD->D.sediment_qbx;
+        double *sed_qy = GD->D.sediment_qby;
+        #pragma omp target exit data map(delete: sed_vs[0:ncl], sed_ds[0:ncl], \
+            sed_dm[0:ncl], sed_rr[0:ncl], sed_tc[0:ncl], sed_ar[0:ncl], \
+            sed_qx[0:n], sed_qy[0:n])
+
+        // [L-5]. Mirrors the enter-data above, on the same guard.
+        double *sed_sl = GD->D.sediment_source_limited;
+        anuga_int *sed_ex = GD->D.sediment_bed_exhausted;
+        double *sed_rdz = GD->D.sediment_repose_dz;
+        #pragma omp target exit data map(delete: sed_sl[0:ncl*n], sed_ex[0:n], \
+            sed_rdz[0:n])
+        if (GD->D.sediment_has_z_base) {
+            double *sed_zb = GD->D.sediment_z_base;
+            #pragma omp target exit data map(delete: sed_zb[0:n])
         }
     }
 
@@ -1290,6 +1365,17 @@ void gpu_domain_sync_from_device(struct gpu_domain *GD) {
         double *tr_cv = GD->D.tracer_centroid_values;
         double *tr_qv = GD->D.tracer_conserved_values;
         #pragma omp target update from(tr_cv[0:ns*n], tr_qv[0:ns*n])
+    }
+
+    // Bed elevation, once sediment can move it. Normally z is constant and
+    // never needs syncing back, which is why it is not in the list above; with
+    // the Exner update of [G-4] the device owns it and the host copy would
+    // otherwise stay at its initial value for ever. Centroid AND edge, because
+    // the DE algorithms use discontinuous elevation and the kernel shifts both.
+    if (GD->D.n_sediment_classes > 0) {
+        double *bed_cv_s = GD->D.bed_centroid_values;
+        double *bed_ev_s = GD->D.bed_edge_values;
+        #pragma omp target update from(bed_cv_s[0:n], bed_ev_s[0:3*n])
     }
 }
 
