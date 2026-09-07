@@ -7,7 +7,7 @@ Sediment physics: choosing the laws
 
 .. note::
 
-   **You can skip this page to begin with.** ``add_sediment_class`` picks a
+   **You can skip this page to begin with.** ``Sediment_transport_operator`` picks a
    working set of laws for a sand bed, and :ref:`sediment` shows how to run a
    model with them. This appendix is for when you need to say *which* physics,
    rather than accept the defaults.
@@ -243,3 +243,86 @@ constants if you have a calibration.
 Bedload only redistributes: it moves sediment between cells and conserves the
 total exactly. The flux across each edge is centred, which is what makes it
 antisymmetric and therefore conservative; see ``test_sediment_bedload.py``.
+
+.. _sediment_references:
+
+References
+----------
+
+The laws above are standard sediment-transport formulations; these are the
+sources for each.
+
+**Settling velocity**
+
+* Ferguson, R. I. and Church, M. (2004). A simple universal equation for grain
+  settling velocity. *Journal of Sedimentary Research*, 74(6), 933-937.
+  The ``[S-1]`` settling velocity, chosen over the Dietrich fit because it is
+  smooth across the Stokes/turbulent transition and branch-free.
+* Dietrich, W. E. (1982). Settling velocity of natural particles.
+  *Water Resources Research*, 18(6), 1615-1626.
+  The polynomial fit the above is preferred to.
+
+**Erosion**
+
+* Shields, A. (1936). *Anwendung der Ähnlichkeitsmechanik und der
+  Turbulenzforschung auf die Geschiebebewegung.* Mitteilungen der
+  Preussischen Versuchsanstalt für Wasserbau und Schiffbau, Berlin.
+  The critical shear stress ``tau_c_star`` is a Shields parameter.
+* Smith, J. D. and McLean, S. R. (1977). Spatially averaged flow over a wavy
+  surface. *Journal of Geophysical Research*, 82(12), 1735-1746.
+  The near-bed reference concentration in the ``[E-1]`` non-cohesive route.
+* Partheniades, E. (1965). Erosion and deposition of cohesive soils.
+  *Journal of the Hydraulics Division, ASCE*, 91(1), 105-139.
+  The ``[E-4]`` cohesive erosion route.
+* Hanson, G. J. and Simon, A. (2001). Erodibility of cohesive streambeds in
+  the loess area of the midwestern USA. *Hydrological Processes*, 15(1),
+  23-38. The ``[E-3]``/``[E-5]`` cohesive route and its excess-stress form.
+
+**Suspension and deposition**
+
+* Rouse, H. (1937). Modern conceptions of the mechanics of fluid turbulence.
+  *Transactions of the ASCE*, 102, 463-505.
+  The ``[S-4]`` Rouse profile behind the ``d*`` near-bed ratio.
+* van Rijn, L. C. (1984). Sediment transport, part II: suspended load
+  transport. *Journal of Hydraulic Engineering*, 110(11), 1613-1641.
+  The reference height ``a`` and the ``a >= 0.01 h`` floor.
+
+**Bedload and bed evolution**
+
+* Exner, F. M. (1925). Über die Wechselwirkung zwischen Wasser und Geschiebe
+  in Flüssen. *Sitzungsberichte der Akademie der Wissenschaften*, Vienna.
+  The ``[G-4]`` bed evolution equation.
+* Wong, M. and Parker, G. (2006). Reanalysis and correction of bed-load
+  relation of Meyer-Peter and Müller using their own database. *Journal of
+  Hydraulic Engineering*, 132(11), 1159-1168.
+  The default ``'wong_parker_eq24'`` bedload formula.
+* Engelund, F. and Hansen, E. (1967). *A Monograph on Sediment Transport in
+  Alluvial Streams.* Teknisk Forlag, Copenhagen.
+  The ``[K-5]`` total-load option.
+
+**Bed roughness closures**
+
+* Larsen, I. J. and Lamb, M. P. (2016). Progressive incision of the Channeled
+  Scablands by outburst floods. *Nature*, 538, 229-232.
+  The ``'larsen_lamb'`` friction closure and the Moses Coulee ``sigma_br``
+  value quoted above.
+* Wilson, L., Ghatan, G. J., Head, J. W. and Mitchell, K. L. (2004). Mars
+  outflow channels: a reappraisal of the estimation of water flow velocities
+  from water depths, regional slopes, and channel floor properties. *Journal
+  of Geophysical Research: Planets*, 109, E09003.
+  The ``'wilson'`` friction closure. Note the caveat above: these are
+  Mars outflow channel closures, not general-purpose flood closures.
+
+.. note::
+
+   **Still to be filled in.** The following short codes appear in the text and
+   in the source comments and come from the internal sediment specification,
+   which is not distributed with ANUGA. They have deliberately not been
+   guessed at:
+
+   ``FG21``, ``RDy26``, ``LM15``, ``DL09``, ``P13``, ``P14``, ``FP64``,
+   ``A22``, ``A23``.
+
+   ``RDy26`` refers to the RDycore configuration the benchmarks are compared
+   against; the rest are literature the specification cites. Replace this note
+   with the full citations when they are to hand.

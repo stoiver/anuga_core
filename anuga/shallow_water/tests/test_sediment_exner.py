@@ -28,6 +28,7 @@ import numpy as np
 import pytest
 
 from anuga import Reflective_boundary, rectangular_cross_domain
+from anuga import Sediment_transport_operator
 
 LAMBDA = 0.28
 D_G = 0.01
@@ -51,7 +52,7 @@ def build():
     d.sediment_porosity = LAMBDA
     x, y = d.centroid_coordinates[:, 0], d.centroid_coordinates[:, 1]
     c0 = 0.7 * np.exp(-5.0 * (x - 0.9) ** 2 - 50.0 * (y - 0.5) ** 2)
-    d.add_sediment_class('sand', diameter=D_G, rho_s=RHO_S, rho_w=RHO_W,
+    Sediment_transport_operator(d, name='sand', diameter=D_G, rho_s=RHO_S, rho_w=RHO_W,
                          tau_c_star=0.0, initial_concentration=c0)
     return d, c0
 

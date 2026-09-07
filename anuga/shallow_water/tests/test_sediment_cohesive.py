@@ -26,6 +26,7 @@ import numpy as np
 import pytest
 
 from anuga import Reflective_boundary, rectangular_cross_domain
+from anuga import Sediment_transport_operator
 
 LEN = 200.0
 TAU_CRIT = 0.088          # Pa, anugaSed's default
@@ -107,7 +108,7 @@ def test_both_clamp_to_zero_below_the_threshold():
 def test_below_the_critical_shear_nothing_erodes():
     d = channel()
     d.set_bed_material('cohesive', tau_crit=1e6)      # unreachable
-    d.add_sediment_class('silt', diameter=6.5e-5, initial_concentration=0.0)
+    Sediment_transport_operator(d, name='silt', diameter=6.5e-5, initial_concentration=0.0)
     d.evolve_to_end(finaltime=20.0)
     assert float(np.abs(d.get_tracer('silt')).max()) == 0.0
 
@@ -115,7 +116,7 @@ def test_below_the_critical_shear_nothing_erodes():
 def test_above_it_the_bed_erodes():
     d = channel()
     d.set_bed_material('cohesive', tau_crit=TAU_CRIT)
-    d.add_sediment_class('silt', diameter=6.5e-5, initial_concentration=0.0)
+    Sediment_transport_operator(d, name='silt', diameter=6.5e-5, initial_concentration=0.0)
     d.evolve_to_end(finaltime=20.0)
     assert d.get_tracer('silt').max() > 0.0
 
@@ -125,11 +126,11 @@ def test_the_two_routes_give_materially_different_answers():
     tuning error, so the two had better not agree."""
     coh = channel()
     coh.set_bed_material('cohesive', tau_crit=TAU_CRIT)
-    coh.add_sediment_class('silt', diameter=6.5e-5, initial_concentration=0.0)
+    Sediment_transport_operator(coh, name='silt', diameter=6.5e-5, initial_concentration=0.0)
     coh.evolve_to_end(finaltime=20.0)
 
     non = channel()
-    non.add_sediment_class('silt', diameter=6.5e-5, tau_c_star=0.04,
+    Sediment_transport_operator(non, name='silt', diameter=6.5e-5, tau_c_star=0.04,
                            initial_concentration=0.0)
     non.evolve_to_end(finaltime=20.0)
 

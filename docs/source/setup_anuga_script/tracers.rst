@@ -10,9 +10,9 @@ salinity, a dye release, a pollutant, a temperature proxy. It is *passive* —
 it is transported by the flow but does not affect it, so adding one never
 changes the hydrodynamics.
 
-Tracers are the foundation the suspended sediment classes are built on: a
-sediment class **is** a tracer with settling parameters attached, so everything
-on this page applies to sediment too.
+Tracers are the foundation suspended sediment is built on: a sediment grain
+size **is** a tracer with settling parameters attached, so everything on this
+page applies to sediment too. See :ref:`sediment`.
 
 
 The shortest useful program
@@ -104,9 +104,10 @@ Registering and setting
    domain.get_tracer('dye')                       # the concentration, per cell
    domain.get_tracer_names()                      # in registration order
 
-Order matters. A tracer's slot is fixed at registration, and a sediment class
+Order matters. A tracer's slot is fixed at registration, and a sediment grain
+size
 occupies the tracer slot of the same index, so do not interleave
-:meth:`add_tracer` and ``add_sediment_class`` if you rely on that
+:meth:`add_tracer` and ``Sediment_transport_operator`` if you rely on that
 correspondence.
 
 A tracer may not be named after a quantity. Both are written to the sww as

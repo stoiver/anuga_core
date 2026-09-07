@@ -30,6 +30,7 @@ sp = pytest.importorskip('sympy')
 
 import anuga
 from anuga import rectangular_cross_domain
+from anuga import Sediment_transport_operator
 from anuga.abstract_2d_finite_volumes.generic_boundary_conditions import Boundary
 
 Hs, Ts, Us, Vs, Zs, Cs = 0.005, 20.0, 0.025, 0.025, 0.0025, 0.5
@@ -166,9 +167,14 @@ def run(nxy, dt=None):
     names = []
     for i, a in enumerate(ALPHAS):
         nm = 'c%d' % i
-        d.add_sediment_class(nm, diameter=1.0e-4, tau_c_star=0.0,
-                             auto_operator=False,
-                             initial_concentration=c_ex[a](x, y, 0.0))
+        # Registered WITHOUT building the operator: fractional-step operators
+        # run in registration order, and the source has to be applied before
+        # the sediment operator consumes it, so the operator is created below
+        # -- after MMS_source_operator. Sediment_transport_operator() would
+        # otherwise put itself first.
+        d._register_sediment_fraction(
+            nm, diameter=1.0e-4, tau_c_star=0.0,
+            initial_concentration=c_ex[a](x, y, 0.0))
         names.append(nm)
     vs = d.sediment_settling_velocity[0]
 
@@ -178,8 +184,8 @@ def run(nxy, dt=None):
     # them, and operators run in registration order.
     MMS_source_operator(d, [(nm, make_S_ms(a, vs))
                             for nm, a in zip(names, ALPHAS)])
-    from anuga.operators.sediment_operator import Sediment_operator
-    Sediment_operator(d)
+    # No grain size argument: it picks up the ones registered above.
+    Sediment_transport_operator(d)
 
     d.evolve_to_end(finaltime=STOP)
 
@@ -234,9 +240,14 @@ def run(nxy, dt=None):
     names = []
     for i, a in enumerate(ALPHAS):
         nm = 'c%d' % i
-        d.add_sediment_class(nm, diameter=1.0e-4, tau_c_star=0.0,
-                             auto_operator=False,
-                             initial_concentration=c_ex[a](x, y, 0.0))
+        # Registered WITHOUT building the operator: fractional-step operators
+        # run in registration order, and the source has to be applied before
+        # the sediment operator consumes it, so the operator is created below
+        # -- after MMS_source_operator. Sediment_transport_operator() would
+        # otherwise put itself first.
+        d._register_sediment_fraction(
+            nm, diameter=1.0e-4, tau_c_star=0.0,
+            initial_concentration=c_ex[a](x, y, 0.0))
         names.append(nm)
     vs = d.sediment_settling_velocity[0]
 
@@ -246,8 +257,8 @@ def run(nxy, dt=None):
     # them, and operators run in registration order.
     MMS_source_operator(d, [(nm, make_S_ms(a, vs))
                             for nm, a in zip(names, ALPHAS)])
-    from anuga.operators.sediment_operator import Sediment_operator
-    Sediment_operator(d)
+    # No grain size argument: it picks up the ones registered above.
+    Sediment_transport_operator(d)
 
     d.evolve_to_end(finaltime=STOP)
 

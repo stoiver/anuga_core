@@ -13,6 +13,7 @@ import numpy as np
 import pytest
 
 from anuga import Reflective_boundary, rectangular_cross_domain
+from anuga import Sediment_transport_operator
 
 LEN = 500.0
 DEPTH, DIAM = 1.0, 1.0e-4
@@ -89,7 +90,7 @@ def test_deposition_follows_the_analytic_decay():
     constant, which is what the analytic solution assumes."""
     d = still(depth=DEPTH, dt=1.0)
     d.sediment_bed_evolution = False
-    d.add_sediment_class('sand', diameter=DIAM, initial_concentration=0.05)
+    Sediment_transport_operator(d, name='sand', diameter=DIAM, initial_concentration=0.05)
     v_s = d.sediment_settling_velocity[0]
     d.evolve_to_end(finaltime=60.0)
     exact = 0.05 * np.exp(-v_s * 60.0 / DEPTH)
@@ -101,7 +102,7 @@ def test_the_source_integration_is_first_order_in_dt():
     for dt in (4.0, 1.0):
         d = still(depth=DEPTH, dt=dt)
         d.sediment_bed_evolution = False
-        d.add_sediment_class('sand', diameter=DIAM, initial_concentration=0.05)
+        Sediment_transport_operator(d, name='sand', diameter=DIAM, initial_concentration=0.05)
         v_s = d.sediment_settling_velocity[0]
         d.evolve_to_end(finaltime=60.0)
         exact = 0.05 * np.exp(-v_s * 60.0 / DEPTH)
@@ -117,7 +118,7 @@ def test_d_star_zero_disables_deposition_entirely():
     base.evolve_to_end(finaltime=20.0)
 
     zero = still(depth=DEPTH, dt=1.0)
-    zero.add_sediment_class('zero', diameter=1.0e-4, d_star=0.0,
+    Sediment_transport_operator(zero, name='zero', diameter=1.0e-4, d_star=0.0,
                             initial_concentration=0.05)
     zero.evolve_to_end(finaltime=20.0)
 
@@ -133,7 +134,7 @@ def test_an_aggressive_settler_never_drives_mass_negative():
     negative -- and a negative m flips deposition's sign and starts creating
     sediment."""
     d = still(depth=DEPTH, dt=1.0)
-    d.add_sediment_class('fast', diameter=5.0e-3, initial_concentration=0.05)
+    Sediment_transport_operator(d, name='fast', diameter=5.0e-3, initial_concentration=0.05)
     d.evolve_to_end(finaltime=30.0)
     assert d.tracer_conserved_values[0].min() >= 0.0
     assert d.get_tracer('fast').max() < 1e-6, 'it should deposit essentially all'
@@ -142,24 +143,45 @@ def test_an_aggressive_settler_never_drives_mass_negative():
 def test_concentration_stays_under_c_max():
     d = still(depth=DEPTH, dt=1.0)
     d.sediment_c_max = 0.10
-    d.add_sediment_class('capped', diameter=1.0e-4, initial_concentration=0.05)
+    Sediment_transport_operator(d, name='capped', diameter=1.0e-4, initial_concentration=0.05)
     d.evolve_to_end(finaltime=10.0)
     assert d.get_tracer('capped').max() <= 0.10 + 1e-12
 
 
 # ---------------------------------------------------------------- API
 
-def test_a_second_class_registers_at_the_next_index():
+def test_a_second_grain_size_registers_at_the_next_index():
+    """The constructor returns the OPERATOR now, so check the order directly."""
     d = still()
-    assert d.add_sediment_class('a', diameter=1e-4) == 0
-    assert d.add_sediment_class('b', diameter=5e-4) == 1
+    Sediment_transport_operator(d, name='a', diameter=1e-4)
+    Sediment_transport_operator(d, name='b', diameter=5e-4)
+
+    assert d.get_sediment_names() == ['a', 'b'], 'registration order lost'
+    assert d.get_tracer_index('a') == 0
+    assert d.get_tracer_index('b') == 1
     assert (d.sediment_settling_velocity[1]
-            > d.sediment_settling_velocity[0]), 'per-class v_s must differ'
+            > d.sediment_settling_velocity[0]), 'per-grain-size v_s must differ'
+
+
+def test_a_second_call_extends_the_same_operator():
+    """One fractional step, however many grain sizes.
+
+    Two operators in the list would apply the bed exchange twice per timestep.
+    """
+    d = still()
+    first = Sediment_transport_operator(d, name='a', diameter=1e-4)
+    second = Sediment_transport_operator(d, name='b', diameter=5e-4)
+
+    assert first is second, 'a second call built a separate operator'
+    n = sum(isinstance(op, Sediment_transport_operator)
+            for op in d.fractional_step_operators)
+    assert n == 1, 'the domain has %d sediment operators, expected 1' % n
+    assert d.n_sediment_classes == 2
 
 
 def test_a_non_positive_diameter_is_rejected():
     with pytest.raises(ValueError):
-        still().add_sediment_class('c', diameter=0.0)
+        Sediment_transport_operator(still(), name='c', diameter=0.0)
 
 
 def test_mixing_add_tracer_and_add_sediment_class_is_rejected():
@@ -168,14 +190,14 @@ def test_mixing_add_tracer_and_add_sediment_class_is_rejected():
     d = still()
     d.add_tracer('plain')
     with pytest.raises(ValueError):
-        d.add_sediment_class('s', diameter=1e-4)
+        Sediment_transport_operator(d, name='s', diameter=1e-4)
 
 
 # ---------------------------------------------------------------- entrainment
 
 def test_no_entrainment_below_the_critical_shields_stress():
     d = still(depth=DEPTH, dt=1.0)
-    d.add_sediment_class('sand', diameter=DIAM, tau_c_star=0.04,
+    Sediment_transport_operator(d, name='sand', diameter=DIAM, tau_c_star=0.04,
                          initial_concentration=0.0)
     d.evolve_to_end(finaltime=20.0)
     assert float(np.abs(d.get_tracer('sand')).max()) == 0.0
@@ -183,7 +205,7 @@ def test_no_entrainment_below_the_critical_shields_stress():
 
 def test_a_flowing_channel_entrains_from_a_clean_bed():
     d = channel()
-    d.add_sediment_class('sand', diameter=DIAM, tau_c_star=0.04,
+    Sediment_transport_operator(d, name='sand', diameter=DIAM, tau_c_star=0.04,
                          initial_concentration=0.0)
     d.evolve_to_end(finaltime=60.0)
     assert d.get_tracer('sand').max() > 0.0
@@ -191,7 +213,7 @@ def test_a_flowing_channel_entrains_from_a_clean_bed():
 
 def test_tau_c_star_zero_disables_entrainment():
     d = channel()
-    d.add_sediment_class('sand', diameter=DIAM, tau_c_star=0.0,
+    Sediment_transport_operator(d, name='sand', diameter=DIAM, tau_c_star=0.0,
                          initial_concentration=0.0)
     d.evolve_to_end(finaltime=60.0)
     assert float(np.abs(d.get_tracer('sand')).max()) == 0.0
@@ -203,7 +225,7 @@ def test_violent_flow_stays_bounded_near_c_max():
     cell slightly over c_max. The tolerance admits that; what it must not do is
     run away, which the longer run checks."""
     d = channel(depth=3.0, slope=0.05, n_manning=0.05)
-    d.add_sediment_class('sand', diameter=DIAM, tau_c_star=0.04,
+    Sediment_transport_operator(d, name='sand', diameter=DIAM, tau_c_star=0.04,
                          initial_concentration=0.0)
     d.evolve_to_end(finaltime=60.0)
     c = d.get_tracer('sand')
@@ -220,7 +242,7 @@ def test_violent_flow_stays_bounded_near_c_max():
 
 def test_deposition_only_never_creates_mass():
     d = tilted()
-    d.add_sediment_class('s', diameter=1e-4, tau_c_star=0.0,
+    Sediment_transport_operator(d, name='s', diameter=1e-4, tau_c_star=0.0,
                          initial_concentration=0.02)
     m0 = float((d.tracer_conserved_values[0] * d.areas).sum())
     d.evolve_to_end(finaltime=15.0)
@@ -235,7 +257,7 @@ def test_a_near_still_start_does_not_deposit_everything_at_once():
     against a physical timescale h/v_s of about 125 s. The packing-limited
     prediction is about 26%."""
     d = tilted()
-    d.add_sediment_class('s', diameter=1e-4, tau_c_star=0.0,
+    Sediment_transport_operator(d, name='s', diameter=1e-4, tau_c_star=0.0,
                          initial_concentration=0.02)
     m0 = float((d.tracer_conserved_values[0] * d.areas).sum())
     d.evolve_to_end(finaltime=1.0)
@@ -248,7 +270,7 @@ def test_c_pack_is_exposed_and_binds():
     for c_pack in (0.65, 0.05):
         d = tilted()
         d.sediment_c_pack = c_pack
-        d.add_sediment_class('s', diameter=1e-4, tau_c_star=0.0,
+        Sediment_transport_operator(d, name='s', diameter=1e-4, tau_c_star=0.0,
                              initial_concentration=0.02)
         m0 = float((d.tracer_conserved_values[0] * d.areas).sum())
         d.evolve_to_end(finaltime=1.0)

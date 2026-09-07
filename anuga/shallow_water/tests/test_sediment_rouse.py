@@ -17,6 +17,7 @@ import pytest
 from scipy.integrate import quad
 
 import anuga
+from anuga import Sediment_transport_operator
 from anuga import Reflective_boundary, rectangular_cross_domain
 
 LEN = 500.0
@@ -151,7 +152,7 @@ def _lake(d_star_mode=0, dt=1.0):
 
 def test_constant_mode_keeps_the_well_mixed_semantics():
     d = _lake(d_star_mode=0)
-    d.add_sediment_class('s', diameter=1e-4, d_star=1.0,
+    Sediment_transport_operator(d, name='s', diameter=1e-4, d_star=1.0,
                          initial_concentration=0.02)
     d.evolve_to_end(finaltime=30.0)
     assert np.isfinite(d.get_tracer('s')).all()
@@ -162,12 +163,12 @@ def test_rouse_deposits_at_least_as_fast_as_the_well_mixed_limit():
     slower than the d* = 1 case. Direction, not magnitude -- the magnitude is
     what the fit tests above cover."""
     const = _lake(d_star_mode=0)
-    const.add_sediment_class('s', diameter=1e-4, d_star=1.0,
+    Sediment_transport_operator(const, name='s', diameter=1e-4, d_star=1.0,
                              initial_concentration=0.02)
     const.evolve_to_end(finaltime=30.0)
 
     rouse = _lake(d_star_mode=1)
-    rouse.add_sediment_class('s', diameter=1e-4, initial_concentration=0.02)
+    Sediment_transport_operator(rouse, name='s', diameter=1e-4, initial_concentration=0.02)
     rouse.evolve_to_end(finaltime=30.0)
 
     assert (rouse.get_tracer('s').mean()

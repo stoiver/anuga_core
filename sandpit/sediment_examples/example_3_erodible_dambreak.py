@@ -15,6 +15,7 @@ Demonstrates
 """
 import numpy as np
 import anuga
+from anuga import Sediment_transport_operator
 
 LEN_X, LEN_Y = 400.0, 100.0
 DAM_X = 150.0
@@ -45,8 +46,8 @@ domain.set_deposition('d_star', near_bed='rouse')  # [S-4] rather than well-mixe
 domain.set_sediment_friction('constant')           # ordinary flood work
 domain.set_bedload('wong_parker_eq24')             # [K-1] and [G-5]
 
-domain.add_sediment_class('fine_sand', diameter=1.5e-4, initial_concentration=0.0)
-domain.add_sediment_class('coarse_sand', diameter=8.0e-4, initial_concentration=0.0)
+Sediment_transport_operator(domain, name='fine_sand', diameter=1.5e-4, initial_concentration=0.0)
+Sediment_transport_operator(domain, name='coarse_sand', diameter=8.0e-4, initial_concentration=0.0)
 
 # Mode 2 is the unified path. Whether it offloads to a device is a property
 # of the build, not of this call: a build without offload runs the same

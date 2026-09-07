@@ -25,6 +25,7 @@ exists to size the gap, not to claim one:
 """
 import numpy as np
 import anuga
+from anuga import Sediment_transport_operator
 from anuga import rectangular_cross, Domain, Dirichlet_boundary, Reflective_boundary
 
 LENGTH = WIDTH = 5.0
@@ -74,7 +75,7 @@ b.sediment_porosity = 0.3
 b.set_bed_material('cohesive', tau_crit=TAU_CRIT)
 b.set_shear_closure('depth_slope')
 b.sediment_d_star_mode = 1                      # Rouse, as their fit approximates
-b.add_sediment_class('sand', diameter=D50, rho_s=2650.0, rho_w=1000.0,
+Sediment_transport_operator(b, name='sand', diameter=D50, rho_s=2650.0, rho_w=1000.0,
                      initial_concentration=CONC)
 b.set_tracer_boundary('sand', 'left', CONC)   # 'left' is the inflow
 zb0 = b.quantities['elevation'].centroid_values.copy()

@@ -8,7 +8,7 @@ The originals are Python 2 and drive `Sed_transport_operator` through an
 `evolved_quantities` list containing `'concentration'`. These ports keep their
 geometry, boundary conditions, durations and parameters, and drive our API
 instead: `domain.add_sediment_class()`, which registers the fractional-step
-`Sediment_operator` for you.
+`Sediment_transport_operator` for you.
 
 ## Bed material: both routes are available
 

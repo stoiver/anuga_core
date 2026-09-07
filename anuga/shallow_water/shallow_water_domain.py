@@ -950,7 +950,7 @@ class Domain(Generic_Domain):
         # on first use: a lazily allocated array has to change the C struct and
         # the device mapping when it appears, and set_tracer_source did that by
         # discarding the GPU interface -- mid-run, from inside a fractional
-        # step. Sediment_operator then saw gpu_interface is None, took the CPU
+        # step. Sediment_transport_operator then saw gpu_interface is None, took the CPU
         # path while the state was on the device, and the source contributed
         # exactly nothing on a GPU build (#288). Being here also means reorder()
         # permutes it, which it previously did not.
@@ -1124,12 +1124,19 @@ class Domain(Generic_Domain):
             raise ValueError('grain diameter must be > 0, got %g' % d)
         return (R * _g * d * d) / (C1 * nu + math.sqrt(0.75 * C2 * R * _g * d**3))
 
-    def add_sediment_class(self, name, diameter, d_star=1.0, beta=None,
-                           initial_concentration=0.0, rho_s=2650.0,
-                           rho_w=1000.0, tau_c_star=0.04,
-                           reference_height=None, auto_operator=True,
-                           **settling_kwargs):
-        """Register a suspended sediment class and return its index.
+    def _register_sediment_fraction(self, name, diameter, d_star=1.0, beta=None,
+                                    initial_concentration=0.0, rho_s=2650.0,
+                                    rho_w=1000.0, tau_c_star=0.04,
+                                    reference_height=None,
+                                    **settling_kwargs):
+        """Register one suspended sediment grain size and return its index.
+
+        Private: the public entry point is
+        :class:`~anuga.operators.sediment_operator.Sediment_transport_operator`,
+        which calls this. Kept here because the bookkeeping it does -- growing
+        the per-fraction parameter arrays and invalidating the C struct and the
+        device mapping -- belongs with the rest of the domain's array
+        management.
 
         A sediment class is a tracer -- so it is transported by the machinery of
         Phases 1-2 -- plus the settling parameters the source term needs. The
@@ -1156,11 +1163,6 @@ class Domain(Generic_Domain):
             Critical Shields stress for entrainment `[E-1]`. Default 0.04,
             FG21's choice for suspension. Setting it to 0 disables entrainment
             for this class, leaving deposition only.
-        auto_operator : bool, optional
-            Register a `Sediment_operator` on this domain if one is not already
-            present (default True). The operator is what applies `[G-3]`'s bed
-            exchange and `[G-4]`'s bed evolution as a fractional step; without
-            it the classes are transported as inert tracers, silently.
         reference_height : float, optional
             `a` in `[S-4]`, the near-bed reference height at which `c_b` is
             evaluated, in metres. Only used when `sediment_d_star_mode = 1`.
@@ -1236,18 +1238,6 @@ class Domain(Generic_Domain):
 
         self._sediment_names.append(name)
         self.n_sediment_classes = ncl
-
-        # Register the fractional-step operator that actually applies the bed
-        # exchange, unless one is already present. Without it a domain accepts
-        # sediment classes and then quietly transports them as inert tracers --
-        # no erosion, no deposition, no bed change, and no error. Requiring the
-        # user to remember is a silent-no-op waiting to happen; pass
-        # auto_operator=False to manage it yourself.
-        if auto_operator:
-            from anuga.operators.sediment_operator import Sediment_operator
-            if not any(isinstance(op, Sediment_operator)
-                       for op in self.fractional_step_operators):
-                Sediment_operator(self)
 
         # add_tracer already invalidated both caches, but it did so BEFORE the
         # arrays above existed. Invalidate again so the rebuilt struct sees them.
@@ -6740,7 +6730,7 @@ class Domain(Generic_Domain):
 
         Rate_operators with GPU support don't need CPU sync.
         boundary_flux_integral_operator is GPU-safe (only reads boundary_flux_sum).
-        Sediment_operator is GPU-safe (device-resident kernel, updates in place).
+        Sediment_transport_operator is GPU-safe (device-resident kernel, updates in place).
         Boyd_box_operator/Boyd_pipe_operator are GPU-safe via GPUCulvertManager.
         Inlet_operator with GPU support doesn't need CPU sync.
 
@@ -6757,7 +6747,7 @@ class Domain(Generic_Domain):
         from anuga.structures.inlet_operator import Inlet_operator
         from anuga.structures.gpu_culvert_manager import GPUCulvertManager
         from anuga.operators.collect_max_quantities_operator import Collect_max_quantities_operator
-        from anuga.operators.sediment_operator import Sediment_operator
+        from anuga.operators.sediment_operator import Sediment_transport_operator
 
         # Initialize GPU culvert manager for Boyd operators if needed
         has_boyd_ops = any(GPUCulvertManager.is_boyd_operator(op)
@@ -6801,7 +6791,7 @@ class Domain(Generic_Domain):
                     op._init_gpu()
                 if hasattr(op, '_gpu_initialized') and op._gpu_initialized:
                     continue  # GPU-accelerated, no sync needed
-            elif isinstance(op, Sediment_operator):
+            elif isinstance(op, Sediment_transport_operator):
                 # The sediment kernel runs on the device in mode 2 and updates
                 # the tracer and bed arrays in place, so no host sync is needed.
                 continue

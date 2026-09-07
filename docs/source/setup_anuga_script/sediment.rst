@@ -12,7 +12,7 @@ section numbers in the tables refer to the internal sediment specification,
 which is not distributed with ANUGA; they are kept as stable identifiers for
 each term rather than as links you can follow.
 
-A sediment class **is** a tracer with settling parameters attached, so
+A sediment grain size **is** a tracer with settling parameters attached, so
 :ref:`tracers` covers the transport, boundary and conservation machinery that
 this page builds on.
 
@@ -37,16 +37,15 @@ The shortest useful program
    domain.set_boundary({t: anuga.Reflective_boundary(domain)
                         for t in domain.get_boundary_tags()})
 
-   domain.add_sediment_class('sand', diameter=2.0e-4)   # <- the only new line
+   Sediment_transport_operator(domain, name='sand', diameter=2.0e-4)   # <- the only new line
 
    for t in domain.evolve(yieldstep=1.0, finaltime=30.0):
        pass
 
-``add_sediment_class`` is the entry point. One call gives you a transported
+``Sediment_transport_operator`` is the entry point. One call gives you a transported
 concentration, erosion, deposition, the settling velocity, the bed exchange,
 and the limiters, with defaults chosen for a sand bed. It registers the
-fractional-step ``Sediment_operator`` for you, so there is nothing else to wire
-up.
+fractional step for you, so there is nothing else to wire up.
 
 Everything below is about changing those defaults.
 
@@ -93,7 +92,8 @@ Choices are made by naming the **physics**, never by setting a flag:
 +---------------------------------------------+------------------------------+--------+
 | call                                        | chooses                      | spec   |
 +=============================================+==============================+========+
-| ``add_sediment_class(name, diameter, ...)`` | a grain size to transport    | 2.2    |
+| ``Sediment_transport_operator(domain,``     | sediment transport on, and   | 2.2    |
+| ``  name, diameter, ...)``                  | a grain size to carry        |        |
 +---------------------------------------------+------------------------------+--------+
 | ``set_bed_material(material, ...)``         | the erosion law              | 4.1.1  |
 +---------------------------------------------+------------------------------+--------+
@@ -133,7 +133,7 @@ Choices are made by naming the **physics**, never by setting a flag:
       alone until you need to say otherwise.
 
 Order does not matter, with one exception noted under
-``add_sediment_class`` below: call them before ``evolve()``, in whatever
+``Sediment_transport_operator`` below: call them before ``evolve()``, in whatever
 order reads best.
 
 **Anything not in that table is internal.** The domain carries roughly fifteen
@@ -147,14 +147,14 @@ setters; they invalidate the device mapping for you.
 Sediment classes
 ----------------
 
-.. _41-add_sediment_class:
+.. _sediment_transport_operator:
 
-``add_sediment_class``
+``Sediment_transport_operator``
 ~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   domain.add_sediment_class(name, diameter, d_star=1.0, beta=None,
+   Sediment_transport_operator(domain, name, diameter, d_star=1.0, beta=None,
                              initial_concentration=0.0, rho_s=2650.0,
                              rho_w=1000.0, tau_c_star=0.04,
                              reference_height=None, auto_operator=True,
@@ -191,16 +191,15 @@ Sediment classes
 | ``reference_height``      | m     | ``None`` | Rouse reference height  |
 |                           |       |          | ``a``; see the appendix |
 +---------------------------+-------+----------+-------------------------+
-| ``auto_operator``         | --    | ``True`` | register                |
-|                           |       |          | ``Sediment_operator``   |
-+---------------------------+-------+----------+-------------------------+
 
-Multiple classes are independent: each has its own concentration, settling
+Multiple grain sizes are independent: each has its own concentration, settling
 velocity and critical stress, and each exchanges with the same bed. Call it
-once per grain size.
+once per grain size -- the second and later calls add to the same operator and
+return it, so there is still only one fractional step.
 
 Classes occupy tracer slots in call order, so class ``s`` is tracer ``s``. **The
-one ordering rule**: do not interleave ``add_tracer`` and ``add_sediment_class``
+one ordering rule**: do not interleave ``add_tracer`` and
+``Sediment_transport_operator``
 on the same domain if you rely on that correspondence.
 
 .. _42-choosing-tau_c_star:
@@ -318,7 +317,7 @@ from nowhere.
 Where several classes compete for the last of the material they are scaled by
 one shared proportional factor, not served in registration order: the bed
 carries no per-class stratigraphy, so no class has a better claim, and the
-answer must not depend on the order you called ``add_sediment_class``.
+answer must not depend on the order you registered the grain sizes.
 Deposition is never scaled -- it is what replenishes the bed.
 
 The two transport routes give **different strengths of guarantee**, and it is
@@ -460,7 +459,7 @@ finished:
 
 ::
 
-   Sediment_operator: angle-of-repose relaxation hit its 50-sweep cap at
+   Sediment_transport_operator: angle-of-repose relaxation hit its 50-sweep cap at
    t = 0.3 s; the bed may still exceed 30.0 degrees.
 
 If you *start* from a bed steeper than the critical angle, expect that on the
@@ -543,7 +542,7 @@ Choosing a configuration
 If you do not know where to start:
 
 - **Sand bed, flood or dam break, morphology wanted.** Defaults, plus a class:
-  ``add_sediment_class('sand', diameter=2e-4)``. Add
+  ``Sediment_transport_operator(domain, name='sand', diameter=2e-4)``. Add
   ``set_bedload('wong_parker_eq24')`` if the grains are coarse enough to move
   along the bed.
 - **Fine cohesive sediment, muddy estuary.** ``set_bed_material('cohesive')``
