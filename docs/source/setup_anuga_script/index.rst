@@ -21,6 +21,7 @@ Writing an ANUGA script
    rainfall
    riverwalls
    tracers
+   sediment
    evolve
 
 .. seealso::
