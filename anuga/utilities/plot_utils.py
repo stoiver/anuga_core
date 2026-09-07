@@ -50,7 +50,6 @@
 from anuga.file.netcdf import NetCDFFile
 import numpy
 import copy
-import matplotlib.cm
 
 class combine_outputs:
     """
@@ -1303,7 +1302,7 @@ def Make_Geotif(swwFile=None,
 
     return
 
-def plot_triangles(p, adjustLowerLeft=False, values=None, values_cmap=matplotlib.cm.jet, edgecolors='k'):
+def plot_triangles(p, adjustLowerLeft=False, values=None, values_cmap=None, edgecolors='k'):
     """ Add mesh triangles to a pyplot plot
 
        @param p = object holding sww vertex information (from util.get_output)
@@ -1315,6 +1314,13 @@ def plot_triangles(p, adjustLowerLeft=False, values=None, values_cmap=matplotlib
     import matplotlib
     from matplotlib import pyplot as pyplot
     from matplotlib.collections import PolyCollection
+
+    # Resolved here rather than as a default argument: importing matplotlib at
+    # module level made it a hard requirement of `import anuga`, which meant a
+    # solver or MPI run could not start when a PLOTTING library was missing or
+    # broken. None keeps the same colormap without that coupling.
+    if values_cmap is None:
+        values_cmap = matplotlib.cm.jet
 
     x0=p.xllcorner
     y0=p.yllcorner
