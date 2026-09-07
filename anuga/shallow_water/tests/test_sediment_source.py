@@ -179,6 +179,41 @@ def test_a_second_call_extends_the_same_operator():
     assert d.n_sediment_classes == 2
 
 
+def test_a_diameter_without_a_name_is_refused():
+    """It used to be silently dropped when a grain size already existed.
+
+    Sediment_transport_operator(d, diameter=...) with no name= added nothing
+    and raised nothing: the caller asked for a second grain size and got one.
+    """
+    d = still()
+    Sediment_transport_operator(d, name='sand', diameter=2.0e-4)
+    with pytest.raises(ValueError, match='diameter= but not name='):
+        Sediment_transport_operator(d, diameter=5.0e-5)
+    assert d.get_sediment_names() == ['sand'], 'nothing should have been added'
+
+
+def test_a_name_without_a_diameter_is_refused():
+    """Previously a TypeError from float(None), deep inside the registration."""
+    d = still()
+    with pytest.raises(ValueError, match='name= but not diameter='):
+        Sediment_transport_operator(d, name='sand')
+
+
+def test_a_bare_operator_needs_an_existing_grain_size():
+    d = still()
+    with pytest.raises(ValueError, match='needs a grain size'):
+        Sediment_transport_operator(d)
+
+
+def test_a_bare_operator_picks_up_grain_sizes_registered_already():
+    """The form the MMS harness uses to control operator ordering."""
+    d = still()
+    d._register_sediment_fraction('sand', diameter=2.0e-4)
+    op = Sediment_transport_operator(d)
+    assert d.get_sediment_names() == ['sand']
+    assert op in d.fractional_step_operators
+
+
 def test_a_non_positive_diameter_is_rejected():
     with pytest.raises(ValueError):
         Sediment_transport_operator(still(), name='c', diameter=0.0)

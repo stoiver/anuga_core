@@ -87,6 +87,19 @@ class Sediment_transport_operator(Operator):
                  description=None, label=None, logging=False, verbose=False,
                  **settling_kwargs):
 
+        # name and diameter describe one grain size, so they travel together.
+        # Without this, `Sediment_transport_operator(domain, diameter=5e-5)`
+        # on a domain that already has a grain size registered SILENTLY did
+        # nothing -- the diameter was dropped and no fraction was added.
+        if (name is None) != (diameter is None):
+            missing, given = (('name', 'diameter') if name is None
+                              else ('diameter', 'name'))
+            raise ValueError(
+                'Sediment_transport_operator was given %s= but not %s=; a '
+                'grain size needs both, e.g. '
+                "Sediment_transport_operator(domain, name='sand', "
+                'diameter=2.0e-4)' % (given, missing))
+
         registering = dict(d_star=d_star, beta=beta,
                            initial_concentration=initial_concentration,
                            rho_s=rho_s, rho_w=rho_w, tau_c_star=tau_c_star,

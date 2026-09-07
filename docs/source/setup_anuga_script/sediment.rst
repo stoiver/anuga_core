@@ -197,10 +197,162 @@ velocity and critical stress, and each exchanges with the same bed. Call it
 once per grain size -- the second and later calls add to the same operator and
 return it, so there is still only one fractional step.
 
-Classes occupy tracer slots in call order, so class ``s`` is tracer ``s``. **The
-one ordering rule**: do not interleave ``add_tracer`` and
-``Sediment_transport_operator``
-on the same domain if you rely on that correspondence.
+
+What a second call does and does not change
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Calling ``Sediment_transport_operator`` again adds a **grain size**, not a
+second sediment model. Only the grain's own properties are per grain size;
+every physics choice, and the bed itself, is shared.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 74
+
+   * - Per grain size
+     - Set by
+   * - ``diameter``
+     - the call
+   * - settling velocity ``v_s``
+     - computed from ``diameter`` (and any ``settling_kwargs``)
+   * - ``tau_c_star``
+     - the call
+   * - ``d_star``, ``reference_height``
+     - the call
+   * - submerged specific gravity ``R``
+     - computed from ``rho_s`` (see the caveat below)
+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 74
+
+   * - Shared by every grain size
+     - Set by
+   * - erosion law, ``tau_crit``, ``K_e``, ``K_partheniades``
+     - :ref:`set_bed_material <sediment_physics>`
+   * - deposition law, ``tau_d``, near-bed ``d*`` mode
+     - ``set_deposition``
+   * - shear closure; friction mode and its parameters
+     - ``set_shear_closure``, ``set_sediment_friction``
+   * - bedload mode, ``K``, ``m``, and bedload's own ``tau_c_star``
+     - ``set_bedload``
+   * - ``porosity``, ``c_max``, ``c_pack``, ``rho_w``, ``bed_evolution``
+     - ``set_sediment_parameters``
+   * - ``beta``
+     - one ``beta_tracer`` for every tracer on the domain
+   * - **the bed**
+     - one ``elevation``, which all grain sizes erode and deposit onto
+
+Because the shared settings live on the **domain**, not on the operator, order
+does not matter: ``set_bed_material('cohesive')`` called after both grain sizes
+are registered applies to both.
+
+.. warning::
+
+   ``rho_s`` and ``rho_w`` are both arguments to the call, but only ``rho_s``
+   is genuinely per grain size. ``rho_w`` contributes to that grain's ``R``,
+   while the DIMENSIONAL bed shear stress the kernel forms uses the single
+   shared ``sediment_rho_w``:
+
+   .. code-block:: python
+
+      Sediment_transport_operator(domain, name='a', diameter=2e-4, rho_w=1000.0)
+      Sediment_transport_operator(domain, name='b', diameter=2e-4, rho_w=1200.0)
+
+      domain.sediment_R        # [1.65, 1.2083]  -- both honoured
+      domain.sediment_rho_w    # 1000.0          -- only the first survives
+
+   Two grain sizes suspended in genuinely different fluids is not
+   representable, which is physically reasonable -- there is one flow -- but
+   the argument being per call implies otherwise. Set the water density once,
+   with ``set_sediment_parameters(rho_w=...)``.
+
+Grain sizes occupy tracer slots in call order, so grain size ``s`` is tracer
+``s``. **The one ordering rule**: do not interleave ``add_tracer`` and
+``Sediment_transport_operator`` on the same domain if you rely on that
+correspondence.
+
+
+Choosing a name
+~~~~~~~~~~~~~~~
+
+``name`` is a label you choose, not a value from a list. Nothing is inferred
+from it: ``diameter`` and the settling parameters do all the work, so a grain
+size called ``'boulder'`` with ``diameter=2e-5`` is silt, and behaves like
+silt.
+
+.. code-block:: python
+
+   Sediment_transport_operator(domain, name='fine_sand', diameter=1.5e-4)
+   Sediment_transport_operator(domain, name='mud',       diameter=2.0e-5)
+
+   domain.get_sediment_names()        # ['fine_sand', 'mud']
+   domain.get_tracer('fine_sand')     # its concentration, per cell
+
+It is also the **tracer** name, which is what constrains it. It must be a
+non-empty string, unique on the domain, and it may not be
+
+* the name of a quantity -- ``stage``, ``elevation``, ``friction``,
+  ``xmomentum``, ``ymomentum``, ``height``, ``x``, ``y``, ``xvelocity``,
+  ``yvelocity``. Both a quantity and a tracer are written to the sww as
+  ``<name>_c``, so a grain size called ``stage`` would overwrite the stage in
+  the output.
+* anything beginning ``max_``, which is reserved for the running maxima
+  ``Collect_max_quantities_operator`` writes.
+
+Both are refused rather than allowed to corrupt the output. The name also
+becomes the sww variable ``<name>_c``, so pick something you will recognise
+when you open the file six months later.
+
+.. warning::
+
+   Do not confuse this with ``set_sediment_friction(bed='sand')``. **That**
+   ``'sand'`` is one of a fixed set -- ``'sand'``, ``'gravel'``,
+   ``'boulder'`` -- selecting a roughness closure, and has nothing to do with
+   what you called your grain size. ``name`` is the only sediment argument
+   that is free text; every other choice below names a physics option from a
+   fixed vocabulary.
+
+
+If you do not choose one
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+``name`` and ``diameter`` describe one grain size, so they travel together.
+Giving one without the other is an error rather than a partial registration:
+
+.. code-block:: python
+
+   Sediment_transport_operator(domain, diameter=2.0e-4)
+   # ValueError: given diameter= but not name=
+
+   Sediment_transport_operator(domain, name='sand')
+   # ValueError: given name= but not diameter=
+
+Omitting **both** is meaningful, and is the one case where it is allowed: the
+operator then carries whatever grain sizes are already registered rather than
+adding one.
+
+.. code-block:: python
+
+   Sediment_transport_operator(domain)
+   # ValueError if nothing is registered yet: it would transport nothing
+
+That form exists for controlling **operator order**. Fractional-step operators
+run in the order they are created, so if another operator must run before the
+sediment one -- an external source that the bed exchange then consumes, say --
+register the grain sizes first and create the operator at the point you want
+it in the sequence:
+
+.. code-block:: python
+
+   for nm, d50 in grain_sizes:
+       domain._register_sediment_fraction(nm, diameter=d50)
+
+   My_source_operator(domain, ...)        # runs first
+   Sediment_transport_operator(domain)    # then this
+
+Ordinary models do not need this: creating the operator per grain size, as
+everywhere else on this page, puts it in a sensible place by itself.
 
 .. _42-choosing-tau_c_star:
 
