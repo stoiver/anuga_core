@@ -1738,14 +1738,14 @@ class Domain(Generic_Domain):
         statements rather than tuning (spec 4.1.1).
         """
         if self.n_sediment_classes == 0:
-            return 'sediment: no classes registered'
+            return 'sediment: no grain sizes registered'
 
         ero = {0: "[E-1] Shields / Smith-McLean, non-cohesive (sand, gravel)",
                1: "[E-3] Hanson & Simon, cohesive (silt, clay)",
                2: "[E-4] Partheniades (RDycore)"}[self.sediment_erosion_mode]
         dep = {0: "[D-1] D = d* c v_s", 1: "[D-2] D = v_s c (1 - tau_b/tau_d)"
                }[self.sediment_deposition_mode]
-        dstar = {0: "constant, per class", 1: "[S-4] Rouse profile"
+        dstar = {0: "constant, per grain size", 1: "[S-4] Rouse profile"
                  }[self.sediment_d_star_mode]
         shear = {0: "[T-1] quadratic drag, tau_b = rho f_c |v|^2",
                  1: "[T-7] depth-slope, tau_b = rho g h S (aSM16; legacy)"
@@ -1763,7 +1763,7 @@ class Domain(Generic_Domain):
                   self.sediment_bedload_tau_c_star)))
 
         L = ['sediment configuration',
-             '  classes            : %d  %r' % (self.n_sediment_classes,
+             '  grain sizes        : %d  %r' % (self.n_sediment_classes,
                                                 self.get_sediment_names()),
              '  erosion            : %s' % ero,
              '  deposition         : %s' % dep,
@@ -1819,7 +1819,10 @@ class Domain(Generic_Domain):
             L.append('  erodible region    : %d of %d cells erodible '
                      '(%d locked at their current bed)'
                      % (int(mask.sum()), len(mask), int((~mask).sum())))
-        L.append('  per class:')
+        L.append('  (bracketed labels such as [E-1] name the term in the '
+                 'physics; see the')
+        L.append('   Sediment physics appendix in the ANUGA documentation)')
+        L.append('  per grain size:')
         for i, nm in enumerate(self.get_sediment_names()):
             L.append('    %-10s d=%.4g m  v_s=%.4e m/s  R=%.4g  tau_c*=%.4g'
                      % (nm, self.sediment_diameter[i],

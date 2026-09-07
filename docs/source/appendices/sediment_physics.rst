@@ -244,6 +244,144 @@ Bedload only redistributes: it moves sediment between cells and conserves the
 total exactly. The flux across each edge is centred, which is what makes it
 antisymmetric and therefore conservative; see ``test_sediment_bedload.py``.
 
+
+.. _sediment_labels:
+
+What the bracketed labels mean
+------------------------------
+
+Labels like ``[E-1]`` name a **term in the physics**, not a reference. They
+appear throughout this page, in the source comments, and in the output of
+``domain.sediment_summary()``, so that a given term can be pointed at
+unambiguously wherever it comes up. The list below is what each one names.
+
+They originate in an internal specification that is not distributed with
+ANUGA; the numbering is kept because it is already in the code and the
+summaries, and renumbering would only break the correspondence.
+
+**Settling and suspension**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 86
+
+   * - Label
+     - Term
+   * - ``[S-1]``
+     - settling velocity ``v_s``, Ferguson & Church (2004)
+   * - ``[S-2]``
+     - Rouse number ``Z = v_s / (kappa u*)``
+   * - ``[S-4]``
+     - the Rouse near-bed concentration ratio ``d*(Z, a/h)``
+
+**Erosion**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 86
+
+   * - Label
+     - Term
+   * - ``[E-1]``, ``[E-2]``
+     - non-cohesive entrainment: Shields threshold with a Smith & McLean
+       reference concentration
+   * - ``[E-3]``, ``[E-5]``
+     - cohesive erosion, Hanson & Simon excess-stress form
+   * - ``[E-4]``
+     - Partheniades cohesive erosion
+
+**Deposition**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 86
+
+   * - Label
+     - Term
+   * - ``[D-1]``
+     - ``D = d* c v_s``
+   * - ``[D-2]``
+     - threshold deposition, ``D = v_s c (1 - tau_b/tau_d)``
+
+**Bed shear and friction**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 86
+
+   * - Label
+     - Term
+   * - ``[T-1]``
+     - quadratic drag, ``tau_b = rho f_c |v|^2`` -- the default closure
+   * - ``[T-2]``
+     - shear velocity ``u* = |v| sqrt(f_c)``
+   * - ``[T-3]``
+     - dimensionless stress ``tau* = f_c |v|^2 / (R g d)``
+   * - ``[T-4]``
+     - excess stress ``tau_x = tau* - tau_c*``
+   * - ``[T-5]``
+     - the depth-limiting velocity form ANUGA uses
+   * - ``[T-6]``
+     - constant Manning ``n``, taken from the domain's friction quantity
+   * - ``[T-7]``
+     - depth-slope closure, ``tau_b = rho g h S``
+   * - ``[T-8]``..``[T-10]``
+     - the ``'wilson'`` friction closure
+   * - ``[T-13]``..``[T-15]``
+     - the ``'larsen_lamb'`` friction closure
+
+**Bedload**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 86
+
+   * - Label
+     - Term
+   * - ``[K-1]``, ``[K-2]``
+     - power law, ``q_b* = K tau_x^m``
+   * - ``[K-3]``
+     - bed change from bedload, ``dz/dt = -(1/(1-lambda)) div q_b``
+   * - ``[K-4]``
+     - the per-cell bedload transport vector ``q_b``
+   * - ``[K-5]``
+     - Engelund & Hansen total load, no threshold
+
+**Coupling to the flow and the bed**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 86
+
+   * - Label
+     - Term
+   * - ``[G-3]``
+     - the suspended source term, ``m_s <- m_s + dt (E_s - D_s)``, including
+       any external source
+   * - ``[G-4]``
+     - Exner bed evolution from the suspended exchange
+   * - ``[G-5]``
+     - the bedload divergence contribution to the bed
+
+**Limiters**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 86
+
+   * - Label
+     - Term
+   * - ``[L-1]``
+     - positivity
+   * - ``[L-2]``
+     - the concentration ceiling ``c_max``
+   * - ``[L-3]``
+     - the edge reconstruction limiter ``beta``
+   * - ``[L-4]``
+     - the packing fraction ``c_pack`` bounding near-bed concentration
+   * - ``[L-5]``
+     - the non-erodible base
+
 .. _sediment_references:
 
 References
