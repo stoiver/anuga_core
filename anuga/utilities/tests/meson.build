@@ -14,6 +14,7 @@ python_sources = [
 'test_numerical_tools.py',
 'test_plot_utils.py',
 'test_plot_utils_tracers.py',
+'test_import_without_matplotlib.py',
 'test_quantity_setting_functions.py',
 'test_sparse.py',
 'test_spatialInputUtil.py',

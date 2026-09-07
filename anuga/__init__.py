@@ -84,8 +84,44 @@ from anuga.coordinate_transforms.geo_reference import Geo_reference
 from anuga.operators.base_operator import Operator
 from anuga.structures.structure_operator import Structure_operator
 
-from anuga.utilities.animate import SWW_plotter
-from anuga.utilities.animate import Domain_plotter
+# The plotting helpers need matplotlib, and anuga.utilities.animate raises at
+# import when it is missing. Importing them eagerly here made that a hard
+# dependency of `import anuga` itself: a solver-only or MPI run would die
+# before it started because a PLOTTING library could not load.
+#
+# That is not hypothetical. It broke a nightly build on Windows, where
+# matplotlib's _c_internal_utils extension failed inside an mpiexec
+# subprocess -- "DLL load failed ... The handle is invalid" -- and took
+# `import anuga` down with it, in a load-balance test that never plots
+# anything.
+#
+# So bind them lazily. A user who actually plots gets the same clear
+# matplotlib error as before, at the point of use; everyone else is
+# unaffected by matplotlib being absent or broken.
+def _plotter_stub(_name):
+    class _MissingPlotter:
+        """Placeholder for a plotting class whose import failed."""
+
+        def __init__(self, *args, **kwargs):
+            raise ImportError(
+                '%s needs matplotlib, which could not be imported:\n    %s\n'
+                'Install it with: conda install matplotlib  or  '
+                'pip install matplotlib' % (_name, _plotter_import_error))
+
+    _MissingPlotter.__name__ = _name
+    _MissingPlotter.__qualname__ = _name
+    return _MissingPlotter
+
+
+try:
+    from anuga.utilities.animate import SWW_plotter
+    from anuga.utilities.animate import Domain_plotter
+
+    _plotter_import_error = None
+except ImportError as _e:                    # pragma: no cover - env specific
+    _plotter_import_error = _e
+    SWW_plotter = _plotter_stub('SWW_plotter')
+    Domain_plotter = _plotter_stub('Domain_plotter')
 
 
 from anuga.abstract_2d_finite_volumes.generic_domain import Generic_Domain
