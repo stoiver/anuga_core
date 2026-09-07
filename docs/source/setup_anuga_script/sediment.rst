@@ -37,7 +37,7 @@ The shortest useful program
    domain.set_boundary({t: anuga.Reflective_boundary(domain)
                         for t in domain.get_boundary_tags()})
 
-   Sediment_transport_operator(domain, name='sand', diameter=2.0e-4)   # <- the only new line
+   anuga.Sediment_transport_operator(domain, name='sand', diameter=2.0e-4)   # <- the only new line
 
    for t in domain.evolve(yieldstep=1.0, finaltime=30.0):
        pass
@@ -92,8 +92,8 @@ Choices are made by naming the **physics**, never by setting a flag:
 +---------------------------------------------+------------------------------+--------+
 | call                                        | chooses                      | spec   |
 +=============================================+==============================+========+
-| ``Sediment_transport_operator(domain,``     | sediment transport on, and   | 2.2    |
-| ``  name, diameter, ...)``                  | a grain size to carry        |        |
+| ``anuga.Sediment_transport_operator(``      | sediment transport on, and   | 2.2    |
+| ``    domain, name, diameter, ...)``        | a grain size to carry        |        |
 +---------------------------------------------+------------------------------+--------+
 | ``set_bed_material(material, ...)``         | the erosion law              | 4.1.1  |
 +---------------------------------------------+------------------------------+--------+
@@ -150,15 +150,15 @@ Sediment classes
 .. _sediment_transport_operator:
 
 ``Sediment_transport_operator``
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   Sediment_transport_operator(domain, name, diameter, d_star=1.0, beta=None,
-                             initial_concentration=0.0, rho_s=2650.0,
-                             rho_w=1000.0, tau_c_star=0.04,
-                             reference_height=None, auto_operator=True,
-                             **settling_kwargs)
+   anuga.Sediment_transport_operator(
+       domain, name, diameter,
+       d_star=1.0, beta=None, initial_concentration=0.0,
+       rho_s=2650.0, rho_w=1000.0, tau_c_star=0.04,
+       reference_height=None, **settling_kwargs)
 
 +---------------------------+-------+----------+-------------------------+
 | parameter                 | units | default  | meaning                 |
@@ -256,8 +256,8 @@ are registered applies to both.
 
    .. code-block:: python
 
-      Sediment_transport_operator(domain, name='a', diameter=2e-4, rho_w=1000.0)
-      Sediment_transport_operator(domain, name='b', diameter=2e-4, rho_w=1200.0)
+      anuga.Sediment_transport_operator(domain, name='a', diameter=2e-4, rho_w=1000.0)
+      anuga.Sediment_transport_operator(domain, name='b', diameter=2e-4, rho_w=1200.0)
 
       domain.sediment_R        # [1.65, 1.2083]  -- both honoured
       domain.sediment_rho_w    # 1000.0          -- only the first survives
@@ -283,8 +283,8 @@ silt.
 
 .. code-block:: python
 
-   Sediment_transport_operator(domain, name='fine_sand', diameter=1.5e-4)
-   Sediment_transport_operator(domain, name='mud',       diameter=2.0e-5)
+   anuga.Sediment_transport_operator(domain, name='fine_sand', diameter=1.5e-4)
+   anuga.Sediment_transport_operator(domain, name='mud',       diameter=2.0e-5)
 
    domain.get_sediment_names()        # ['fine_sand', 'mud']
    domain.get_tracer('fine_sand')     # its concentration, per cell
@@ -322,10 +322,10 @@ Giving one without the other is an error rather than a partial registration:
 
 .. code-block:: python
 
-   Sediment_transport_operator(domain, diameter=2.0e-4)
+   anuga.Sediment_transport_operator(domain, diameter=2.0e-4)
    # ValueError: given diameter= but not name=
 
-   Sediment_transport_operator(domain, name='sand')
+   anuga.Sediment_transport_operator(domain, name='sand')
    # ValueError: given name= but not diameter=
 
 Omitting **both** is meaningful, and is the one case where it is allowed: the
@@ -334,7 +334,7 @@ adding one.
 
 .. code-block:: python
 
-   Sediment_transport_operator(domain)
+   anuga.Sediment_transport_operator(domain)
    # ValueError if nothing is registered yet: it would transport nothing
 
 That form exists for controlling **operator order**. Fractional-step operators
@@ -349,7 +349,7 @@ it in the sequence:
        domain._register_sediment_fraction(nm, diameter=d50)
 
    My_source_operator(domain, ...)        # runs first
-   Sediment_transport_operator(domain)    # then this
+   anuga.Sediment_transport_operator(domain)    # then this
 
 Ordinary models do not need this: creating the operator per grain size, as
 everywhere else on this page, puts it in a sensible place by itself.
@@ -693,8 +693,10 @@ Choosing a configuration
 
 If you do not know where to start:
 
-- **Sand bed, flood or dam break, morphology wanted.** Defaults, plus a class:
-  ``Sediment_transport_operator(domain, name='sand', diameter=2e-4)``. Add
+- **Sand bed, flood or dam break, morphology wanted.** Defaults, plus one
+  grain size:
+  ``anuga.Sediment_transport_operator(domain, name='sand', diameter=2e-4)``.
+  Add
   ``set_bedload('wong_parker_eq24')`` if the grains are coarse enough to move
   along the bed.
 - **Fine cohesive sediment, muddy estuary.** ``set_bed_material('cohesive')``
