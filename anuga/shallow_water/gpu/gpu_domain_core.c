@@ -1364,6 +1364,30 @@ void gpu_sync_tracer_source_to_device(struct gpu_domain *GD)
     #pragma omp target update to(tr_es[0:ns*n])
 }
 
+// Push the tracer boundary concentrations to the device on their own.
+//
+// set_tracer_boundary() and update_tracer_boundary_values() write the HOST
+// array.  The device copy is made once, when the arrays are mapped, and
+// gpu_sync_boundary_values() (the per-step push the boundary evaluators use)
+// carries only the hydrodynamic boundary values -- so without this a value
+// set after the interface exists, or re-evaluated for a later time, is never
+// seen by the flux kernel and every inflow edge keeps injecting the mapped
+// (t = 0, or zero-filled) concentration.  One small array, like the source.
+void gpu_sync_tracer_boundary_to_device(struct gpu_domain *GD)
+{
+    if (!GD->gpu_initialized) return;
+    if (GD->D.number_of_tracers <= 0) return;
+
+    anuga_int nb = GD->D.boundary_length;
+    if (nb <= 0) return;   /* not mapped either; see gpu_domain_map_arrays */
+
+    double *tr_bv = GD->D.tracer_boundary_values;
+    if (tr_bv == NULL) return;
+
+    anuga_int ns = GD->D.number_of_tracers;
+    #pragma omp target update to(tr_bv[0:ns*nb])
+}
+
 void gpu_domain_sync_from_device(struct gpu_domain *GD) {
     // Sync centroid values from GPU (use at yieldstep for Python I/O)
     if (!GD->gpu_initialized) return;
