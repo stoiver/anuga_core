@@ -2622,6 +2622,11 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
     double * restrict t_bv = D->tracer_boundary_values;
     double * restrict t_bf = D->tracer_boundary_flux;
 #endif
+    // Scalar, so it is hoisted on BOTH builds: a D->member load inside the
+    // element loop is a host dereference on the device (CUDA_ERROR_ILLEGAL_ADDRESS
+    // the first time a boundary edge carries a tracer), and a loop-invariant
+    // integer costs nothing on the CPU path.
+    const anuga_int t_bl = D->boundary_length;
 
     // Reduction variables
     double local_timestep = 1.0e+100;
@@ -2810,7 +2815,6 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
                 double * restrict t_eu = D->tracer_explicit_update;
                 double * restrict t_bf = D->tracer_boundary_flux;
 #endif
-                const anuga_int t_bl = D->boundary_length;
                 const double wflux = edgeflux[0];
                 const int    inflow = (wflux > 0.0);
                 /* Conservation accounting: record what crosses a DOMAIN boundary edge,
