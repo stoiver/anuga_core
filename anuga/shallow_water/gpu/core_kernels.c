@@ -705,8 +705,8 @@ static inline double core_rouse_d_star(double Z, double a_h) {
 static inline double core_tau_b_over_rho(anuga_int closure, double f_c,
                                          double vel2, double grav, double h,
                                          const double * restrict bed_ev,
-                                         const double * restrict normals,
-                                         const double * restrict edgelengths,
+                                         const anuga_geom_t * restrict normals,
+                                         const anuga_geom_t * restrict edgelengths,
                                          double area, anuga_int k) {
     if (closure != 1) {
         return f_c * vel2;                       /* [T-1] */
@@ -784,9 +784,9 @@ void core_apply_bedload(struct domain *D, double timestep) {
     double * restrict qbx = D->sediment_qbx;
     double * restrict qby = D->sediment_qby;
     anuga_int * restrict neighbours = D->neighbours;
-    double * restrict normals = D->normals;
-    double * restrict edgelengths = D->edgelengths;
-    double * restrict areas = D->areas;
+    anuga_geom_t * restrict normals = D->normals;
+    anuga_geom_t * restrict edgelengths = D->edgelengths;
+    anuga_geom_t * restrict areas = D->areas;
     /* [L-5]. Both the flag and the arrays are required; see the note in
      * core_apply_sediment_source. */
     double * restrict z_base = D->sediment_z_base;
@@ -1072,8 +1072,8 @@ anuga_int core_apply_repose(struct domain *D) {
     double * restrict bed_cv = D->bed_centroid_values;
     double * restrict bed_ev = D->bed_edge_values;
     double * restrict dz = D->sediment_repose_dz;
-    double * restrict areas = D->areas;
-    double * restrict cc = D->centroid_coordinates;
+    anuga_geom_t * restrict areas = D->areas;
+    anuga_geom_t * restrict cc = D->centroid_coordinates;
     anuga_int * restrict neighbours = D->neighbours;
     double * restrict z_base = D->sediment_z_base;
     const anuga_int has_z_base = (D->sediment_has_z_base && z_base != NULL);
@@ -1272,9 +1272,9 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     double * restrict tau_c_star = D->sediment_tau_c_star;
     double * restrict a_ref = D->sediment_reference_height;
     double * restrict bed_ev_r = D->bed_edge_values;
-    double * restrict normals_r = D->normals;
-    double * restrict edgelengths_r = D->edgelengths;
-    double * restrict areas_r = D->areas;
+    anuga_geom_t * restrict normals_r = D->normals;
+    anuga_geom_t * restrict edgelengths_r = D->edgelengths;
+    anuga_geom_t * restrict areas_r = D->areas;
     const anuga_int d_star_mode = D->sediment_d_star_mode;
     const double a_h_floor = D->sediment_a_h_floor;
     const double c_pack = D->sediment_c_pack;
@@ -1817,6 +1817,17 @@ void core_forcing_and_update_on(struct domain *D, double timestep,
     double * restrict xmom_bk = D->xmom_backup_values;
     double * restrict ymom_bk = D->ymom_backup_values;
 
+    // Generic passive tracers: the conserved m = h*c is integrated exactly as
+    // core_update_conserved_quantities does it (no semi-implicit term, no
+    // clamping) and RK2-averaged exactly as core_saxpy_conserved_quantities
+    // does it, on m rather than c.  Pointers hoisted for the GPU build.
+    const anuga_int n_tracers = D->number_of_tracers;
+#ifndef CPU_ONLY_MODE
+    double * restrict t_cons = D->tracer_conserved_values;
+    double * restrict t_eu   = D->tracer_explicit_update;
+    double * restrict t_bk   = D->tracer_backup_values;
+#endif
+
     const anuga_int loop_n = iter ? iter_n : n;
     OMP_PARALLEL_LOOP
     for (anuga_int q = 0; q < loop_n; q++) {
@@ -1827,6 +1838,20 @@ void core_forcing_and_update_on(struct domain *D, double timestep,
                                 stage_cv, xmom_cv, ymom_cv, bed_cv, height_cv,
                                 friction_cv, stage_siu, xmom_siu, ymom_siu,
                                 stage_bk, xmom_bk, ymom_bk);
+
+        if (n_tracers > 0) {
+#ifdef CPU_ONLY_MODE
+            double * restrict t_cons = D->tracer_conserved_values;
+            double * restrict t_eu   = D->tracer_explicit_update;
+            double * restrict t_bk   = D->tracer_backup_values;
+#endif
+            for (anuga_int s = 0; s < n_tracers; s++) {
+                const anuga_int idx = s * n + k;
+                double m = t_cons[idx] + timestep * t_eu[idx];
+                if (do_saxpy) m = a * m + b * t_bk[idx];
+                t_cons[idx] = m;
+            }
+        }
     }
 }
 
@@ -2033,6 +2058,19 @@ double core_prepare_step_on(struct domain *D, int do_backup, int zero_eu,
     double * restrict xmom_eu = D->xmom_explicit_update;
     double * restrict ymom_eu = D->ymom_explicit_update;
 
+    // Generic passive tracers: the same three cell-local pieces the unfused
+    // kernels do (core_backup_conserved_quantities backs up m, the flux
+    // kernel zeroes the explicit update, core_extrapolate_centroid_pass
+    // derives c = m/h from the PROTECTED height).  Pointers hoisted to
+    // function scope for the GPU build -- see core_update_conserved_quantities.
+    const anuga_int n_tracers = D->number_of_tracers;
+#ifndef CPU_ONLY_MODE
+    double * restrict t_cons = D->tracer_conserved_values;
+    double * restrict t_cv   = D->tracer_centroid_values;
+    double * restrict t_bk   = D->tracer_backup_values;
+    double * restrict t_eu   = D->tracer_explicit_update;
+#endif
+
     double mass_error = 0.0;
     const anuga_int loop_n = iter ? iter_n : n;
 
@@ -2086,6 +2124,23 @@ double core_prepare_step_on(struct domain *D, int do_backup, int zero_eu,
 
         xmom_cv[k] = xmom_out;
         ymom_cv[k] = ymom_out;
+
+        if (n_tracers > 0) {
+#ifdef CPU_ONLY_MODE
+            double * restrict t_cons = D->tracer_conserved_values;
+            double * restrict t_cv   = D->tracer_centroid_values;
+            double * restrict t_bk   = D->tracer_backup_values;
+            double * restrict t_eu   = D->tracer_explicit_update;
+#endif
+            const double inv_h = is_dry ? 0.0 : (1.0 / dk);
+            for (anuga_int s = 0; s < n_tracers; s++) {
+                const anuga_int idx = s * n + k;
+                const double m = t_cons[idx];
+                if (do_backup) t_bk[idx] = m;
+                if (zero_eu)   t_eu[idx] = 0.0;
+                t_cv[idx] = m * inv_h;
+            }
+        }
     }
 
     return mass_error;
@@ -2896,8 +2951,10 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
 // D->edge_flux_work (EDGE_SLOT_STRIDE * 3n doubles; ANUGA leaves it NULL) --
 // and, like reconstruct_edge_bed, it assumes fluxes follow an extrapolate,
 // reconstructing bed values as stage - height.  Riverwalls are NOT
-// supported (their weir corrections are one-sided); callers must fall back
-// to the cell-based kernel when riverwall edges exist.
+// supported (their weir corrections are one-sided), and neither are passive
+// tracers (only the cell-based kernel advects them); callers must fall back
+// to the cell-based kernel when riverwall edges or tracers exist
+// (gpu_flux_mode in gpu_kernels.c does).
 // ============================================================================
 
 #define EDGE_SLOT_STRIDE 6
@@ -3254,7 +3311,8 @@ void core_build_active_sets(struct domain *D,
 //
 // Requirements (same contract as the slot variant): the explicit updates
 // must be ZERO on entry (core_prepare_step's zero_eu flag), no riverwalls,
-// and fluxes follow an extrapolate (bed reconstructed as stage - height).
+// no tracers, and fluxes follow an extrapolate (bed reconstructed as
+// stage - height).
 // max_speed_array is NOT maintained on this path (per-cell max would need an
 // atomic max); the wave speeds live and die in registers, so this mode needs
 // NO auxiliary arrays at all -- drivers select it with

@@ -282,13 +282,16 @@ void gpu_forcing_and_update(struct gpu_domain *GD, double timestep,
 //   FLUX_CELL    -- classic cell-based kernel (always valid)
 //   FLUX_SLOT    -- edge-based pair via slot records (D->edge_flux_work set)
 //   FLUX_SCATTER -- single-solve atomic scatter (D->neigh_work set, no slots)
-// Riverwalls and sloped Manning force the cell-based path: the weir
-// corrections are one-sided, and sloped Manning needs the separate kernels
-// that consume array-resident explicit updates.
+// Riverwalls, sloped Manning and passive tracers force the cell-based path:
+// the weir corrections are one-sided, sloped Manning needs the separate
+// kernels that consume array-resident explicit updates, and only the
+// cell-based kernel advects tracers (the single-solve kernels have no upwind
+// tracer flux and never touch tracer_explicit_update).
 enum { FLUX_CELL = 0, FLUX_SLOT, FLUX_SCATTER };
 
 static int gpu_flux_mode(struct gpu_domain *GD) {
-    if (GD->D.number_of_riverwall_edges != 0 || GD->use_sloped_mannings)
+    if (GD->D.number_of_riverwall_edges != 0 || GD->use_sloped_mannings
+            || GD->D.number_of_tracers > 0)
         return FLUX_CELL;
     if (GD->D.edge_flux_work != NULL) return FLUX_SLOT;
     if (GD->D.reconstruct_edge_bed == 2 && GD->D.owned_edges != NULL)
