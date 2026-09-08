@@ -400,6 +400,34 @@ void gpu_active_set_prepare(struct gpu_domain *GD) {
         return;
     }
 
+    // The active path drives the scatter flux kernel DIRECTLY (it is the only
+    // flux kernel with an edge-list variant), bypassing gpu_flux_mode.  So
+    // everything gpu_flux_mode would route to the cell-based kernel has to
+    // disable the mode here instead, or the active steps would silently use a
+    // kernel that cannot represent the physics: riverwalls (one-sided weir
+    // corrections), sloped Manning (separate kernels), and passive tracers --
+    // sediment classes are tracers -- which only the cell-based kernel
+    // advects.  Full stepping stays correct; only the speedup is lost.
+    // number_of_tracers cannot change while the interface is mapped
+    // (add_tracer tears it down), so a one-time check here is sufficient.
+    const char *why = NULL;
+    if (D->number_of_tracers > 0)
+        why = "passive tracers / sediment classes are registered (only the "
+              "cell-based flux kernel advects them)";
+    else if (D->number_of_riverwall_edges != 0)
+        why = "riverwalls are present (their weir corrections are one-sided)";
+    else if (GD->use_sloped_mannings)
+        why = "sloped Manning friction is selected";
+    if (why != NULL) {
+        if (GD->rank == 0) {
+            fprintf(stderr, "gpu: active-set stepping disabled: %s; "
+                            "running full steps\n", why);
+        }
+        GD->use_active_set = 0;
+        GD->as_prepared = 1;
+        return;
+    }
+
     const anuga_int n = D->number_of_elements;
 
     // Compacted owned-slot list: every boundary slot + the larger-index side

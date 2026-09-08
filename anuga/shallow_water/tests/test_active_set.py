@@ -133,6 +133,47 @@ class Test_active_set(unittest.TestCase):
         frac, samples = domain.get_active_set_stats()
         assert samples > 0
 
+    def test_tracers_disable_the_active_set(self):
+        """With a passive tracer registered the flag is ignored, not honoured
+        with a kernel that cannot advect the tracer.
+
+        The active path drives the scatter flux kernel directly, and only the
+        cell-based kernel carries the tracer flux.  So the run must (a) never
+        engage the active set and (b) reproduce the plain mode-2 run exactly
+        -- same kernels, same launch order, hence bit-identical -- for the
+        hydrodynamics AND the tracer.
+        """
+        def build(name):
+            d = _make_domain(name)
+            # A step in the pool so there is flow to carry the tracer (the
+            # base pool is at rest).
+            d.set_quantity('stage', lambda x, y: np.where(x < 10.0, 2.5, 2.0))
+            d.add_tracer('c', beta=1.0)
+            x = d.centroid_coordinates[:, 0]
+            d.set_tracer('c', np.where(x < 10.0, 1.0, 0.0))
+            d.set_multiprocessor_mode(2)
+            return d
+
+        ref = build('as_tr_ref')
+        self._evolve(ref)
+
+        act = build('as_tr_act')
+        act.set_use_active_set(True)
+        self._evolve(act)
+
+        assert act.get_active_set_stats() == (1.0, 0), \
+            'active set engaged on a domain with tracers'
+        for q in ('stage', 'xmomentum', 'ymomentum'):
+            a = act.quantities[q].centroid_values
+            r = ref.quantities[q].centroid_values
+            assert np.array_equal(a, r), f'{q}: max diff {np.abs(a - r).max()}'
+        a = act.get_tracer('c')
+        r = ref.get_tracer('c')
+        assert np.array_equal(a, r), f'tracer: max diff {np.abs(a - r).max()}'
+        # and the tracer actually moved, so the comparison is not vacuous
+        initial = np.where(act.centroid_coordinates[:, 0] < 10.0, 1.0, 0.0)
+        assert np.abs(a - initial).max() > 1e-3
+
 
 if __name__ == '__main__':
     unittest.main()

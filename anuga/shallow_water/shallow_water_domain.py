@@ -3570,7 +3570,10 @@ A grain size is a tracer -- so it is transported by the machinery of
 
         Only the GPU/unified compute path honours the flag (rk2/DE1,
         ader2/DE_ader2 and euler/DE0 stepping; DE2/rk3 runs full steps with a
-        notice).  It also switches the flux kernel to single-solve scatter
+        notice).  It is also ignored, with a notice, on domains with passive
+        tracers or sediment classes, riverwalls, or sloped Manning friction:
+        the active path uses the single-solve scatter flux kernel, which
+        carries none of those.  It also switches the flux kernel to single-solve scatter
         mode, whose results differ from the default cell-based kernel only at
         floating-point roundoff.  Serial domains only for now -- under MPI
         the flag is ignored with a warning.
@@ -3591,6 +3594,11 @@ A grain size is a tracer -- so it is transported by the machinery of
             except ImportError:
                 pass
         if flag:
+            if getattr(self, 'number_of_tracers', 0) > 0:
+                log.warning('active-set stepping requested on a domain with '
+                            'passive tracers / sediment classes: only the '
+                            'cell-based flux kernel advects tracers, so the '
+                            'GPU path will run full steps (flag ignored).')
             rate_like = [type(op).__name__ for op in
                          getattr(self, 'fractional_step_operators', [])
                          if 'rate' in type(op).__name__.lower()]
