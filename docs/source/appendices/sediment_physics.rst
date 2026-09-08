@@ -376,7 +376,10 @@ summaries, and renumbering would only break the correspondence.
    * - ``[L-2]``
      - the concentration ceiling ``c_max``
    * - ``[L-3]``
-     - the edge reconstruction limiter ``beta``
+     - a cap on the rate of bed change, ``|dz/dt| <= max_dz``. **Not
+       implemented in ANUGA** -- listed so the gap in the numbering is not
+       mistaken for an omission here. It is unrelated to the ``beta`` edge
+       reconstruction limiter, which the tracers share.
    * - ``[L-4]``
      - the packing fraction ``c_pack`` bounding near-bed concentration
    * - ``[L-5]``
@@ -451,16 +454,56 @@ sources for each.
   The ``'wilson'`` friction closure. Note the caveat above: these are
   Mars outflow channel closures, not general-purpose flood closures.
 
+**The short codes used in the source and the specification**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 12 88
+
+   * - Code
+     - Reference
+   * - ``FG21``
+     - Fassett, C. I. and Goudge, T. A. (2021). Modeling the hydrodynamics,
+       sediment transport, and valley incision of outlet-forming floods from
+       Martian crater lakes. *JGR Planets*, 126, e2021JE006979.
+       doi:10.1029/2021JE006979
+   * - ``RDy26``
+     - Feng, D., Tan, Z., Xu, D., Johnson, J. and Bisht, G. (2026).
+       *RDycore-sediment v1.0.* EGUsphere preprint 2026-4859.
+       doi:10.5194/egusphere-2026-4859
+   * - ``aSM16``
+     - Perignon, M. C. (2016). *Using the Sediment Transport and Vegetation
+       Operators in ANUGA.* anugaSed manual. The authoritative specification
+       for the original anugaSed code.
+   * - ``P14``
+     - Perignon, M. C. (2014). *A Rolling Stone Gathers No Moss.* PhD thesis,
+       University of Colorado Boulder.
+   * - ``P13``
+     - Perignon, M. C., Tucker, G. E., Griffin, E. R. and Friedman, J. M.
+       (2013). Effects of riparian vegetation on topographic change during a
+       large flood event, Rio Puerco, New Mexico. *JGR Earth Surface*, 118(3),
+       1193-1209. doi:10.1002/jgrf.20073
+   * - ``DL09``
+     - Davy, P. and Lague, D. (2009). Fluvial erosion/transport equation of
+       landscape evolution models revisited. *JGR Earth Surface*, 114, F03007.
+       doi:10.1029/2008JF001146. Source of the E-D framework.
+   * - ``LM15``
+     - Liu, X., Mohammadian, A., Kurganov, A. and Infante Sedano, J. A.
+       (2015). Well-balanced central-upwind scheme for a fully coupled shallow
+       water system modeling flows over erodible bed. *Journal of
+       Computational Physics*, 300, 202-218. doi:10.1016/j.jcp.2015.07.043
+   * - ``LL16``
+     - Larsen and Lamb (2016), above. Uses ANUGA.
+   * - ``W04``
+     - Wilson et al. (2004), above. Not the same Wilson as the 1966 erosion
+       coefficient cited by ``P14``.
+   * - ``EH67``
+     - Engelund and Hansen (1967), above.
+   * - ``aS16``
+     - The ``anugaSed`` source itself (Perignon 2016, MIT licence).
+
 .. note::
 
-   **Still to be filled in.** The following short codes appear in the text and
-   in the source comments and come from the internal sediment specification,
-   which is not distributed with ANUGA. They have deliberately not been
-   guessed at:
-
-   ``FG21``, ``RDy26``, ``LM15``, ``DL09``, ``P13``, ``P14``, ``FP64``,
-   ``A22``, ``A23``.
-
-   ``RDy26`` refers to the RDycore configuration the benchmarks are compared
-   against; the rest are literature the specification cites. Replace this note
-   with the full citations when they are to hand.
+   Two things that look like citations but are not. ``A22``/``A23`` are
+   *equation numbers* in ``RDy26``'s appendix, and ``FP64`` in the GPU sources
+   is double-precision floating point.

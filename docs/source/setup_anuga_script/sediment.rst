@@ -190,8 +190,9 @@ Sediment classes
 +---------------------------+-------+----------+-------------------------+
 | ``initial_concentration`` | --    | 0.0      | volumetric, uniform     |
 +---------------------------+-------+----------+-------------------------+
-| ``beta``                  | --    | domain's | limiter coefficient     |
-|                           |       |          | ``[L-3]``               |
+| ``beta``                  | --    | domain's | edge reconstruction     |
+|                           |       |          | limiter, shared by all  |
+|                           |       |          | tracers                 |
 +---------------------------+-------+----------+-------------------------+
 | ``reference_height``      | m     | ``None`` | Rouse reference height  |
 |                           |       |          | ``a``; see the appendix |

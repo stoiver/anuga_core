@@ -1740,25 +1740,25 @@ class Domain(Generic_Domain):
         if self.n_sediment_classes == 0:
             return 'sediment: no grain sizes registered'
 
-        ero = {0: "[E-1] Shields / Smith-McLean, non-cohesive (sand, gravel)",
-               1: "[E-3] Hanson & Simon, cohesive (silt, clay)",
-               2: "[E-4] Partheniades (RDycore)"}[self.sediment_erosion_mode]
-        dep = {0: "[D-1] D = d* c v_s", 1: "[D-2] D = v_s c (1 - tau_b/tau_d)"
+        ero = {0: "Shields / Smith-McLean, non-cohesive (sand, gravel)   [E-1]",
+               1: "Hanson & Simon, cohesive (silt, clay)   [E-3]",
+               2: "Partheniades (RDycore)   [E-4]"}[self.sediment_erosion_mode]
+        dep = {0: "D = d* c v_s   [D-1]", 1: "D = v_s c (1 - tau_b/tau_d)   [D-2]"
                }[self.sediment_deposition_mode]
-        dstar = {0: "constant, per grain size", 1: "[S-4] Rouse profile"
+        dstar = {0: "constant, per grain size", 1: "Rouse profile   [S-4]"
                  }[self.sediment_d_star_mode]
-        shear = {0: "[T-1] quadratic drag, tau_b = rho f_c |v|^2",
-                 1: "[T-7] depth-slope, tau_b = rho g h S (aSM16; legacy)"
+        shear = {0: "quadratic drag, tau_b = rho f_c |v|^2   [T-1]",
+                 1: "depth-slope, tau_b = rho g h S (aSM16; legacy)   [T-7]"
                  }[self.sediment_shear_closure]
         fric = {0: "constant n, from the domain friction quantity",
-                1: "larsen_lamb [T-13..15], n = %.5f" % self.sediment_manning_ll,
-                2: "wilson [T-8..10], bed=%s, D=%.4g m"
+                1: "larsen_lamb, n = %.5f   [T-13..15]" % self.sediment_manning_ll,
+                2: "wilson, bed=%s, D=%.4g m   [T-8..10]"
                    % (['sand', 'gravel', 'boulder'][self.sediment_wilson_bed],
                       self.sediment_wilson_D)}[self.sediment_friction_mode]
         bl = ("off" if self.sediment_bedload_mode == 0 else
-              ("[K-5] Engelund-Hansen, TOTAL LOAD (suspended source disabled)"
+              ("Engelund-Hansen, TOTAL LOAD (suspended source disabled)   [K-5]"
                if self.sediment_bedload_mode == 2 else
-               "[K-1] power law, K=%.4g m=%.4g tau_c*=%.4g"
+               "power law, K=%.4g m=%.4g tau_c*=%.4g   [K-1]"
                % (self.sediment_bedload_K, self.sediment_bedload_m,
                   self.sediment_bedload_tau_c_star)))
 
@@ -1819,9 +1819,11 @@ class Domain(Generic_Domain):
             L.append('  erodible region    : %d of %d cells erodible '
                      '(%d locked at their current bed)'
                      % (int(mask.sum()), len(mask), int((~mask).sum())))
-        L.append('  (bracketed labels such as [E-1] name the term in the '
-                 'physics; see the')
-        L.append('   Sediment physics appendix in the ANUGA documentation)')
+        L.append('  ([E-1] and the like are cross-references to the term in '
+                 'the physics;')
+        L.append('   see the Sediment physics appendix -- the description '
+                 'before each')
+        L.append('   label is the whole story.)')
         L.append('  per grain size:')
         for i, nm in enumerate(self.get_sediment_names()):
             L.append('    %-10s d=%.4g m  v_s=%.4e m/s  R=%.4g  tau_c*=%.4g'
