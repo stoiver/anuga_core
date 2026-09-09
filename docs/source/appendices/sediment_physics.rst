@@ -90,6 +90,133 @@ Both act on the same :math:`z`, and when both are active their contributions sum
 The rest of this page is the closures: what :math:`E_s`, :math:`D_s`,
 :math:`\mathbf{q}_b` and the bed shear stress they all depend on are taken to be.
 
+--------------
+
+Bed shear stress
+----------------
+
+Every erosion and deposition rate below depends on the bed shear stress, so this
+is the term to get right first. The default closure is quadratic drag:
+
+.. math::
+
+   \tau_b = \rho\, f_c\, |\mathbf{v}|^2 \qquad \text{[T-1]}
+
+where :math:`f_c` is the Darcy-Weisbach friction factor divided by eight,
+:math:`f_c = f/8`. With a Manning closure :math:`f_c = g n^2 h^{-1/3}`.
+
+From it follow the shear velocity, the dimensionless (Shields) stress, and the
+excess stress that drives transport:
+
+.. math::
+
+   u_* = \sqrt{\tau_b/\rho} = |\mathbf{v}|\sqrt{f_c}
+   \qquad \text{[T-2]}
+
+.. math::
+
+   \tau^{*} = \frac{\tau_b}{(\rho_s - \rho)\, g\, D} = \frac{u_*^2}{R\,g\,D}
+   \qquad \text{[T-3]}
+
+.. math::
+
+   \tau_x = \tau^{*} - \tau_c^{*} \qquad \text{[T-4]}
+
+with :math:`R = \rho_s/\rho - 1` the submerged specific gravity and
+:math:`\tau_c^{*}` the critical Shields stress for that grain size.
+
+Velocity is recovered from momentum with ANUGA's depth-limiting form, so that a
+vanishing depth does not produce a divergent velocity:
+
+.. math::
+
+   u = \frac{(uh)\,h}{h^2 + h_\epsilon^2}
+   \qquad \text{[T-5]}
+
+The alternative depth-slope closure, :math:`\tau_b = \rho\,g\,h\,S`, is what
+anugaSed used and is kept for reproducing its results.
+
+
+Two independent choices feed ``tau_b``: how the stress is formed, and what
+friction factor goes into it.
+
+.. _71-set_shear_closure----how:
+
+``set_shear_closure`` -- how
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   domain.set_shear_closure('quadratic_drag')   # default
+   domain.set_shear_closure('depth_slope')
+
+==================== ===================== =========
+value                expression            spec
+==================== ===================== =========
+``'quadratic_drag'`` \`tau_b = rho f_c     v
+``'depth_slope'``    ``tau_b = rho g h S`` ``[T-7]``
+==================== ===================== =========
+
+``'quadratic_drag'`` is the default and the right choice for unsteady or
+rapidly varying flow -- dam breaks, floods, anything with significant
+inertia.
+
+``'depth_slope'`` assumes locally uniform flow, where friction balances gravity.
+It is what anugaSed uses, so choose it when reproducing their results
+(divergence **D1** in the spec). It degrades where that balance does not hold.
+
+The two are interchangeable by construction: the kernel returns ``tau_b/rho``,
+so everything downstream is unchanged by the choice.
+
+.. _72-set_sediment_friction----what:
+
+``set_sediment_friction`` -- what
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   domain.set_sediment_friction('constant')    # default
+   domain.set_sediment_friction('wilson', bed='gravel', grain_size=0.02)
+   domain.set_sediment_friction('larsen_lamb', k_s=0.05, r_d=2.0, r_br=2.0)
+
+``'wilson'`` and ``'larsen_lamb'`` are not callable with the mode alone -- they
+require a length scale and refuse without one, rather than inventing a
+default:
+
+- ``'wilson'`` needs ``grain_size > 0`` (D50 for sand, D84 for gravel or boulder);
+- ``'larsen_lamb'`` needs either ``k_s`` or ``sigma_br``. There is no universal
+  ``sigma_br``: it is site-measured, and LL16 report about 5 m at Moses Coulee.
+
++-------------------+------------------+-------------------------------+
+| mode              | spec             | when                          |
++===================+==================+===============================+
+| ``'constant'``    | ``[T-6]``        | default: ``f_c`` from the     |
+|                   |                  | domain's Manning ``n``.       |
+|                   |                  | Ordinary flood and channel    |
+|                   |                  | work.                         |
++-------------------+------------------+-------------------------------+
+| ``'wilson'``      | ``[T-8..T-12]``  | depth-dependent, from grain   |
+|                   |                  | size. Shallow flow over       |
+|                   |                  | coarse beds, where relative   |
+|                   |                  | submergence matters.          |
++-------------------+------------------+-------------------------------+
+| ``'larsen_lamb'`` | ``[T-13..T-15]`` | partitions total stress into  |
+|                   |                  | grain and form drag. Bedforms |
+|                   |                  | or roughness elements, where  |
+|                   |                  | only the grain part drives    |
+|                   |                  | sediment.                     |
++-------------------+------------------+-------------------------------+
+
+``bed`` is ``'sand'`` or ``'gravel'``; ``grain_size`` (m) is the roughness length
+scale; ``k_s`` (m) is the roughness height; ``r_d`` and ``r_br`` (default 2.0) are
+Larsen-Lamb's drag partitioning ratios.
+
+This affects **only** the sediment source term. The hydrodynamic friction
+operator is untouched, so momentum still sees the domain's Manning ``n``
+whatever you choose here.
+
+--------------
+
 
 Choosing ``tau_c_star``
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -311,131 +438,6 @@ near-bed concentration; it is a numerical guard, not a physical parameter, and
 Near-bed concentration is bounded by ``c_pack`` ``[L-4]`` regardless. That bound
 exists because equilibrium Rouse ``d*`` at vanishing shear will otherwise
 deposit the entire water column in under a second.
-
---------------
-
-Bed shear stress
-----------------
-
-Every erosion and deposition rate below depends on the bed shear stress, so this
-is the term to get right first. The default closure is quadratic drag:
-
-.. math::
-
-   \tau_b = \rho\, f_c\, |\mathbf{v}|^2 \qquad \text{[T-1]}
-
-where :math:`f_c` is the Darcy-Weisbach friction factor divided by eight,
-:math:`f_c = f/8`. With a Manning closure :math:`f_c = g n^2 h^{-1/3}`.
-
-From it follow the shear velocity, the dimensionless (Shields) stress, and the
-excess stress that drives transport:
-
-.. math::
-
-   u_* = \sqrt{\tau_b/\rho} = |\mathbf{v}|\sqrt{f_c}
-   \qquad \text{[T-2]}
-
-.. math::
-
-   \tau^{*} = \frac{\tau_b}{(\rho_s - \rho)\, g\, D} = \frac{u_*^2}{R\,g\,D}
-   \qquad \text{[T-3]}
-
-.. math::
-
-   \tau_x = \tau^{*} - \tau_c^{*} \qquad \text{[T-4]}
-
-with :math:`R = \rho_s/\rho - 1` the submerged specific gravity and
-:math:`\tau_c^{*}` the critical Shields stress for that grain size.
-
-Velocity is recovered from momentum with ANUGA's depth-limiting form, so that a
-vanishing depth does not produce a divergent velocity:
-
-.. math::
-
-   u = \frac{(uh)\,h}{h^2 + h_\epsilon^2}
-   \qquad \text{[T-5]}
-
-The alternative depth-slope closure, :math:`\tau_b = \rho\,g\,h\,S`, is what
-anugaSed used and is kept for reproducing its results.
-
-
-Two independent choices feed ``tau_b``: how the stress is formed, and what
-friction factor goes into it.
-
-.. _71-set_shear_closure----how:
-
-``set_shear_closure`` -- how
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-   domain.set_shear_closure('quadratic_drag')   # default
-   domain.set_shear_closure('depth_slope')
-
-==================== ===================== =========
-value                expression            spec
-==================== ===================== =========
-``'quadratic_drag'`` \`tau_b = rho f_c     v
-``'depth_slope'``    ``tau_b = rho g h S`` ``[T-7]``
-==================== ===================== =========
-
-``'quadratic_drag'`` is the default and the right choice for unsteady or
-rapidly varying flow -- dam breaks, floods, anything with significant
-inertia.
-
-``'depth_slope'`` assumes locally uniform flow, where friction balances gravity.
-It is what anugaSed uses, so choose it when reproducing their results
-(divergence **D1** in the spec). It degrades where that balance does not hold.
-
-The two are interchangeable by construction: the kernel returns ``tau_b/rho``,
-so everything downstream is unchanged by the choice.
-
-.. _72-set_sediment_friction----what:
-
-``set_sediment_friction`` -- what
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-   domain.set_sediment_friction('constant')    # default
-   domain.set_sediment_friction('wilson', bed='gravel', grain_size=0.02)
-   domain.set_sediment_friction('larsen_lamb', k_s=0.05, r_d=2.0, r_br=2.0)
-
-``'wilson'`` and ``'larsen_lamb'`` are not callable with the mode alone -- they
-require a length scale and refuse without one, rather than inventing a
-default:
-
-- ``'wilson'`` needs ``grain_size > 0`` (D50 for sand, D84 for gravel or boulder);
-- ``'larsen_lamb'`` needs either ``k_s`` or ``sigma_br``. There is no universal
-  ``sigma_br``: it is site-measured, and LL16 report about 5 m at Moses Coulee.
-
-+-------------------+------------------+-------------------------------+
-| mode              | spec             | when                          |
-+===================+==================+===============================+
-| ``'constant'``    | ``[T-6]``        | default: ``f_c`` from the     |
-|                   |                  | domain's Manning ``n``.       |
-|                   |                  | Ordinary flood and channel    |
-|                   |                  | work.                         |
-+-------------------+------------------+-------------------------------+
-| ``'wilson'``      | ``[T-8..T-12]``  | depth-dependent, from grain   |
-|                   |                  | size. Shallow flow over       |
-|                   |                  | coarse beds, where relative   |
-|                   |                  | submergence matters.          |
-+-------------------+------------------+-------------------------------+
-| ``'larsen_lamb'`` | ``[T-13..T-15]`` | partitions total stress into  |
-|                   |                  | grain and form drag. Bedforms |
-|                   |                  | or roughness elements, where  |
-|                   |                  | only the grain part drives    |
-|                   |                  | sediment.                     |
-+-------------------+------------------+-------------------------------+
-
-``bed`` is ``'sand'`` or ``'gravel'``; ``grain_size`` (m) is the roughness length
-scale; ``k_s`` (m) is the roughness height; ``r_d`` and ``r_br`` (default 2.0) are
-Larsen-Lamb's drag partitioning ratios.
-
-This affects **only** the sediment source term. The hydrodynamic friction
-operator is untouched, so momentum still sees the domain's Manning ``n``
-whatever you choose here.
 
 --------------
 
