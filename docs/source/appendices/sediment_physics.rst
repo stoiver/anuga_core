@@ -107,6 +107,52 @@ else.
 Erosion: naming the bed material
 --------------------------------
 
+The three routes are different physics, not different tunings of one law. Which
+you want is a statement about the bed material.
+
+**Non-cohesive** -- sand, gravel, boulders. A saturating near-bed reference
+concentration after Smith & McLean, recovered as a flux by the settling velocity:
+
+.. math::
+
+   E^{*} = \frac{0.65\, \gamma_0\, S}{1 + \gamma_0\, S},
+   \qquad S = \frac{\tau^{*}}{\tau_c^{*}} - 1
+   \qquad \text{[E-1]}
+
+.. math::
+
+   E = v_s\, E^{*} \qquad \text{[E-2]}
+
+with :math:`\gamma_0 = 0.0024` empirical. The 0.65 is the maximum packing
+fraction, so :math:`E^{*}` saturates rather than growing without bound.
+
+**Cohesive** -- silt, clay, cohesive bank material. An excess *dimensional*
+stress law, calibrated by jet test:
+
+.. math::
+
+   E = K_e\,(\tau_b - \tau_c) \qquad \text{[E-3]}
+
+.. math::
+
+   K_e = \frac{0.2 \times 10^{-6}}{\sqrt{\tau_c}}
+   \quad [\mathrm{m^3\,N^{-1}\,s^{-1}}],
+   \qquad \tau_c = \tau_c^{*}\,(\rho_s - \rho)\, g\, D_{50}
+   \qquad \text{[E-5]}
+
+**Partheniades** -- the form RDycore uses, also on dimensional stress,
+normalised by the threshold:
+
+.. math::
+
+   E = K_e \, \frac{\tau_b - \tau_c}{\tau_c}
+   \quad \text{for } \tau_b > \tau_c, \text{ else } 0
+   \qquad \text{[E-4]}
+
+Note that ``[E-1]`` is written in Shields stress while ``[E-3]`` and ``[E-4]``
+are in dimensional stress; that is the usual source of confusion between them.
+
+
 .. code-block:: python
 
    domain.set_bed_material('noncohesive')   # default
@@ -145,6 +191,37 @@ millimetre -- the sign of the bed change reverses. See
 Deposition
 ----------
 
+Deposition is the settling flux out of the water column. The default is the
+near-bed concentration times the settling velocity:
+
+.. math::
+
+   D = c_b\, v_s = d^{*}(Z)\, c\, v_s \qquad \text{[D-1]}
+
+The alternative is a threshold form with a critical *deposition* stress, which
+switches deposition off in flow strong enough to keep grains suspended:
+
+.. math::
+
+   D = v_s\, c \left(1 - \frac{\tau_b}{\tau_d}\right)
+   \quad \text{for } \tau_b < \tau_d, \text{ else } 0
+   \qquad \text{[D-2]}
+
+Setting :math:`\tau_d = 0` disables deposition entirely, which is how the
+passive-transport benchmarks are run.
+
+The settling velocity itself is Ferguson & Church, smooth across the
+Stokes-to-turbulent transition and branch-free:
+
+.. math::
+
+   v_s = \frac{R\,g\,d^2}{C_1 \nu + \sqrt{0.75\, C_2\, R\, g\, d^3}}
+   \qquad \text{[S-1]}
+
+with :math:`C_1 = 18`, :math:`C_2 = 0.4` for smooth spheres, and
+:math:`1.0`, :math:`1.1` for natural irregular grains.
+
+
 .. code-block:: python
 
    domain.set_deposition(law='d_star', tau_d=0.0, near_bed='constant',
@@ -170,6 +247,36 @@ Deposition
 
 ``near_bed`` -- the ``d*`` ratio
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:math:`d^{*}` is the ratio of near-bed to depth-averaged concentration, and it
+is what makes ``[D-1]`` a near-bed law rather than a depth-averaged one. It is a
+function of the Rouse number
+
+.. math::
+
+   Z = \frac{v_s}{\kappa\, u_*}, \qquad \kappa = 0.41
+   \qquad \text{[S-2]}
+
+At low :math:`Z` the grain is well mixed through the column and
+:math:`d^{*} \to 1` (washload); at high :math:`Z` it concentrates near the bed
+and :math:`d^{*} \gg 1`.
+
+``'constant'`` takes :math:`d^{*} = 1` -- a uniform suspension. ``'rouse'``
+evaluates the defining ratio, obtained by requiring that the sediment discharge
+be the depth integral of concentration times velocity over a Rouse-Vanoni
+concentration profile and a logarithmic velocity profile:
+
+.. math::
+
+   d^{*} = \frac{\displaystyle\int_a^h \ln(z/z_0)\, dz}
+                {\displaystyle\int_a^h
+                   \left(\frac{h-z}{h-a}\cdot\frac{a}{z}\right)^{Z}
+                   \ln(z/z_0)\, dz}
+   \qquad \text{[S-4]}
+
+with :math:`a` the reference height. ANUGA evaluates a fitted form of this
+rather than the integral itself, for the reasons given below.
+
 
 Deposition is driven by the concentration *at the bed*, but the transported
 quantity is depth-averaged. ``d* = c_b/c`` bridges them.
@@ -209,6 +316,48 @@ deposit the entire water column in under a second.
 
 Bed shear stress
 ----------------
+
+Every erosion and deposition rate below depends on the bed shear stress, so this
+is the term to get right first. The default closure is quadratic drag:
+
+.. math::
+
+   \tau_b = \rho\, f_c\, |\mathbf{v}|^2 \qquad \text{[T-1]}
+
+where :math:`f_c` is the Darcy-Weisbach friction factor divided by eight,
+:math:`f_c = f/8`. With a Manning closure :math:`f_c = g n^2 h^{-1/3}`.
+
+From it follow the shear velocity, the dimensionless (Shields) stress, and the
+excess stress that drives transport:
+
+.. math::
+
+   u_* = \sqrt{\tau_b/\rho} = |\mathbf{v}|\sqrt{f_c}
+   \qquad \text{[T-2]}
+
+.. math::
+
+   \tau^{*} = \frac{\tau_b}{(\rho_s - \rho)\, g\, D} = \frac{u_*^2}{R\,g\,D}
+   \qquad \text{[T-3]}
+
+.. math::
+
+   \tau_x = \tau^{*} - \tau_c^{*} \qquad \text{[T-4]}
+
+with :math:`R = \rho_s/\rho - 1` the submerged specific gravity and
+:math:`\tau_c^{*}` the critical Shields stress for that grain size.
+
+Velocity is recovered from momentum with ANUGA's depth-limiting form, so that a
+vanishing depth does not produce a divergent velocity:
+
+.. math::
+
+   u = \frac{(uh)\,h}{h^2 + h_\epsilon^2}
+   \qquad \text{[T-5]}
+
+The alternative depth-slope closure, :math:`\tau_b = \rho\,g\,h\,S`, is what
+anugaSed used and is kept for reproducing its results.
+
 
 Two independent choices feed ``tau_b``: how the stress is formed, and what
 friction factor goes into it.
@@ -292,6 +441,60 @@ whatever you choose here.
 
 Bedload
 -------
+
+Bedload moves grains along the bed rather than through the water column. The
+transport rate is a power law in the excess Shields stress, made dimensional by
+the grain size:
+
+.. math::
+
+   q_b^{*} = K\, \tau_x^{\,m} \qquad \text{[K-1]}
+
+.. math::
+
+   q_b = q_b^{*}\, \sqrt{\left(\tfrac{\rho_s}{\rho} - 1\right) g}\; D^{3/2}
+   \qquad \text{[K-2]}
+
+and it moves the bed by its divergence:
+
+.. math::
+
+   \frac{\partial z}{\partial t}
+     = -\frac{1}{1-\lambda}\, \nabla \cdot \mathbf{q}_b
+   \qquad \text{[K-3]}
+
+:math:`q_b` is a magnitude, so it is directed along the flow to give the vector
+:math:`\mathbf{q}_b`.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 14 12 14 26
+
+   * - Parameter set
+     - :math:`K`
+     - :math:`m`
+     - :math:`\tau_c^{*}`
+     - Notes
+   * - Wong & Parker (2006) Eq 24
+     - 3.97
+     - 1.5
+     - 0.0495
+     - the default; bedload only
+   * - Engelund & Hansen ``[K-5]``
+     - :math:`0.05/f_c`
+     - 2.5
+     - 0
+     - **total load**, no threshold
+
+.. warning::
+
+   Engelund & Hansen is a **total load** relation -- it already includes
+   suspended transport. Selecting it therefore *replaces* the suspended source
+   rather than supplementing it, and running both would double-count. Note also
+   that its :math:`K` is friction-dependent, not a constant, and that it has no
+   threshold: subtracting a :math:`\tau_c^{*}` from it would be a different
+   model.
+
 
 .. code-block:: python
 
