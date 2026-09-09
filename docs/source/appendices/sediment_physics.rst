@@ -12,11 +12,21 @@ Sediment physics: choosing the laws
    model with them. This appendix is for when you need to say *which* physics,
    rather than accept the defaults.
 
-Each section below covers one choice: what the alternatives are, what they
-assume, and how to tell which one your problem wants. Labels like ``[E-1]``
-and the section numbers refer to the internal sediment specification, which is
-not distributed with ANUGA; they are stable identifiers for each term rather
-than links you can follow.
+This page is a short review of the formulations ANUGA implements: for each
+term in the governing equations, what the published alternatives are, what they
+assume, and how to tell which one your problem wants. Sources are cited by
+label -- [FG21]_, [RDy26]_ and so on -- and collected in `References`_ at the
+end.
+
+Where the sources disagree, they disagree about physics rather than notation,
+and the page says so. Erosion is the clearest case: the cohesive and
+non-cohesive routes are not competing fits to the same data but descriptions of
+different bed material, so choosing between them is a statement about the bed.
+
+Bracketed equation labels like ``[E-1]`` are internal identifiers for each
+term. They appear in the source comments and in ``sediment_summary()`` so a
+term can be traced from the code to the equation and on to the paper; they are
+listed under `What the bracketed labels mean`_.
 
 .. _sediment_governing_equations:
 
@@ -35,8 +45,9 @@ vector the solver carries is
 
    \mathbf{U} = \begin{bmatrix} h & uh & vh & m_1 & \dots & m_{N_s}\end{bmatrix}^{T}
 
-**Suspended transport.** The tracer equation with a source: what the bed gives up
-and what settles out of the water column.
+**Suspended transport** [RDy26]_, which is [DL09]_ written per grain size. The
+tracer equation with a source: what the bed gives up and what settles out of
+the water column.
 
 .. math::
 
@@ -58,8 +69,9 @@ moves by the volume it gains, allowing for pore space:
    \frac{\partial z}{\partial t} = \frac{D - E}{1 - \lambda}
    \qquad \text{[G-4]}
 
-with :math:`\lambda` the bed porosity, since a deposited volume :math:`(1-\lambda)\,dz`
-of grains fills a bed volume :math:`dz`. This is the Exner equation.
+with :math:`\lambda` the bed porosity, since a deposited volume
+:math:`(1-\lambda)\,dz` of grains fills a bed volume :math:`dz`. This is the
+Exner equation [Exn25]_, in the form used by [P14]_ and [FG21]_.
 
 **Bedload.** When bedload is switched on it moves the bed too, by the divergence
 of the bedload transport vector :math:`\mathbf{q}_b`:
@@ -79,8 +91,10 @@ Both act on the same :math:`z`, and when both are active their contributions sum
    regardless of :math:`c_s`, and the momentum equations are unchanged by the
    presence of sediment.
 
-   Neither of the reference models this implementation follows does that coupling
-   either. It is the assumption most likely to fail for very energetic flows,
+   Neither [FG21]_ nor [RDy26]_ does that coupling either. [LM15]_ is the
+   contrasting approach: a fully coupled system in which the sediment is part
+   of the hyperbolic problem rather than a tracer advected by an
+   already-computed flux. It is the assumption most likely to fail for very energetic flows,
    where the mixture starts to behave like a debris flow.
 
    Whether the bed moves at all is itself a choice --
@@ -96,7 +110,8 @@ Bed shear stress
 ----------------
 
 Every erosion and deposition rate below depends on the bed shear stress, so this
-is the term to get right first. The default closure is quadratic drag:
+is the term to get right first. [FG21]_, [RDy26]_ and [P14]_ all specify the
+same quadratic drag law, in different notation:
 
 .. math::
 
@@ -125,16 +140,17 @@ excess stress that drives transport:
 with :math:`R = \rho_s/\rho - 1` the submerged specific gravity and
 :math:`\tau_c^{*}` the critical Shields stress for that grain size.
 
-Velocity is recovered from momentum with ANUGA's depth-limiting form, so that a
-vanishing depth does not produce a divergent velocity:
+Velocity is recovered from momentum with ANUGA's depth-limiting form [MR12]_,
+so that a vanishing depth does not produce a divergent velocity. [RDy26]_
+adopts the same form:
 
 .. math::
 
    u = \frac{(uh)\,h}{h^2 + h_\epsilon^2}
    \qquad \text{[T-5]}
 
-The alternative depth-slope closure, :math:`\tau_b = \rho\,g\,h\,S`, is what
-anugaSed used and is kept for reproducing its results.
+The alternative depth-slope closure, :math:`\tau_b = \rho\,g\,h\,S`, is the one
+[aSM16]_ used, and is kept for reproducing anugaSed's results.
 
 
 Two independent choices feed ``tau_b``: how the stress is formed, and what
@@ -179,13 +195,15 @@ so everything downstream is unchanged by the choice.
    domain.set_sediment_friction('wilson', bed='gravel', grain_size=0.02)
    domain.set_sediment_friction('larsen_lamb', k_s=0.05, r_d=2.0, r_br=2.0)
 
-``'wilson'`` and ``'larsen_lamb'`` are not callable with the mode alone -- they
+``'wilson'`` [Wil04]_ and ``'larsen_lamb'`` [LL16]_ are not callable with the
+mode alone -- they
 require a length scale and refuse without one, rather than inventing a
 default:
 
 - ``'wilson'`` needs ``grain_size > 0`` (D50 for sand, D84 for gravel or boulder);
 - ``'larsen_lamb'`` needs either ``k_s`` or ``sigma_br``. There is no universal
-  ``sigma_br``: it is site-measured, and LL16 report about 5 m at Moses Coulee.
+  ``sigma_br``: it is site-measured, and [LL16]_ report about 5 m at Moses
+  Coulee.
 
 +-------------------+------------------+-------------------------------+
 | mode              | spec             | when                          |
@@ -238,7 +256,8 @@ The three routes are different physics, not different tunings of one law. Which
 you want is a statement about the bed material.
 
 **Non-cohesive** -- sand, gravel, boulders. A saturating near-bed reference
-concentration after Smith & McLean, recovered as a flux by the settling velocity:
+concentration after [SM77]_ and [Par98]_, as used by [FG21]_, recovered as a
+flux by the settling velocity. The threshold is a Shields stress [Shi36]_:
 
 .. math::
 
@@ -253,8 +272,10 @@ concentration after Smith & McLean, recovered as a flux by the settling velocity
 with :math:`\gamma_0 = 0.0024` empirical. The 0.65 is the maximum packing
 fraction, so :math:`E^{*}` saturates rather than growing without bound.
 
-**Cohesive** -- silt, clay, cohesive bank material. An excess *dimensional*
-stress law, calibrated by jet test:
+**Cohesive** -- silt, clay, cohesive bank material; the regime of the Rio
+Puerco field data [P13]_ that anugaSed was built for. An excess *dimensional*
+stress law, calibrated by jet test [HS01]_ and specified for ANUGA by
+[aSM16]_:
 
 .. math::
 
@@ -267,8 +288,8 @@ stress law, calibrated by jet test:
    \qquad \tau_c = \tau_c^{*}\,(\rho_s - \rho)\, g\, D_{50}
    \qquad \text{[E-5]}
 
-**Partheniades** -- the form RDycore uses, also on dimensional stress,
-normalised by the threshold:
+**Partheniades** [Par65]_ -- the form [RDy26]_ uses, also on dimensional
+stress, normalised by the threshold:
 
 .. math::
 
@@ -318,15 +339,16 @@ millimetre -- the sign of the bed change reverses. See
 Deposition
 ----------
 
-Deposition is the settling flux out of the water column. The default is the
-near-bed concentration times the settling velocity:
+Deposition is the settling flux out of the water column. The default, after
+[P14]_ and [FG21]_, is the near-bed concentration times the settling velocity:
 
 .. math::
 
    D = c_b\, v_s = d^{*}(Z)\, c\, v_s \qquad \text{[D-1]}
 
-The alternative is a threshold form with a critical *deposition* stress, which
-switches deposition off in flow strong enough to keep grains suspended:
+The alternative, from [RDy26]_, is a threshold form with a critical
+*deposition* stress, which switches deposition off in flow strong enough to
+keep grains suspended:
 
 .. math::
 
@@ -337,8 +359,9 @@ switches deposition off in flow strong enough to keep grains suspended:
 Setting :math:`\tau_d = 0` disables deposition entirely, which is how the
 passive-transport benchmarks are run.
 
-The settling velocity itself is Ferguson & Church, smooth across the
-Stokes-to-turbulent transition and branch-free:
+The settling velocity itself is [FC04]_, smooth across the Stokes-to-turbulent
+transition and branch-free. [Die82]_ is the more accurate polynomial fit for
+natural irregular grains, at the cost of a branchy evaluation:
 
 .. math::
 
@@ -377,7 +400,7 @@ with :math:`C_1 = 18`, :math:`C_2 = 0.4` for smooth spheres, and
 
 :math:`d^{*}` is the ratio of near-bed to depth-averaged concentration, and it
 is what makes ``[D-1]`` a near-bed law rather than a depth-averaged one. It is a
-function of the Rouse number
+function of the Rouse number [Rou37]_
 
 .. math::
 
@@ -389,9 +412,10 @@ At low :math:`Z` the grain is well mixed through the column and
 and :math:`d^{*} \gg 1`.
 
 ``'constant'`` takes :math:`d^{*} = 1` -- a uniform suspension. ``'rouse'``
-evaluates the defining ratio, obtained by requiring that the sediment discharge
-be the depth integral of concentration times velocity over a Rouse-Vanoni
-concentration profile and a logarithmic velocity profile:
+evaluates the defining ratio given by [aSM16]_ after [DL09]_, obtained by
+requiring that the sediment discharge be the depth integral of concentration
+times velocity over a Rouse-Vanoni concentration profile and a logarithmic
+velocity profile:
 
 .. math::
 
@@ -401,7 +425,7 @@ concentration profile and a logarithmic velocity profile:
                    \ln(z/z_0)\, dz}
    \qquad \text{[S-4]}
 
-with :math:`a` the reference height. ANUGA evaluates a fitted form of this
+with :math:`a` the reference height, in the sense of [vR84]_. ANUGA evaluates a fitted form of this
 rather than the integral itself, for the reasons given below.
 
 
@@ -444,9 +468,9 @@ deposit the entire water column in under a second.
 Bedload
 -------
 
-Bedload moves grains along the bed rather than through the water column. The
-transport rate is a power law in the excess Shields stress, made dimensional by
-the grain size:
+Bedload moves grains along the bed rather than through the water column.
+Following [FG21]_, the transport rate is a power law in the excess Shields
+stress, made dimensional by the grain size:
 
 .. math::
 
@@ -465,8 +489,8 @@ and it moves the bed by its divergence:
      = -\frac{1}{1-\lambda}\, \nabla \cdot \mathbf{q}_b
    \qquad \text{[K-3]}
 
-:math:`q_b` is a magnitude, so it is directed along the flow to give the vector
-:math:`\mathbf{q}_b`.
+:math:`q_b` is a magnitude, so it is directed along the flow to give the
+vector :math:`\mathbf{q}_b`, following [Par98]_.
 
 .. list-table::
    :header-rows: 1
@@ -477,12 +501,12 @@ and it moves the bed by its divergence:
      - :math:`m`
      - :math:`\tau_c^{*}`
      - Notes
-   * - Wong & Parker (2006) Eq 24
+   * - [WP06]_ Eq 24, correcting [MPM48]_
      - 3.97
      - 1.5
      - 0.0495
      - the default; bedload only
-   * - Engelund & Hansen ``[K-5]``
+   * - [EH67]_, as ``[K-5]``
      - :math:`0.05/f_c`
      - 2.5
      - 0
@@ -668,120 +692,101 @@ summaries, and renumbering would only break the correspondence.
 References
 ----------
 
-The laws above are standard sediment-transport formulations; these are the
-sources for each.
+Cited by label throughout the page. The short labels are also the ones used in
+the source comments and in the internal specification, so a term can be traced
+from the code to the paper it comes from.
 
-**Settling velocity**
+.. [DL09] Davy, P. and Lague, D. (2009). Fluvial erosion/transport equation of
+   landscape evolution models revisited. *Journal of Geophysical Research:
+   Earth Surface*, 114, F03007. doi:10.1029/2008JF001146
 
-* Ferguson, R. I. and Church, M. (2004). A simple universal equation for grain
-  settling velocity. *Journal of Sedimentary Research*, 74(6), 933-937.
-  The ``[S-1]`` settling velocity, chosen over the Dietrich fit because it is
-  smooth across the Stokes/turbulent transition and branch-free.
-* Dietrich, W. E. (1982). Settling velocity of natural particles.
-  *Water Resources Research*, 18(6), 1615-1626.
-  The polynomial fit the above is preferred to.
+.. [Die82] Dietrich, W. E. (1982). Settling velocity of natural particles.
+   *Water Resources Research*, 18(6), 1615-1626.
 
-**Erosion**
+.. [EH67] Engelund, F. and Hansen, E. (1967). *A Monograph on Sediment
+   Transport in Alluvial Streams.* Teknisk Forlag, Copenhagen.
 
-* Shields, A. (1936). *Anwendung der Ähnlichkeitsmechanik und der
-  Turbulenzforschung auf die Geschiebebewegung.* Mitteilungen der
-  Preussischen Versuchsanstalt für Wasserbau und Schiffbau, Berlin.
-  The critical shear stress ``tau_c_star`` is a Shields parameter.
-* Smith, J. D. and McLean, S. R. (1977). Spatially averaged flow over a wavy
-  surface. *Journal of Geophysical Research*, 82(12), 1735-1746.
-  The near-bed reference concentration in the ``[E-1]`` non-cohesive route.
-* Partheniades, E. (1965). Erosion and deposition of cohesive soils.
-  *Journal of the Hydraulics Division, ASCE*, 91(1), 105-139.
-  The ``[E-4]`` cohesive erosion route.
-* Hanson, G. J. and Simon, A. (2001). Erodibility of cohesive streambeds in
-  the loess area of the midwestern USA. *Hydrological Processes*, 15(1),
-  23-38. The ``[E-3]``/``[E-5]`` cohesive route and its excess-stress form.
+.. [Exn25] Exner, F. M. (1925). Über die Wechselwirkung zwischen Wasser und
+   Geschiebe in Flüssen. *Sitzungsberichte der Akademie der Wissenschaften*,
+   Vienna.
 
-**Suspension and deposition**
+.. [FC04] Ferguson, R. I. and Church, M. (2004). A simple universal equation
+   for grain settling velocity. *Journal of Sedimentary Research*, 74(6),
+   933-937.
 
-* Rouse, H. (1937). Modern conceptions of the mechanics of fluid turbulence.
-  *Transactions of the ASCE*, 102, 463-505.
-  The ``[S-4]`` Rouse profile behind the ``d*`` near-bed ratio.
-* van Rijn, L. C. (1984). Sediment transport, part II: suspended load
-  transport. *Journal of Hydraulic Engineering*, 110(11), 1613-1641.
-  The reference height ``a`` and the ``a >= 0.01 h`` floor.
+.. [FG21] Fassett, C. I. and Goudge, T. A. (2021). Modeling the hydrodynamics,
+   sediment transport, and valley incision of outlet-forming floods from
+   Martian crater lakes. *Journal of Geophysical Research: Planets*, 126,
+   e2021JE006979. doi:10.1029/2021JE006979
 
-**Bedload and bed evolution**
+.. [HS01] Hanson, G. J. and Simon, A. (2001). Erodibility of cohesive
+   streambeds in the loess area of the midwestern USA. *Hydrological
+   Processes*, 15(1), 23-38.
 
-* Exner, F. M. (1925). Über die Wechselwirkung zwischen Wasser und Geschiebe
-  in Flüssen. *Sitzungsberichte der Akademie der Wissenschaften*, Vienna.
-  The ``[G-4]`` bed evolution equation.
-* Wong, M. and Parker, G. (2006). Reanalysis and correction of bed-load
-  relation of Meyer-Peter and Müller using their own database. *Journal of
-  Hydraulic Engineering*, 132(11), 1159-1168.
-  The default ``'wong_parker_eq24'`` bedload formula.
-* Engelund, F. and Hansen, E. (1967). *A Monograph on Sediment Transport in
-  Alluvial Streams.* Teknisk Forlag, Copenhagen.
-  The ``[K-5]`` total-load option.
+.. [LL16] Larsen, I. J. and Lamb, M. P. (2016). Progressive incision of the
+   Channeled Scablands by outburst floods. *Nature*, 538(7624), 229-232.
+   doi:10.1038/nature19817. Uses ANUGA.
 
-**Bed roughness closures**
+.. [LM15] Liu, X., Mohammadian, A., Kurganov, A. and Infante Sedano, J. A.
+   (2015). Well-balanced central-upwind scheme for a fully coupled shallow
+   water system modeling flows over erodible bed. *Journal of Computational
+   Physics*, 300, 202-218. doi:10.1016/j.jcp.2015.07.043
 
-* Larsen, I. J. and Lamb, M. P. (2016). Progressive incision of the Channeled
-  Scablands by outburst floods. *Nature*, 538, 229-232.
-  The ``'larsen_lamb'`` friction closure and the Moses Coulee ``sigma_br``
-  value quoted above.
-* Wilson, L., Ghatan, G. J., Head, J. W. and Mitchell, K. L. (2004). Mars
-  outflow channels: a reappraisal of the estimation of water flow velocities
-  from water depths, regional slopes, and channel floor properties. *Journal
-  of Geophysical Research: Planets*, 109, E09003.
-  The ``'wilson'`` friction closure. Note the caveat above: these are
-  Mars outflow channel closures, not general-purpose flood closures.
+.. [MPM48] Meyer-Peter, E. and Müller, R. (1948). Formulas for bed-load
+   transport. *Proceedings of the 2nd Meeting of the IAHR*, Stockholm, 39-64.
 
-**The short codes used in the source and the specification**
+.. [MR12] Mungkasi, S. and Roberts, S. G. (2012). Approximations of the
+   Carrier-Greenspan periodic solution to the shallow water wave equations for
+   flows on a sloping beach. *International Journal for Numerical Methods in
+   Fluids*, 69(4), 763-780. Source of the velocity regularisation ANUGA uses.
 
-.. list-table::
-   :header-rows: 1
-   :widths: 12 88
+.. [P13] Perignon, M. C., Tucker, G. E., Griffin, E. R. and Friedman, J. M.
+   (2013). Effects of riparian vegetation on topographic change during a large
+   flood event, Rio Puerco, New Mexico. *Journal of Geophysical Research:
+   Earth Surface*, 118(3), 1193-1209. doi:10.1002/jgrf.20073
 
-   * - Code
-     - Reference
-   * - ``FG21``
-     - Fassett, C. I. and Goudge, T. A. (2021). Modeling the hydrodynamics,
-       sediment transport, and valley incision of outlet-forming floods from
-       Martian crater lakes. *JGR Planets*, 126, e2021JE006979.
-       doi:10.1029/2021JE006979
-   * - ``RDy26``
-     - Feng, D., Tan, Z., Xu, D., Johnson, J. and Bisht, G. (2026).
-       *RDycore-sediment v1.0.* EGUsphere preprint 2026-4859.
-       doi:10.5194/egusphere-2026-4859
-   * - ``aSM16``
-     - Perignon, M. C. (2016). *Using the Sediment Transport and Vegetation
-       Operators in ANUGA.* anugaSed manual. The authoritative specification
-       for the original anugaSed code.
-   * - ``P14``
-     - Perignon, M. C. (2014). *A Rolling Stone Gathers No Moss.* PhD thesis,
-       University of Colorado Boulder.
-   * - ``P13``
-     - Perignon, M. C., Tucker, G. E., Griffin, E. R. and Friedman, J. M.
-       (2013). Effects of riparian vegetation on topographic change during a
-       large flood event, Rio Puerco, New Mexico. *JGR Earth Surface*, 118(3),
-       1193-1209. doi:10.1002/jgrf.20073
-   * - ``DL09``
-     - Davy, P. and Lague, D. (2009). Fluvial erosion/transport equation of
-       landscape evolution models revisited. *JGR Earth Surface*, 114, F03007.
-       doi:10.1029/2008JF001146. Source of the E-D framework.
-   * - ``LM15``
-     - Liu, X., Mohammadian, A., Kurganov, A. and Infante Sedano, J. A.
-       (2015). Well-balanced central-upwind scheme for a fully coupled shallow
-       water system modeling flows over erodible bed. *Journal of
-       Computational Physics*, 300, 202-218. doi:10.1016/j.jcp.2015.07.043
-   * - ``LL16``
-     - Larsen and Lamb (2016), above. Uses ANUGA.
-   * - ``W04``
-     - Wilson et al. (2004), above. Not the same Wilson as the 1966 erosion
-       coefficient cited by ``P14``.
-   * - ``EH67``
-     - Engelund and Hansen (1967), above.
-   * - ``aS16``
-     - The ``anugaSed`` source itself (Perignon 2016, MIT licence).
+.. [P14] Perignon, M. C. (2014). *A Rolling Stone Gathers No Moss.* PhD thesis,
+   University of Colorado Boulder.
+
+.. [Par65] Partheniades, E. (1965). Erosion and deposition of cohesive soils.
+   *Journal of the Hydraulics Division, ASCE*, 91(1), 105-139.
+
+.. [Par98] Parker, G. (1998). *1D Sediment Transport Morphodynamics with
+   Applications to Rivers and Turbidity Currents.* e-book.
+
+.. [RDy26] Feng, D., Tan, Z., Xu, D., Johnson, J. and Bisht, G. (2026).
+   *RDycore-sediment v1.0.* EGUsphere preprint 2026-4859.
+   doi:10.5194/egusphere-2026-4859
+
+.. [Rou37] Rouse, H. (1937). Modern conceptions of the mechanics of fluid
+   turbulence. *Transactions of the ASCE*, 102, 463-505.
+
+.. [SM77] Smith, J. D. and McLean, S. R. (1977). Spatially averaged flow over a
+   wavy surface. *Journal of Geophysical Research*, 82(12), 1735-1746.
+
+.. [Shi36] Shields, A. (1936). *Anwendung der Ähnlichkeitsmechanik und der
+   Turbulenzforschung auf die Geschiebebewegung.* Mitteilungen der
+   Preussischen Versuchsanstalt für Wasserbau und Schiffbau, Berlin.
+
+.. [Wil04] Wilson, L., Ghatan, G. J., Head, J. W. and Mitchell, K. L. (2004).
+   Mars outflow channels: a reappraisal of the estimation of water flow
+   velocities from water depths, regional slopes, and channel floor
+   properties. *Journal of Geophysical Research: Planets*, 109, E09003.
+   doi:10.1029/2004JE002281
+
+.. [WP06] Wong, M. and Parker, G. (2006). Reanalysis and correction of bed-load
+   relation of Meyer-Peter and Müller using their own database. *Journal of
+   Hydraulic Engineering*, 132(11), 1159-1168.
+
+.. [aSM16] Perignon, M. C. (2016). *Using the Sediment Transport and Vegetation
+   Operators in ANUGA.* anugaSed manual. The authoritative specification for
+   the original anugaSed code.
+
+.. [vR84] van Rijn, L. C. (1984). Sediment transport, part II: suspended load
+   transport. *Journal of Hydraulic Engineering*, 110(11), 1613-1641.
 
 .. note::
 
-   Two things that look like citations but are not. ``A22``/``A23`` are
-   *equation numbers* in ``RDy26``'s appendix, and ``FP64`` in the GPU sources
-   is double-precision floating point.
+   Two things in the source that look like citations but are not. ``A22`` and
+   ``A23`` are equation numbers in [RDy26]_'s appendix, and ``FP64`` in the GPU
+   sources is double-precision floating point.
