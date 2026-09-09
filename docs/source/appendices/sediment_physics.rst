@@ -18,6 +18,79 @@ and the section numbers refer to the internal sediment specification, which is
 not distributed with ANUGA; they are stable identifiers for each term rather
 than links you can follow.
 
+.. _sediment_governing_equations:
+
+The equations being solved
+--------------------------
+
+Everything on this page is a choice of closure for one of the terms below. It is
+worth reading the equations first: most of the parameters name a term here.
+
+A sediment grain size is a tracer, so it starts from :ref:`the tracer transport
+equation <tracer_transport_equation>` -- the conserved variable is mass per unit
+area, :math:`m_s = h\,c_s`, for grain size :math:`s = 1 \dots N_s`. The state
+vector the solver carries is
+
+.. math::
+
+   \mathbf{U} = \begin{bmatrix} h & uh & vh & m_1 & \dots & m_{N_s}\end{bmatrix}^{T}
+
+**Suspended transport.** The tracer equation with a source: what the bed gives up
+and what settles out of the water column.
+
+.. math::
+
+   \frac{\partial m_s}{\partial t}
+   + \frac{\partial (u\,m_s)}{\partial x}
+   + \frac{\partial (v\,m_s)}{\partial y}
+   = E_s - D_s + S_{m_s}
+   \qquad \text{[G-3]}
+
+:math:`E_s` is entrainment from the bed and :math:`D_s` deposition onto it, both
+per grain size. :math:`S_{m_s}` is an optional external supply -- hillslope yield,
+a tributary load, rainfall washoff -- and is zero unless you set one.
+
+**Bed evolution.** What leaves the water column arrives at the bed, and the bed
+moves by the volume it gains, allowing for pore space:
+
+.. math::
+
+   \frac{\partial z}{\partial t} = \frac{D - E}{1 - \lambda}
+   \qquad \text{[G-4]}
+
+with :math:`\lambda` the bed porosity, since a deposited volume :math:`(1-\lambda)\,dz`
+of grains fills a bed volume :math:`dz`. This is the Exner equation.
+
+**Bedload.** When bedload is switched on it moves the bed too, by the divergence
+of the bedload transport vector :math:`\mathbf{q}_b`:
+
+.. math::
+
+   \frac{\partial z}{\partial t} = -\frac{1}{1 - \lambda}\,\nabla \cdot \mathbf{q}_b
+   \qquad \text{[G-5]}
+
+Both act on the same :math:`z`, and when both are active their contributions sum.
+
+.. note::
+
+   **What is not coupled.** The bed feeds back into the flow -- a moving :math:`z`
+   changes the bed slope in the shallow water source term -- but the sediment does
+   **not** feed back into momentum: the fluid density is held at :math:`\rho`
+   regardless of :math:`c_s`, and the momentum equations are unchanged by the
+   presence of sediment.
+
+   Neither of the reference models this implementation follows does that coupling
+   either. It is the assumption most likely to fail for very energetic flows,
+   where the mixture starts to behave like a debris flow.
+
+   Whether the bed moves at all is itself a choice --
+   ``set_sediment_parameters(bed_evolution=False)`` holds :math:`z` fixed and
+   solves only the transport equation above.
+
+The rest of this page is the closures: what :math:`E_s`, :math:`D_s`,
+:math:`\mathbf{q}_b` and the bed shear stress they all depend on are taken to be.
+
+
 Choosing ``tau_c_star``
 ~~~~~~~~~~~~~~~~~~~~~~~
 
