@@ -95,6 +95,10 @@ Notation
    * - :math:`\tau_d`
      - critical stress for *deposition*
      - Pa
+   * - :math:`S`
+     - excess-stress ratio, :math:`\tau^{*}/\tau_c^{*}-1`, in ``[E-1]``;
+       water-surface slope in ``[T-7]``
+     - --
    * - :math:`u_*`
      - shear velocity, :math:`\sqrt{\tau_b/\rho}`
      - m s\ :sup:`-1`
@@ -144,13 +148,15 @@ typical one -- which is why the ``'wilson'`` closure below asks for
 
 .. warning::
 
-   Two symbols are overloaded, by long convention in this literature, and both
-   appear on this page.
+   Three symbols are overloaded, by long convention in this literature, and all
+   three appear on this page.
 
    :math:`D` is **grain diameter** in the shear and bedload relations, and the
    **deposition flux** in the mass balance. :math:`m` is the **conserved
    variable** :math:`h\,c` in the transport equation, and the **exponent** in
-   the bedload power law :math:`q_b^{*} = K\tau_x^{\,m}`.
+   the bedload power law :math:`q_b^{*} = K\tau_x^{\,m}`. :math:`S` is the
+   **excess-stress ratio** in the Smith & McLean entrainment ``[E-1]``, and the
+   **water-surface slope** in the depth-slope shear closure ``[T-7]``.
 
    Which is meant is unambiguous from the equation, but they are worth
    flagging.
@@ -289,7 +295,7 @@ The alternative depth-slope closure, :math:`\tau_b = \rho\,g\,h\,S`, is the one
 [aSM16]_ used, and is kept for reproducing anugaSed's results.
 
 
-Two independent choices feed ``tau_b``: how the stress is formed, and what
+Two independent choices feed :math:`\tau_b`: how the stress is formed, and what
 friction factor goes into it.
 
 .. _71-set_shear_closure----how:
@@ -324,7 +330,8 @@ inertia.
 It is what anugaSed uses, so choose it when reproducing their results
 (divergence **D1** in the spec). It degrades where that balance does not hold.
 
-The two are interchangeable by construction: the kernel returns ``tau_b/rho``,
+The two are interchangeable by construction: the kernel returns
+:math:`\tau_b/\rho`,
 so everything downstream is unchanged by the choice.
 
 .. _72-set_sediment_friction----what:
@@ -524,16 +531,23 @@ with :math:`C_1 = 18`, :math:`C_2 = 0.4` for smooth spheres, and
 ``law``
 ~~~~~~~
 
-+-----------------+-------------------------+-------------------------+
-| value           | expression              | when                    |
-+=================+=========================+=========================+
-| ``'d_star'``    | ``D = d* c v_s``,       | default; always         |
-|                 | ``[D-1]``               | deposits                |
-+-----------------+-------------------------+-------------------------+
-| ``'threshold'`` | ``[D-2]``, deposition   | when you need           |
-|                 | only where              | deposition suppressed   |
-|                 | ``tau_b < tau_d``       | under strong flow       |
-+-----------------+-------------------------+-------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 16 38 10 36
+
+   * - value
+     - expression
+     - label
+     - when
+   * - ``'d_star'``
+     - :math:`D = d^{*}\, c\, v_s`
+     - ``[D-1]``
+     - default; always deposits
+   * - ``'threshold'``
+     - :math:`D = d^{*}\, c\, v_s` where :math:`\tau_b < \tau_d`,
+       and :math:`D = 0` otherwise
+     - ``[D-2]``
+     - when you need deposition suppressed under strong flow
 
 ``tau_d`` (Pa) is the threshold for ``'threshold'`` and is ignored otherwise.
 
@@ -574,37 +588,41 @@ rather than the integral itself, for the reasons given below.
 
 
 Deposition is driven by the concentration *at the bed*, but the transported
-quantity is depth-averaged. ``d* = c_b/c`` bridges them.
+quantity is depth-averaged. :math:`d^{*} = c_b/c` bridges them.
 
-+----------------+-----------------------------------------------------+
-| value          | meaning                                             |
-+================+=====================================================+
-| ``'constant'`` | ``d*`` is whatever each class was given (1.0 =      |
-|                | well-mixed). Default.                               |
-+----------------+-----------------------------------------------------+
-| ``'rouse'``    | ``d*`` from the Rouse profile ``[S-4]``, recomputed |
-|                | per cell per step                                   |
-+----------------+-----------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 82
 
-``'constant'`` with ``d* = 1`` is the well-mixed assumption: fine sediment,
+   * - value
+     - meaning
+   * - ``'constant'``
+     - :math:`d^{*}` is whatever each grain size was given
+       (:math:`d^{*}=1` is well-mixed). Default.
+   * - ``'rouse'``
+     - :math:`d^{*}` from the Rouse profile ``[S-4]``, recomputed per cell
+       per step
+
+``'constant'`` with :math:`d^{*} = 1` is the well-mixed assumption: fine sediment,
 vigorous mixing, shallow flow. It is also what the analytic decay solutions
 assume, so use it when comparing against them.
 
 ``'rouse'`` is the physical choice when the profile is stratified -- coarser
 grains, or deeper and slower flow, where near-bed concentration genuinely
-exceeds the mean. It costs an evaluation of the fitted ``d*(Z, a/h)``
+exceeds the mean. It costs an evaluation of the fitted :math:`d^{*}(Z,\, a/h)`
 polynomial per cell per class per step (§9.5 of the spec; 28 terms, maximum
-error 0.82% over ``Z`` in [0.01, 2.5], ``a/h`` in [1e-3, 0.15], clamped at the
+error 0.82% over :math:`Z` in [0.01, 2.5], :math:`a/h` in [1e-3, 0.15],
+clamped at the
 edges rather than extrapolated).
 
-``reference_height_floor`` (default 0.01) is the floor on ``a/h``. The Rouse
-profile is singular as the reference height approaches the bed, so ``a/h`` is
+``reference_height_floor`` (default 0.01) is the floor on :math:`a/h`. The Rouse
+profile is singular as the reference height approaches the bed, so :math:`a/h` is
 never allowed below this. Lowering it admits more stratification and more
 near-bed concentration; it is a numerical guard, not a physical parameter, and
 0.01 sits comfortably inside the fit range.
 
 Near-bed concentration is bounded by ``c_pack`` ``[L-4]`` regardless. That bound
-exists because equilibrium Rouse ``d*`` at vanishing shear will otherwise
+exists because equilibrium Rouse :math:`d^{*}` at vanishing shear will otherwise
 deposit the entire water column in under a second.
 
 --------------
@@ -714,11 +732,11 @@ summaries, and renumbering would only break the correspondence.
    * - Label
      - Term
    * - ``[S-1]``
-     - settling velocity ``v_s``, Ferguson & Church (2004)
+     - settling velocity :math:`v_s`, Ferguson & Church (2004)
    * - ``[S-2]``
-     - Rouse number ``Z = v_s / (kappa u*)``
+     - Rouse number :math:`Z = v_s/(\kappa\, u_*)`
    * - ``[S-4]``
-     - the Rouse near-bed concentration ratio ``d*(Z, a/h)``
+     - the Rouse near-bed concentration ratio :math:`d^{*}(Z,\, a/h)`
 
 **Erosion**
 
@@ -745,9 +763,9 @@ summaries, and renumbering would only break the correspondence.
    * - Label
      - Term
    * - ``[D-1]``
-     - ``D = d* c v_s``
+     - :math:`D = d^{*}\, c\, v_s`
    * - ``[D-2]``
-     - threshold deposition, ``D = v_s c (1 - tau_b/tau_d)``
+     - threshold deposition, :math:`D = v_s\, c\,(1 - \tau_b/\tau_d)`
 
 **Bed shear and friction**
 
@@ -758,19 +776,20 @@ summaries, and renumbering would only break the correspondence.
    * - Label
      - Term
    * - ``[T-1]``
-     - quadratic drag, ``tau_b = rho f_c |v|^2`` -- the default closure
+     - quadratic drag, :math:`\tau_b = \rho\, f_c\, |\mathbf{v}|^2`
+       -- the default closure
    * - ``[T-2]``
-     - shear velocity ``u* = |v| sqrt(f_c)``
+     - shear velocity :math:`u_* = |\mathbf{v}|\sqrt{f_c}`
    * - ``[T-3]``
-     - dimensionless stress ``tau* = f_c |v|^2 / (R g d)``
+     - dimensionless stress :math:`\tau^{*} = f_c |\mathbf{v}|^2/(R\, g\, d)`
    * - ``[T-4]``
-     - excess stress ``tau_x = tau* - tau_c*``
+     - excess stress :math:`\tau_x = \tau^{*} - \tau_c^{*}`
    * - ``[T-5]``
      - the depth-limiting velocity form ANUGA uses
    * - ``[T-6]``
-     - constant Manning ``n``, taken from the domain's friction quantity
+     - constant Manning :math:`n`, taken from the domain's friction quantity
    * - ``[T-7]``
-     - depth-slope closure, ``tau_b = rho g h S``
+     - depth-slope closure, :math:`\tau_b = \rho\, g\, h\, S`
    * - ``[T-8]``..``[T-10]``
      - the ``'wilson'`` friction closure
    * - ``[T-13]``..``[T-15]``
@@ -785,11 +804,12 @@ summaries, and renumbering would only break the correspondence.
    * - Label
      - Term
    * - ``[K-1]``, ``[K-2]``
-     - power law, ``q_b* = K tau_x^m``
+     - power law, :math:`q_b^{*} = K\, \tau_x^{\,m}`
    * - ``[K-3]``
-     - bed change from bedload, ``dz/dt = -(1/(1-lambda)) div q_b``
+     - bed change from bedload,
+       :math:`\partial z/\partial t = -\dfrac{1}{1-\lambda}\,\nabla\cdot\mathbf{q}_b`
    * - ``[K-4]``
-     - the per-cell bedload transport vector ``q_b``
+     - the per-cell bedload transport vector :math:`\mathbf{q}_b`
    * - ``[K-5]``
      - Engelund & Hansen total load, no threshold
 
@@ -802,7 +822,8 @@ summaries, and renumbering would only break the correspondence.
    * - Label
      - Term
    * - ``[G-3]``
-     - the suspended source term, ``m_s <- m_s + dt (E_s - D_s)``, including
+     - the suspended source term,
+       :math:`m_s \leftarrow m_s + \Delta t\,(E_s - D_s)`, including
        any external source
    * - ``[G-4]``
      - Exner bed evolution from the suspended exchange
@@ -820,14 +841,16 @@ summaries, and renumbering would only break the correspondence.
    * - ``[L-1]``
      - positivity
    * - ``[L-2]``
-     - the concentration ceiling ``c_max``
+     - the concentration ceiling :math:`c_{\max}` (``c_max``)
    * - ``[L-3]``
-     - a cap on the rate of bed change, ``|dz/dt| <= max_dz``. **Not
+     - a cap on the rate of bed change,
+       :math:`|\partial z/\partial t| \le` ``max_dz``. **Not
        implemented in ANUGA** -- listed so the gap in the numbering is not
        mistaken for an omission here. It is unrelated to the ``beta`` edge
        reconstruction limiter, which the tracers share.
    * - ``[L-4]``
-     - the packing fraction ``c_pack`` bounding near-bed concentration
+     - the packing fraction :math:`c_\text{pack}` (``c_pack``) bounding
+       near-bed concentration
    * - ``[L-5]``
      - the non-erodible base
 
