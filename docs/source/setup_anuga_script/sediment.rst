@@ -427,8 +427,30 @@ both are required positional parameters, and omitting either is a
 
 Setting sediment up with **no** grain size at all is legal, and is what
 ``initialize_sediment_operator`` on its own does -- see :ref:`operator_order`.
-An operator with no grain sizes registered transports nothing; it is a
-configured run waiting for its sediment, not an error.
+It is a configured run waiting for its sediment, not an error. But it is only
+useful as a step on the way to ``add_grain_size``: an operator with no grain
+sizes transports nothing, and evolving that way warns rather than completing
+silently with the bed untouched.
+
+.. note::
+
+   **This includes bedload.** Moving the bed without carrying anything in
+   suspension is a reasonable thing to want, and it does not remove the need
+   for a grain size: the diameter and :math:`R` that set the Shields stress
+   -- and so the transport vector :math:`\mathbf{q}_b` -- live on a grain
+   size. With none registered, the bedload kernel returns immediately and the
+   bed does not move.
+
+   For bed evolution with no suspended sediment, register the grain size and
+   choose the total-load formula, which turns the suspended exchange off:
+
+   .. code-block:: python
+
+      domain.add_grain_size('sand', diameter=2.0e-4)
+      domain.set_bedload('engelund_hansen')    # [K-5], total load
+
+   On the channel at the top of this page that scours about 14 cm of bed while
+   the concentration stays at zero throughout.
 
 
 .. _42-choosing-tau_c_star:

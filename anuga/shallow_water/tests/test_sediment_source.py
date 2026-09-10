@@ -10,6 +10,8 @@ The exchange E - D of [G-3], applied as a fractional step. Covered here:
 The mode 1 / mode 2 comparisons are in test_sediment_gpu.py.
 """
 import numpy as np
+import warnings
+
 import pytest
 
 from anuga import Reflective_boundary, rectangular_cross_domain
@@ -265,6 +267,46 @@ def test_set_bed_material_does_not_reset_the_water_density():
 
     assert d.sediment_rho_w == 1025.0
     assert d.sediment_R[0] == R
+
+
+def test_evolving_with_no_grain_size_warns_rather_than_doing_nothing():
+    """A bare operator is legal -- it is how operator order is controlled --
+    but evolving that way transports nothing.
+
+    Bedload does not rescue it: core_apply_bedload returns immediately when
+    n_sediment_classes is 0, because the diameter and R that set the Shields
+    stress live on a grain size. Without the warning the run completes with the
+    bed untouched and nothing said.
+    """
+    d = still()
+    d.initialize_sediment_operator()
+    d.set_bedload('wong_parker_eq24')
+    z0 = d.quantities['elevation'].centroid_values.copy()
+
+    with pytest.warns(UserWarning, match='no grain size is registered'):
+        d.evolve_to_end(finaltime=2.0)
+
+    assert np.abs(d.quantities['elevation'].centroid_values - z0).max() == 0.0
+
+
+def test_the_no_grain_size_warning_is_raised_once_not_per_timestep():
+    d = still()
+    d.initialize_sediment_operator()
+    with pytest.warns(UserWarning) as record:
+        d.evolve_to_end(finaltime=5.0)
+    n = sum('no grain size is registered' in str(w.message) for w in record)
+    assert n == 1, 'warned %d times; it must not fire every timestep' % n
+
+
+def test_no_warning_once_a_grain_size_is_registered_after_the_operator():
+    """The operator-ordering pattern must stay silent."""
+    d = still()
+    d.initialize_sediment_operator()
+    d.add_grain_size('sand', diameter=2.0e-4)
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter('always')
+        d.evolve_to_end(finaltime=2.0)
+    assert not [x for x in w if 'no grain size' in str(x.message)]
 
 
 def test_a_non_positive_diameter_is_rejected():
