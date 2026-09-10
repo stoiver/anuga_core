@@ -75,24 +75,24 @@ Print what you configured
 
 This is the single most useful call in the interface. It reports the active
 configuration -- every law selected, every scalar in force, and each grain
-size's derived settling velocity -- as text:
+size's derived settling velocity -- as text. For the program above, every line
+but the first is a default:
 
 ::
 
    sediment configuration
-     grain sizes        : 2  --  fine (d=0.0001 m), coarse (d=0.0005 m)
+     grain sizes        : 1  --  sand (d=0.0002 m)
      erosion            : Shields / Smith-McLean, non-cohesive (sand, gravel)   [E-1]
      deposition         : D = d* c v_s   [D-1]
-     near-bed d*        : Rouse profile   [S-4]
+     near-bed d*        : constant, per grain size
      shear closure      : quadratic drag, tau_b = rho f_c |v|^2   [T-1]
-     friction closure   : wilson, bed=gravel, D=0.02 m   [T-8..10]
-     bedload            : power law, K=3.97 m=1.5 tau_c*=0.0495   [K-1]
+     friction closure   : constant n, from the domain friction quantity
+     bedload            : off
      bed evolution      : True  (spec 2.4 Phase 4, evolving)
-     porosity lambda    : 0.28
-     c_max      [L-2]   : 0.35
+     porosity lambda    : 0.3
+     c_max      [L-2]   : 0.3
      c_pack     [L-4]   : 0.65
      rho_w              : 1000 kg/m3
-     a/h floor          : 0.01
      erodible base [L-5]: none (unlimited depth)
      angle of repose    : off (spec 7)
      erodible region    : whole domain
@@ -100,12 +100,16 @@ size's derived settling velocity -- as text:
       see the Sediment physics appendix -- the description before each
       label is the whole story.)
      per grain size:
-       fine       d=0.0001 m  v_s=8.0040e-03 m/s  R=1.65  tau_c*=0.04
-       coarse     d=0.0005 m  v_s=9.4839e-02 m/s  R=1.65  tau_c*=0.04
+       sand       d=0.0002 m  v_s=2.6695e-02 m/s  R=1.65  tau_c*=0.04
 
 Settling velocity in particular is *derived*, not set: if ``v_s`` is not what
 you expected, the diameter or the fluid properties are not what you thought.
 Print this at the top of every run.
+
+Lines appear only when they apply -- configure the Rouse near-bed profile, for
+instance, and an ``a/h floor`` line joins the list. Everything below this point
+is about changing one of these defaults, and the summary is how you check that
+the change took.
 
 The interface at a glance
 -------------------------
