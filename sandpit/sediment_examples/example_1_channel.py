@@ -13,7 +13,6 @@ import argparse
 
 import numpy as np
 import anuga
-from anuga import Sediment_transport_operator
 
 ap = argparse.ArgumentParser(description=__doc__)
 ap.add_argument('--bed', default='noncohesive',
@@ -60,8 +59,8 @@ domain.sediment_porosity = 0.3
 if args.bed == 'cohesive':
     # anugaSed's own configuration: Hanson & Simon [E-3] with tau_c = 0.088 Pa.
     domain.set_bed_material('cohesive', tau_crit=0.088)
-Sediment_transport_operator(domain, name='sand', diameter=D50, rho_s=2650.0, rho_w=1000.0,
-                          initial_concentration=INFLOW_CONC)
+domain.add_grain_size(name='sand', diameter=D50, rho_s=2650.0,
+                      initial_concentration=INFLOW_CONC)
 # The domain starts DRY, so the initial concentration washes out immediately;
 # what actually matters is the concentration of the water flowing in.
 domain.set_tracer_boundary('sand', 'left', INFLOW_CONC)   # 'left' is the inflow

@@ -24,7 +24,6 @@ different -- this is a sediment mass balance, that is a kinematic erosion rule
 import math
 import numpy as np
 import anuga
-from anuga import Sediment_transport_operator
 
 LEN_X, LEN_Y = 120.0, 30.0
 CREST_X, CREST_W, CREST_H = 60.0, 4.0, 2.5
@@ -77,7 +76,7 @@ def build(repose):
 
     domain.set_sediment_parameters(porosity=PORO)
     domain.set_bed_material('noncohesive')
-    Sediment_transport_operator(domain, name='dune_sand', diameter=3.0e-4)
+    domain.add_grain_size(name='dune_sand', diameter=3.0e-4)
     if repose:
         # 50 sweeps is the default and is sized for a bed that is already
         # near-relaxed. This one starts below the critical angle, so the cap

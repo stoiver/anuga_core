@@ -32,20 +32,37 @@ The shortest useful program
    domain = anuga.rectangular_cross_domain(40, 10, len1=100.0, len2=25.0)
    domain.set_flow_algorithm('DE0')
    domain.set_quantity('elevation', lambda x, y: -0.01 * x)
-   domain.set_quantity('stage', 0.5)
+   domain.set_quantity('stage', lambda x, y: -0.01 * x + 0.5)   # 0.5 m deep
    domain.set_quantity('friction', 0.03)
-   domain.set_boundary({t: anuga.Reflective_boundary(domain)
-                        for t in domain.get_boundary_tags()})
+   domain.set_boundary({'left':   anuga.Dirichlet_boundary([0.8, 1.0, 0.0]),
+                        'right':  anuga.Dirichlet_boundary([-0.5, 0.0, 0.0]),
+                        'top':    anuga.Reflective_boundary(domain),
+                        'bottom': anuga.Reflective_boundary(domain)})
 
-   anuga.Sediment_transport_operator(domain, name='sand', diameter=2.0e-4)   # <- the only new line
+   domain.add_grain_size('sand', diameter=2.0e-4)   # <- the only new line
 
    for t in domain.evolve(yieldstep=1.0, finaltime=30.0):
        pass
 
-``Sediment_transport_operator`` is the entry point. One call gives you a transported
+   print('peak concentration : %.3f' % domain.get_tracer('sand').max())
+
+After 30 s this scours 5-22 cm from the bed and carries a peak concentration of
+about 0.145.
+
+.. note::
+
+   The stage follows the bed (``-0.01 * x + 0.5``) and the boundaries drive
+   flow through the channel. A *flat* stage over a sloping bed is hydrostatic
+   -- the water does not move, the bed shear stress never reaches the Shields
+   threshold, and nothing erodes. Sediment needs flow; if a model reports zero
+   concentration everywhere, check the hydrodynamics before the sediment
+   settings.
+
+``add_grain_size`` is the entry point. One call gives you a transported
 concentration, erosion, deposition, the settling velocity, the bed exchange,
-and the limiters, with defaults chosen for a sand bed. It registers the
-fractional step for you, so there is nothing else to wire up.
+and the limiters, with defaults chosen for a sand bed. It creates the sediment
+operator and registers the fractional step for you, so there is nothing else to
+wire up.
 
 Everything below is about changing those defaults.
 
@@ -98,8 +115,11 @@ Choices are made by naming the **physics**, never by setting a flag:
 +---------------------------------------------+------------------------------+--------+
 | call                                        | chooses                      | spec   |
 +=============================================+==============================+========+
-| ``anuga.Sediment_transport_operator(``      | sediment transport on, and   | 2.2    |
-| ``    domain, name, diameter, ...)``        | a grain size to carry        |        |
+| ``initialize_sediment_operator(...)``       | sediment transport on, and   | 2.2    |
+|                                             | the domain-wide parameters   |        |
++---------------------------------------------+------------------------------+--------+
+| ``add_grain_size(name, diameter, ...)``     | a grain size to carry, and   | 2.2    |
+|                                             | its own properties           |        |
 +---------------------------------------------+------------------------------+--------+
 | ``set_bed_material(material, ...)``         | the erosion law              | 4.1.1  |
 +---------------------------------------------+------------------------------+--------+
@@ -143,9 +163,8 @@ Choices are made by naming the **physics**, never by setting a flag:
       term in the physics; they appear in this page, in the source, and in the
       output of ``sediment_summary()``.
 
-Order does not matter, with one exception noted under
-``Sediment_transport_operator`` below: call them before ``evolve()``, in whatever
-order reads best.
+Order does not matter, with one exception noted under :ref:`grain_sizes`
+below: call them before ``evolve()``, in whatever order reads best.
 
 **Anything not in that table is internal.** The domain carries roughly fifteen
 ``sediment_*`` arrays (``sediment_qbx``, ``sediment_settling_velocity``,
@@ -155,101 +174,162 @@ setters; they invalidate the device mapping for you.
 
 --------------
 
-Sediment classes
-----------------
+Setting sediment up
+-------------------
 
-.. _sediment_transport_operator:
-
-``Sediment_transport_operator``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Sediment transport is configured through two calls, and the split between them
+is the point: a parameter belongs to exactly one of the two, so there is never
+a question of which call wins.
 
 .. code-block:: python
 
-   anuga.Sediment_transport_operator(
-       domain, name, diameter,
-       d_star=1.0, beta=None, initial_concentration=0.0,
-       rho_s=2650.0, rho_w=1000.0, tau_c_star=0.04,
-       reference_height=None, **settling_kwargs)
+   domain.initialize_sediment_operator(porosity=0.28, rho_w=1000.0)  # the run
+   domain.add_grain_size('sand', diameter=2.0e-4)                    # a grain
+   domain.add_grain_size('silt', diameter=2.0e-5, tau_c_star=0.11)   # another
 
-+---------------------------+-------+----------+-------------------------+
-| parameter                 | units | default  | meaning                 |
-+===========================+=======+==========+=========================+
-| ``name``                  | --    | required | label; also the tracer  |
-|                           |       |          | name                    |
-+---------------------------+-------+----------+-------------------------+
-| ``diameter``              | m     | required | grain diameter ``d``;   |
-|                           |       |          | sets ``v_s`` via        |
-|                           |       |          | ``[S-1]``               |
-+---------------------------+-------+----------+-------------------------+
-| ``rho_s``                 | kg/m3 | 2650     | sediment density        |
-|                           |       |          | (quartz)                |
-+---------------------------+-------+----------+-------------------------+
-| ``rho_w``                 | kg/m3 | 1000     | fluid density;          |
-|                           |       |          | ``R = rho_s/rho_w - 1`` |
-+---------------------------+-------+----------+-------------------------+
-| ``tau_c_star``            | --    | 0.04     | critical Shields        |
-|                           |       |          | stress, ``[E-1]``       |
-+---------------------------+-------+----------+-------------------------+
-| ``d_star``                | --    | 1.0      | near-bed ratio          |
-|                           |       |          | ``c_b/c``; 1.0 is       |
-|                           |       |          | well-mixed              |
-+---------------------------+-------+----------+-------------------------+
-| ``initial_concentration`` | --    | 0.0      | volumetric, uniform     |
-+---------------------------+-------+----------+-------------------------+
-| ``beta``                  | --    | domain's | edge reconstruction     |
-|                           |       |          | limiter, shared by all  |
-|                           |       |          | tracers                 |
-+---------------------------+-------+----------+-------------------------+
-| ``reference_height``      | m     | ``None`` | Rouse reference height  |
-|                           |       |          | ``a``; see the appendix |
-+---------------------------+-------+----------+-------------------------+
+``initialize_sediment_operator`` takes what describes the **run**;
+``add_grain_size`` takes what describes **one grain size**. Neither accepts the
+other's parameters -- passing ``diameter=`` to the first, or ``rho_w=`` to the
+second, is a ``TypeError`` rather than a silently ignored argument.
 
-Multiple grain sizes are independent: each has its own concentration, settling
-velocity and critical stress, and each exchanges with the same bed. Call it
-once per grain size -- the second and later calls add to the same operator and
-return it, so there is still only one fractional step.
+The two may be called in either order, and ``initialize_sediment_operator`` is
+optional: ``add_grain_size`` creates the operator with default domain-wide
+parameters if none exists, which is why the program at the top of this page is
+a single line.
 
+.. _sediment_operator_init:
 
-What a second call does and does not change
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``initialize_sediment_operator``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Calling ``Sediment_transport_operator`` again adds a **grain size**, not a
-second sediment model. Only the grain's own properties are per grain size;
-every physics choice, and the bed itself, is shared.
+.. code-block:: python
+
+   domain.initialize_sediment_operator(
+       porosity=None, c_max=None, c_pack=None, bed_evolution=None, rho_w=None,
+       description=None, label=None, logging=False, verbose=False)
+
+Switches sediment transport on and returns the operator. The physical
+parameters are the same ones :ref:`set_sediment_parameters <scalar_parameters>`
+takes, and are documented there; passing them here is a convenience, and
+``set_sediment_parameters`` can still change them afterwards.
+
+**One operator per domain.** Calling it again returns the same operator,
+applying any parameters given the second time. That is not just tidiness: the
+kernel makes a single pass over every registered grain size, so a second
+operator in the fractional-step list would apply the bed exchange twice per
+timestep.
+
+.. code-block:: python
+
+   op = domain.initialize_sediment_operator(porosity=0.28)
+   op is domain.initialize_sediment_operator(rho_w=1025.0)   # True
+
+The return value is the operator, which you need only for controlling operator
+order -- see :ref:`operator_order` below.
+
+.. _grain_sizes:
+
+``add_grain_size``
+~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   domain.add_grain_size(
+       name, diameter,
+       rho_s=2650.0, tau_c_star=0.04, d_star=1.0, beta=None,
+       initial_concentration=0.0, reference_height=None, **settling_kwargs)
 
 .. list-table::
    :header-rows: 1
-   :widths: 26 74
+   :widths: 24 10 12 54
+
+   * - parameter
+     - units
+     - default
+     - meaning
+   * - ``name``
+     - --
+     - required
+     - label; also the tracer name
+   * - ``diameter``
+     - m
+     - required
+     - grain diameter :math:`d`; sets :math:`v_s` via ``[S-1]``
+   * - ``rho_s``
+     - kg/m3
+     - 2650
+     - sediment density (quartz); enters as
+       :math:`R = \rho_s/\rho_w - 1`
+   * - ``tau_c_star``
+     - --
+     - 0.04
+     - critical Shields stress :math:`\tau_c^{*}`, ``[E-1]``
+   * - ``d_star``
+     - --
+     - 1.0
+     - near-bed ratio :math:`d^{*} = c_b/c`; 1.0 is well-mixed
+   * - ``initial_concentration``
+     - --
+     - 0.0
+     - volumetric :math:`c`, uniform
+   * - ``beta``
+     - --
+     - domain's
+     - edge reconstruction limiter, shared by all tracers
+   * - ``reference_height``
+     - m
+     - ``None``
+     - Rouse reference height :math:`a`; see the appendix
+
+Multiple grain sizes are independent: each has its own concentration, settling
+velocity and critical stress, and each exchanges with the same bed. Call it
+once per grain size.
+
+There is no ``rho_w`` here. Water density is a property of the fluid, and there
+is one fluid, so it lives on ``initialize_sediment_operator`` and
+``set_sediment_parameters``. Changing it afterwards recomputes :math:`R` and
+:math:`v_s` for every grain size already registered.
+
+
+What belongs to a grain size, and what to the run
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Only the grain's own properties are per grain size; every physics choice, and
+the bed itself, is shared.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
 
    * - Per grain size
      - Set by
    * - ``diameter``
-     - the call
-   * - settling velocity ``v_s``
-     - computed from ``diameter`` (and any ``settling_kwargs``)
+     - ``add_grain_size``
+   * - settling velocity :math:`v_s`
+     - computed from ``diameter``, ``rho_s`` and any ``settling_kwargs``
    * - ``tau_c_star``
-     - the call
+     - ``add_grain_size``
    * - ``d_star``, ``reference_height``
-     - the call
-   * - submerged specific gravity ``R``
-     - computed from ``rho_s`` (see the caveat below)
+     - ``add_grain_size``
+   * - submerged specific gravity :math:`R`
+     - computed from ``rho_s`` and the shared ``rho_w``
 
 .. list-table::
    :header-rows: 1
-   :widths: 26 74
+   :widths: 40 60
 
    * - Shared by every grain size
      - Set by
+   * - ``porosity``, ``c_max``, ``c_pack``, ``rho_w``, ``bed_evolution``
+     - ``initialize_sediment_operator`` or ``set_sediment_parameters``
    * - erosion law, ``tau_crit``, ``K_e``, ``K_partheniades``
      - :ref:`set_bed_material <sediment_physics>`
-   * - deposition law, ``tau_d``, near-bed ``d*`` mode
+   * - deposition law, ``tau_d``, near-bed :math:`d^{*}` mode
      - ``set_deposition``
    * - shear closure; friction mode and its parameters
      - ``set_shear_closure``, ``set_sediment_friction``
    * - bedload mode, ``K``, ``m``, and bedload's own ``tau_c_star``
      - ``set_bedload``
-   * - ``porosity``, ``c_max``, ``c_pack``, ``rho_w``, ``bed_evolution``
-     - ``set_sediment_parameters``
    * - ``beta``
      - one ``beta_tracer`` for every tracer on the domain
    * - **the bed**
@@ -259,30 +339,33 @@ Because the shared settings live on the **domain**, not on the operator, order
 does not matter: ``set_bed_material('cohesive')`` called after both grain sizes
 are registered applies to both.
 
-.. warning::
-
-   ``rho_s`` and ``rho_w`` are both arguments to the call, but only ``rho_s``
-   is genuinely per grain size. ``rho_w`` contributes to that grain's ``R``,
-   while the DIMENSIONAL bed shear stress the kernel forms uses the single
-   shared ``sediment_rho_w``:
-
-   .. code-block:: python
-
-      anuga.Sediment_transport_operator(domain, name='a', diameter=2e-4, rho_w=1000.0)
-      anuga.Sediment_transport_operator(domain, name='b', diameter=2e-4, rho_w=1200.0)
-
-      domain.sediment_R        # [1.65, 1.2083]  -- both honoured
-      domain.sediment_rho_w    # 1000.0          -- only the first survives
-
-   Two grain sizes suspended in genuinely different fluids is not
-   representable, which is physically reasonable -- there is one flow -- but
-   the argument being per call implies otherwise. Set the water density once,
-   with ``set_sediment_parameters(rho_w=...)``.
-
 Grain sizes occupy tracer slots in call order, so grain size ``s`` is tracer
 ``s``. **The one ordering rule**: do not interleave ``add_tracer`` and
-``Sediment_transport_operator`` on the same domain if you rely on that
-correspondence.
+``add_grain_size`` on the same domain if you rely on that correspondence.
+
+
+.. _operator_order:
+
+Controlling operator order
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Fractional-step operators run in the order they are created. If another
+operator must run before the sediment one -- an external source that the bed
+exchange then consumes, say -- create the sediment operator at the point you
+want it in the sequence, and add the grain sizes afterwards:
+
+.. code-block:: python
+
+   My_source_operator(domain, ...)          # runs first
+   domain.initialize_sediment_operator()    # then this
+
+   for nm, d50 in grain_sizes:
+       domain.add_grain_size(nm, diameter=d50)
+
+``add_grain_size`` will not displace an operator that already exists, so the
+order established here survives however many grain sizes follow. Ordinary
+models do not need this: calling ``add_grain_size`` straight away, as
+everywhere else on this page, puts the operator in a sensible place by itself.
 
 
 Choosing a name
@@ -295,8 +378,8 @@ silt.
 
 .. code-block:: python
 
-   anuga.Sediment_transport_operator(domain, name='fine_sand', diameter=1.5e-4)
-   anuga.Sediment_transport_operator(domain, name='mud',       diameter=2.0e-5)
+   domain.add_grain_size('fine_sand', diameter=1.5e-4)
+   domain.add_grain_size('mud',       diameter=2.0e-5)
 
    domain.get_sediment_names()        # ['fine_sand', 'mud']
    domain.get_tracer('fine_sand')     # its concentration, per cell
@@ -326,45 +409,23 @@ when you open the file six months later.
    fixed vocabulary.
 
 
-If you do not choose one
-~~~~~~~~~~~~~~~~~~~~~~~~
+If you leave a grain size out
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``name`` and ``diameter`` describe one grain size, so they travel together.
-Giving one without the other is an error rather than a partial registration:
-
-.. code-block:: python
-
-   anuga.Sediment_transport_operator(domain, diameter=2.0e-4)
-   # ValueError: given diameter= but not name=
-
-   anuga.Sediment_transport_operator(domain, name='sand')
-   # ValueError: given name= but not diameter=
-
-Omitting **both** is meaningful, and is the one case where it is allowed: the
-operator then carries whatever grain sizes are already registered rather than
-adding one.
+``name`` and ``diameter`` describe one grain size, so they travel together:
+both are required positional parameters, and omitting either is a
+``TypeError`` at the call rather than a partial registration.
 
 .. code-block:: python
 
-   anuga.Sediment_transport_operator(domain)
-   # ValueError if nothing is registered yet: it would transport nothing
+   domain.add_grain_size('sand')
+   # TypeError: add_grain_size() missing 1 required positional argument: 'diameter'
 
-That form exists for controlling **operator order**. Fractional-step operators
-run in the order they are created, so if another operator must run before the
-sediment one -- an external source that the bed exchange then consumes, say --
-register the grain sizes first and create the operator at the point you want
-it in the sequence:
+Setting sediment up with **no** grain size at all is legal, and is what
+``initialize_sediment_operator`` on its own does -- see :ref:`operator_order`.
+An operator with no grain sizes registered transports nothing; it is a
+configured run waiting for its sediment, not an error.
 
-.. code-block:: python
-
-   for nm, d50 in grain_sizes:
-       domain._register_sediment_fraction(nm, diameter=d50)
-
-   My_source_operator(domain, ...)        # runs first
-   anuga.Sediment_transport_operator(domain)    # then this
-
-Ordinary models do not need this: creating the operator per grain size, as
-everywhere else on this page, puts it in a sensible place by itself.
 
 .. _42-choosing-tau_c_star:
 
@@ -380,6 +441,8 @@ Both are volumetric concentration ``c`` (dimensionless), not ``h*c``. The
 conserved quantity is ``m = h*c``; the interface works in ``c`` throughout.
 
 --------------
+
+.. _scalar_parameters:
 
 Scalar parameters
 -----------------
@@ -707,8 +770,7 @@ If you do not know where to start:
 
 - **Sand bed, flood or dam break, morphology wanted.** Defaults, plus one
   grain size:
-  ``anuga.Sediment_transport_operator(domain, name='sand', diameter=2e-4)``.
-  Add
+  ``domain.add_grain_size('sand', diameter=2e-4)``. Add
   ``set_bedload('wong_parker_eq24')`` if the grains are coarse enough to move
   along the bed.
 - **Fine cohesive sediment, muddy estuary.** ``set_bed_material('cohesive')``

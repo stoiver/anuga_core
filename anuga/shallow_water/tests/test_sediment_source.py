@@ -90,7 +90,7 @@ def test_deposition_follows_the_analytic_decay():
     constant, which is what the analytic solution assumes."""
     d = still(depth=DEPTH, dt=1.0)
     d.sediment_bed_evolution = False
-    Sediment_transport_operator(d, name='sand', diameter=DIAM, initial_concentration=0.05)
+    d.add_grain_size(name='sand', diameter=DIAM, initial_concentration=0.05)
     v_s = d.sediment_settling_velocity[0]
     d.evolve_to_end(finaltime=60.0)
     exact = 0.05 * np.exp(-v_s * 60.0 / DEPTH)
@@ -102,7 +102,7 @@ def test_the_source_integration_is_first_order_in_dt():
     for dt in (4.0, 1.0):
         d = still(depth=DEPTH, dt=dt)
         d.sediment_bed_evolution = False
-        Sediment_transport_operator(d, name='sand', diameter=DIAM, initial_concentration=0.05)
+        d.add_grain_size(name='sand', diameter=DIAM, initial_concentration=0.05)
         v_s = d.sediment_settling_velocity[0]
         d.evolve_to_end(finaltime=60.0)
         exact = 0.05 * np.exp(-v_s * 60.0 / DEPTH)
@@ -118,8 +118,8 @@ def test_d_star_zero_disables_deposition_entirely():
     base.evolve_to_end(finaltime=20.0)
 
     zero = still(depth=DEPTH, dt=1.0)
-    Sediment_transport_operator(zero, name='zero', diameter=1.0e-4, d_star=0.0,
-                            initial_concentration=0.05)
+    zero.add_grain_size(name='zero', diameter=1.0e-4, d_star=0.0,
+                        initial_concentration=0.05)
     zero.evolve_to_end(finaltime=20.0)
 
     assert np.allclose(zero.get_tracer('zero'), base.get_tracer('plain'),
@@ -134,7 +134,7 @@ def test_an_aggressive_settler_never_drives_mass_negative():
     negative -- and a negative m flips deposition's sign and starts creating
     sediment."""
     d = still(depth=DEPTH, dt=1.0)
-    Sediment_transport_operator(d, name='fast', diameter=5.0e-3, initial_concentration=0.05)
+    d.add_grain_size(name='fast', diameter=5.0e-3, initial_concentration=0.05)
     d.evolve_to_end(finaltime=30.0)
     assert d.tracer_conserved_values[0].min() >= 0.0
     assert d.get_tracer('fast').max() < 1e-6, 'it should deposit essentially all'
@@ -143,7 +143,7 @@ def test_an_aggressive_settler_never_drives_mass_negative():
 def test_concentration_stays_under_c_max():
     d = still(depth=DEPTH, dt=1.0)
     d.sediment_c_max = 0.10
-    Sediment_transport_operator(d, name='capped', diameter=1.0e-4, initial_concentration=0.05)
+    d.add_grain_size(name='capped', diameter=1.0e-4, initial_concentration=0.05)
     d.evolve_to_end(finaltime=10.0)
     assert d.get_tracer('capped').max() <= 0.10 + 1e-12
 
@@ -153,8 +153,8 @@ def test_concentration_stays_under_c_max():
 def test_a_second_grain_size_registers_at_the_next_index():
     """The constructor returns the OPERATOR now, so check the order directly."""
     d = still()
-    Sediment_transport_operator(d, name='a', diameter=1e-4)
-    Sediment_transport_operator(d, name='b', diameter=5e-4)
+    d.add_grain_size(name='a', diameter=1e-4)
+    d.add_grain_size(name='b', diameter=5e-4)
 
     assert d.get_sediment_names() == ['a', 'b'], 'registration order lost'
     assert d.get_tracer_index('a') == 0
@@ -163,60 +163,113 @@ def test_a_second_grain_size_registers_at_the_next_index():
             > d.sediment_settling_velocity[0]), 'per-grain-size v_s must differ'
 
 
-def test_a_second_call_extends_the_same_operator():
+def test_however_many_grain_sizes_there_is_one_operator():
     """One fractional step, however many grain sizes.
 
     Two operators in the list would apply the bed exchange twice per timestep.
     """
     d = still()
-    first = Sediment_transport_operator(d, name='a', diameter=1e-4)
-    second = Sediment_transport_operator(d, name='b', diameter=5e-4)
+    d.add_grain_size(name='a', diameter=1e-4)
+    d.add_grain_size(name='b', diameter=5e-4)
 
-    assert first is second, 'a second call built a separate operator'
     n = sum(isinstance(op, Sediment_transport_operator)
             for op in d.fractional_step_operators)
     assert n == 1, 'the domain has %d sediment operators, expected 1' % n
     assert d.n_sediment_classes == 2
 
 
-def test_a_diameter_without_a_name_is_refused():
-    """It used to be silently dropped when a grain size already existed.
+def test_initialize_returns_the_one_operator_however_often_it_is_called():
+    d = still()
+    first = d.initialize_sediment_operator()
+    d.add_grain_size(name='a', diameter=1e-4)
+    second = d.initialize_sediment_operator(porosity=0.28)
 
-    Sediment_transport_operator(d, diameter=...) with no name= added nothing
-    and raised nothing: the caller asked for a second grain size and got one.
+    assert first is second, 'a second call built a separate operator'
+    assert d.sediment_porosity == 0.28, 'the second call was ignored'
+    n = sum(isinstance(op, Sediment_transport_operator)
+            for op in d.fractional_step_operators)
+    assert n == 1
+
+
+def test_the_two_calls_do_not_share_a_parameter():
+    """The split is what stops a parameter being silently dropped.
+
+    Under the old single entry point, `diameter=` without `name=` added
+    nothing and raised nothing, and a domain-wide `rho_w=` on a second call
+    was discarded. Neither can be expressed now: a per-grain-size parameter
+    is not in initialize_sediment_operator's signature, and a domain-wide one
+    is not in add_grain_size's, so both are a TypeError rather than a silent
+    no-op.
     """
     d = still()
-    Sediment_transport_operator(d, name='sand', diameter=2.0e-4)
-    with pytest.raises(ValueError, match='diameter= but not name='):
-        Sediment_transport_operator(d, diameter=5.0e-5)
-    assert d.get_sediment_names() == ['sand'], 'nothing should have been added'
+    with pytest.raises(TypeError):
+        d.initialize_sediment_operator(diameter=5.0e-5)
+    # A domain-wide name would otherwise be swallowed by **settling_kwargs and
+    # resurface as a TypeError naming settling_velocity, which tells the caller
+    # nothing about what they did wrong.
+    with pytest.raises(TypeError, match='property of the run'):
+        d.add_grain_size(name='sand', diameter=2.0e-4, rho_w=1025.0)
+    with pytest.raises(TypeError, match='properties of the run'):
+        d.add_grain_size(name='sand', diameter=2.0e-4, rho_w=1025.0, c_max=0.2)
+    assert d.get_sediment_names() == [], 'nothing should have been added'
 
 
-def test_a_name_without_a_diameter_is_refused():
-    """Previously a TypeError from float(None), deep inside the registration."""
+def test_a_grain_size_needs_a_diameter():
     d = still()
-    with pytest.raises(ValueError, match='name= but not diameter='):
-        Sediment_transport_operator(d, name='sand')
+    with pytest.raises(TypeError):
+        d.add_grain_size(name='sand')
 
 
-def test_a_bare_operator_needs_an_existing_grain_size():
+def test_initialize_alone_registers_no_grain_size():
+    """Domain-wide setup is legal before any grain size exists."""
     d = still()
-    with pytest.raises(ValueError, match='needs a grain size'):
-        Sediment_transport_operator(d)
-
-
-def test_a_bare_operator_picks_up_grain_sizes_registered_already():
-    """The form the MMS harness uses to control operator ordering."""
-    d = still()
-    d._register_sediment_fraction('sand', diameter=2.0e-4)
-    op = Sediment_transport_operator(d)
-    assert d.get_sediment_names() == ['sand']
+    op = d.initialize_sediment_operator(porosity=0.28)
+    assert d.get_sediment_names() == []
     assert op in d.fractional_step_operators
+    assert d.sediment_porosity == 0.28
+
+
+def test_add_grain_size_creates_the_operator_if_initialize_was_skipped():
+    d = still()
+    d.add_grain_size(name='sand', diameter=2.0e-4)
+    ops = [o for o in d.fractional_step_operators
+           if isinstance(o, Sediment_transport_operator)]
+    assert len(ops) == 1
+    assert d.get_sediment_names() == ['sand']
+
+
+def test_the_two_calls_may_come_in_either_order():
+    """initialize after add still applies, and R follows the new rho_w."""
+    d = still()
+    d.add_grain_size(name='sand', diameter=2.0e-4, rho_s=2650.0)
+    assert abs(d.sediment_R[0] - 1.65) < 1e-12
+
+    d.initialize_sediment_operator(rho_w=1250.0)
+    assert abs(d.sediment_R[0] - (2650.0 / 1250.0 - 1.0)) < 1e-12, (
+        'R kept the density it was registered with')
+
+
+def test_set_bed_material_does_not_reset_the_water_density():
+    """It used to take rho_w=1000.0 as a DEFAULT, so every call clobbered it.
+
+    Choosing an erosion law says nothing about the density of the water, and
+    the reset was silent: R and v_s quietly reverted to their fresh-water
+    values partway through a setup.
+    """
+    d = still()
+    d.initialize_sediment_operator(rho_w=1025.0)
+    d.add_grain_size(name='sand', diameter=2.0e-4, rho_s=2650.0)
+    R = d.sediment_R[0]
+
+    d.set_bed_material('cohesive', tau_crit=0.5)
+
+    assert d.sediment_rho_w == 1025.0
+    assert d.sediment_R[0] == R
 
 
 def test_a_non_positive_diameter_is_rejected():
     with pytest.raises(ValueError):
-        Sediment_transport_operator(still(), name='c', diameter=0.0)
+        still().add_grain_size(name='c', diameter=0.0)
 
 
 def test_mixing_add_tracer_and_add_sediment_class_is_rejected():
@@ -225,31 +278,31 @@ def test_mixing_add_tracer_and_add_sediment_class_is_rejected():
     d = still()
     d.add_tracer('plain')
     with pytest.raises(ValueError):
-        Sediment_transport_operator(d, name='s', diameter=1e-4)
+        d.add_grain_size(name='s', diameter=1e-4)
 
 
 # ---------------------------------------------------------------- entrainment
 
 def test_no_entrainment_below_the_critical_shields_stress():
     d = still(depth=DEPTH, dt=1.0)
-    Sediment_transport_operator(d, name='sand', diameter=DIAM, tau_c_star=0.04,
-                         initial_concentration=0.0)
+    d.add_grain_size(name='sand', diameter=DIAM, tau_c_star=0.04,
+                     initial_concentration=0.0)
     d.evolve_to_end(finaltime=20.0)
     assert float(np.abs(d.get_tracer('sand')).max()) == 0.0
 
 
 def test_a_flowing_channel_entrains_from_a_clean_bed():
     d = channel()
-    Sediment_transport_operator(d, name='sand', diameter=DIAM, tau_c_star=0.04,
-                         initial_concentration=0.0)
+    d.add_grain_size(name='sand', diameter=DIAM, tau_c_star=0.04,
+                     initial_concentration=0.0)
     d.evolve_to_end(finaltime=60.0)
     assert d.get_tracer('sand').max() > 0.0
 
 
 def test_tau_c_star_zero_disables_entrainment():
     d = channel()
-    Sediment_transport_operator(d, name='sand', diameter=DIAM, tau_c_star=0.0,
-                         initial_concentration=0.0)
+    d.add_grain_size(name='sand', diameter=DIAM, tau_c_star=0.0,
+                     initial_concentration=0.0)
     d.evolve_to_end(finaltime=60.0)
     assert float(np.abs(d.get_tracer('sand')).max()) == 0.0
 
@@ -260,8 +313,8 @@ def test_violent_flow_stays_bounded_near_c_max():
     cell slightly over c_max. The tolerance admits that; what it must not do is
     run away, which the longer run checks."""
     d = channel(depth=3.0, slope=0.05, n_manning=0.05)
-    Sediment_transport_operator(d, name='sand', diameter=DIAM, tau_c_star=0.04,
-                         initial_concentration=0.0)
+    d.add_grain_size(name='sand', diameter=DIAM, tau_c_star=0.04,
+                     initial_concentration=0.0)
     d.evolve_to_end(finaltime=60.0)
     c = d.get_tracer('sand')
     assert np.isfinite(c).all()
@@ -277,8 +330,7 @@ def test_violent_flow_stays_bounded_near_c_max():
 
 def test_deposition_only_never_creates_mass():
     d = tilted()
-    Sediment_transport_operator(d, name='s', diameter=1e-4, tau_c_star=0.0,
-                         initial_concentration=0.02)
+    d.add_grain_size(name='s', diameter=1e-4, tau_c_star=0.0, initial_concentration=0.02)
     m0 = float((d.tracer_conserved_values[0] * d.areas).sum())
     d.evolve_to_end(finaltime=15.0)
     m1 = float((d.tracer_conserved_values[0] * d.areas).sum())
@@ -292,8 +344,7 @@ def test_a_near_still_start_does_not_deposit_everything_at_once():
     against a physical timescale h/v_s of about 125 s. The packing-limited
     prediction is about 26%."""
     d = tilted()
-    Sediment_transport_operator(d, name='s', diameter=1e-4, tau_c_star=0.0,
-                         initial_concentration=0.02)
+    d.add_grain_size(name='s', diameter=1e-4, tau_c_star=0.0, initial_concentration=0.02)
     m0 = float((d.tracer_conserved_values[0] * d.areas).sum())
     d.evolve_to_end(finaltime=1.0)
     m1 = float((d.tracer_conserved_values[0] * d.areas).sum())
@@ -305,8 +356,8 @@ def test_c_pack_is_exposed_and_binds():
     for c_pack in (0.65, 0.05):
         d = tilted()
         d.sediment_c_pack = c_pack
-        Sediment_transport_operator(d, name='s', diameter=1e-4, tau_c_star=0.0,
-                             initial_concentration=0.02)
+        d.add_grain_size(name='s', diameter=1e-4, tau_c_star=0.0,
+                         initial_concentration=0.02)
         m0 = float((d.tracer_conserved_values[0] * d.areas).sum())
         d.evolve_to_end(finaltime=1.0)
         m1 = float((d.tracer_conserved_values[0] * d.areas).sum())

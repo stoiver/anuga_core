@@ -13,7 +13,6 @@ import numpy as np
 import pytest
 
 from anuga import Reflective_boundary, rectangular_cross_domain
-from anuga import Sediment_transport_operator
 
 LEN = 500.0
 
@@ -145,7 +144,7 @@ def test_all_three_closures_run_and_give_distinct_answers():
         if name != 'constant':
             d.set_sediment_friction(name, **kwargs)
         d.sediment_d_star_mode = 1
-        Sediment_transport_operator(d, name='s', diameter=1e-4, initial_concentration=0.01)
+        d.add_grain_size(name='s', diameter=1e-4, initial_concentration=0.01)
         d.evolve_to_end(finaltime=20.0)
         means[name] = float(d.get_tracer('s').mean())
 

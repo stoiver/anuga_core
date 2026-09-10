@@ -16,7 +16,6 @@ import numpy as num
 import pytest
 
 import anuga
-from anuga import Sediment_transport_operator
 from anuga.operators.base_operator import Operator
 
 
@@ -54,7 +53,7 @@ def _domain(mode):
     # A sediment CLASS, not a bare tracer: tracer_external_source is applied
     # by the sediment source kernel, which does nothing with no classes
     # registered -- so a plain tracer would never show the source at all.
-    Sediment_transport_operator(d, name='mms', diameter=1.0e-4, initial_concentration=0.0)
+    d.add_grain_size(name='mms', diameter=1.0e-4, initial_concentration=0.0)
     d.store = False
     op = _ResetsTheInterface(d)
     d.set_multiprocessor_mode(mode)
@@ -128,7 +127,7 @@ def test_a_time_varying_source_is_not_stale_on_the_device():
         d.set_quantity('stage', 1.0)
         b = anuga.Reflective_boundary(d)
         d.set_boundary({'left': b, 'right': b, 'top': b, 'bottom': b})
-        Sediment_transport_operator(d, name='mms', diameter=1.0e-4, initial_concentration=0.0)
+        d.add_grain_size(name='mms', diameter=1.0e-4, initial_concentration=0.0)
         d.store = False
         _Ramp(d)
         d.set_multiprocessor_mode(mode)

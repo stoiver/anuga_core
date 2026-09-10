@@ -11,7 +11,6 @@ than a rectangular test domain.
 import os
 import numpy as np
 import anuga
-from anuga import Sediment_transport_operator
 
 FILENAME_ROOT = 'topo'
 INFLOW_CONC = 0.01
@@ -58,8 +57,7 @@ domain.set_boundary({'bottom': Bi, 'side1': Br, 'side2': Br,
 
 # --- our API ----------------------------------------------------------------
 domain.sediment_porosity = 0.3
-Sediment_transport_operator(domain, name='sand', diameter=D50, rho_s=2650.0, rho_w=1000.0,
-                          initial_concentration=0.0)
+domain.add_grain_size(name='sand', diameter=D50, rho_s=2650.0, initial_concentration=0.0)
 domain.set_tracer_boundary('sand', 'top', INFLOW_CONC)    # 'top' carries INFLOW_STAGE
 
 areas = domain.areas

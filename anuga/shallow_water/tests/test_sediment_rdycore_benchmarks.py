@@ -20,7 +20,6 @@ import pytest
 from scipy.optimize import brentq
 
 from anuga import Reflective_boundary, rectangular_cross_domain
-from anuga import Sediment_transport_operator
 
 G = 9.81
 HL, HR, CL, CR = 1.0, 0.5, 0.7, 0.5
@@ -43,8 +42,8 @@ def lake():
     d.set_boundary({t: Reflective_boundary(d) for t in d.get_boundary_tags()})
     # 1 g/L is 1e-3 by volume. d* = 0 disables exchange: this is a passive case.
     c0 = np.where((x > 8.0) & (x < 12.0), 1.0e-3, 0.0)
-    Sediment_transport_operator(d, name='ssc', diameter=1e-4, tau_c_star=0.0, d_star=0.0,
-                         initial_concentration=c0)
+    d.add_grain_size(name='ssc', diameter=1e-4, tau_c_star=0.0, d_star=0.0,
+                     initial_concentration=c0)
     w0 = d.quantities['stage'].centroid_values.copy()
     z0 = d.quantities['elevation'].centroid_values.copy()
     d.evolve_to_end(finaltime=100.0)
@@ -118,8 +117,8 @@ def run_dambreak(nx):
     d.set_quantity('stage', np.where(x < DAM_X, HL, HR), location='centroids')
     d.set_quantity('friction', 0.0)
     d.set_boundary({t: Reflective_boundary(d) for t in d.get_boundary_tags()})
-    Sediment_transport_operator(d, name='ssc', diameter=1e-4, tau_c_star=0.0, d_star=0.0,
-                         initial_concentration=np.where(x < DAM_X, CL, CR))
+    d.add_grain_size(name='ssc', diameter=1e-4, tau_c_star=0.0, d_star=0.0,
+                     initial_concentration=np.where(x < DAM_X, CL, CR))
     d.evolve_to_end(finaltime=DAM_T)
     h = np.maximum(d.quantities['stage'].centroid_values
                    - d.quantities['elevation'].centroid_values, 0.0)

@@ -30,7 +30,6 @@ sp = pytest.importorskip('sympy')
 
 import anuga
 from anuga import rectangular_cross_domain
-from anuga import Sediment_transport_operator
 from anuga.abstract_2d_finite_volumes.generic_boundary_conditions import Boundary
 
 Hs, Ts, Us, Vs, Zs, Cs = 0.005, 20.0, 0.025, 0.025, 0.0025, 0.5
@@ -185,7 +184,7 @@ def run(nxy, dt=None):
     MMS_source_operator(d, [(nm, make_S_ms(a, vs))
                             for nm, a in zip(names, ALPHAS)])
     # No grain size argument: it picks up the ones registered above.
-    Sediment_transport_operator(d)
+    d.initialize_sediment_operator()
 
     d.evolve_to_end(finaltime=STOP)
 
@@ -258,7 +257,7 @@ def run(nxy, dt=None):
     MMS_source_operator(d, [(nm, make_S_ms(a, vs))
                             for nm, a in zip(names, ALPHAS)])
     # No grain size argument: it picks up the ones registered above.
-    Sediment_transport_operator(d)
+    d.initialize_sediment_operator()
 
     d.evolve_to_end(finaltime=STOP)
 

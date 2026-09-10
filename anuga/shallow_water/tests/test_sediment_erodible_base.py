@@ -17,7 +17,6 @@ import numpy as np
 import pytest
 
 from anuga import Reflective_boundary, rectangular_cross_domain
-from anuga import Sediment_transport_operator
 from anuga.abstract_2d_finite_volumes.region import Region
 
 POROSITY = 0.3
@@ -41,7 +40,7 @@ def build(base=None, base_depth=None, classes=(('sand', 2.0e-4),),
     if bedload:
         d.set_bedload('wong_parker_eq24')
     for name, diameter in classes:
-        Sediment_transport_operator(d, name=name, diameter=diameter)
+        d.add_grain_size(name=name, diameter=diameter)
     if base is not None:
         d.set_erodible_base(elevation=base)
     elif base_depth is not None:
@@ -258,8 +257,8 @@ def test_locked_cells_still_accrete():
     d.set_quantity('friction', 0.03)
     d.set_boundary({t: Reflective_boundary(d) for t in d.get_boundary_tags()})
     d.set_sediment_parameters(porosity=POROSITY)
-    Sediment_transport_operator(d, name='silt', diameter=6.0e-5, tau_c_star=1.0e6,
-                         initial_concentration=0.01)
+    d.add_grain_size(name='silt', diameter=6.0e-5, tau_c_star=1.0e6,
+                     initial_concentration=0.01)
     zc = d.quantities['elevation'].centroid_values.copy()
     d.set_erodible_region(polygon=HALF)
     locked = d.centroid_coordinates[:, 0] >= 30.0

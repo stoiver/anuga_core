@@ -26,7 +26,6 @@ import pytest
 from scipy.optimize import brentq
 
 from anuga import Reflective_boundary, rectangular_cross_domain
-from anuga import Sediment_transport_operator
 
 G = 9.81
 HL, HR, CL, CR = 1.0, 0.5, 0.7, 0.5
@@ -79,9 +78,8 @@ def build(exchange, nx=800, manning=MANNING):
         d.set_deposition('threshold', tau_d=TAU_D)
     else:
         d.set_deposition('threshold', tau_d=0.0)     # their passive hook
-    Sediment_transport_operator(d, name='ssc', diameter=1.0e-4, rho_s=RHO_S, rho_w=1000.0,
-                         tau_c_star=0.0,
-                         initial_concentration=np.where(x < DAM_X, CL, CR))
+    d.add_grain_size(name='ssc', diameter=1.0e-4, rho_s=RHO_S, tau_c_star=0.0,
+                     initial_concentration=np.where(x < DAM_X, CL, CR))
     d.sediment_settling_velocity[0] = V_S            # RDy26 prescribe it
     return d, x
 

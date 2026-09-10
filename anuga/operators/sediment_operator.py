@@ -34,85 +34,50 @@ from anuga.operators.base_operator import Operator
 class Sediment_transport_operator(Operator):
     """Suspended sediment transport and bed evolution, as a fractional step.
 
-    This is the entry point: creating one both switches sediment transport on
-    and registers a grain size for it to carry.
+    Not normally constructed directly. The entry point is
+    :meth:`~anuga.shallow_water.shallow_water_domain.Domain.initialize_sediment_operator`,
+    which creates this operator and returns it, with
+    :meth:`~anuga.shallow_water.shallow_water_domain.Domain.add_grain_size`
+    for each grain size:
 
     .. code-block:: python
 
-        from anuga import Sediment_transport_operator
+        domain.initialize_sediment_operator(porosity=0.28)
+        domain.add_grain_size('sand', diameter=2.0e-4)
+        domain.add_grain_size('silt', diameter=2.0e-5)
 
-        Sediment_transport_operator(domain, name='sand', diameter=2.0e-4)
+    Constructing it directly is equivalent to
+    `domain.initialize_sediment_operator()` with no domain-wide parameters, and
+    is there for code that wants the handle without setting anything.
 
-    A grain size is a tracer with settling parameters attached, so it inherits
-    the transport, boundary and conservation machinery described under
-    :ref:`tracers`.
-
-    ONE OPERATOR PER DOMAIN. A second call adds another grain size to the same
-    operator and returns it, rather than creating a second one:
-
-    .. code-block:: python
-
-        Sediment_transport_operator(domain, name='sand', diameter=2.0e-4)
-        Sediment_transport_operator(domain, name='silt', diameter=2.0e-5)
-        # one operator, two grain sizes
-
-    That is not a convenience -- the kernel makes a single pass over every
-    registered grain size, so two operators in the fractional-step list would
-    apply the bed exchange twice per timestep.
+    ONE OPERATOR PER DOMAIN. Constructing a second returns the first: the
+    kernel makes a single pass over every registered grain size, so two
+    operators in the fractional-step list would apply the bed exchange twice
+    per timestep.
 
     Parameters
     ----------
     domain : Domain
         The domain to transport sediment on.
-    name : str
-        Identifier for this grain size, e.g. 'sand'. Also its tracer name.
-    diameter : float
-        Grain diameter in metres.
-
-    The remaining parameters are the per-grain-size settling and threshold
-    properties; see :ref:`sediment` for what they mean and how to choose them.
+    description, label, logging, verbose
+        See :class:`~anuga.operators.base_operator.Operator`. Ignored when this
+        domain already has a sediment operator.
     """
 
     def __new__(cls, domain, *args, **kwargs):
-        # One per domain: return the existing operator so a second call adds a
-        # grain size to it instead of registering a duplicate fractional step.
+        # One per domain: return the existing operator rather than registering
+        # a duplicate fractional step.
         for op in getattr(domain, 'fractional_step_operators', ()):
             if isinstance(op, cls):
                 return op
         return super().__new__(cls)
 
-    def __init__(self, domain, name=None, diameter=None, d_star=1.0, beta=None,
-                 initial_concentration=0.0, rho_s=2650.0, rho_w=1000.0,
-                 tau_c_star=0.04, reference_height=None,
-                 description=None, label=None, logging=False, verbose=False,
-                 **settling_kwargs):
-
-        # name and diameter describe one grain size, so they travel together.
-        # Without this, `Sediment_transport_operator(domain, diameter=5e-5)`
-        # on a domain that already has a grain size registered SILENTLY did
-        # nothing -- the diameter was dropped and no fraction was added.
-        if (name is None) != (diameter is None):
-            missing, given = (('name', 'diameter') if name is None
-                              else ('diameter', 'name'))
-            raise ValueError(
-                'Sediment_transport_operator was given %s= but not %s=; a '
-                'grain size needs both, e.g. '
-                "Sediment_transport_operator(domain, name='sand', "
-                'diameter=2.0e-4)' % (given, missing))
-
-        registering = dict(d_star=d_star, beta=beta,
-                           initial_concentration=initial_concentration,
-                           rho_s=rho_s, rho_w=rho_w, tau_c_star=tau_c_star,
-                           reference_height=reference_height,
-                           **settling_kwargs)
-
+    def __init__(self, domain, description=None, label=None, logging=False,
+                 verbose=False):
         # __new__ may have handed back the operator this domain already has, in
-        # which case Python still calls __init__ on it. Add the grain size and
-        # leave everything else alone -- re-running Operator.__init__ would
-        # register a second fractional step.
+        # which case Python still calls __init__ on it. Re-running
+        # Operator.__init__ would register a second fractional step.
         if getattr(self, '_sediment_initialised', False):
-            if name is not None:
-                domain._register_sediment_fraction(name, diameter, **registering)
             return
 
         Operator.__init__(self, domain, description, label, logging, verbose)
@@ -123,18 +88,9 @@ class Sediment_transport_operator(Operator):
         self.repose_sweeps_total = 0
         self.repose_cap_hits = 0
 
-        if name is not None:
-            domain._register_sediment_fraction(name, diameter, **registering)
-        elif getattr(domain, 'n_sediment_classes', 0) == 0:
-            raise ValueError(
-                'Sediment_transport_operator needs a grain size: pass '
-                "name= and diameter=, e.g. "
-                "Sediment_transport_operator(domain, name='sand', "
-                'diameter=2.0e-4)')
-
     def add_grain_size(self, name, diameter, **kwargs):
-        """Register another grain size on this operator. Returns its index."""
-        return self.domain._register_sediment_fraction(name, diameter, **kwargs)
+        """Register a grain size. Delegates to `domain.add_grain_size`."""
+        return self.domain.add_grain_size(name, diameter, **kwargs)
 
     def __call__(self):
         timestep = self.domain.get_timestep()

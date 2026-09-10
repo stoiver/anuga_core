@@ -12,7 +12,6 @@ import numpy as np
 import pytest
 
 from anuga import Reflective_boundary, rectangular_cross_domain
-from anuga import Sediment_transport_operator
 
 LEN = 100.0
 
@@ -32,8 +31,8 @@ def channel(slope=0.02, depth=0.5, n_manning=0.025, dt=0.5):
 
 def _gravel_channel(formula='wong_parker_eq24', concentration=0.0):
     d = channel()
-    Sediment_transport_operator(d, name='gravel', diameter=5e-3, tau_c_star=0.0,
-                         initial_concentration=concentration)
+    d.add_grain_size(name='gravel', diameter=5e-3, tau_c_star=0.0,
+                     initial_concentration=concentration)
     d.set_bedload(formula)
     return d
 
