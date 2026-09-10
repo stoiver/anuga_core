@@ -1962,8 +1962,14 @@ class Domain(Generic_Domain):
                   self.sediment_bedload_tau_c_star)))
 
         L = ['sediment configuration',
-             '  grain sizes        : %d  %r' % (self.n_sediment_classes,
-                                                self.get_sediment_names()),
+             # The name is free text, so it is usually a material ('sand')
+             # rather than a size. Carry the diameter alongside it, or the
+             # line labels as a grain size something that is not one.
+             '  grain sizes        : %d  --  %s'
+             % (self.n_sediment_classes,
+                ', '.join('%s (d=%.4g m)' % (nm, self.sediment_diameter[i])
+                          for i, nm in
+                          enumerate(self.get_sediment_names()))),
              '  erosion            : %s' % ero,
              '  deposition         : %s' % dep,
              '  near-bed d*        : %s' % dstar,

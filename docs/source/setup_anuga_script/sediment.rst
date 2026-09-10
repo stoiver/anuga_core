@@ -80,7 +80,7 @@ size's derived settling velocity -- as text:
 ::
 
    sediment configuration
-     grain sizes        : 2  ['fine', 'coarse']
+     grain sizes        : 2  --  fine (d=0.0001 m), coarse (d=0.0005 m)
      erosion            : Shields / Smith-McLean, non-cohesive (sand, gravel)   [E-1]
      deposition         : D = d* c v_s   [D-1]
      near-bed d*        : Rouse profile   [S-4]
