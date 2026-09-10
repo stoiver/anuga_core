@@ -28,6 +28,138 @@ term. They appear in the source comments and in ``sediment_summary()`` so a
 term can be traced from the code to the equation and on to the paper; they are
 listed under `What the bracketed labels mean`_.
 
+.. _sediment_notation:
+
+Notation
+--------
+
+.. list-table::
+   :header-rows: 1
+   :widths: 16 56 28
+
+   * - Symbol
+     - Meaning
+     - Units
+   * - :math:`h`
+     - water depth
+     - m
+   * - :math:`u, v`
+     - depth-averaged velocity components
+     - m s\ :sup:`-1`
+   * - :math:`|\mathbf{v}|`
+     - velocity magnitude, :math:`\sqrt{u^2+v^2}`
+     - m s\ :sup:`-1`
+   * - :math:`z`
+     - bed elevation
+     - m
+   * - :math:`g`
+     - gravitational acceleration (a domain parameter, not a constant)
+     - m s\ :sup:`-2`
+   * - :math:`\rho`, :math:`\rho_s`
+     - water density; sediment particle density
+     - kg m\ :sup:`-3`
+   * - :math:`R`
+     - submerged specific gravity, :math:`(\rho_s-\rho)/\rho`
+     - --
+   * - :math:`D`, :math:`d`
+     - grain diameter
+     - m
+   * - :math:`\nu`
+     - kinematic viscosity of water
+     - m\ :sup:`2` s\ :sup:`-1`
+   * - :math:`\kappa`
+     - von Kármán constant, 0.41
+     - --
+   * - :math:`\lambda`
+     - bed porosity
+     - --
+   * - :math:`n`
+     - Manning coefficient
+     - s m\ :sup:`-1/3`
+   * - :math:`f`, :math:`f_c`
+     - Darcy-Weisbach friction factor; friction coefficient
+       :math:`f_c \equiv f/8`
+     - --
+   * - :math:`\tau_b`
+     - bed shear stress
+     - Pa
+   * - :math:`\tau^{*}`
+     - Shields (dimensionless) shear stress
+     - --
+   * - :math:`\tau_c^{*}`, :math:`\tau_c`
+     - critical Shields stress for motion; its dimensional form
+     - --, Pa
+   * - :math:`\tau_x`
+     - excess Shields stress, :math:`\tau^{*}-\tau_c^{*}`
+     - --
+   * - :math:`\tau_d`
+     - critical stress for *deposition*
+     - Pa
+   * - :math:`u_*`
+     - shear velocity, :math:`\sqrt{\tau_b/\rho}`
+     - m s\ :sup:`-1`
+   * - :math:`c`, :math:`c_s`
+     - depth-averaged volumetric concentration (of grain size :math:`s`)
+     - --
+   * - :math:`c_b`
+     - near-bed concentration
+     - --
+   * - :math:`m`, :math:`m_s`
+     - conserved sediment variable, :math:`m_s \equiv h\,c_s`
+     - m
+   * - :math:`v_s`
+     - settling velocity
+     - m s\ :sup:`-1`
+   * - :math:`Z`
+     - Rouse number, :math:`v_s/(\kappa u_*)`
+     - --
+   * - :math:`d^{*}`
+     - near-bed concentration ratio, :math:`c_b/c`
+     - --
+   * - :math:`a`, :math:`z_0`
+     - reference height; roughness length
+     - m
+   * - :math:`h_\epsilon`
+     - regularisation depth in the velocity recovery
+     - m
+   * - :math:`E`, :math:`D`
+     - entrainment (erosion) flux; deposition flux
+     - m s\ :sup:`-1`
+   * - :math:`K_e`
+     - erodibility coefficient
+     - m\ :sup:`3` N\ :sup:`-1` s\ :sup:`-1`
+   * - :math:`\mathbf{q}_b`, :math:`q_b^{*}`
+     - bedload flux per unit width; its dimensionless form
+     - m\ :sup:`2` s\ :sup:`-1`, --
+   * - :math:`N_s`
+     - number of grain sizes
+     - --
+
+**Grain-size percentiles.** :math:`D_{50}` is the median grain diameter: half
+the bed material by mass is finer. :math:`D_{84}` is the diameter that 84% is
+finer than, and so on for any :math:`D_{xx}`. The coarser percentiles are used
+where the roughness is set by the largest grains present rather than the
+typical one -- which is why the ``'wilson'`` closure below asks for
+:math:`D_{50}` on a sand bed but :math:`D_{84}` on gravel or boulders.
+
+.. warning::
+
+   Two symbols are overloaded, by long convention in this literature, and both
+   appear on this page.
+
+   :math:`D` is **grain diameter** in the shear and bedload relations, and the
+   **deposition flux** in the mass balance. :math:`m` is the **conserved
+   variable** :math:`h\,c` in the transport equation, and the **exponent** in
+   the bedload power law :math:`q_b^{*} = K\tau_x^{\,m}`.
+
+   Which is meant is unambiguous from the equation, but they are worth
+   flagging.
+
+**Sign convention.** :math:`E` is positive from the bed into the water column,
+:math:`D` is positive from the water column onto the bed, and the bed rises
+under net deposition.
+
+
 .. _sediment_governing_equations:
 
 The equations being solved
@@ -149,6 +281,10 @@ adopts the same form:
    u = \frac{(uh)\,h}{h^2 + h_\epsilon^2}
    \qquad \text{[T-5]}
 
+with :math:`h_\epsilon` a small regularisation depth: it leaves :math:`u`
+unchanged where the water is deep and drives it smoothly to zero as the cell
+dries, instead of dividing by a depth approaching zero.
+
 The alternative depth-slope closure, :math:`\tau_b = \rho\,g\,h\,S`, is the one
 [aSM16]_ used, and is kept for reproducing anugaSed's results.
 
@@ -200,7 +336,8 @@ mode alone -- they
 require a length scale and refuse without one, rather than inventing a
 default:
 
-- ``'wilson'`` needs ``grain_size > 0`` (D50 for sand, D84 for gravel or boulder);
+- ``'wilson'`` needs ``grain_size > 0`` (:math:`D_{50}` for sand,
+  :math:`D_{84}` for gravel or boulder -- see :ref:`sediment_notation`);
 - ``'larsen_lamb'`` needs either ``k_s`` or ``sigma_br``. There is no universal
   ``sigma_br``: it is site-measured, and [LL16]_ report about 5 m at Moses
   Coulee.
