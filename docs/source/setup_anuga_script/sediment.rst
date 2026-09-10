@@ -57,26 +57,32 @@ Print what you configured
    print(domain.sediment_summary())
 
 This is the single most useful call in the interface. It reports the active
-configuration -- every law selected, every scalar in force, and each class's
-derived settling velocity -- as text:
+configuration -- every law selected, every scalar in force, and each grain
+size's derived settling velocity -- as text:
 
 ::
 
    sediment configuration
-     classes            : 2  ['fine', 'coarse']
-     erosion            : [E-1] Shields / Smith-McLean, non-cohesive (sand, gravel)
-     deposition         : [D-1] D = d* c v_s
-     near-bed d*        : [S-4] Rouse profile
-     shear closure      : [T-1] quadratic drag, tau_b = rho f_c |v|^2
-     friction closure   : wilson [T-8..10], bed=gravel, D=0.02 m
-     bedload            : [K-1] power law, K=3.97 m=1.5 tau_c*=0.0495
+     grain sizes        : 2  ['fine', 'coarse']
+     erosion            : Shields / Smith-McLean, non-cohesive (sand, gravel)   [E-1]
+     deposition         : D = d* c v_s   [D-1]
+     near-bed d*        : Rouse profile   [S-4]
+     shear closure      : quadratic drag, tau_b = rho f_c |v|^2   [T-1]
+     friction closure   : wilson, bed=gravel, D=0.02 m   [T-8..10]
+     bedload            : power law, K=3.97 m=1.5 tau_c*=0.0495   [K-1]
      bed evolution      : True  (spec 2.4 Phase 4, evolving)
      porosity lambda    : 0.28
      c_max      [L-2]   : 0.35
      c_pack     [L-4]   : 0.65
      rho_w              : 1000 kg/m3
      a/h floor          : 0.01
-     per class:
+     erodible base [L-5]: none (unlimited depth)
+     angle of repose    : off (spec 7)
+     erodible region    : whole domain
+     ([E-1] and the like are cross-references to the term in the physics;
+      see the Sediment physics appendix -- the description before each
+      label is the whole story.)
+     per grain size:
        fine       d=0.0001 m  v_s=8.0040e-03 m/s  R=1.65  tau_c*=0.04
        coarse     d=0.0005 m  v_s=9.4839e-02 m/s  R=1.65  tau_c*=0.04
 

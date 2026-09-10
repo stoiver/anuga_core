@@ -302,12 +302,19 @@ friction factor goes into it.
    domain.set_shear_closure('quadratic_drag')   # default
    domain.set_shear_closure('depth_slope')
 
-==================== ===================== =========
-value                expression            spec
-==================== ===================== =========
-``'quadratic_drag'`` \`tau_b = rho f_c     v
-``'depth_slope'``    ``tau_b = rho g h S`` ``[T-7]``
-==================== ===================== =========
+.. list-table::
+   :header-rows: 1
+   :widths: 26 50 24
+
+   * - value
+     - expression
+     - label
+   * - ``'quadratic_drag'``
+     - :math:`\tau_b = \rho\, f_c\, |\mathbf{v}|^2`
+     - ``[T-1]``
+   * - ``'depth_slope'``
+     - :math:`\tau_b = \rho\, g\, h\, S`
+     - ``[T-7]``
 
 ``'quadratic_drag'`` is the default and the right choice for unsteady or
 rapidly varying flow -- dam breaks, floods, anything with significant
