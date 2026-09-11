@@ -77,7 +77,7 @@ def test_the_two_closures_give_materially_different_erosion():
     for closure in ('quadratic_drag', 'depth_slope'):
         d = channel()
         d.set_shear_closure(closure)
-        d.add_sediment_class('sand', diameter=1e-4, initial_concentration=0.0)
+        d.add_grain_size(name='sand', diameter=1e-4, initial_concentration=0.0)
         d.evolve_to_end(finaltime=30.0)
         means[closure] = float(d.get_tracer('sand').mean())
 

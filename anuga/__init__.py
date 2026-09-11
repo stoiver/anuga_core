@@ -82,6 +82,7 @@ from anuga.abstract_2d_finite_volumes.region import Region
 from anuga.geospatial_data.geospatial_data import Geospatial_data
 from anuga.coordinate_transforms.geo_reference import Geo_reference
 from anuga.operators.base_operator import Operator
+from anuga.operators.sediment_operator import Sediment_transport_operator
 from anuga.structures.structure_operator import Structure_operator
 
 # The plotting helpers need matplotlib, and anuga.utilities.animate raises at

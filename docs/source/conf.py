@@ -28,6 +28,7 @@ release = anuga.__version__
 import os
 import sys
 sys.path.insert(0, os.path.abspath("../../anuga"))
+sys.path.insert(0, os.path.abspath("_ext"))
 
 # -- General configuration ---------------------------------------------------
 
@@ -50,6 +51,7 @@ extensions = [
     'sphinx.ext.autosectionlabel',
     'sphinx_copybutton',
     'nbsphinx',
+    'spec_label',
 ]
 
 def linkcode_resolve(domain, info):

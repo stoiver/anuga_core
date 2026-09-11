@@ -279,8 +279,11 @@ Top-level simulation settings.
    # Number of OpenMP threads.  Omit to read OMP_NUM_THREADS env var (default 1).
    # omp_num_threads = 4
 
-   # Multiprocessor mode: 1 = OpenMP CPU (default), 2 = OpenMP GPU offload (experimental, branch sp26)
-   multiprocessor_mode = 1
+   # Compute mode: "legacy" = OpenMP CPU (default), "unified" = shared
+   # CPU/GPU kernels, offloading only when GPU offload is enabled
+   # process-wide (experimental).  The older integer multiprocessor_mode
+   # (1 or 2) is still accepted.
+   compute_mode = "legacy"
 
 .. _toml-mesh:
 
@@ -845,6 +848,6 @@ Excel Compatibility
 
 The Excel format is described in the ``cairns_toml_excel`` example directory.
 Attributes that exist only in the TOML interface
-(``multiprocessor_mode``, ``omp_num_threads``, ``outputstep``,
+(``compute_mode``, ``omp_num_threads``, ``outputstep``,
 ``report_operator_statistics``) are set to sensible defaults when reading
 Excel files.
