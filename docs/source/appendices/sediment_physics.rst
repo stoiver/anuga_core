@@ -23,7 +23,7 @@ and the page says so. Erosion is the clearest case: the cohesive and
 non-cohesive routes are not competing fits to the same data but descriptions of
 different bed material, so choosing between them is a statement about the bed.
 
-Bracketed equation labels like ``[E-1]`` are internal identifiers for each
+Bracketed equation labels like :spec:`E-1` are internal identifiers for each
 term. They appear in the source comments and in ``sediment_summary()`` so a
 term can be traced from the code to the equation and on to the paper; they are
 listed under `What the bracketed labels mean`_.
@@ -181,6 +181,8 @@ vector the solver carries is
 tracer equation with a source: what the bed gives up and what settles out of
 the water column.
 
+.. _spec-g-3:
+
 .. math::
 
    \frac{\partial m_s}{\partial t}
@@ -196,6 +198,8 @@ a tributary load, rainfall washoff -- and is zero unless you set one.
 **Bed evolution.** What leaves the water column arrives at the bed, and the bed
 moves by the volume it gains, allowing for pore space:
 
+.. _spec-g-4:
+
 .. math::
 
    \frac{\partial z}{\partial t} = \frac{D - E}{1 - \lambda}
@@ -207,6 +211,8 @@ Exner equation [Exn25]_, in the form used by [P14]_ and [FG21]_.
 
 **Bedload.** When bedload is switched on it moves the bed too, by the divergence
 of the bedload transport vector :math:`\mathbf{q}_b`:
+
+.. _spec-g-5:
 
 .. math::
 
@@ -245,6 +251,8 @@ Every erosion and deposition rate below depends on the bed shear stress, so this
 is the term to get right first. [FG21]_, [RDy26]_ and [P14]_ all specify the
 same quadratic drag law, in different notation:
 
+.. _spec-t-1:
+
 .. math::
 
    \tau_b = \rho\, f_c\, |\mathbf{v}|^2 \qquad \text{[T-1]}
@@ -255,15 +263,21 @@ where :math:`f_c` is the Darcy-Weisbach friction factor divided by eight,
 From it follow the shear velocity, the dimensionless (Shields) stress, and the
 excess stress that drives transport:
 
+.. _spec-t-2:
+
 .. math::
 
    u_* = \sqrt{\tau_b/\rho} = |\mathbf{v}|\sqrt{f_c}
    \qquad \text{[T-2]}
 
+.. _spec-t-3:
+
 .. math::
 
    \tau^{*} = \frac{\tau_b}{(\rho_s - \rho)\, g\, D} = \frac{u_*^2}{R\,g\,D}
    \qquad \text{[T-3]}
+
+.. _spec-t-4:
 
 .. math::
 
@@ -275,6 +289,8 @@ with :math:`R = \rho_s/\rho - 1` the submerged specific gravity and
 Velocity is recovered from momentum with ANUGA's depth-limiting form [MR12]_,
 so that a vanishing depth does not produce a divergent velocity. [RDy26]_
 adopts the same form:
+
+.. _spec-t-5:
 
 .. math::
 
@@ -311,10 +327,10 @@ friction factor goes into it.
      - label
    * - ``'quadratic_drag'``
      - :math:`\tau_b = \rho\, f_c\, |\mathbf{v}|^2`
-     - ``[T-1]``
+     - :spec:`T-1`
    * - ``'depth_slope'``
      - :math:`\tau_b = \rho\, g\, h\, S`
-     - ``[T-7]``
+     - :spec:`T-7`
 
 ``'quadratic_drag'`` is the default and the right choice for unsteady or
 rapidly varying flow -- dam breaks, floods, anything with significant
@@ -349,25 +365,22 @@ default:
   ``sigma_br``: it is site-measured, and [LL16]_ report about 5 m at Moses
   Coulee.
 
-+-------------------+------------------+-------------------------------+
-| mode              | spec             | when                          |
-+===================+==================+===============================+
-| ``'constant'``    | ``[T-6]``        | default: ``f_c`` from the     |
-|                   |                  | domain's Manning ``n``.       |
-|                   |                  | Ordinary flood and channel    |
-|                   |                  | work.                         |
-+-------------------+------------------+-------------------------------+
-| ``'wilson'``      | ``[T-8..T-12]``  | depth-dependent, from grain   |
-|                   |                  | size. Shallow flow over       |
-|                   |                  | coarse beds, where relative   |
-|                   |                  | submergence matters.          |
-+-------------------+------------------+-------------------------------+
-| ``'larsen_lamb'`` | ``[T-13..T-15]`` | partitions total stress into  |
-|                   |                  | grain and form drag. Bedforms |
-|                   |                  | or roughness elements, where  |
-|                   |                  | only the grain part drives    |
-|                   |                  | sediment.                     |
-+-------------------+------------------+-------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 26 46
+
+   * - mode
+     - spec
+     - when
+   * - ``'constant'``
+     - :spec:`T-6`
+     - default: ``f_c`` from the domain's Manning ``n``. Ordinary flood and channel work.
+   * - ``'wilson'``
+     - ``[T-8..T-12]``
+     - depth-dependent, from grain size. Shallow flow over coarse beds, where relative submergence matters.
+   * - ``'larsen_lamb'``
+     - ``[T-13..T-15]``
+     - partitions total stress into grain and form drag. Bedforms or roughness elements, where only the grain part drives sediment.
 
 ``bed`` is ``'sand'`` or ``'gravel'``; ``grain_size`` (m) is the roughness length
 scale; ``k_s`` (m) is the roughness height; ``r_d`` and ``r_br`` (default 2.0) are
@@ -403,11 +416,15 @@ you want is a statement about the bed material.
 concentration after [SM77]_ and [Par98]_, as used by [FG21]_, recovered as a
 flux by the settling velocity. The threshold is a Shields stress [Shi36]_:
 
+.. _spec-e-1:
+
 .. math::
 
    E^{*} = \frac{0.65\, \gamma_0\, S}{1 + \gamma_0\, S},
    \qquad S = \frac{\tau^{*}}{\tau_c^{*}} - 1
    \qquad \text{[E-1]}
+
+.. _spec-e-2:
 
 .. math::
 
@@ -421,9 +438,13 @@ Puerco field data [P13]_ that anugaSed was built for. An excess *dimensional*
 stress law, calibrated by jet test [HS01]_ and specified for ANUGA by
 [aSM16]_:
 
+.. _spec-e-3:
+
 .. math::
 
    E = K_e\,(\tau_b - \tau_c) \qquad \text{[E-3]}
+
+.. _spec-e-5:
 
 .. math::
 
@@ -435,13 +456,15 @@ stress law, calibrated by jet test [HS01]_ and specified for ANUGA by
 **Partheniades** [Par65]_ -- the form [RDy26]_ uses, also on dimensional
 stress, normalised by the threshold:
 
+.. _spec-e-4:
+
 .. math::
 
    E = K_e \, \frac{\tau_b - \tau_c}{\tau_c}
    \quad \text{for } \tau_b > \tau_c, \text{ else } 0
    \qquad \text{[E-4]}
 
-Note that ``[E-1]`` is written in Shields stress while ``[E-3]`` and ``[E-4]``
+Note that :spec:`E-1` is written in Shields stress while :spec:`E-3` and :spec:`E-4`
 are in dimensional stress; that is the usual source of confusion between them.
 
 
@@ -455,19 +478,22 @@ The argument is the **material**, not the formula, because spec 4.1.1 is
 explicit that these describe different sediment rather than competing
 descriptions of the same sediment. Picking the wrong one is a physics error.
 
-+------------------+-------------------------+-------------------------+
-| material         | law                     | when                    |
-+==================+=========================+=========================+
-| ``noncohesive``  | ``[E-1]``/``[E-2]``     | sand, gravel, boulders  |
-|                  | Shields, Smith & McLean |                         |
-+------------------+-------------------------+-------------------------+
-| ``cohesive``     | ``[E-3]`` Hanson &      | clay, silt,             |
-|                  | Simon                   | consolidated mud        |
-+------------------+-------------------------+-------------------------+
-| ``partheniades`` | ``[E-4]`` Partheniades  | cohesive, where you     |
-|                  |                         | have a site-calibrated  |
-|                  |                         | ``K_e``                 |
-+------------------+-------------------------+-------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 26 37 37
+
+   * - material
+     - law
+     - when
+   * - ``noncohesive``
+     - :spec:`E-1`/:spec:`E-2` Shields, Smith & McLean
+     - sand, gravel, boulders
+   * - ``cohesive``
+     - :spec:`E-3` Hanson & Simon
+     - clay, silt, consolidated mud
+   * - ``partheniades``
+     - :spec:`E-4` Partheniades
+     - cohesive, where you have a site-calibrated ``K_e``
 
 ``tau_crit`` (Pa, default 0.088) and ``K_e`` (m3/N/s) apply to the cohesive
 routes only; the non-cohesive route takes its threshold per class from
@@ -486,6 +512,8 @@ Deposition
 Deposition is the settling flux out of the water column. The default, after
 [P14]_ and [FG21]_, is the near-bed concentration times the settling velocity:
 
+.. _spec-d-1:
+
 .. math::
 
    D = c_b\, v_s = d^{*}(Z)\, c\, v_s \qquad \text{[D-1]}
@@ -493,6 +521,8 @@ Deposition is the settling flux out of the water column. The default, after
 The alternative, from [RDy26]_, is a threshold form with a critical
 *deposition* stress, which switches deposition off in flow strong enough to
 keep grains suspended:
+
+.. _spec-d-2:
 
 .. math::
 
@@ -506,6 +536,8 @@ passive-transport benchmarks are run.
 The settling velocity itself is [FC04]_, smooth across the Stokes-to-turbulent
 transition and branch-free. [Die82]_ is the more accurate polynomial fit for
 natural irregular grains, at the cost of a branchy evaluation:
+
+.. _spec-s-1:
 
 .. math::
 
@@ -524,16 +556,19 @@ with :math:`C_1 = 18`, :math:`C_2 = 0.4` for smooth spheres, and
 ``law``
 ~~~~~~~
 
-+-----------------+-------------------------+-------------------------+
-| value           | expression              | when                    |
-+=================+=========================+=========================+
-| ``'d_star'``    | ``D = d* c v_s``,       | default; always         |
-|                 | ``[D-1]``               | deposits                |
-+-----------------+-------------------------+-------------------------+
-| ``'threshold'`` | ``[D-2]``, deposition   | when you need           |
-|                 | only where              | deposition suppressed   |
-|                 | ``tau_b < tau_d``       | under strong flow       |
-+-----------------+-------------------------+-------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 37 37
+
+   * - value
+     - expression
+     - when
+   * - ``'d_star'``
+     - ``D = d* c v_s``, :spec:`D-1`
+     - default; always deposits
+   * - ``'threshold'``
+     - :spec:`D-2`, deposition only where ``tau_b < tau_d``
+     - when you need deposition suppressed under strong flow
 
 ``tau_d`` (Pa) is the threshold for ``'threshold'`` and is ignored otherwise.
 
@@ -543,8 +578,10 @@ with :math:`C_1 = 18`, :math:`C_2 = 0.4` for smooth spheres, and
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 :math:`d^{*}` is the ratio of near-bed to depth-averaged concentration, and it
-is what makes ``[D-1]`` a near-bed law rather than a depth-averaged one. It is a
+is what makes :spec:`D-1` a near-bed law rather than a depth-averaged one. It is a
 function of the Rouse number [Rou37]_
+
+.. _spec-s-2:
 
 .. math::
 
@@ -561,6 +598,8 @@ requiring that the sediment discharge be the depth integral of concentration
 times velocity over a Rouse-Vanoni concentration profile and a logarithmic
 velocity profile:
 
+.. _spec-s-4:
+
 .. math::
 
    d^{*} = \frac{\displaystyle\int_a^h \ln(z/z_0)\, dz}
@@ -576,15 +615,16 @@ rather than the integral itself, for the reasons given below.
 Deposition is driven by the concentration *at the bed*, but the transported
 quantity is depth-averaged. ``d* = c_b/c`` bridges them.
 
-+----------------+-----------------------------------------------------+
-| value          | meaning                                             |
-+================+=====================================================+
-| ``'constant'`` | ``d*`` is whatever each class was given (1.0 =      |
-|                | well-mixed). Default.                               |
-+----------------+-----------------------------------------------------+
-| ``'rouse'``    | ``d*`` from the Rouse profile ``[S-4]``, recomputed |
-|                | per cell per step                                   |
-+----------------+-----------------------------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 23 77
+
+   * - value
+     - meaning
+   * - ``'constant'``
+     - ``d*`` is whatever each class was given (1.0 = well-mixed). Default.
+   * - ``'rouse'``
+     - ``d*`` from the Rouse profile :spec:`S-4`, recomputed per cell per step
 
 ``'constant'`` with ``d* = 1`` is the well-mixed assumption: fine sediment,
 vigorous mixing, shallow flow. It is also what the analytic decay solutions
@@ -603,7 +643,7 @@ never allowed below this. Lowering it admits more stratification and more
 near-bed concentration; it is a numerical guard, not a physical parameter, and
 0.01 sits comfortably inside the fit range.
 
-Near-bed concentration is bounded by ``c_pack`` ``[L-4]`` regardless. That bound
+Near-bed concentration is bounded by ``c_pack`` :spec:`L-4` regardless. That bound
 exists because equilibrium Rouse ``d*`` at vanishing shear will otherwise
 deposit the entire water column in under a second.
 
@@ -616,9 +656,13 @@ Bedload moves grains along the bed rather than through the water column.
 Following [FG21]_, the transport rate is a power law in the excess Shields
 stress, made dimensional by the grain size:
 
+.. _spec-k-1:
+
 .. math::
 
    q_b^{*} = K\, \tau_x^{\,m} \qquad \text{[K-1]}
+
+.. _spec-k-2:
 
 .. math::
 
@@ -626,6 +670,8 @@ stress, made dimensional by the grain size:
    \qquad \text{[K-2]}
 
 and it moves the bed by its divergence:
+
+.. _spec-k-3:
 
 .. math::
 
@@ -650,7 +696,9 @@ vector :math:`\mathbf{q}_b`, following [Par98]_.
      - 1.5
      - 0.0495
      - the default; bedload only
-   * - [EH67]_, as ``[K-5]``
+   * - .. _spec-k-5:
+
+       [EH67]_, as ``[K-5]``
      - :math:`0.05/f_c`
      - 2.5
      - 0
@@ -673,8 +721,8 @@ vector :math:`\mathbf{q}_b`, following [Par98]_.
    domain.set_bedload('engelund_hansen')
    domain.set_bedload('off')                # default
 
-Bedload ``[K-1]``-``[K-4]`` transports sediment along the bed rather than in
-suspension, and drives its own bed evolution term ``[G-5]``. It is **off by
+Bedload :spec:`K-1`-:spec:`K-4` transports sediment along the bed rather than in
+suspension, and drives its own bed evolution term :spec:`G-5`. It is **off by
 default**: it is a separate transport mode, not a refinement of suspension,
 and enabling it changes what the model represents.
 
@@ -696,7 +744,7 @@ antisymmetric and therefore conservative; see ``test_sediment_bedload.py``.
 What the bracketed labels mean
 ------------------------------
 
-Labels like ``[E-1]`` name a **term in the physics**, not a reference. They
+Labels like :spec:`E-1` name a **term in the physics**, not a reference. They
 appear throughout this page, in the source comments, and in the output of
 ``domain.sediment_summary()``, so that a given term can be pointed at
 unambiguously wherever it comes up. The list below is what each one names.
@@ -713,11 +761,11 @@ summaries, and renumbering would only break the correspondence.
 
    * - Label
      - Term
-   * - ``[S-1]``
+   * - :spec:`S-1`
      - settling velocity ``v_s``, Ferguson & Church (2004)
-   * - ``[S-2]``
+   * - :spec:`S-2`
      - Rouse number ``Z = v_s / (kappa u*)``
-   * - ``[S-4]``
+   * - :spec:`S-4`
      - the Rouse near-bed concentration ratio ``d*(Z, a/h)``
 
 **Erosion**
@@ -728,12 +776,12 @@ summaries, and renumbering would only break the correspondence.
 
    * - Label
      - Term
-   * - ``[E-1]``, ``[E-2]``
+   * - :spec:`E-1`, :spec:`E-2`
      - non-cohesive entrainment: Shields threshold with a Smith & McLean
        reference concentration
-   * - ``[E-3]``, ``[E-5]``
+   * - :spec:`E-3`, :spec:`E-5`
      - cohesive erosion, Hanson & Simon excess-stress form
-   * - ``[E-4]``
+   * - :spec:`E-4`
      - Partheniades cohesive erosion
 
 **Deposition**
@@ -744,9 +792,9 @@ summaries, and renumbering would only break the correspondence.
 
    * - Label
      - Term
-   * - ``[D-1]``
+   * - :spec:`D-1`
      - ``D = d* c v_s``
-   * - ``[D-2]``
+   * - :spec:`D-2`
      - threshold deposition, ``D = v_s c (1 - tau_b/tau_d)``
 
 **Bed shear and friction**
@@ -757,23 +805,33 @@ summaries, and renumbering would only break the correspondence.
 
    * - Label
      - Term
-   * - ``[T-1]``
+   * - :spec:`T-1`
      - quadratic drag, ``tau_b = rho f_c |v|^2`` -- the default closure
-   * - ``[T-2]``
+   * - :spec:`T-2`
      - shear velocity ``u* = |v| sqrt(f_c)``
-   * - ``[T-3]``
+   * - :spec:`T-3`
      - dimensionless stress ``tau* = f_c |v|^2 / (R g d)``
-   * - ``[T-4]``
+   * - :spec:`T-4`
      - excess stress ``tau_x = tau* - tau_c*``
-   * - ``[T-5]``
+   * - :spec:`T-5`
      - the depth-limiting velocity form ANUGA uses
-   * - ``[T-6]``
+   * - .. _spec-t-6:
+
+       ``[T-6]``
      - constant Manning ``n``, taken from the domain's friction quantity
-   * - ``[T-7]``
+   * - .. _spec-t-7:
+
+       ``[T-7]``
      - depth-slope closure, ``tau_b = rho g h S``
-   * - ``[T-8]``..``[T-10]``
+   * - .. _spec-t-8:
+       .. _spec-t-10:
+
+       ``[T-8]`` to ``[T-10]``
      - the ``'wilson'`` friction closure
-   * - ``[T-13]``..``[T-15]``
+   * - .. _spec-t-13:
+       .. _spec-t-15:
+
+       ``[T-13]`` to ``[T-15]``
      - the ``'larsen_lamb'`` friction closure
 
 **Bedload**
@@ -784,13 +842,15 @@ summaries, and renumbering would only break the correspondence.
 
    * - Label
      - Term
-   * - ``[K-1]``, ``[K-2]``
+   * - :spec:`K-1`, :spec:`K-2`
      - power law, ``q_b* = K tau_x^m``
-   * - ``[K-3]``
+   * - :spec:`K-3`
      - bed change from bedload, ``dz/dt = -(1/(1-lambda)) div q_b``
-   * - ``[K-4]``
+   * - .. _spec-k-4:
+
+       ``[K-4]``
      - the per-cell bedload transport vector ``q_b``
-   * - ``[K-5]``
+   * - :spec:`K-5`
      - Engelund & Hansen total load, no threshold
 
 **Coupling to the flow and the bed**
@@ -801,12 +861,12 @@ summaries, and renumbering would only break the correspondence.
 
    * - Label
      - Term
-   * - ``[G-3]``
+   * - :spec:`G-3`
      - the suspended source term, ``m_s <- m_s + dt (E_s - D_s)``, including
        any external source
-   * - ``[G-4]``
+   * - :spec:`G-4`
      - Exner bed evolution from the suspended exchange
-   * - ``[G-5]``
+   * - :spec:`G-5`
      - the bedload divergence contribution to the bed
 
 **Limiters**
@@ -817,18 +877,28 @@ summaries, and renumbering would only break the correspondence.
 
    * - Label
      - Term
-   * - ``[L-1]``
+   * - .. _spec-l-1:
+
+       ``[L-1]``
      - positivity
-   * - ``[L-2]``
+   * - .. _spec-l-2:
+
+       ``[L-2]``
      - the concentration ceiling ``c_max``
-   * - ``[L-3]``
+   * - .. _spec-l-3:
+
+       ``[L-3]``
      - a cap on the rate of bed change, ``|dz/dt| <= max_dz``. **Not
        implemented in ANUGA** -- listed so the gap in the numbering is not
        mistaken for an omission here. It is unrelated to the ``beta`` edge
        reconstruction limiter, which the tracers share.
-   * - ``[L-4]``
+   * - .. _spec-l-4:
+
+       ``[L-4]``
      - the packing fraction ``c_pack`` bounding near-bed concentration
-   * - ``[L-5]``
+   * - .. _spec-l-5:
+
+       ``[L-5]``
      - the non-erodible base
 
 .. _sediment_references:

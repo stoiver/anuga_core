@@ -7,7 +7,7 @@ Sediment transport
 
 This documents the user-facing interface: every parameter, its units, its
 default, and how to choose between the alternative methods. It assumes you
-know ANUGA, and it does not derive the physics. Labels like ``[E-1]`` and the
+know ANUGA, and it does not derive the physics. Labels like :spec:`E-1` and the
 section numbers in the tables refer to the internal sediment specification,
 which is not distributed with ANUGA; they are kept as stable identifiers for
 each term rather than as links you can follow.
@@ -116,43 +116,52 @@ The interface at a glance
 
 Choices are made by naming the **physics**, never by setting a flag:
 
-+---------------------------------------------+------------------------------+--------+
-| call                                        | chooses                      | spec   |
-+=============================================+==============================+========+
-| ``initialize_sediment_operator(...)``       | sediment transport on, and   | 2.2    |
-|                                             | the domain-wide parameters   |        |
-+---------------------------------------------+------------------------------+--------+
-| ``add_grain_size(name, diameter, ...)``     | a grain size to carry, and   | 2.2    |
-|                                             | its own properties           |        |
-+---------------------------------------------+------------------------------+--------+
-| ``set_bed_material(material, ...)``         | the erosion law              | 4.1.1  |
-+---------------------------------------------+------------------------------+--------+
-| ``set_deposition(law, near_bed, ...)``      | the deposition law and       | 4.4    |
-|                                             | near-bed ratio               |        |
-+---------------------------------------------+------------------------------+--------+
-| ``set_shear_closure(closure)``              | how ``tau_b`` is formed      | 3.2    |
-+---------------------------------------------+------------------------------+--------+
-| ``set_sediment_friction(mode, ...)``        | the friction factor feeding  | 3.3    |
-|                                             | ``tau_b``                    |        |
-+---------------------------------------------+------------------------------+--------+
-| ``set_bedload(formula, ...)``               | bedload transport, or off    | 5      |
-+---------------------------------------------+------------------------------+--------+
-| ``set_sediment_parameters(...)``            | the scalar physical          | 2.4, 6 |
-|                                             | properties                   |        |
-+---------------------------------------------+------------------------------+--------+
-| ``set_erodible_base(...)``                  | the depth below which        | 4.5    |
-|                                             | nothing erodes               |        |
-+---------------------------------------------+------------------------------+--------+
-| ``set_erodible_region(...)``                | where erosion may act at all | 4.5    |
-+---------------------------------------------+------------------------------+--------+
-| ``set_angle_of_repose(...)``                | relaxation of over-steep bed | 7      |
-|                                             | slopes                       |        |
-+---------------------------------------------+------------------------------+--------+
-| ``set_tracer_source(name, values)``         | an external source           | 2.6    |
-+---------------------------------------------+------------------------------+--------+
-| ``set_tracer_boundary(name, tag, value)``   | inflow concentration, per    | 2.5    |
-|                                             | boundary tag                 |        |
-+---------------------------------------------+------------------------------+--------+
+.. list-table::
+   :header-rows: 1
+   :widths: 54 36 10
+
+   * - call
+     - chooses
+     - spec
+   * - ``initialize_sediment_operator(...)``
+     - sediment transport on, and the domain-wide parameters
+     - 2.2
+   * - ``add_grain_size(name, diameter, ...)``
+     - a grain size to carry, and its own properties
+     - 2.2
+   * - ``set_bed_material(material, ...)``
+     - the erosion law
+     - 4.1.1
+   * - ``set_deposition(law, near_bed, ...)``
+     - the deposition law and near-bed ratio
+     - 4.4
+   * - ``set_shear_closure(closure)``
+     - how ``tau_b`` is formed
+     - 3.2
+   * - ``set_sediment_friction(mode, ...)``
+     - the friction factor feeding ``tau_b``
+     - 3.3
+   * - ``set_bedload(formula, ...)``
+     - bedload transport, or off
+     - 5
+   * - ``set_sediment_parameters(...)``
+     - the scalar physical properties
+     - 2.4, 6
+   * - ``set_erodible_base(...)``
+     - the depth below which nothing erodes
+     - 4.5
+   * - ``set_erodible_region(...)``
+     - where erosion may act at all
+     - 4.5
+   * - ``set_angle_of_repose(...)``
+     - relaxation of over-steep bed slopes
+     - 7
+   * - ``set_tracer_source(name, values)``
+     - an external source
+     - 2.6
+   * - ``set_tracer_boundary(name, tag, value)``
+     - inflow concentration, per boundary tag
+     - 2.5
 
 .. seealso::
 
@@ -163,7 +172,7 @@ Choices are made by naming the **physics**, never by setting a flag:
       alone until you need to say otherwise.
 
    :ref:`sediment_labels`
-      What the bracketed labels mean. ``[E-1]``, ``[T-1]`` and the rest name a
+      What the bracketed labels mean. :spec:`E-1`, :spec:`T-1` and the rest name a
       term in the physics; they appear in this page, in the source, and in the
       output of ``sediment_summary()``.
 
@@ -258,7 +267,7 @@ order -- see :ref:`operator_order` below.
    * - ``diameter``
      - m
      - required
-     - grain diameter :math:`d`; sets :math:`v_s` via ``[S-1]``
+     - grain diameter :math:`d`; sets :math:`v_s` via :spec:`S-1`
    * - ``rho_s``
      - kg/m3
      - 2650
@@ -267,7 +276,7 @@ order -- see :ref:`operator_order` below.
    * - ``tau_c_star``
      - --
      - 0.04
-     - critical Shields stress :math:`\tau_c^{*}`, ``[E-1]``
+     - critical Shields stress :math:`\tau_c^{*}`, :spec:`E-1`
    * - ``d_star``
      - --
      - 1.0
@@ -480,35 +489,34 @@ Scalar parameters
 
 All optional; only what you pass is changed. All are validated.
 
-+-------------------------+-------+----------+-------------------------+
-| parameter               | units | default  | meaning                 |
-+=========================+=======+==========+=========================+
-| ``porosity``            | --    | 0.30     | bed porosity            |
-|                         |       |          | ``lambda``, ``[G-4]``.  |
-|                         |       |          | Sediment volume leaving |
-|                         |       |          | suspension is           |
-|                         |       |          | ``(1-lambda) dz``; the  |
-|                         |       |          | rest is pore space      |
-|                         |       |          | filled from the water   |
-|                         |       |          | column. LM15 use 0.28.  |
-+-------------------------+-------+----------+-------------------------+
-| ``c_max``               | --    | 0.30     | ``[L-2]``, ceiling on   |
-|                         |       |          | depth-averaged          |
-|                         |       |          | concentration (FG21;    |
-|                         |       |          | anugaSed use 0.20).     |
-+-------------------------+-------+----------+-------------------------+
-| ``c_pack``              | --    | 0.65     | ``[L-4]``, maximum      |
-|                         |       |          | packing bounding        |
-|                         |       |          | *near-bed*              |
-|                         |       |          | ``c_b = d* c``. Only    |
-|                         |       |          | bites when ``d* != 1``. |
-+-------------------------+-------+----------+-------------------------+
-| ``bed_evolution``       | --    | ``True`` | whether the bed moves   |
-+-------------------------+-------+----------+-------------------------+
-| ``rho_w``               | kg/m3 | 1000     | fluid density used to   |
-|                         |       |          | form dimensional        |
-|                         |       |          | ``tau_b``               |
-+-------------------------+-------+----------+-------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 37 10 15 37
+
+   * - parameter
+     - units
+     - default
+     - meaning
+   * - ``porosity``
+     - --
+     - 0.30
+     - bed porosity ``lambda``, :spec:`G-4`. Sediment volume leaving suspension is ``(1-lambda) dz``; the rest is pore space filled from the water column. LM15 use 0.28.
+   * - ``c_max``
+     - --
+     - 0.30
+     - :spec:`L-2`, ceiling on depth-averaged concentration (FG21; anugaSed use 0.20).
+   * - ``c_pack``
+     - --
+     - 0.65
+     - :spec:`L-4`, maximum packing bounding *near-bed* ``c_b = d* c``. Only bites when ``d* != 1``.
+   * - ``bed_evolution``
+     - --
+     - ``True``
+     - whether the bed moves
+   * - ``rho_w``
+     - kg/m3
+     - 1000
+     - fluid density used to form dimensional ``tau_b``
 
 .. _91-bed_evolution-is-the-coupling-stage:
 
@@ -522,7 +530,7 @@ concentration evolves, but elevation never changes. Choose it when
 - comparing against RDycore v1.0, which is configured this way;
 - isolating a transport question from a morphology question.
 
-``True`` (the default) evolves the bed through ``[G-4]`` and ``[G-5]``. Choose it
+``True`` (the default) evolves the bed through :spec:`G-4` and :spec:`G-5`. Choose it
 for any real morphological problem. Both bed terms are applied in a single
 fractional step.
 
@@ -540,7 +548,7 @@ The non-erodible base
 By default the bed is **bottomless**: erosion lowers it for as long as the flow
 has the strength to. That is right for a deep alluvial channel and wrong
 wherever the erodible layer is finite -- a reach floored by an outcrop, a lined
-culvert, a dam apron, a soil layer of known depth over rock. ``[L-5]`` gives it a
+culvert, a dam apron, a soil layer of known depth over rock. :spec:`L-5` gives it a
 floor.
 
 The base is a **per-centroid field**, because bedrock is a surface. ``depth=``
@@ -576,16 +584,19 @@ Deposition is never scaled -- it is what replenishes the bed.
 The two transport routes give **different strengths of guarantee**, and it is
 worth knowing which you are relying on:
 
-+----------------------+----------------------+----------------------+
-| route                | floor is             | why                  |
-+======================+======================+======================+
-| suspended exchange   | **exact**            | the limit is on the  |
-| ``[G-4]``            |                      | exchange term itself |
-+----------------------+----------------------+----------------------+
-| bedload ``[G-5]``    | within one step's    | bedload is a         |
-|                      | flux                 | divergence; see      |
-|                      |                      | below                |
-+----------------------+----------------------+----------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 33 33 33
+
+   * - route
+     - floor is
+     - why
+   * - suspended exchange :spec:`G-4`
+     - **exact**
+     - the limit is on the exchange term itself
+   * - bedload :spec:`G-5`
+     - within one step's flux
+     - bedload is a divergence; see below
 
 Bedload only redistributes, and stays exactly conservative with a base present,
 because the limit is applied to the transport vector and to whole edges -- both
@@ -617,7 +628,7 @@ class, so a polygon that selects a set of cells there selects the same set
 here. A region that selects no cells is rejected rather than silently doing
 nothing -- that is almost always a polygon in the wrong coordinates.
 
-**Passing a ``Region`` is the general form.** ``Region`` understands more than the
+**Passing a Region is the general form.** ``Region`` understands more than the
 keywords above -- ``line=``, ``poly=``, ``expand_polygon=`` -- so build one and hand
 it over when you need those:
 
@@ -640,7 +651,7 @@ and look like it worked.
 
 **Locked means unscourable, not inert.** A locked cell is held at the
 elevation it has when you call this, by giving it zero erodible thickness --
-the restriction is ``[L-5]`` with the layer set to nothing, not a separate
+the restriction is :spec:`L-5` with the layer set to nothing, not a separate
 mechanism. Sediment may still settle onto it, which is what a concrete apron
 or a rock bar does in the field, and that new material is erodible again
 because it now sits above the base. Under genuinely erosive flow such a cell
@@ -692,7 +703,7 @@ its neighbours, never discarded (measured drift 2.3e-13 m3 on 4.0e2 m3 of bed).
 This is the sharpest difference from ANUGA's ``sanddune_erosion_operator``, which
 lowers an over-steep cell and lets the material vanish.
 
-It respects ``[L-5]``: a cell cannot slump away material it is not allowed to
+It respects :spec:`L-5`: a cell cannot slump away material it is not allowed to
 lose, so a locked cell or one already at its base stays put and its neighbours
 relax around it.
 
@@ -760,8 +771,9 @@ Running on the GPU
    domain.set_multiprocessor_mode(2)
 
 Mode 1 is the legacy CPU/OpenMP path; mode 2 is the unified path that runs on
-the device. **Both paths share ``core_kernels.c``, so the physics is the same
-code**, and ``test_sediment_gpu.py`` holds them to agreement.
+the device. **Both paths share the same kernel file, so the physics is the
+same code** -- ``core_kernels.c`` -- and ``test_sediment_gpu.py`` holds them
+to agreement.
 
 Nothing about the sediment configuration changes between modes: set it up the
 same way and switch the mode.
