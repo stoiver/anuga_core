@@ -106,10 +106,11 @@ Region
 ------
 
 A ``Region`` identifies a spatial subset of the mesh.  It is typically
-created by passing a polygon to an operator or by calling
-``domain.get_region()``, and it provides the list of triangle indices
-that fall inside the polygon.  Operators use regions to apply forcing
-(rainfall, extraction) only over a defined area.
+created by passing a polygon to an operator, or directly with
+``anuga.Region(domain, polygon=...)`` -- a region may also be given as a
+centre and radius, a line, or explicit triangle indices.  It provides the
+list of triangle indices that fall inside it.  Operators use regions to
+apply forcing (rainfall, extraction) only over a defined area.
 
 .. code-block:: python
 
