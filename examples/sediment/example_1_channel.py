@@ -5,7 +5,7 @@ Same geometry, slope, boundaries and duration; our API and, deliberately, the
 non-cohesive erosion route -- see README.md.
 
 Demonstrates
-  * add_sediment_class()      registers the class and its operator
+  * add_grain_size()          registers the grain size and its operator
   * set_tracer_boundary()     prescribed inflow concentration, per boundary tag
   * entrainment [E-1], deposition [D-1], Exner bed change [G-4]
 """

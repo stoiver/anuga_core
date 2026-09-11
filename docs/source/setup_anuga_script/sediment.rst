@@ -18,7 +18,7 @@ this page builds on.
 
 Verification evidence for these terms is in
 ``anuga/shallow_water/tests/test_sediment_*.py``; runnable
-examples are in ``sandpit/sediment_examples/``.
+examples are in ``examples/sediment/``.
 
 --------------
 
@@ -292,7 +292,8 @@ order -- see :ref:`operator_order` below.
    * - ``reference_height``
      - m
      - ``None``
-     - Rouse reference height :math:`a`; see the appendix
+     - Rouse reference height :math:`a` in :spec:`S-4`; see
+       :ref:`near_bed_d_star`
 
 Multiple grain sizes are independent: each has its own concentration, settling
 velocity and critical stress, and each exchanges with the same bed. Call it
@@ -817,7 +818,7 @@ If you do not know where to start:
   each class a ``reference_height``.
 - **Shallow flow over gravel.** ``set_sediment_friction('wilson', bed='gravel', grain_size=...)``.
 - **Reproducing anugaSed.** ``set_bed_material('cohesive')`` and
-  ``set_shear_closure('depth_slope')``; see ``sandpit/sediment_examples/``.
+  ``set_shear_closure('depth_slope')``; see ``examples/sediment/``.
 - **Comparing against an analytic solution.**
   ``set_sediment_parameters(bed_evolution=False)`` and leave ``d*`` at 1.0.
 - **A finite erodible layer over rock.** ``set_erodible_base(depth=...)``, and

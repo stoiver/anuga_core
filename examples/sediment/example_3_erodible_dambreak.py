@@ -1,12 +1,12 @@
-"""Example 3 -- multi-class dam break over an erodible bed, on the GPU.
+"""Example 3 -- multi-grain-size dam break over an erodible bed, on the GPU.
 
 The other two examples are faithful ports of anugaSed's cases, so they only
-exercise what anugaSed does: one sediment class, suspension only, mode 1.
+exercise what anugaSed does: one grain size, suspension only, mode 1.
 This one covers what the module adds -- several grain sizes at once, bedload
 alongside suspension, a moving bed, and the unified (GPU) compute path.
 
 Demonstrates
-  * two sediment classes with different grain sizes, settling and mobility
+  * two grain sizes with different diameters, settling and mobility
   * bedload [K-1]..[K-4] and its bed evolution [G-5]
   * suspended exchange [E-1]/[D-1] and Exner bed evolution [G-4]
   * the Rouse near-bed ratio [S-4]
@@ -91,7 +91,7 @@ print()
 print('  That closes to machine precision, and it should: the boundaries are')
 print('  reflective, so nothing leaves. Every cubic metre now in suspension')
 print('  came out of the bed, and (1-lambda) dz accounts for it exactly --')
-print('  across BOTH classes, with erosion, deposition and bedload all active')
+print('  across BOTH grain sizes, with erosion, deposition and bedload active')
 print('  and the bed moving under them. It is the strongest statement this')
 print('  example makes: the coupling conserves sediment.')
 print()

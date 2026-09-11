@@ -502,7 +502,7 @@ routes only; the non-cohesive route takes its threshold per class from
 The choice is not a small correction. On the same channel over 30 s, the
 non-cohesive route scours 3-6 cm while the cohesive route accretes about a
 millimetre -- the sign of the bed change reverses. See
-``sandpit/sediment_examples/README.md``.
+``examples/sediment/README.md``.
 
 --------------
 
@@ -571,6 +571,8 @@ with :math:`C_1 = 18`, :math:`C_2 = 0.4` for smooth spheres, and
      - when you need deposition suppressed under strong flow
 
 ``tau_d`` (Pa) is the threshold for ``'threshold'`` and is ignored otherwise.
+
+.. _near_bed_d_star:
 
 .. _62-near_bed----the-d-ratio:
 
