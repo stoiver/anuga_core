@@ -769,23 +769,23 @@ Running on the GPU
 
 .. code-block:: python
 
-   domain.set_multiprocessor_mode(2)
+   domain.set_compute_mode('unified')
 
-Mode 1 is the legacy CPU/OpenMP path; mode 2 is the unified path that runs on
-the device. **Both paths share the same kernel file, so the physics is the
-same code** -- ``core_kernels.c`` -- and ``test_sediment_gpu.py`` holds them
-to agreement.
+``'legacy'`` is the CPU/OpenMP path; ``'unified'`` is the shared path that can
+run on the device. **Both paths share the same kernel file, so the physics is
+the same code** -- ``core_kernels.c`` -- and ``test_sediment_gpu.py`` holds
+them to agreement.
 
 Nothing about the sediment configuration changes between modes: set it up the
 same way and switch the mode.
 
-Mode 2 selects the *unified* code path; whether that path actually offloads to
-a device is a property of the **build**, not of this call. A build without
-offload compiles the same kernels under ``CPU_ONLY_MODE`` and runs them on the
-host. ``set_multiprocessor_mode(2)`` therefore does not fail on a machine with
-no GPU, but it also does not report one: ``domain.multiprocessor_mode`` will
-read 2 either way. To find out what you are actually running on, ask the
-build:
+``'unified'`` selects the *unified* code path; whether that path actually
+offloads to a device is a property of the **build**, not of this call. A build
+without offload compiles the same kernels under ``CPU_ONLY_MODE`` and runs them
+on the host. ``set_compute_mode('unified')`` therefore does not fail on a
+machine with no GPU, but it also does not report one:
+``domain.get_compute_mode()`` reads ``'unified'`` either way. To find out what
+you are actually running on, ask the build:
 
 .. code-block:: python
 
@@ -796,9 +796,9 @@ To confirm kernels are reaching the device on a run, set
 ``NVCOMPILER_ACC_NOTIFY=1`` in the environment. Polling ``nvidia-smi`` is
 unreliable for this -- the sampling interval misses short kernel bursts.
 
-Call ``set_multiprocessor_mode`` **after** the sediment setup. Each setter
-invalidates the device mapping, so configuring sediment after selecting mode 2
-simply forces the mapping to be rebuilt.
+Call ``set_compute_mode`` **after** the sediment setup. Each setter
+invalidates the device mapping, so configuring sediment after selecting
+``'unified'`` simply forces the mapping to be rebuilt.
 
 --------------
 

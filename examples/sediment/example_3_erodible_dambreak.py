@@ -48,16 +48,17 @@ domain.set_bedload('wong_parker_eq24')             # [K-1] and [G-5]
 domain.add_grain_size(name='fine_sand', diameter=1.5e-4, initial_concentration=0.0)
 domain.add_grain_size(name='coarse_sand', diameter=8.0e-4, initial_concentration=0.0)
 
-# Mode 2 is the unified path. Whether it offloads to a device is a property
-# of the build, not of this call: a build without offload runs the same
-# kernels on the host under CPU_ONLY_MODE.
-domain.set_multiprocessor_mode(2)
+# 'unified' is the shared CPU/GPU path. Whether it offloads to a device is a
+# property of the build, not of this call: a build without offload runs the
+# same kernels on the host under CPU_ONLY_MODE.
+domain.set_compute_mode('unified')
 offloads = anuga.gpu_offload_enabled()
 
 print(domain.sediment_summary())
 print()
-print('compute mode: 2 (unified), offload %s'
-      % ('enabled -- running on the device' if offloads
+print('compute mode: %s, offload %s'
+      % (domain.get_compute_mode(),
+         'enabled -- running on the device' if offloads
          else 'not built in -- unified kernels on the host'))
 print()
 
