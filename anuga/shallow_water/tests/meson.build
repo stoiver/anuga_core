@@ -25,6 +25,7 @@ python_sources = [
 'test_tracers_gpu.py',
 'test_tracers_gpu_boundary.py',
 'test_tracers_gpu_boundary_sync.py',
+'test_tracers_gpu_boundary_refresh.py',
 'test_sediment_paths.py',
 'test_sediment_rdycore_erosion.py',
 'test_sediment_rdycore_benchmarks.py',

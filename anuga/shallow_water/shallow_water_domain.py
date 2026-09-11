@@ -5593,7 +5593,17 @@ class Domain(Generic_Domain):
                 stage_val = float(value[0])
             set_flather_value(gpu_dom, stage_val)
 
+        # Time-varying tracer inflow concentrations. The C step evaluates the
+        # hydrodynamic boundaries on the device and never calls
+        # update_boundary(), so without this a callable given to
+        # set_tracer_boundary() is only re-evaluated at yield points and the
+        # inflow carries a concentration up to a whole yieldstep stale.
+        # A no-op without callables (the common case).
+        if self.number_of_tracers > 0 and self._tracer_boundary_functions:
+            self.update_tracer_boundary_values()
+
         max_timestep = self._get_max_timestep_to_output_times(yieldstep, finaltime)
+
 
         if not hasattr(self, '_ader2_prev_dt'):
             self._ader2_prev_dt = 0.0
@@ -6095,7 +6105,17 @@ class Domain(Generic_Domain):
                 stage_val = float(value[0])
             set_flather_value(gpu_dom, stage_val)
 
+        # Time-varying tracer inflow concentrations. The C step evaluates the
+        # hydrodynamic boundaries on the device and never calls
+        # update_boundary(), so without this a callable given to
+        # set_tracer_boundary() is only re-evaluated at yield points and the
+        # inflow carries a concentration up to a whole yieldstep stale.
+        # A no-op without callables (the common case).
+        if self.number_of_tracers > 0 and self._tracer_boundary_functions:
+            self.update_tracer_boundary_values()
+
         max_timestep = self._get_max_timestep_to_output_times(yieldstep, finaltime)
+
 
         # Execute full Euler step in C (includes MPI timestep reduction)
         self.timestep = evolve_one_euler_step_gpu(gpu_dom, max_timestep, 1)
@@ -6226,7 +6246,17 @@ class Domain(Generic_Domain):
                 stage_val = float(value[0])
             set_flather_value(gpu_dom, stage_val)
 
+        # Time-varying tracer inflow concentrations. The C step evaluates the
+        # hydrodynamic boundaries on the device and never calls
+        # update_boundary(), so without this a callable given to
+        # set_tracer_boundary() is only re-evaluated at yield points and the
+        # inflow carries a concentration up to a whole yieldstep stale.
+        # A no-op without callables (the common case).
+        if self.number_of_tracers > 0 and self._tracer_boundary_functions:
+            self.update_tracer_boundary_values()
+
         max_timestep = self._get_max_timestep_to_output_times(yieldstep, finaltime)
+
 
         # Execute full RK2 step in C (includes MPI timestep reduction)
         # apply_forcing=1 enables Manning friction on GPU
@@ -6557,7 +6587,17 @@ class Domain(Generic_Domain):
                 stage_val = float(value[0])
             set_flather_value(gpu_dom, stage_val)
 
+        # Time-varying tracer inflow concentrations. The C step evaluates the
+        # hydrodynamic boundaries on the device and never calls
+        # update_boundary(), so without this a callable given to
+        # set_tracer_boundary() is only re-evaluated at yield points and the
+        # inflow carries a concentration up to a whole yieldstep stale.
+        # A no-op without callables (the common case).
+        if self.number_of_tracers > 0 and self._tracer_boundary_functions:
+            self.update_tracer_boundary_values()
+
         max_timestep = self._get_max_timestep_to_output_times(yieldstep, finaltime)
+
 
         # Execute full RK3 step in C (includes MPI timestep reduction)
         # apply_forcing=1 enables Manning friction on GPU
