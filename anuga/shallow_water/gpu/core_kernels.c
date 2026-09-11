@@ -2140,19 +2140,29 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
 //                 benchmark caught that; every correctness test passed.
 //   GPU build  -- the loops below are 'omp target' regions and D is NOT mapped
 //                 to the device, so a D->member load inside the region reads a
-//                 host address on the device. The tracer work then silently
-//                 does nothing: no crash, explicit_update stays zero on the
-//                 device, and m never moves. They must be loaded at function
-//                 scope so the pointer VALUES are captured as firstprivate
-//                 scalars and address-translated via the present table.
+//                 host address on the device. What happens next depends on
+//                 what is loaded. A POINTER member yields a garbage pointer
+//                 value, and the tracer work silently does nothing: no crash,
+//                 explicit_update stays zero on the device, and m never moves.
+//                 A SCALAR member is consumed as data, and the read itself
+//                 faults: boundary_length below, loaded in-loop, took the whole
+//                 process down with CUDA_ERROR_ILLEGAL_ADDRESS as soon as
+//                 n_tracers > 0 (the load ran for every edge, before any
+//                 inflow test). Everything read from D must be loaded at
+//                 function scope so the VALUES are captured as firstprivate
+//                 scalars and, for pointers, address-translated via the
+//                 present table.
 //
 // So: hoisted declarations under #ifndef CPU_ONLY_MODE, in-guard declarations
-// under #ifdef CPU_ONLY_MODE. The loop bodies are identical either way.
+// under #ifdef CPU_ONLY_MODE -- pointers AND the boundary_length scalar alike,
+// so the benchmarked CPU hot loop stays byte-identical. The loop bodies are
+// identical either way.
 #ifndef CPU_ONLY_MODE
     double * restrict t_eu = D->tracer_explicit_update;
     double * restrict t_ev = D->tracer_edge_values;
     double * restrict t_bv = D->tracer_boundary_values;
     double * restrict t_bf = D->tracer_boundary_flux;
+    const anuga_int t_bl = D->boundary_length;
 #endif
 
     // Reduction variables
@@ -2341,8 +2351,8 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
                 double * restrict t_bv = D->tracer_boundary_values;
                 double * restrict t_eu = D->tracer_explicit_update;
                 double * restrict t_bf = D->tracer_boundary_flux;
-#endif
                 const anuga_int t_bl = D->boundary_length;
+#endif
                 const double wflux = edgeflux[0];
                 const int    inflow = (wflux > 0.0);
                 /* Conservation accounting: record what crosses a DOMAIN boundary edge,

@@ -2293,6 +2293,22 @@ A grain size is a tracer -- so it is transported by the machinery of
         else:
             self._tracer_boundary_functions.pop((s, tag), None)
             self._apply_tracer_boundary(s, idx, value, tag)
+        self._push_tracer_boundary_to_device()
+
+    def _push_tracer_boundary_to_device(self):
+        """Mirror the host tracer boundary array to the device, if there is one.
+
+        The device copy is made once when the arrays are mapped, and the
+        per-step boundary push carries only the hydrodynamic values, so every
+        host write to tracer_boundary_values has to be followed by this or the
+        flux kernel keeps reading the mapped copy. Same reasoning as the
+        external source in set_tracer_source. A no-op off the GPU path.
+        """
+        if (self.multiprocessor_mode == MULTIPROCESSOR_GPU
+                and self.gpu_interface is not None):
+            from anuga.shallow_water.sw_domain_gpu_ext import (
+                sync_tracer_boundary_to_device)
+            sync_tracer_boundary_to_device(self.gpu_interface.gpu_dom)
 
     def _apply_tracer_boundary(self, s, idx, value, tag):
         """Write one tracer's boundary values for the edges of one tag."""
@@ -2320,6 +2336,7 @@ A grain size is a tracer -- so it is transported by the machinery of
         for (s, tag), f in self._tracer_boundary_functions.items():
             idx = num.asarray(self.tag_boundary_cells[tag], dtype=num.intp)
             self._apply_tracer_boundary(s, idx, f(t), tag)
+        self._push_tracer_boundary_to_device()
 
     def get_tracer_boundary(self, name, tag):
         """Return the boundary concentrations of `name` on `tag`."""
@@ -5772,7 +5789,17 @@ A grain size is a tracer -- so it is transported by the machinery of
                 stage_val = float(value[0])
             set_flather_value(gpu_dom, stage_val)
 
+        # Time-varying tracer inflow concentrations. The C step evaluates the
+        # hydrodynamic boundaries on the device and never calls
+        # update_boundary(), so without this a callable given to
+        # set_tracer_boundary() is only re-evaluated at yield points and the
+        # inflow carries a concentration up to a whole yieldstep stale.
+        # A no-op without callables (the common case).
+        if self.number_of_tracers > 0 and self._tracer_boundary_functions:
+            self.update_tracer_boundary_values()
+
         max_timestep = self._get_max_timestep_to_output_times(yieldstep, finaltime)
+
 
         if not hasattr(self, '_ader2_prev_dt'):
             self._ader2_prev_dt = 0.0
@@ -6271,7 +6298,17 @@ A grain size is a tracer -- so it is transported by the machinery of
                 stage_val = float(value[0])
             set_flather_value(gpu_dom, stage_val)
 
+        # Time-varying tracer inflow concentrations. The C step evaluates the
+        # hydrodynamic boundaries on the device and never calls
+        # update_boundary(), so without this a callable given to
+        # set_tracer_boundary() is only re-evaluated at yield points and the
+        # inflow carries a concentration up to a whole yieldstep stale.
+        # A no-op without callables (the common case).
+        if self.number_of_tracers > 0 and self._tracer_boundary_functions:
+            self.update_tracer_boundary_values()
+
         max_timestep = self._get_max_timestep_to_output_times(yieldstep, finaltime)
+
 
         # Execute full Euler step in C (includes MPI timestep reduction)
         self.timestep = evolve_one_euler_step_gpu(gpu_dom, max_timestep, 1)
@@ -6401,7 +6438,17 @@ A grain size is a tracer -- so it is transported by the machinery of
                 stage_val = float(value[0])
             set_flather_value(gpu_dom, stage_val)
 
+        # Time-varying tracer inflow concentrations. The C step evaluates the
+        # hydrodynamic boundaries on the device and never calls
+        # update_boundary(), so without this a callable given to
+        # set_tracer_boundary() is only re-evaluated at yield points and the
+        # inflow carries a concentration up to a whole yieldstep stale.
+        # A no-op without callables (the common case).
+        if self.number_of_tracers > 0 and self._tracer_boundary_functions:
+            self.update_tracer_boundary_values()
+
         max_timestep = self._get_max_timestep_to_output_times(yieldstep, finaltime)
+
 
         # Execute full RK2 step in C (includes MPI timestep reduction)
         # apply_forcing=1 enables Manning friction on GPU
@@ -6730,7 +6777,17 @@ A grain size is a tracer -- so it is transported by the machinery of
                 stage_val = float(value[0])
             set_flather_value(gpu_dom, stage_val)
 
+        # Time-varying tracer inflow concentrations. The C step evaluates the
+        # hydrodynamic boundaries on the device and never calls
+        # update_boundary(), so without this a callable given to
+        # set_tracer_boundary() is only re-evaluated at yield points and the
+        # inflow carries a concentration up to a whole yieldstep stale.
+        # A no-op without callables (the common case).
+        if self.number_of_tracers > 0 and self._tracer_boundary_functions:
+            self.update_tracer_boundary_values()
+
         max_timestep = self._get_max_timestep_to_output_times(yieldstep, finaltime)
+
 
         # Execute full RK3 step in C (includes MPI timestep reduction)
         # apply_forcing=1 enables Manning friction on GPU
