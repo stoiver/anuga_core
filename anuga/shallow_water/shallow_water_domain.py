@@ -2094,6 +2094,22 @@ class Domain(Generic_Domain):
         else:
             self._tracer_boundary_functions.pop((s, tag), None)
             self._apply_tracer_boundary(s, idx, value, tag)
+        self._push_tracer_boundary_to_device()
+
+    def _push_tracer_boundary_to_device(self):
+        """Mirror the host tracer boundary array to the device, if there is one.
+
+        The device copy is made once when the arrays are mapped, and the
+        per-step boundary push carries only the hydrodynamic values, so every
+        host write to tracer_boundary_values has to be followed by this or the
+        flux kernel keeps reading the mapped copy. Same reasoning as the
+        external source in set_tracer_source. A no-op off the GPU path.
+        """
+        if (self.multiprocessor_mode == MULTIPROCESSOR_GPU
+                and self.gpu_interface is not None):
+            from anuga.shallow_water.sw_domain_gpu_ext import (
+                sync_tracer_boundary_to_device)
+            sync_tracer_boundary_to_device(self.gpu_interface.gpu_dom)
 
     def _apply_tracer_boundary(self, s, idx, value, tag):
         """Write one tracer's boundary values for the edges of one tag."""
@@ -2121,6 +2137,7 @@ class Domain(Generic_Domain):
         for (s, tag), f in self._tracer_boundary_functions.items():
             idx = num.asarray(self.tag_boundary_cells[tag], dtype=num.intp)
             self._apply_tracer_boundary(s, idx, f(t), tag)
+        self._push_tracer_boundary_to_device()
 
     def get_tracer_boundary(self, name, tag):
         """Return the boundary concentrations of `name` on `tag`."""

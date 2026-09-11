@@ -240,6 +240,7 @@ cdef extern from "gpu_domain.h" nogil:
     void gpu_sync_boundary_values(gpu_domain *GD)
     void gpu_sync_riverwall_to_device(gpu_domain *GD)
     void gpu_sync_tracer_source_to_device(gpu_domain *GD)
+    void gpu_sync_tracer_boundary_to_device(gpu_domain *GD)
     void gpu_sync_edge_values_from_device(gpu_domain *GD)
     int gpu_boundary_edge_sync_init(gpu_domain *GD, int num_boundary_cells, int *boundary_cell_ids)
     void gpu_boundary_edge_sync_finalize(gpu_domain *GD)
@@ -1444,6 +1445,16 @@ def sync_tracer_source_to_device(GPUDomain gpu_dom):
     array, not the whole state. #288
     """
     gpu_sync_tracer_source_to_device(&gpu_dom.GD)
+
+
+def sync_tracer_boundary_to_device(GPUDomain gpu_dom):
+    """Push the tracer boundary concentrations to the device.
+
+    set_tracer_boundary writes the host array, and a callable boundary is
+    re-evaluated every step; the per-step boundary push carries only the
+    hydrodynamic values, so this one has its own. One small array.
+    """
+    gpu_sync_tracer_boundary_to_device(&gpu_dom.GD)
 
 
 def sync_edge_values_from_device(GPUDomain gpu_dom):
