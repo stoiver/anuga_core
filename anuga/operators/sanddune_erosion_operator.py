@@ -234,8 +234,11 @@ class Sanddune_erosion_operator(Operator, Region)  :
             # no scour though if Tau_bed < Tau_crit ie if de is <= 0
             de = num.where(de > 0.0, de, 0.0)                                    # de=de whenever de>0 vector
 
-            # Also ensure we don't erode below the base surface level
-            self.elev_c[ind] = num.maximum(elev_c_ind - de, base_ind )
+            # Also ensure we don't erode below the base surface level.
+            # The outer minimum keeps this a LIMIT on erosion: without it a bed
+            # that already sits below base_ind is lifted up to it.
+            self.elev_c[ind] = num.minimum(
+                elev_c_ind, num.maximum(elev_c_ind - de, base_ind))
 
             #-------------------------------------------------------------------------------------------
             # Reduce triangles elevations in any area where erosion has created unstable face slopes, so

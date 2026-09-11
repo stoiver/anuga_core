@@ -146,14 +146,18 @@ class Erosion_operator(Operator, Region):
 
             de = m*dt
             height = self.stage_c[ind] - self.elev_c[ind]
-            self.elev_c[ind] = num.maximum(self.elev_c[ind] - de, self.base)
+            self.elev_c[ind] = num.minimum(
+                self.elev_c[ind],
+                num.maximum(self.elev_c[ind] - de, self.base))
             self.stage_c[ind] = self.elev_c[ind] + height
         else:
             m = num.vstack((m,m,m)).T  # Stack up m to apply to vertices
             m = num.where(m>self.threshold, m, 0.0)
 
             de = m*dt
-            self.elev_v[ind] = num.maximum(self.elev_v[ind] - de, self.base)
+            self.elev_v[ind] = num.minimum(
+                self.elev_v[ind],
+                num.maximum(self.elev_v[ind] - de, self.base))
 
         self.max_change = num.max(de)
 
@@ -649,7 +653,9 @@ class Bed_shear_erosion_operator(Erosion_operator):
             de = num.where(limiting > self.threshold, de, 0.0)
 
             # Ensure we don't erode below self.base level
-            self.elev_c[ind] = num.maximum(self.elev_c[ind] - de, self.base)
+            self.elev_c[ind] = num.minimum(
+                self.elev_c[ind],
+                num.maximum(self.elev_c[ind] - de, self.base))
 
             self.stage_c[ind] = self.elev_c[ind] + height
 
@@ -667,7 +673,9 @@ class Bed_shear_erosion_operator(Erosion_operator):
             de = num.where(limiting > self.threshold, de, 0.0)
 
             # Ensure we don't erode below self.base level
-            self.elev_v[ind] = num.maximum(self.elev_v[ind] - de, self.base)
+            self.elev_v[ind] = num.minimum(
+                self.elev_v[ind],
+                num.maximum(self.elev_v[ind] - de, self.base))
 
 
         return updated
