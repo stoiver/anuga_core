@@ -124,37 +124,38 @@ class Erosion_operator(Operator, Region):
 
         updated = True
 
+        #--------------------------------------
+        # `indices is None` means the whole domain -- see __call__'s
+        # docstring. This used to be a separate branch that added 0.0 to the
+        # elevation, so whole-domain erosion silently did nothing.
+        #--------------------------------------
         if self.indices is None:
-
-            #--------------------------------------
-            # Update all three vertices for each cell
-            #--------------------------------------
-            self.elev_c[:] = self.elev_c + 0.0
-
+            ind = num.arange(self.domain.number_of_elements)
         else:
-
-            #--------------------------------------
-            # Update each cell
-            # associated with self.indices
-            #--------------------------------------
             ind = self.indices
-            m = num.sqrt(self.xmom_c[ind]**2 + self.ymom_c[ind]**2)
 
-            if self.domain.get_using_discontinuous_elevation():
-                m = num.where(m>self.threshold, m, 0.0)
+        m = num.sqrt(self.xmom_c[ind]**2 + self.ymom_c[ind]**2)
 
-                de = m*dt
-                height = self.stage_c[ind] - self.elev_c[ind]
-                self.elev_c[ind] = num.amax(num.maximum(self.elev_v[ind] - de, self.base), axis=1)
-                self.stage_c[ind] = self.elev_c[ind] + height
-            else:
-                m = num.vstack((m,m,m)).T  # Stack up m to apply to vertices
-                m = num.where(m>self.threshold, m, 0.0)
+        if self.domain.get_using_discontinuous_elevation():
+            #--------------------------------------
+            # Elevation lives at the centroid, so erode the centroid value.
+            # This used to subtract the per-cell `de`, shape (n,), from the
+            # (n, 3) vertex array, which cannot broadcast.
+            #--------------------------------------
+            m = num.where(m>self.threshold, m, 0.0)
 
-                de = m*dt
-                self.elev_v[ind] = num.amax(num.maximum(self.elev_v[ind] - de, self.base), axis=1)
+            de = m*dt
+            height = self.stage_c[ind] - self.elev_c[ind]
+            self.elev_c[ind] = num.maximum(self.elev_c[ind] - de, self.base)
+            self.stage_c[ind] = self.elev_c[ind] + height
+        else:
+            m = num.vstack((m,m,m)).T  # Stack up m to apply to vertices
+            m = num.where(m>self.threshold, m, 0.0)
 
-            self.max_change = num.max(de)
+            de = m*dt
+            self.elev_v[ind] = num.maximum(self.elev_v[ind] - de, self.base)
+
+        self.max_change = num.max(de)
 
         return updated
 
@@ -600,78 +601,73 @@ class Bed_shear_erosion_operator(Erosion_operator):
 
         updated = True
 
+        #--------------------------------------
+        # `indices is None` means the whole domain -- see __call__'s
+        # docstring. This used to be a separate branch that added 0.0 to the
+        # elevation, so whole-domain erosion silently did nothing.
+        #--------------------------------------
         if self.indices is None:
+            ind = num.arange(self.domain.number_of_elements)
+        else:
+            ind = self.indices
+        shear_factor = self.shear_factor
 
-            #--------------------------------------
-            # Update all three vertices for each cell
-            #--------------------------------------
-            self.elev_v[:] = self.elev_v + 0.0
+        # These arrays, m,d and v will be shape (len(ids),1)
+        m = num.sqrt(self.xmom_c[ind]**2 + self.ymom_c[ind]**2)  # abs Momentum
+        d= (self.stage_c[ind]-self.elev_c[ind]) # Depth
+
+        v = m / (d + 1.0e-10)  # Velocity = Momentum/Depth
+
+        #  ---- NOTE SCOUR or EROSION usually is determined by
+        #  Shear Stress = density*gravity*depth*bed_slope
+
+        bedslope = num.sqrt(self.elev_gx[ind]**2 + self.elev_gy[ind]**2)
+        EN_slope = num.sqrt(self.WLev_gx[ind]**2 + self.WLev_gy[ind]**2)
+
+        # Implement  Bed Shear term based on BED SLOPE
+        es=EN_slope
+        bedshearBs=1000*9.81*d*bedslope  # ro*g*h*bedslope , { Bed Slope  or  Energy Slope ??} in N/m**2
+        bsbs = bedshearBs
+
+        # Implement Bed Shear term based on ENERGY SLOPE
+        bedshearEs=1000*9.81*d*EN_slope  # ro*g*h*EN_slope , { Energy Slope ??}
+        bses = bedshearEs
+        froude = v / num.sqrt(9.81*(d+1.0e-10))
+        froude = m / 9.81**0.5 / (d+1.0e-10)**1.5  # Check that these are the same ??
+        factor = 9.8*bedslope
+
+        # elevation change increment
+        de = (bses / shear_factor)*dt  # Works OK...  Energy SLope
+        #de = bsbs/100000.0*dt  # Works OK...  Bed Slope
+
+
+        if self.domain.get_using_discontinuous_elevation():
+            height = self.stage_c[ind] - self.elev_c[ind]
+
+            limiting = v
+            # de will have a value of 0.0 (and hence no effect) if limiting <= threshold
+            de = num.where(limiting > self.threshold, de, 0.0)
+
+            # Ensure we don't erode below self.base level
+            self.elev_c[ind] = num.maximum(self.elev_c[ind] - de, self.base)
+
+            self.stage_c[ind] = self.elev_c[ind] + height
 
         else:
-
-            #--------------------------------------
-            # Update all three vertices for each cell
-            #--------------------------------------
-
-            ind = self.indices
-            shear_factor = self.shear_factor
-
-            # These arrays, m,d and v will be shape (len(ids),1)
-            m = num.sqrt(self.xmom_c[ind]**2 + self.ymom_c[ind]**2)  # abs Momentum
-            d= (self.stage_c[ind]-self.elev_c[ind]) # Depth
-
-            v = m / (d + 1.0e-10)  # Velocity = Momentum/Depth
-
-            #  ---- NOTE SCOUR or EROSION usually is determined by
-            #  Shear Stress = density*gravity*depth*bed_slope
-
-            bedslope = num.sqrt(self.elev_gx[ind]**2 + self.elev_gy[ind]**2)
-            EN_slope = num.sqrt(self.WLev_gx[ind]**2 + self.WLev_gy[ind]**2)
-
-            # Implement  Bed Shear term based on BED SLOPE
-            es=EN_slope
-            bedshearBs=1000*9.81*d*bedslope  # ro*g*h*bedslope , { Bed Slope  or  Energy Slope ??} in N/m**2
-            bsbs = bedshearBs
-
-            # Implement Bed Shear term based on ENERGY SLOPE
-            bedshearEs=1000*9.81*d*EN_slope  # ro*g*h*EN_slope , { Energy Slope ??}
-            bses = bedshearEs
-            froude = v / num.sqrt(9.81*(d+1.0e-10))
-            froude = m / 9.81**0.5 / (d+1.0e-10)**1.5  # Check that these are the same ??
-            factor = 9.8*bedslope
-
-            # elevation change increment
-            de = (bses / shear_factor)*dt  # Works OK...  Energy SLope
-            #de = bsbs/100000.0*dt  # Works OK...  Bed Slope
+            # v needs to be stacked to get the right shape (len(ids),3)
+            #m  = num.vstack((m,m,m)).T
+            v  = num.vstack((v,v,v)).T
+            #bses = num.vstack((bses,bses,bses)).T
+            #es = num.vstack((es,es,es)).T
+            de = num.vstack((de,de,de)).T
 
 
-            if self.domain.get_using_discontinuous_elevation():
-                height = self.stage_c[ind] - self.elev_c[ind]
+            limiting = v # Make the limiting trigger Velocity? or Momentum... or Shear ??
+            # de will have a value of 0.0 (and hence no effect) if limiting <= threshold
+            de = num.where(limiting > self.threshold, de, 0.0)
 
-                limiting = v
-                # de will have a value of 0.0 (and hence no effect) if limiting <= threshold
-                de = num.where(limiting > self.threshold, de, 0.0)
-
-                # Ensure we don't erode below self.base level
-                self.elev_c[ind] = num.maximum(self.elev_c[ind] - de, self.base)
-
-                self.stage_c[ind] = self.elev_c[ind] + height
-
-            else:
-                # v needs to be stacked to get the right shape (len(ids),3)
-                #m  = num.vstack((m,m,m)).T
-                v  = num.vstack((v,v,v)).T
-                #bses = num.vstack((bses,bses,bses)).T
-                #es = num.vstack((es,es,es)).T
-                de = num.vstack((de,de,de)).T
-
-
-                limiting = v # Make the limiting trigger Velocity? or Momentum... or Shear ??
-                # de will have a value of 0.0 (and hence no effect) if limiting <= threshold
-                de = num.where(limiting > self.threshold, de, 0.0)
-
-                # Ensure we don't erode below self.base level
-                self.elev_v[ind] = num.maximum(self.elev_v[ind] - de, self.base)
+            # Ensure we don't erode below self.base level
+            self.elev_v[ind] = num.maximum(self.elev_v[ind] - de, self.base)
 
 
         return updated
@@ -729,35 +725,30 @@ class Flat_slice_erosion_operator(Erosion_operator):
 
         updated = True
 
+        #--------------------------------------
+        # `indices is None` means the whole domain -- see __call__'s
+        # docstring. This used to be a separate branch that added 0.0 to the
+        # elevation, so whole-domain erosion silently did nothing.
+        #--------------------------------------
         if self.indices is None:
-
-            #--------------------------------------
-            # Update all three vertices for each cell
-            #--------------------------------------
-            self.elev_v[:] = self.elev_v + 0.0
-
+            ind = num.arange(self.domain.number_of_elements)
         else:
-
-            #--------------------------------------
-            # Update all three vertices for each cell
-            #--------------------------------------
-
             ind = self.indices
 
-            if self.domain.get_using_discontinuous_elevation():
-                try:
-                    height = self.stage_c[ind] - self.elev_c[ind]
-                    value = self.elevation(t)
-                    self.elev_c[ind] = num.where(self.elev_c[ind] >  value, value, self.elev_c[ind])
-                    self.stage_c[ind] = self.elev_c[ind] + height
-                except Exception:
-                    pass
-            else:
-                try:
-                    value = self.elevation(t)
-                    self.elev_v[ind] = num.where(self.elev_v[ind] >  value, value, self.elev_v[ind])
-                except Exception:
-                    pass
+        if self.domain.get_using_discontinuous_elevation():
+            try:
+                height = self.stage_c[ind] - self.elev_c[ind]
+                value = self.elevation(t)
+                self.elev_c[ind] = num.where(self.elev_c[ind] >  value, value, self.elev_c[ind])
+                self.stage_c[ind] = self.elev_c[ind] + height
+            except Exception:
+                pass
+        else:
+            try:
+                value = self.elevation(t)
+                self.elev_v[ind] = num.where(self.elev_v[ind] >  value, value, self.elev_v[ind])
+            except Exception:
+                pass
 
 
         return updated
@@ -816,44 +807,39 @@ class Flat_fill_slice_erosion_operator(Erosion_operator):
 
         updated = True
 
+        #--------------------------------------
+        # `indices is None` means the whole domain -- see __call__'s
+        # docstring. This used to be a separate branch that added 0.0 to the
+        # elevation, so whole-domain erosion silently did nothing.
+        #--------------------------------------
         if self.indices is None:
-
-            #--------------------------------------
-            # Update all three vertices for each cell
-            #--------------------------------------
-            self.elev_v[:] = self.elev_v + 0.0
-
+            ind = num.arange(self.domain.number_of_elements)
         else:
-
-            #--------------------------------------
-            # Update all three vertices for each cell
-            #--------------------------------------
-
             ind = self.indices
 
-            if self.domain.get_using_discontinuous_elevation():
+        if self.domain.get_using_discontinuous_elevation():
 
-                try:
-                    value = self.elevation(t)
-                    height = self.stage_c[ind] - self.elev_c[ind]
-                    if value > num.max(self.elev_c[ind]):
-                        self.elev_c[ind] = num.where(self.elev_c[ind] <  value, value, self.elev_c[ind])
-                    else:
-                        self.elev_c[ind] = num.where(self.elev_c[ind] >  value, value, self.elev_c[ind])
-                    self.stage_c[ind] = self.elev_c[ind] + height
-                except Exception:
-                    pass
+            try:
+                value = self.elevation(t)
+                height = self.stage_c[ind] - self.elev_c[ind]
+                if value > num.max(self.elev_c[ind]):
+                    self.elev_c[ind] = num.where(self.elev_c[ind] <  value, value, self.elev_c[ind])
+                else:
+                    self.elev_c[ind] = num.where(self.elev_c[ind] >  value, value, self.elev_c[ind])
+                self.stage_c[ind] = self.elev_c[ind] + height
+            except Exception:
+                pass
 
-            else:
-                try:
-                    value = self.elevation(t)
-                    print(value)
-                    if value > num.max(self.elev_v[ind]):
-                        self.elev_v[ind] = num.where(self.elev_v[ind] <  value, value, self.elev_v[ind])
-                    else:
-                        self.elev_v[ind] = num.where(self.elev_v[ind] >  value, value, self.elev_v[ind])
-                except Exception:
-                    pass
+        else:
+            try:
+                value = self.elevation(t)
+                print(value)
+                if value > num.max(self.elev_v[ind]):
+                    self.elev_v[ind] = num.where(self.elev_v[ind] <  value, value, self.elev_v[ind])
+                else:
+                    self.elev_v[ind] = num.where(self.elev_v[ind] >  value, value, self.elev_v[ind])
+            except Exception:
+                pass
 
 
         return updated
