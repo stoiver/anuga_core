@@ -1,6 +1,6 @@
 """Suspended sediment must reach the sww file (issue #274, gap 2).
 
-A sediment class IS a tracer -- `add_sediment_class` calls `add_tracer`, so
+A grain size IS a tracer -- `add_grain_size` calls `add_tracer`, so
 class `s` occupies tracer slot `s` -- which means the tracer writer stores it
 with no sediment-specific code at all. `test_tracers_sww.py` says as much in
 its docstring, but says it about `add_tracer`; nothing checked the claim

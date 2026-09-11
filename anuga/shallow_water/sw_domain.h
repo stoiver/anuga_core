@@ -178,8 +178,8 @@ struct domain {
      * offset here aliases members silently, with no compile error.
      *
      * All arrays are (n_sediment_classes,) and indexed by TRACER index, so
-     * sediment class s occupies tracer slot s. Classes are registered through
-     * Domain.add_sediment_class(), which registers the tracer first.
+     * grain size s occupies tracer slot s. Grain sizes are registered through
+     * Domain.add_grain_size(), which registers the tracer first.
      *
      * n_sediment_classes == 0 is the ordinary case and must cost nothing: the
      * source kernel returns immediately on a single test, exactly as the flux

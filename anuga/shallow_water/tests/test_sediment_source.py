@@ -314,9 +314,9 @@ def test_a_non_positive_diameter_is_rejected():
         still().add_grain_size(name='c', diameter=0.0)
 
 
-def test_mixing_add_tracer_and_add_sediment_class_is_rejected():
-    """Class s must occupy tracer slot s, so interleaving is refused rather
-    than silently breaking that correspondence."""
+def test_mixing_add_tracer_and_add_grain_size_is_rejected():
+    """Grain size s must occupy tracer slot s, so interleaving is refused
+    rather than silently breaking that correspondence."""
     d = still()
     d.add_tracer('plain')
     with pytest.raises(ValueError):

@@ -148,7 +148,7 @@ def test_bedload_holds_the_base_to_within_one_step_of_flux():
 def test_registration_order_does_not_change_the_answer():
     """The erodible thickness belongs to the CELL, not to a class, so the
     classes are limited together by one shared proportional factor. Serving
-    them in order would make the answer depend on the order add_sediment_class
+    them in order would make the answer depend on the order add_grain_size
     was called, which is not physics."""
     first = build(base_depth=0.004, classes=TWO_CLASSES)
     first.evolve_to_end(finaltime=30.0)

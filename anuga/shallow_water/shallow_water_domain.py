@@ -1143,10 +1143,10 @@ class Domain(Generic_Domain):
         device mapping -- belongs with the rest of the domain's array
         management.
 
-        A sediment class is a tracer -- so it is transported by the machinery of
+A grain size is a tracer -- so it is transported by the machinery of
         Phases 1-2 -- plus the settling parameters the source term needs. The
-        tracer is registered first, so class `s` always occupies tracer slot
-        `s`; `add_tracer` and `add_sediment_class` must not be interleaved on
+        tracer is registered first, so grain size `s` always occupies tracer
+        slot `s`; `add_tracer` and `add_grain_size` must not be interleaved on
         the same domain if you rely on that.
 
         Parameters
@@ -1195,9 +1195,9 @@ class Domain(Generic_Domain):
         """
         if self.number_of_tracers != self.n_sediment_classes:
             raise ValueError(
-                'add_sediment_class requires sediment class s to occupy tracer '
-                'slot s, but this domain already has %d tracers and %d sediment '
-                'classes. Do not mix add_tracer() and add_sediment_class().'
+                'add_grain_size requires grain size s to occupy tracer '
+                'slot s, but this domain already has %d tracers and %d grain '
+                'sizes. Do not mix add_tracer() and add_grain_size().'
                 % (self.number_of_tracers, self.n_sediment_classes))
 
         if tau_c_star < 0.0:
@@ -1619,8 +1619,8 @@ class Domain(Generic_Domain):
             `tau_d = 0` disables deposition entirely -- the hook RDycore's
             passive-transport benchmarks rely on.
         near_bed : {'constant', 'rouse'}
-            How `d*` in `[D-1]` is obtained. `'constant'` uses the per-class
-            value given to `add_sediment_class` (default 1.0, the well-mixed
+            How `d*` in `[D-1]` is obtained. `'constant'` uses the
+            per-grain-size value given to `add_grain_size` (default 1.0, the well-mixed
             limit of P14/P13). `'rouse'` evaluates the fitted `[S-4]` profile
             per cell from the local Rouse number.
         reference_height_floor : float
@@ -2043,8 +2043,8 @@ class Domain(Generic_Domain):
 
         `'noncohesive'` (default) -- sand, gravel, boulders. Shields
         entrainment via Smith & McLean / Parker, `[E-1]`/`[E-2]`, with a
-        critical Shields stress per class (`tau_c_star` on
-        `add_sediment_class`).
+        critical Shields stress per grain size (`tau_c_star` on
+        `add_grain_size`).
 
         `'partheniades'` -- `[E-4]`, `E = K_p (tau_b - tau_c)/tau_c`, the form
         RDycore-sediment uses. `K_e` here is the Partheniades coefficient as a
