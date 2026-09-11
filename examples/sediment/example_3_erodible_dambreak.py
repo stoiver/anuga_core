@@ -1,12 +1,12 @@
-"""Example 3 -- multi-class dam break over an erodible bed, on the GPU.
+"""Example 3 -- multi-grain-size dam break over an erodible bed, on the GPU.
 
 The other two examples are faithful ports of anugaSed's cases, so they only
-exercise what anugaSed does: one sediment class, suspension only, mode 1.
+exercise what anugaSed does: one grain size, suspension only, mode 1.
 This one covers what the module adds -- several grain sizes at once, bedload
 alongside suspension, a moving bed, and the unified (GPU) compute path.
 
 Demonstrates
-  * two sediment classes with different grain sizes, settling and mobility
+  * two grain sizes with different diameters, settling and mobility
   * bedload [K-1]..[K-4] and its bed evolution [G-5]
   * suspended exchange [E-1]/[D-1] and Exner bed evolution [G-4]
   * the Rouse near-bed ratio [S-4]
@@ -45,19 +45,20 @@ domain.set_deposition('d_star', near_bed='rouse')  # [S-4] rather than well-mixe
 domain.set_sediment_friction('constant')           # ordinary flood work
 domain.set_bedload('wong_parker_eq24')             # [K-1] and [G-5]
 
-domain.add_sediment_class('fine_sand', diameter=1.5e-4, initial_concentration=0.0)
-domain.add_sediment_class('coarse_sand', diameter=8.0e-4, initial_concentration=0.0)
+domain.add_grain_size(name='fine_sand', diameter=1.5e-4, initial_concentration=0.0)
+domain.add_grain_size(name='coarse_sand', diameter=8.0e-4, initial_concentration=0.0)
 
-# Mode 2 is the unified path. Whether it offloads to a device is a property
-# of the build, not of this call: a build without offload runs the same
-# kernels on the host under CPU_ONLY_MODE.
-domain.set_multiprocessor_mode(2)
+# 'unified' is the shared CPU/GPU path. Whether it offloads to a device is a
+# property of the build, not of this call: a build without offload runs the
+# same kernels on the host under CPU_ONLY_MODE.
+domain.set_compute_mode('unified')
 offloads = anuga.gpu_offload_enabled()
 
 print(domain.sediment_summary())
 print()
-print('compute mode: 2 (unified), offload %s'
-      % ('enabled -- running on the device' if offloads
+print('compute mode: %s, offload %s'
+      % (domain.get_compute_mode(),
+         'enabled -- running on the device' if offloads
          else 'not built in -- unified kernels on the host'))
 print()
 
@@ -91,7 +92,7 @@ print()
 print('  That closes to machine precision, and it should: the boundaries are')
 print('  reflective, so nothing leaves. Every cubic metre now in suspension')
 print('  came out of the bed, and (1-lambda) dz accounts for it exactly --')
-print('  across BOTH classes, with erosion, deposition and bedload all active')
+print('  across BOTH grain sizes, with erosion, deposition and bedload active')
 print('  and the bed moving under them. It is the strongest statement this')
 print('  example makes: the coupling conserves sediment.')
 print()

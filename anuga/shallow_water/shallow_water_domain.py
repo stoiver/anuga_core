@@ -695,6 +695,11 @@ class Domain(Generic_Domain):
         self.n_sediment_classes = 0
         self.sediment_c_max = 0.30              # [L-2]; FG21 0.30, aS16 0.20
         self._sediment_names = []
+        # rho_s and the settling kwargs are kept per grain size so that
+        # R and v_s can be recomputed if the domain-wide rho_w changes
+        # after registration -- otherwise they would silently go stale.
+        self._sediment_rho_s = []
+        self._sediment_settling_kwargs = []
         self.sediment_gamma0 = 0.0024           # [E-1] empirical, FG21
         # Erosion route, spec 4.1.1 -- see set_bed_material().
         self.sediment_erosion_mode = 0          # 0 non-cohesive, 1 cohesive
@@ -950,7 +955,7 @@ class Domain(Generic_Domain):
         # on first use: a lazily allocated array has to change the C struct and
         # the device mapping when it appears, and set_tracer_source did that by
         # discarding the GPU interface -- mid-run, from inside a fractional
-        # step. Sediment_operator then saw gpu_interface is None, took the CPU
+        # step. Sediment_transport_operator then saw gpu_interface is None, took the CPU
         # path while the state was on the device, and the source contributed
         # exactly nothing on a GPU build (#288). Being here also means reorder()
         # permutes it, which it previously did not.
@@ -1124,17 +1129,24 @@ class Domain(Generic_Domain):
             raise ValueError('grain diameter must be > 0, got %g' % d)
         return (R * _g * d * d) / (C1 * nu + math.sqrt(0.75 * C2 * R * _g * d**3))
 
-    def add_sediment_class(self, name, diameter, d_star=1.0, beta=None,
-                           initial_concentration=0.0, rho_s=2650.0,
-                           rho_w=1000.0, tau_c_star=0.04,
-                           reference_height=None, auto_operator=True,
-                           **settling_kwargs):
-        """Register a suspended sediment class and return its index.
+    def _register_sediment_fraction(self, name, diameter, d_star=1.0, beta=None,
+                                    initial_concentration=0.0, rho_s=2650.0,
+                                    tau_c_star=0.04,
+                                    reference_height=None,
+                                    **settling_kwargs):
+        """Register one suspended sediment grain size and return its index.
 
-        A sediment class is a tracer -- so it is transported by the machinery of
+        Private: the public entry point is
+        :class:`~anuga.operators.sediment_operator.Sediment_transport_operator`,
+        which calls this. Kept here because the bookkeeping it does -- growing
+        the per-fraction parameter arrays and invalidating the C struct and the
+        device mapping -- belongs with the rest of the domain's array
+        management.
+
+A grain size is a tracer -- so it is transported by the machinery of
         Phases 1-2 -- plus the settling parameters the source term needs. The
-        tracer is registered first, so class `s` always occupies tracer slot
-        `s`; `add_tracer` and `add_sediment_class` must not be interleaved on
+        tracer is registered first, so grain size `s` always occupies tracer
+        slot `s`; `add_tracer` and `add_grain_size` must not be interleaved on
         the same domain if you rely on that.
 
         Parameters
@@ -1156,11 +1168,6 @@ class Domain(Generic_Domain):
             Critical Shields stress for entrainment `[E-1]`. Default 0.04,
             FG21's choice for suspension. Setting it to 0 disables entrainment
             for this class, leaving deposition only.
-        auto_operator : bool, optional
-            Register a `Sediment_operator` on this domain if one is not already
-            present (default True). The operator is what applies `[G-3]`'s bed
-            exchange and `[G-4]`'s bed evolution as a fractional step; without
-            it the classes are transported as inert tracers, silently.
         reference_height : float, optional
             `a` in `[S-4]`, the near-bed reference height at which `c_b` is
             evaluated, in metres. Only used when `sediment_d_star_mode = 1`.
@@ -1188,13 +1195,16 @@ class Domain(Generic_Domain):
         """
         if self.number_of_tracers != self.n_sediment_classes:
             raise ValueError(
-                'add_sediment_class requires sediment class s to occupy tracer '
-                'slot s, but this domain already has %d tracers and %d sediment '
-                'classes. Do not mix add_tracer() and add_sediment_class().'
+                'add_grain_size requires grain size s to occupy tracer '
+                'slot s, but this domain already has %d tracers and %d grain '
+                'sizes. Do not mix add_tracer() and add_grain_size().'
                 % (self.number_of_tracers, self.n_sediment_classes))
 
         if tau_c_star < 0.0:
             raise ValueError('tau_c_star must be >= 0, got %g' % tau_c_star)
+        # rho_w is a property of the fluid, so it is domain-wide: see
+        # set_sediment_parameters. Only rho_s varies per grain size.
+        rho_w = self.sediment_rho_w
         v_s = self.settling_velocity(diameter, rho_s=rho_s, rho_w=rho_w,
                                      **settling_kwargs)
         index = self.add_tracer(name, beta=beta,
@@ -1235,19 +1245,9 @@ class Domain(Generic_Domain):
             (ncl, self.number_of_elements), dtype=num.float64)
 
         self._sediment_names.append(name)
+        self._sediment_rho_s.append(float(rho_s))
+        self._sediment_settling_kwargs.append(dict(settling_kwargs))
         self.n_sediment_classes = ncl
-
-        # Register the fractional-step operator that actually applies the bed
-        # exchange, unless one is already present. Without it a domain accepts
-        # sediment classes and then quietly transports them as inert tracers --
-        # no erosion, no deposition, no bed change, and no error. Requiring the
-        # user to remember is a silent-no-op waiting to happen; pass
-        # auto_operator=False to manage it yourself.
-        if auto_operator:
-            from anuga.operators.sediment_operator import Sediment_operator
-            if not any(isinstance(op, Sediment_operator)
-                       for op in self.fractional_step_operators):
-                Sediment_operator(self)
 
         # add_tracer already invalidated both caches, but it did so BEFORE the
         # arrays above existed. Invalidate again so the rebuilt struct sees them.
@@ -1619,8 +1619,8 @@ class Domain(Generic_Domain):
             `tau_d = 0` disables deposition entirely -- the hook RDycore's
             passive-transport benchmarks rely on.
         near_bed : {'constant', 'rouse'}
-            How `d*` in `[D-1]` is obtained. `'constant'` uses the per-class
-            value given to `add_sediment_class` (default 1.0, the well-mixed
+            How `d*` in `[D-1]` is obtained. `'constant'` uses the
+            per-grain-size value given to `add_grain_size` (default 1.0, the well-mixed
             limit of P14/P13). `'rouse'` evaluates the fitted `[S-4]` profile
             per cell from the local Rouse number.
         reference_height_floor : float
@@ -1685,6 +1685,197 @@ class Domain(Generic_Domain):
         if hasattr(self, '_gpu_boundary_info_initialized'):
             del self._gpu_boundary_info_initialized
 
+    def initialize_sediment_operator(self, porosity=None, c_max=None,
+                                     c_pack=None, bed_evolution=None,
+                                     rho_w=None, description=None, label=None,
+                                     logging=False, verbose=False):
+        """Switch sediment transport on, and return the operator.
+
+        This is the entry point for sediment transport. It takes the
+        DOMAIN-WIDE parameters -- the ones that describe the run as a whole
+        rather than any one grain size -- and creates the single
+        :class:`~anuga.operators.sediment_operator.Sediment_transport_operator`
+        that carries the bed exchange.
+
+        Grain sizes are added separately, with :meth:`add_grain_size`:
+
+        .. code-block:: python
+
+            domain.initialize_sediment_operator(porosity=0.28, rho_w=1000.0)
+            domain.add_grain_size('sand', diameter=2.0e-4)
+            domain.add_grain_size('silt', diameter=2.0e-5)
+
+        The split is the point. A parameter belongs to exactly one of the two
+        calls, so there is never a question of which call wins: `porosity` and
+        `rho_w` are properties of the run, `diameter` and `rho_s` are properties
+        of a grain size.
+
+        ONE OPERATOR PER DOMAIN. Calling this twice returns the same operator,
+        applying any parameters given the second time -- the kernel makes a
+        single pass over every registered grain size, so a second operator in
+        the fractional-step list would apply the bed exchange twice per step.
+
+        Calling it is optional in the simplest case: :meth:`add_grain_size` will
+        create the operator with default domain-wide parameters if none exists.
+        The two may be called in either order.
+
+        The closure choices -- which shear, erosion, deposition and bedload laws
+        to use -- have their own setters, because each carries its own
+        parameters and validation: :meth:`set_shear_closure`,
+        :meth:`set_sediment_friction`, :meth:`set_bed_material`,
+        :meth:`set_deposition` and :meth:`set_bedload`.
+
+        Parameters
+        ----------
+        porosity : float, optional
+            Bed porosity `lambda` in `[G-4]`. Default 0.30.
+        c_max : float, optional
+            `[L-2]`, the ceiling on depth-averaged concentration. Default 0.30.
+        c_pack : float, optional
+            `[L-4]`, maximum packing bounding near-bed concentration.
+        bed_evolution : bool, optional
+            `True` (default) evolves the bed; `False` is the fixed-bed stage.
+        rho_w : float, optional
+            Water density, kg/m3. Default 1000.
+        description, label, logging, verbose
+            Passed to the operator; see
+            :class:`~anuga.operators.base_operator.Operator`.
+
+        Returns
+        -------
+        Sediment_transport_operator
+            The domain's sediment operator.
+
+        See Also
+        --------
+        add_grain_size : register one grain size.
+        set_sediment_parameters : change the domain-wide parameters later.
+        sediment_summary : print the complete active configuration.
+        """
+        from anuga.operators.sediment_operator import (
+            Sediment_transport_operator)
+
+        if (porosity is not None or c_max is not None or c_pack is not None
+                or bed_evolution is not None or rho_w is not None):
+            self.set_sediment_parameters(porosity=porosity, c_max=c_max,
+                                         c_pack=c_pack,
+                                         bed_evolution=bed_evolution,
+                                         rho_w=rho_w)
+
+        return Sediment_transport_operator(
+            self, description=description, label=label, logging=logging,
+            verbose=verbose)
+
+    def add_grain_size(self, name, diameter, rho_s=2650.0, tau_c_star=0.04,
+                       d_star=1.0, beta=None, initial_concentration=0.0,
+                       reference_height=None, **settling_kwargs):
+        """Register one suspended sediment grain size and return its index.
+
+        Everything here is a property of THIS grain size. The domain-wide
+        parameters live on :meth:`initialize_sediment_operator`; in particular
+        there is no `rho_w` here, because there is one fluid.
+
+        .. code-block:: python
+
+            domain.add_grain_size('sand', diameter=2.0e-4)
+            domain.add_grain_size('silt', diameter=2.0e-5, tau_c_star=0.11)
+
+        A grain size is a tracer with settling parameters attached, so it
+        inherits the transport, boundary and conservation machinery described
+        under :ref:`tracers`, and takes the tracer slot of the same index. Do
+        not interleave :meth:`add_tracer` and `add_grain_size` on the same
+        domain if you rely on that correspondence.
+
+        If the domain has no sediment operator yet, one is created with the
+        default domain-wide parameters.
+
+        Parameters
+        ----------
+        name : str
+            Identifier for this grain size, e.g. 'sand'. Also its tracer name.
+        diameter : float
+            Grain diameter in metres.
+        rho_s : float, optional
+            Sediment particle density, kg/m3. Default 2650 (quartz). Enters as
+            the submerged specific gravity `R = rho_s/rho_w - 1`.
+        tau_c_star : float, optional
+            Critical Shields stress for entrainment `[E-1]`. Default 0.04.
+            Setting it to 0 disables entrainment for this grain size, leaving
+            deposition only.
+        d_star : float, optional
+            Ratio of near-bed to depth-averaged concentration in `[D-1]`.
+            Default 1.0, the well-mixed limit. Ignored when the domain's
+            `near_bed` mode is `'rouse'`, which computes it per cell.
+        beta : float, optional
+            Edge reconstruction limiter for this grain size's tracer.
+        initial_concentration : float or array-like, optional
+            Initial `c_s`; seeds `m = h*c` consistently.
+        reference_height : float, optional
+            `a` in `[S-4]`, in metres. Defaults to `2*diameter`.
+        **settling_kwargs
+            Passed to :meth:`settling_velocity` -- e.g. `shape='natural'`.
+
+        Returns
+        -------
+        int
+            The index of this grain size, which is also its tracer index.
+
+        See Also
+        --------
+        initialize_sediment_operator : the domain-wide parameters.
+        """
+        # A domain-wide parameter here would otherwise fall into
+        # settling_kwargs and surface as a TypeError from settling_velocity,
+        # which says nothing about what the caller did wrong.
+        domain_wide = sorted(set(settling_kwargs) &
+                             {'porosity', 'c_max', 'c_pack', 'bed_evolution',
+                              'rho_w'})
+        if domain_wide:
+            raise TypeError(
+                'add_grain_size() got %s, which %s of the run rather than '
+                'of one grain size; pass %s to initialize_sediment_operator() '
+                'or set_sediment_parameters()'
+                % (', '.join(domain_wide),
+                   'are properties' if len(domain_wide) > 1 else 'is a property',
+                   'them' if len(domain_wide) > 1 else 'it'))
+
+        if not any(isinstance(op, self._sediment_operator_class())
+                   for op in getattr(self, 'fractional_step_operators', ())):
+            self.initialize_sediment_operator()
+
+        return self._register_sediment_fraction(
+            name, diameter, rho_s=rho_s, tau_c_star=tau_c_star,
+            d_star=d_star, beta=beta,
+            initial_concentration=initial_concentration,
+            reference_height=reference_height, **settling_kwargs)
+
+    @staticmethod
+    def _sediment_operator_class():
+        from anuga.operators.sediment_operator import (
+            Sediment_transport_operator)
+        return Sediment_transport_operator
+
+    def _set_sediment_rho_w(self, rho_w):
+        """Set the domain-wide water density and refresh what derives from it.
+
+        `rho_w` is a property of the fluid, so there is one per domain rather
+        than one per grain size. Two quantities are computed from it at
+        registration time -- the submerged specific gravity `R = rho_s/rho_w - 1`
+        and the settling velocity `v_s` `[S-1]` -- so changing it afterwards has
+        to recompute them, or already-registered grain sizes keep values from
+        the old density and nothing says so.
+        """
+        if rho_w <= 0.0:
+            raise ValueError('rho_w must be > 0, got %g' % rho_w)
+        self.sediment_rho_w = float(rho_w)
+        for i in range(self.n_sediment_classes):
+            rho_s = self._sediment_rho_s[i]
+            self.sediment_R[i] = rho_s / self.sediment_rho_w - 1.0
+            self.sediment_settling_velocity[i] = self.settling_velocity(
+                self.sediment_diameter[i], rho_s=rho_s,
+                rho_w=self.sediment_rho_w,
+                **self._sediment_settling_kwargs[i])
+
     def set_sediment_parameters(self, porosity=None, c_max=None, c_pack=None,
                                 bed_evolution=None, rho_w=None):
         """Set the scalar sediment parameters, with validation.
@@ -1730,9 +1921,7 @@ class Domain(Generic_Domain):
             # May have just been turned on after the classes were registered.
             self._sync_elevation_storage()
         if rho_w is not None:
-            if rho_w <= 0.0:
-                raise ValueError('rho_w must be > 0, got %g' % rho_w)
-            self.sediment_rho_w = float(rho_w)
+            self._set_sediment_rho_w(rho_w)
         self._Domain_C_struct = None
         self.gpu_interface = None
         if hasattr(self, '_gpu_boundary_info_initialized'):
@@ -1748,33 +1937,39 @@ class Domain(Generic_Domain):
         statements rather than tuning (spec 4.1.1).
         """
         if self.n_sediment_classes == 0:
-            return 'sediment: no classes registered'
+            return 'sediment: no grain sizes registered'
 
-        ero = {0: "[E-1] Shields / Smith-McLean, non-cohesive (sand, gravel)",
-               1: "[E-3] Hanson & Simon, cohesive (silt, clay)",
-               2: "[E-4] Partheniades (RDycore)"}[self.sediment_erosion_mode]
-        dep = {0: "[D-1] D = d* c v_s", 1: "[D-2] D = v_s c (1 - tau_b/tau_d)"
+        ero = {0: "Shields / Smith-McLean, non-cohesive (sand, gravel)   [E-1]",
+               1: "Hanson & Simon, cohesive (silt, clay)   [E-3]",
+               2: "Partheniades (RDycore)   [E-4]"}[self.sediment_erosion_mode]
+        dep = {0: "D = d* c v_s   [D-1]", 1: "D = v_s c (1 - tau_b/tau_d)   [D-2]"
                }[self.sediment_deposition_mode]
-        dstar = {0: "constant, per class", 1: "[S-4] Rouse profile"
+        dstar = {0: "constant, per grain size", 1: "Rouse profile   [S-4]"
                  }[self.sediment_d_star_mode]
-        shear = {0: "[T-1] quadratic drag, tau_b = rho f_c |v|^2",
-                 1: "[T-7] depth-slope, tau_b = rho g h S (aSM16; legacy)"
+        shear = {0: "quadratic drag, tau_b = rho f_c |v|^2   [T-1]",
+                 1: "depth-slope, tau_b = rho g h S (aSM16; legacy)   [T-7]"
                  }[self.sediment_shear_closure]
         fric = {0: "constant n, from the domain friction quantity",
-                1: "larsen_lamb [T-13..15], n = %.5f" % self.sediment_manning_ll,
-                2: "wilson [T-8..10], bed=%s, D=%.4g m"
+                1: "larsen_lamb, n = %.5f   [T-13..15]" % self.sediment_manning_ll,
+                2: "wilson, bed=%s, D=%.4g m   [T-8..10]"
                    % (['sand', 'gravel', 'boulder'][self.sediment_wilson_bed],
                       self.sediment_wilson_D)}[self.sediment_friction_mode]
         bl = ("off" if self.sediment_bedload_mode == 0 else
-              ("[K-5] Engelund-Hansen, TOTAL LOAD (suspended source disabled)"
+              ("Engelund-Hansen, TOTAL LOAD (suspended source disabled)   [K-5]"
                if self.sediment_bedload_mode == 2 else
-               "[K-1] power law, K=%.4g m=%.4g tau_c*=%.4g"
+               "power law, K=%.4g m=%.4g tau_c*=%.4g   [K-1]"
                % (self.sediment_bedload_K, self.sediment_bedload_m,
                   self.sediment_bedload_tau_c_star)))
 
         L = ['sediment configuration',
-             '  classes            : %d  %r' % (self.n_sediment_classes,
-                                                self.get_sediment_names()),
+             # The name is free text, so it is usually a material ('sand')
+             # rather than a size. Carry the diameter alongside it, or the
+             # line labels as a grain size something that is not one.
+             '  grain sizes        : %d  --  %s'
+             % (self.n_sediment_classes,
+                ', '.join('%s (d=%.4g m)' % (nm, self.sediment_diameter[i])
+                          for i, nm in
+                          enumerate(self.get_sediment_names()))),
              '  erosion            : %s' % ero,
              '  deposition         : %s' % dep,
              '  near-bed d*        : %s' % dstar,
@@ -1829,7 +2024,12 @@ class Domain(Generic_Domain):
             L.append('  erodible region    : %d of %d cells erodible '
                      '(%d locked at their current bed)'
                      % (int(mask.sum()), len(mask), int((~mask).sum())))
-        L.append('  per class:')
+        L.append('  ([E-1] and the like are cross-references to the term in '
+                 'the physics;')
+        L.append('   see the Sediment physics appendix -- the description '
+                 'before each')
+        L.append('   label is the whole story.)')
+        L.append('  per grain size:')
         for i, nm in enumerate(self.get_sediment_names()):
             L.append('    %-10s d=%.4g m  v_s=%.4e m/s  R=%.4g  tau_c*=%.4g'
                      % (nm, self.sediment_diameter[i],
@@ -1838,13 +2038,13 @@ class Domain(Generic_Domain):
         return '\n'.join(L)
 
     def set_bed_material(self, material='noncohesive', tau_crit=0.088,
-                         K_e=None, rho_w=1000.0):
+                         K_e=None):
         """Select the erosion law by naming the BED MATERIAL (spec 4.1.1).
 
         `'noncohesive'` (default) -- sand, gravel, boulders. Shields
         entrainment via Smith & McLean / Parker, `[E-1]`/`[E-2]`, with a
-        critical Shields stress per class (`tau_c_star` on
-        `add_sediment_class`).
+        critical Shields stress per grain size (`tau_c_star` on
+        `add_grain_size`).
 
         `'partheniades'` -- `[E-4]`, `E = K_p (tau_b - tau_c)/tau_c`, the form
         RDycore-sediment uses. `K_e` here is the Partheniades coefficient as a
@@ -1879,7 +2079,6 @@ class Domain(Generic_Domain):
             # [E-4]'s coefficient is a MASS flux in kg m-2 s-1, not [E-5]'s
             # m3 N-1 s-1. Different quantity, so it lands in its own field.
             self.sediment_K_partheniades = float(K_e)
-        self.sediment_rho_w = float(rho_w)
         # [E-5] Hanson & Simon jet-test erodibility, k_d = 0.2 tau_c^-0.5 in
         # cm3 N-1 s-1; the 1e-6 converts to m3 N-1 s-1.
         self.sediment_K_e = (float(K_e) if K_e is not None
@@ -4183,7 +4382,6 @@ class Domain(Generic_Domain):
                 evaluate_transmissive_boundary_gpu,
                 set_transmissive_n_zero_t_stage,
                 evaluate_transmissive_n_zero_t_boundary_gpu,
-                set_time_boundary_values,
                 evaluate_time_boundary_gpu,
                 set_file_boundary_values_from_domain,
                 evaluate_file_boundary_gpu,
@@ -5352,7 +5550,6 @@ class Domain(Generic_Domain):
             evaluate_transmissive_boundary_gpu,
             set_transmissive_n_zero_t_stage,
             evaluate_transmissive_n_zero_t_boundary_gpu,
-            set_time_boundary_values,
             evaluate_time_boundary_gpu,
             set_file_boundary_values_from_domain,
             evaluate_file_boundary_gpu,
@@ -5508,7 +5705,6 @@ class Domain(Generic_Domain):
         from anuga.shallow_water.sw_domain_gpu_ext import (
             evolve_one_ader2_step_gpu,
             set_transmissive_n_zero_t_stage,
-            set_time_boundary_values,
             set_file_boundary_values_from_domain,
             set_absorbing_wave_value,
             set_characteristic_wave_value,
@@ -5646,7 +5842,6 @@ class Domain(Generic_Domain):
             evaluate_transmissive_boundary_gpu,
             set_transmissive_n_zero_t_stage,
             evaluate_transmissive_n_zero_t_boundary_gpu,
-            set_time_boundary_values,
             evaluate_time_boundary_gpu,
             set_file_boundary_values_from_domain,
             evaluate_file_boundary_gpu,
@@ -5880,7 +6075,6 @@ class Domain(Generic_Domain):
             evaluate_transmissive_boundary_gpu,
             set_transmissive_n_zero_t_stage,
             evaluate_transmissive_n_zero_t_boundary_gpu,
-            set_time_boundary_values,
             evaluate_time_boundary_gpu,
             set_file_boundary_values_from_domain,
             evaluate_file_boundary_gpu,
@@ -6009,7 +6203,6 @@ class Domain(Generic_Domain):
         from anuga.shallow_water.sw_domain_gpu_ext import (
             evolve_one_euler_step_gpu,
             set_transmissive_n_zero_t_stage,
-            set_time_boundary_values,
             set_file_boundary_values_from_domain,
             set_absorbing_wave_value,
             set_characteristic_wave_value,
@@ -6152,7 +6345,6 @@ class Domain(Generic_Domain):
         from anuga.shallow_water.sw_domain_gpu_ext import (
             evolve_one_rk2_step_gpu,
             set_transmissive_n_zero_t_stage,
-            set_time_boundary_values,
             set_file_boundary_values_from_domain,
             set_absorbing_wave_value,
             set_characteristic_wave_value,
@@ -6300,7 +6492,6 @@ class Domain(Generic_Domain):
             evaluate_transmissive_boundary_gpu,
             set_transmissive_n_zero_t_stage,
             evaluate_transmissive_n_zero_t_boundary_gpu,
-            set_time_boundary_values,
             evaluate_time_boundary_gpu,
             set_file_boundary_values_from_domain,
             evaluate_file_boundary_gpu,
@@ -6494,7 +6685,6 @@ class Domain(Generic_Domain):
         from anuga.shallow_water.sw_domain_gpu_ext import (
             evolve_one_rk3_step_gpu,
             set_transmissive_n_zero_t_stage,
-            set_time_boundary_values,
             set_file_boundary_values_from_domain,
             set_absorbing_wave_value,
             set_characteristic_wave_value,
@@ -6797,7 +6987,7 @@ class Domain(Generic_Domain):
 
         Rate_operators with GPU support don't need CPU sync.
         boundary_flux_integral_operator is GPU-safe (only reads boundary_flux_sum).
-        Sediment_operator is GPU-safe (device-resident kernel, updates in place).
+        Sediment_transport_operator is GPU-safe (device-resident kernel, updates in place).
         Boyd_box_operator/Boyd_pipe_operator are GPU-safe via GPUCulvertManager.
         Inlet_operator with GPU support doesn't need CPU sync.
 
@@ -6814,7 +7004,7 @@ class Domain(Generic_Domain):
         from anuga.structures.inlet_operator import Inlet_operator
         from anuga.structures.gpu_culvert_manager import GPUCulvertManager
         from anuga.operators.collect_max_quantities_operator import Collect_max_quantities_operator
-        from anuga.operators.sediment_operator import Sediment_operator
+        from anuga.operators.sediment_operator import Sediment_transport_operator
 
         # Initialize GPU culvert manager for Boyd operators if needed
         has_boyd_ops = any(GPUCulvertManager.is_boyd_operator(op)
@@ -6858,7 +7048,7 @@ class Domain(Generic_Domain):
                     op._init_gpu()
                 if hasattr(op, '_gpu_initialized') and op._gpu_initialized:
                     continue  # GPU-accelerated, no sync needed
-            elif isinstance(op, Sediment_operator):
+            elif isinstance(op, Sediment_transport_operator):
                 # The sediment kernel runs on the device in mode 2 and updates
                 # the tracer and bed arrays in place, so no host sync is needed.
                 continue

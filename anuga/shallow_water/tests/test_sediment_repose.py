@@ -43,7 +43,7 @@ def build(angle=None, relax=1.0, max_sweeps=50, base_depth=None, n_x=40):
     d.set_quantity('friction', 0.03)
     d.set_boundary({t: Reflective_boundary(d) for t in d.get_boundary_tags()})
     d.set_sediment_parameters(porosity=0.3)
-    d.add_sediment_class('sand', diameter=2.0e-4)
+    d.add_grain_size(name='sand', diameter=2.0e-4)
     if angle is not None:
         d.set_angle_of_repose(angle, relax=relax, max_sweeps=max_sweeps)
     if base_depth is not None:
@@ -68,7 +68,7 @@ def max_slope_degrees(d):
 
 def _operator(d):
     return [o for o in d.fractional_step_operators
-            if type(o).__name__ == 'Sediment_operator'][0]
+            if type(o).__name__ == 'Sediment_transport_operator'][0]
 
 
 def test_the_cone_starts_steeper_than_the_critical_angle():

@@ -1,6 +1,6 @@
 """Guard: the sediment kernels are reached on every path.
 
-The sediment physics runs as a fractional step dispatched by Sediment_operator
+The sediment physics runs as a fractional step dispatched by Sediment_transport_operator
 to three kernels -- suspended exchange, bedload, angle-of-repose relaxation --
 through a chain of conditions: the operator must be registered, the mode 1 /
 mode 2 branch taken, and each kernel's enable flag read.
@@ -41,7 +41,7 @@ def build(algorithm='DE0', bedload=False, repose=None, sediment=True):
         d.set_sediment_parameters(porosity=POROSITY)
         if bedload:
             d.set_bedload('wong_parker_eq24')
-        d.add_sediment_class('sand', diameter=3.0e-4)
+        d.add_grain_size(name='sand', diameter=3.0e-4)
         if repose is not None:
             d.set_angle_of_repose(repose, max_sweeps=50)
     return d
@@ -75,7 +75,7 @@ def cone_domain(repose=None, algorithm='DE0'):
     d.set_quantity('friction', 0.03)
     d.set_boundary({t: Reflective_boundary(d) for t in d.get_boundary_tags()})
     d.set_sediment_parameters(porosity=POROSITY)
-    d.add_sediment_class('sand', diameter=3.0e-4)
+    d.add_grain_size(name='sand', diameter=3.0e-4)
     if repose is not None:
         d.set_angle_of_repose(repose, max_sweeps=400)
     return d
@@ -132,13 +132,13 @@ def test_the_flow_algorithms_agree_with_each_other():
 
 def test_the_operator_is_registered_automatically():
     names = [type(o).__name__ for o in build().fractional_step_operators]
-    assert 'Sediment_operator' in names, names
+    assert 'Sediment_transport_operator' in names, names
 
 
 def test_a_domain_without_sediment_does_not_get_the_operator():
     names = [type(o).__name__
              for o in build(sediment=False).fractional_step_operators]
-    assert 'Sediment_operator' not in names
+    assert 'Sediment_transport_operator' not in names
 
 
 def test_the_sediment_operator_does_not_force_cpu_only_fractional_steps():

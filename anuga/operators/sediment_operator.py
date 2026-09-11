@@ -26,36 +26,96 @@ operator must therefore stay on the GPU-safe list in
 """
 
 import math
+import warnings
 
 import anuga.utilities.log as log
 from anuga.operators.base_operator import Operator
 
 
-class Sediment_operator(Operator):
-    """Apply sediment bed exchange and Exner bed evolution as a fractional step.
+class Sediment_transport_operator(Operator):
+    """Suspended sediment transport and bed evolution, as a fractional step.
+
+    Not normally constructed directly. The entry point is
+    :meth:`~anuga.shallow_water.shallow_water_domain.Domain.initialize_sediment_operator`,
+    which creates this operator and returns it, with
+    :meth:`~anuga.shallow_water.shallow_water_domain.Domain.add_grain_size`
+    for each grain size:
+
+    .. code-block:: python
+
+        domain.initialize_sediment_operator(porosity=0.28)
+        domain.add_grain_size('sand', diameter=2.0e-4)
+        domain.add_grain_size('silt', diameter=2.0e-5)
+
+    Constructing it directly is equivalent to
+    `domain.initialize_sediment_operator()` with no domain-wide parameters, and
+    is there for code that wants the handle without setting anything.
+
+    ONE OPERATOR PER DOMAIN. Constructing a second returns the first: the
+    kernel makes a single pass over every registered grain size, so two
+    operators in the fractional-step list would apply the bed exchange twice
+    per timestep.
 
     Parameters
     ----------
     domain : Domain
-        Must already have at least one class registered via
-        `domain.add_sediment_class()`.
+        The domain to transport sediment on.
+    description, label, logging, verbose
+        See :class:`~anuga.operators.base_operator.Operator`. Ignored when this
+        domain already has a sediment operator.
     """
+
+    def __new__(cls, domain, *args, **kwargs):
+        # One per domain: return the existing operator rather than registering
+        # a duplicate fractional step.
+        for op in getattr(domain, 'fractional_step_operators', ()):
+            if isinstance(op, cls):
+                return op
+        return super().__new__(cls)
 
     def __init__(self, domain, description=None, label=None, logging=False,
                  verbose=False):
-        Operator.__init__(self, domain, description, label, logging, verbose)
+        # __new__ may have handed back the operator this domain already has, in
+        # which case Python still calls __init__ on it. Re-running
+        # Operator.__init__ would register a second fractional step.
+        if getattr(self, '_sediment_initialised', False):
+            return
 
-        if getattr(domain, 'n_sediment_classes', 0) == 0:
-            raise ValueError(
-                'Sediment_operator requires at least one sediment class; '
-                'call domain.add_sediment_class(...) first')
+        Operator.__init__(self, domain, description, label, logging, verbose)
+        self._sediment_initialised = True
+
+        self._warned_no_grain_size = False
 
         # Reporting for the repose relaxation (spec 7).
         self.repose_sweeps = 0
         self.repose_sweeps_total = 0
         self.repose_cap_hits = 0
 
+    def add_grain_size(self, name, diameter, **kwargs):
+        """Register a grain size. Delegates to `domain.add_grain_size`."""
+        return self.domain.add_grain_size(name, diameter, **kwargs)
+
     def __call__(self):
+        # Creating the operator without a grain size is legal -- it is how
+        # operator ORDER is controlled (see initialize_sediment_operator) --
+        # but evolving that way transports nothing, and the run would otherwise
+        # complete silently with the bed untouched.
+        if self.domain.n_sediment_classes == 0:
+            if not self._warned_no_grain_size:
+                self._warned_no_grain_size = True
+                msg = ('sediment transport is on but no grain size is '
+                       'registered, so nothing will be transported and the '
+                       'bed will not change. This includes bedload, which '
+                       'takes the grain diameter and R from a registered '
+                       'grain size: for bed evolution with no suspended '
+                       'sediment, register the grain size and select '
+                       "set_bedload('engelund_hansen'), which turns the "
+                       'suspended exchange off. Call '
+                       'domain.add_grain_size(name, diameter)')
+                log.critical(msg)
+                warnings.warn(msg, UserWarning, stacklevel=2)
+            return
+
         timestep = self.domain.get_timestep()
         if timestep <= 0.0:
             return

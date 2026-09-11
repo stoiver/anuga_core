@@ -107,8 +107,7 @@ def test_deposition_agrees():
         if mode != 1:
             d.set_multiprocessor_mode(mode)
             _require_mode_2(d)
-        d.add_sediment_class('sand', diameter=1.0e-4,
-                             initial_concentration=0.05)
+        d.add_grain_size(name='sand', diameter=1.0e-4, initial_concentration=0.05)
         return d
 
     a, b = _both(configure, 30.0, lambda d: d.get_tracer('sand').copy())
@@ -118,8 +117,8 @@ def test_deposition_agrees():
 def test_entrainment_agrees():
     def configure(mode):
         d = channel(mode=mode, nxy=(10, 10), length=(LEN, LEN))
-        d.add_sediment_class('sand', diameter=1.0e-4, tau_c_star=0.04,
-                             initial_concentration=0.0)
+        d.add_grain_size(name='sand', diameter=1.0e-4, tau_c_star=0.04,
+                         initial_concentration=0.0)
         return d
 
     a, b = _both(configure, 40.0, lambda d: d.get_tracer('sand').copy())
@@ -142,7 +141,7 @@ def test_the_rouse_near_bed_ratio_agrees():
         if mode != 1:
             d.set_multiprocessor_mode(mode)
             _require_mode_2(d)
-        d.add_sediment_class('s', diameter=1e-4, initial_concentration=0.02)
+        d.add_grain_size(name='s', diameter=1e-4, initial_concentration=0.02)
         return d
 
     a, b = _both(configure, 30.0, lambda d: d.get_tracer('s').copy())
@@ -154,7 +153,7 @@ def test_the_wilson_friction_closure_agrees():
         d = channel(mode=mode, nxy=(20, 10))
         d.set_sediment_friction('wilson', bed='gravel', grain_size=0.05)
         d.sediment_d_star_mode = 1
-        d.add_sediment_class('s', diameter=1e-4, initial_concentration=0.01)
+        d.add_grain_size(name='s', diameter=1e-4, initial_concentration=0.01)
         return d
 
     a, b = _both(configure, 20.0, lambda d: d.get_tracer('s').copy())
@@ -165,7 +164,7 @@ def test_the_depth_slope_shear_closure_agrees():
     def configure(mode):
         d = channel(mode=mode, nxy=(20, 10), length=(200.0, 100.0))
         d.set_shear_closure('depth_slope')
-        d.add_sediment_class('sand', diameter=1e-4, initial_concentration=0.0)
+        d.add_grain_size(name='sand', diameter=1e-4, initial_concentration=0.0)
         return d
 
     a, b = _both(configure, 20.0, lambda d: d.get_tracer('sand').copy())
@@ -176,8 +175,7 @@ def test_the_cohesive_erosion_route_agrees():
     def configure(mode):
         d = channel(mode=mode, nxy=(20, 10), length=(200.0, 100.0))
         d.set_bed_material('cohesive', tau_crit=0.088)
-        d.add_sediment_class('silt', diameter=6.5e-5,
-                             initial_concentration=0.0)
+        d.add_grain_size(name='silt', diameter=6.5e-5, initial_concentration=0.0)
         return d
 
     a, b = _both(configure, 20.0, lambda d: d.get_tracer('silt').copy())
@@ -203,8 +201,8 @@ def test_exner_bed_evolution_agrees():
             _require_mode_2(d)
         x, y = d.centroid_coordinates[:, 0], d.centroid_coordinates[:, 1]
         c0 = 0.7 * np.exp(-5.0 * (x - 0.9) ** 2 - 50.0 * (y - 0.5) ** 2)
-        d.add_sediment_class('sand', diameter=0.01, rho_s=2400.0,
-                             tau_c_star=0.0, initial_concentration=c0)
+        d.add_grain_size(name='sand', diameter=0.01, rho_s=2400.0, tau_c_star=0.0,
+                         initial_concentration=c0)
         return d
 
     a, b = _both(configure, 20.0,
@@ -216,8 +214,8 @@ def test_bedload_agrees():
     def configure(mode):
         d = channel(mode=mode, slope=0.02, depth=0.5, n_manning=0.025, dt=0.5,
                     nxy=(20, 10), length=(100.0, 50.0))
-        d.add_sediment_class('gravel', diameter=5e-3, tau_c_star=0.0,
-                             initial_concentration=0.0)
+        d.add_grain_size(name='gravel', diameter=5e-3, tau_c_star=0.0,
+                         initial_concentration=0.0)
         d.set_bedload('wong_parker_eq24')
         return d
 
@@ -243,7 +241,7 @@ def test_the_erodible_base_and_bedload_agree():
         d.set_sediment_parameters(porosity=0.3)
         d.set_bedload('wong_parker_eq24')
         for name, diameter in (('fine', 1.0e-4), ('coarse', 6.0e-4)):
-            d.add_sediment_class(name, diameter=diameter)
+            d.add_grain_size(name=name, diameter=diameter)
         d.set_erodible_base(depth=0.02)
         if mode != 1:
             d.set_multiprocessor_mode(mode)
@@ -277,7 +275,7 @@ def test_angle_of_repose_relaxation_agrees():
         d.set_boundary({t: Reflective_boundary(d)
                         for t in d.get_boundary_tags()})
         d.set_sediment_parameters(porosity=0.3)
-        d.add_sediment_class('sand', diameter=2.0e-4)
+        d.add_grain_size(name='sand', diameter=2.0e-4)
         d.set_angle_of_repose(30.0, max_sweeps=400)
         if mode != 1:
             d.set_multiprocessor_mode(mode)

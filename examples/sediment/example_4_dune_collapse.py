@@ -76,7 +76,7 @@ def build(repose):
 
     domain.set_sediment_parameters(porosity=PORO)
     domain.set_bed_material('noncohesive')
-    domain.add_sediment_class('dune_sand', diameter=3.0e-4)
+    domain.add_grain_size(name='dune_sand', diameter=3.0e-4)
     if repose:
         # 50 sweeps is the default and is sized for a bed that is already
         # near-relaxed. This one starts below the critical angle, so the cap
@@ -88,7 +88,7 @@ def build(repose):
 def run(repose):
     domain = build(repose)
     op = [o for o in domain.fractional_step_operators
-          if type(o).__name__ == 'Sediment_operator'][0]
+          if type(o).__name__ == 'Sediment_transport_operator'][0]
     areas = domain.areas
     z0 = domain.quantities['elevation'].centroid_values.copy()
     bed0 = float((z0 * areas).sum())

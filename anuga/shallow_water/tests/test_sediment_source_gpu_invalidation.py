@@ -53,7 +53,7 @@ def _domain(mode):
     # A sediment CLASS, not a bare tracer: tracer_external_source is applied
     # by the sediment source kernel, which does nothing with no classes
     # registered -- so a plain tracer would never show the source at all.
-    d.add_sediment_class('mms', diameter=1.0e-4, initial_concentration=0.0)
+    d.add_grain_size(name='mms', diameter=1.0e-4, initial_concentration=0.0)
     d.store = False
     op = _ResetsTheInterface(d)
     d.set_multiprocessor_mode(mode)
@@ -85,7 +85,7 @@ def test_the_two_modes_agree_on_the_source():
     Three things had to be true at once, and each was a separate defect:
     the source array had to stop being reallocated mid-run (it is now a
     first-class tracer array); it had to be mapped to the device at all;
-    and Sediment_operator had to stop running on the device inside
+    and Sediment_transport_operator had to stop running on the device inside
     apply_fractional_steps' host-coherent window, where the trailing
     sync_to_device overwrites whatever the device computed.
     """
@@ -127,7 +127,7 @@ def test_a_time_varying_source_is_not_stale_on_the_device():
         d.set_quantity('stage', 1.0)
         b = anuga.Reflective_boundary(d)
         d.set_boundary({'left': b, 'right': b, 'top': b, 'bottom': b})
-        d.add_sediment_class('mms', diameter=1.0e-4, initial_concentration=0.0)
+        d.add_grain_size(name='mms', diameter=1.0e-4, initial_concentration=0.0)
         d.store = False
         _Ramp(d)
         d.set_multiprocessor_mode(mode)
