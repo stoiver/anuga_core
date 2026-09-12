@@ -171,11 +171,16 @@ arch_compiles() {
     return $rc
 }
 
-# nvidia-smi is the only way we have to see a GPU, and it is not always
-# cheap: on a node with no driver, or a driver in a bad state, it can block
-# for a long time instead of failing.  Probe ONCE, under a timeout, and reuse
-# the answer -- the script used to call it three times with no timeout, which
-# on an HPC login node looks exactly like a hang.
+# nvidia-smi is the only way we have to see a GPU, and it is not always cheap.
+# Being ON PATH says nothing: an HPC login node typically ships the binary
+# without a driver for it to talk to, where it fails with
+#
+#     NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA
+#     driver.
+#
+# but takes its time about it. The script used to call nvidia-smi three times
+# with no timeout, right after announcing the test suite, which is
+# indistinguishable from a hung test run. Probe ONCE, bounded, and reuse it.
 nvidia_smi_query() {
     command -v nvidia-smi >/dev/null 2>&1 || return 0
     if command -v timeout >/dev/null 2>&1; then
@@ -185,18 +190,36 @@ nvidia_smi_query() {
     fi
 }
 
+if command -v nvidia-smi >/dev/null 2>&1; then
+    echo "# Looking for a GPU (nvidia-smi)..."
+fi
 GPU_NAME_PROBE="$(nvidia_smi_query name | head -1)"
 if [ -n "$GPU_NAME_PROBE" ]; then
     HAVE_GPU=1
+    echo "# GPU detected: ${GPU_NAME_PROBE}"
 else
     HAVE_GPU=0
+    if command -v nvidia-smi >/dev/null 2>&1; then
+        echo "# No usable GPU here: nvidia-smi is installed but reports no"
+        echo "# device (no driver loaded, or none allocated to this node)."
+        echo "# This is normal on an HPC login node. Building anyway."
+    else
+        echo "# No GPU here: nvidia-smi is not installed. Building anyway."
+    fi
 fi
 
 GPU_ARCH_EXPLICIT=1
 [ "$GPU_ARCH" = "auto" ] && GPU_ARCH_EXPLICIT=0
 
 if [ "$GPU_ARCH" = "auto" ]; then
-    CAP=$(nvidia_smi_query compute_cap | head -1 | tr -d ' ')
+    # Only ask again if the first probe actually saw a device; otherwise this
+    # is a second guaranteed-to-fail call, and on a driverless node a second
+    # wait for it.
+    if [ "$HAVE_GPU" = "1" ]; then
+        CAP=$(nvidia_smi_query compute_cap | head -1 | tr -d ' ')
+    else
+        CAP=""
+    fi
     if [[ "$CAP" =~ ^[0-9]+\.[0-9]+$ ]]; then
         GPU_ARCH="cc${CAP//./}"
         echo "# GPU_ARCH=auto -> ${GPU_ARCH} (detected: compute capability ${CAP})"
