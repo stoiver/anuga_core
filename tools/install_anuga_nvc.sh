@@ -182,7 +182,7 @@ arch_compiles() {
 # with no timeout, right after announcing the test suite, which is
 # indistinguishable from a hung test run. Probe ONCE, bounded, and reuse it.
 nvidia_smi_query() {
-    command -v nvidia-smi >/dev/null 2>&1 || return 0
+    command -v nvidia-smi >/dev/null 2>&1 || return 1
     if command -v timeout >/dev/null 2>&1; then
         timeout 10 nvidia-smi --query-gpu="$1" --format=csv,noheader 2>/dev/null
     else
@@ -193,7 +193,19 @@ nvidia_smi_query() {
 if command -v nvidia-smi >/dev/null 2>&1; then
     echo "# Looking for a GPU (nvidia-smi)..."
 fi
+# Require BOTH a zero exit status and a plausible device name. Exit status
+# alone is not enough (some builds report success with an empty list), and a
+# non-empty line alone is not enough either: a failing nvidia-smi may still
+# print something -- "[Not Supported]", "[N/A]", or an error -- on stdout,
+# which a bare -n test reads as a GPU and sends the script on to run the GPU
+# test suite on a machine that has none.
 GPU_NAME_PROBE="$(nvidia_smi_query name | head -1)"
+GPU_PROBE_RC=$?
+case "$GPU_NAME_PROBE" in
+    ''|'['*|*'Not Supported'*|*'N/A'*|*'failed'*|*'Error'*|*'error'*)
+        GPU_NAME_PROBE="" ;;
+esac
+[ "$GPU_PROBE_RC" -ne 0 ] && GPU_NAME_PROBE=""
 if [ -n "$GPU_NAME_PROBE" ]; then
     HAVE_GPU=1
     echo "# GPU detected: ${GPU_NAME_PROBE}"
