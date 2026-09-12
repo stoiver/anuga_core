@@ -247,6 +247,16 @@ if [ "$GPU_ARCH" = "auto" ]; then
         # both, the CUDA 13 default must be overridden explicitly.  So ASK the
         # compiler: try the widest list first and keep the first that builds.
         echo "# GPU_ARCH=auto -> no GPU visible here; probing what this nvc can build."
+        echo "#"
+        echo "#   NOTE: this is the SLOW path, and it is the usual one on a login"
+        echo "#   node. Probing compiles a test file once per candidate list, and"
+        echo "#   the build that follows then generates device code for EVERY"
+        echo "#   architecture in the winning list -- up to seven. Expect tens of"
+        echo "#   minutes, with long silences from nvc. It is working, not hung."
+        echo "#"
+        echo "#   If you know the compute nodes you are targeting, naming them is"
+        echo "#   much faster, e.g. GPU_ARCH=cc80 (A100) or GPU_ARCH=cc90 (H100)."
+        echo "#"
         ALL="cc75,cc80,cc86,cc89,cc90,cc120"
         GPU_ARCH=""
         for CANDIDATE in "cc70,${ALL}" \
