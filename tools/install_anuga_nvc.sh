@@ -171,11 +171,32 @@ arch_compiles() {
     return $rc
 }
 
+# nvidia-smi is the only way we have to see a GPU, and it is not always
+# cheap: on a node with no driver, or a driver in a bad state, it can block
+# for a long time instead of failing.  Probe ONCE, under a timeout, and reuse
+# the answer -- the script used to call it three times with no timeout, which
+# on an HPC login node looks exactly like a hang.
+nvidia_smi_query() {
+    command -v nvidia-smi >/dev/null 2>&1 || return 0
+    if command -v timeout >/dev/null 2>&1; then
+        timeout 10 nvidia-smi --query-gpu="$1" --format=csv,noheader 2>/dev/null
+    else
+        nvidia-smi --query-gpu="$1" --format=csv,noheader 2>/dev/null
+    fi
+}
+
+GPU_NAME_PROBE="$(nvidia_smi_query name | head -1)"
+if [ -n "$GPU_NAME_PROBE" ]; then
+    HAVE_GPU=1
+else
+    HAVE_GPU=0
+fi
+
 GPU_ARCH_EXPLICIT=1
 [ "$GPU_ARCH" = "auto" ] && GPU_ARCH_EXPLICIT=0
 
 if [ "$GPU_ARCH" = "auto" ]; then
-    CAP=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ')
+    CAP=$(nvidia_smi_query compute_cap | head -1 | tr -d ' ')
     if [[ "$CAP" =~ ^[0-9]+\.[0-9]+$ ]]; then
         GPU_ARCH="cc${CAP//./}"
         echo "# GPU_ARCH=auto -> ${GPU_ARCH} (detected: compute capability ${CAP})"
@@ -385,7 +406,12 @@ echo "#============================================================"
 echo "# Building ANUGA with GPU offloading"
 echo "#   CC=$NVC"
 echo "#   CXX=${CXX:-<system default; no C++ sources today>}"
-echo "#   gpu_offload=true  gpu_arch=${GPU_ARCH}  gpu_aware_mpi=${GPU_AWARE_MPI:-0}"
+echo "#   gpu_offload=true  gpu_arch=${GPU_ARCH}"
+echo "#   gpu_aware_mpi=${GPU_AWARE_MPI:-0}  (halo BUFFER allocation only --"
+echo "#     ANUGA never hands device pointers to MPI, on either setting, so"
+echo "#     this says nothing about whether your MPI is CUDA-aware.  A 0 here"
+echo "#     is not a failed detection: it is the default, and it is unrelated"
+echo "#     to what 'ompi_info | grep cuda' reports.  See issue #223.)"
 echo "#============================================================"
 echo " "
 
@@ -518,29 +544,10 @@ if ! $CONDA_RUN python "${ANUGA_CORE_PATH}/tools/anuga_build_report.py" --check;
 fi
 echo " "
 
-echo "#============================================================"
-echo "# Running GPU test suite (isolated runner)"
-echo "#   One fresh process per test.  A plain 'pytest' on this file"
-echo "#   auto-skips on a GPU build: the NVHPC OpenMP-target runtime"
-echo "#   aborts once many mode-2 GPU domains are created in a single"
-echo "#   process, so the tests must each run in their own process."
-echo "#   scripts/anuga_run_isolated_tests.py defaults to test_DE_gpu_omp.py"
-echo "#   and opts in via ANUGA_GPU_TESTS_ISOLATED=1.  Run the script"
-echo "#   directly (not the installed console command, which an editable"
-echo "#   'pip install -e .' does not place on PATH)."
-echo "#============================================================"
-echo " "
-
 # Do not run the GPU tests where there is no GPU.  The usual case is an HPC
 # login node: every test would fail or skip after a long wait, and running a
 # heavy suite there is antisocial (many sites forbid it outright).  The build is
 # still complete and usable -- the tests just have to happen where the GPUs are.
-HAVE_GPU=0
-if nvidia-smi --query-gpu=name --format=csv,noheader >/dev/null 2>&1 && \
-   [ -n "$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null)" ]; then
-    HAVE_GPU=1
-fi
-
 if [ "${SKIP_TESTS:-0}" = "1" ]; then
     echo "SKIP_TESTS=1 - skipping the GPU test suite."
 elif [ "$HAVE_GPU" = "0" ] && [ "${FORCE_TESTS:-0}" != "1" ]; then
@@ -562,6 +569,18 @@ elif [ "$HAVE_GPU" = "0" ] && [ "${FORCE_TESTS:-0}" != "1" ]; then
     echo "# FORCE_TESTS=1 runs them here regardless."
     echo "#=================================================================="
 else
+    echo "#============================================================"
+    echo "# Running GPU test suite (isolated runner)"
+    echo "#   One fresh process per test.  A plain 'pytest' on this file"
+    echo "#   auto-skips on a GPU build: the NVHPC OpenMP-target runtime"
+    echo "#   aborts once many mode-2 GPU domains are created in a single"
+    echo "#   process, so the tests must each run in their own process."
+    echo "#   scripts/anuga_run_isolated_tests.py defaults to test_DE_gpu_omp.py"
+    echo "#   and opts in via ANUGA_GPU_TESTS_ISOLATED=1.  Run the script"
+    echo "#   directly (not the installed console command, which an editable"
+    echo "#   'pip install -e .' does not place on PATH)."
+    echo "#============================================================"
+    echo " "
     $CONDA_RUN \
         python "${ANUGA_CORE_PATH}/scripts/anuga_run_isolated_tests.py"
 fi
