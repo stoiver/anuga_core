@@ -199,8 +199,12 @@ fi
 # print something -- "[Not Supported]", "[N/A]", or an error -- on stdout,
 # which a bare -n test reads as a GPU and sends the script on to run the GPU
 # test suite on a machine that has none.
-GPU_NAME_PROBE="$(nvidia_smi_query name | head -1)"
+# NB capture the status BEFORE piping: `$?` after a pipeline is the status of
+# the last element, so `nvidia_smi_query ... | head -1` would always report
+# head's 0 and the check below would never fire.
+GPU_PROBE_RAW="$(nvidia_smi_query name)"
 GPU_PROBE_RC=$?
+GPU_NAME_PROBE="$(printf '%s\n' "$GPU_PROBE_RAW" | head -1)"
 case "$GPU_NAME_PROBE" in
     ''|'['*|*'Not Supported'*|*'N/A'*|*'failed'*|*'Error'*|*'error'*)
         GPU_NAME_PROBE="" ;;
