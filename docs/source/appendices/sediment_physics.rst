@@ -395,7 +395,34 @@ default:
      - ``[T-13..T-15]``
      - partitions total stress into grain and form drag. Bedforms or roughness elements, where only the grain part drives sediment.
 
-``bed`` is ``'sand'`` or ``'gravel'``; ``grain_size`` (m) is the roughness length
+``bed`` is ``'sand'``, ``'gravel'`` or ``'boulder'`` -- one curve each,
+``[T-8]`` to ``[T-10]``.
+
+.. warning::
+
+   ``bed`` selects the *curve*; ``grain_size`` sets the relative submergence
+   :math:`h/D` that curve is evaluated at. They are independent inputs, and
+   nothing ties them together, so a mismatched pair runs without error and
+   quietly gives the wrong friction.
+
+   The gravel and boulder relations are logarithmic in :math:`h/D`, so too
+   small a ``grain_size`` inflates the submergence and collapses
+   :math:`f_c`. At :math:`h = 1` m, ``bed='boulder'`` gives
+   :math:`f_c = 0.0016` at ``grain_size=2e-4`` against :math:`0.031` at a
+   plausible ``0.5`` -- a factor of 19 in :math:`f_c`, and therefore in
+   :math:`\tau_b`. On a test channel that under-predicted scour four-fold.
+
+   ANUGA warns when ``grain_size`` looks implausible for the chosen ``bed``
+   (roughly Wentworth, widened: sand 6e-5 to 2e-3 m, gravel 2e-3 to 0.25 m,
+   boulder 0.05 to 10 m). It warns rather than refuses -- an unusual bed is a
+   legitimate choice -- but check the pairing before ignoring it.
+
+   Note also that ``grain_size`` is the roughness length scale of the **bed
+   surface**, not the diameter passed to :meth:`add_grain_size`. Which
+   percentile it should carry depends on the bed: :math:`D_{50}` for
+   ``'sand'``, :math:`D_{84}` for ``'gravel'`` and ``'boulder'``.
+
+``grain_size`` (m) is the roughness length
 scale; ``k_s`` (m) is the roughness height; ``r_d`` and ``r_br`` (default 2.0) are
 Larsen-Lamb's drag partitioning ratios.
 
