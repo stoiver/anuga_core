@@ -387,7 +387,7 @@ default:
 
 .. list-table::
    :header-rows: 1
-   :widths: 28 26 46
+   :widths: 24 30 46
 
    * - mode
      - spec
@@ -826,7 +826,7 @@ summaries, and renumbering would only break the correspondence.
 
 .. list-table::
    :header-rows: 1
-   :widths: 14 86
+   :widths: 24 76
 
    * - Label
      - Term
@@ -841,7 +841,7 @@ summaries, and renumbering would only break the correspondence.
 
 .. list-table::
    :header-rows: 1
-   :widths: 14 86
+   :widths: 24 76
 
    * - Label
      - Term
@@ -857,7 +857,7 @@ summaries, and renumbering would only break the correspondence.
 
 .. list-table::
    :header-rows: 1
-   :widths: 14 86
+   :widths: 24 76
 
    * - Label
      - Term
@@ -870,7 +870,7 @@ summaries, and renumbering would only break the correspondence.
 
 .. list-table::
    :header-rows: 1
-   :widths: 14 86
+   :widths: 24 76
 
    * - Label
      - Term
@@ -914,7 +914,7 @@ summaries, and renumbering would only break the correspondence.
 
 .. list-table::
    :header-rows: 1
-   :widths: 14 86
+   :widths: 24 76
 
    * - Label
      - Term
@@ -934,7 +934,7 @@ summaries, and renumbering would only break the correspondence.
 
 .. list-table::
    :header-rows: 1
-   :widths: 14 86
+   :widths: 24 76
 
    * - Label
      - Term
@@ -951,7 +951,7 @@ summaries, and renumbering would only break the correspondence.
 
 .. list-table::
    :header-rows: 1
-   :widths: 14 86
+   :widths: 24 76
 
    * - Label
      - Term
