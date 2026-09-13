@@ -402,7 +402,10 @@ default:
      - :spec:`T-13` to :spec:`T-15`
      - partitions total stress into grain and form drag. Bedforms or roughness elements, where only the grain part drives sediment.
 
-``bed`` is ``'sand'`` or ``'gravel'``; ``grain_size`` (m) is the roughness length
+``bed`` is ``'sand'``, ``'gravel'`` or ``'boulder'`` -- one curve each,
+:spec:`T-8` to :spec:`T-10`. Which grain-size percentile ``grain_size`` should
+carry depends on it: :math:`D_{50}` for ``'sand'``, :math:`D_{84}` for
+``'gravel'`` and ``'boulder'``. ``grain_size`` (m) is the roughness length
 scale; ``k_s`` (m) is the roughness height; ``r_d`` and ``r_br`` (default 2.0) are
 Larsen-Lamb's drag partitioning ratios.
 
