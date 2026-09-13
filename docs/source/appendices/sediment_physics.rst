@@ -725,7 +725,7 @@ vector :math:`\mathbf{q}_b`, following [Par98]_.
      - the default; bedload only
    * - .. _spec-k-5:
 
-       [EH67]_, as ``[K-5]``
+       [EH67]_, as :speclit:`K-5`
      - :math:`0.05/f_c`
      - 2.5
      - 0
@@ -815,7 +815,7 @@ unambiguously wherever it comes up. The list below is what each one names.
 
 Every label below is also an index entry, grouped under **physics label** in
 the :ref:`genindex` -- which is the reliable way to look one up. The site
-search will not find ``[T-7]`` as typed: its tokeniser splits on the bracket
+search will not find :speclit:`T-7` as typed: its tokeniser splits on the bracket
 and hyphen, so the label never enters the search index as a whole word.
 
 They originate in an internal specification that is not distributed with
@@ -887,27 +887,27 @@ summaries, and renumbering would only break the correspondence.
      - the depth-limiting velocity form ANUGA uses
    * - .. _spec-t-6:
 
-       ``[T-6]``
+       :speclit:`T-6`
      - constant Manning ``n``, taken from the domain's friction quantity
    * - .. _spec-t-7:
 
-       ``[T-7]``
+       :speclit:`T-7`
      - depth-slope closure, :math:`\tau_b = \rho\, g\, h\, S` with
        :math:`S` the **bed** slope
    * - .. _spec-t-7e:
 
-       ``[T-7e]``
+       :speclit:`T-7e`
      - energy-slope closure, the same :math:`\tau_b = \rho\, g\, h\, S`
        with :math:`S` the **free-surface** slope
    * - .. _spec-t-8:
        .. _spec-t-10:
 
-       ``[T-8]`` to ``[T-10]``
+       :speclit:`T-8` to :speclit:`T-10`
      - the ``'wilson'`` friction closure
    * - .. _spec-t-13:
        .. _spec-t-15:
 
-       ``[T-13]`` to ``[T-15]``
+       :speclit:`T-13` to :speclit:`T-15`
      - the ``'larsen_lamb'`` friction closure
 
 **Bedload**
@@ -925,7 +925,7 @@ summaries, and renumbering would only break the correspondence.
        :math:`\partial z/\partial t = -\dfrac{1}{1-\lambda}\,\nabla\cdot\mathbf{q}_b`
    * - .. _spec-k-4:
 
-       ``[K-4]``
+       :speclit:`K-4`
      - the per-cell bedload transport vector :math:`\mathbf{q}_b`
    * - :spec:`K-5`
      - Engelund & Hansen total load, no threshold
@@ -957,27 +957,27 @@ summaries, and renumbering would only break the correspondence.
      - Term
    * - .. _spec-l-1:
 
-       ``[L-1]``
+       :speclit:`L-1`
      - positivity
    * - .. _spec-l-2:
 
-       ``[L-2]``
+       :speclit:`L-2`
      - the concentration ceiling :math:`c_{\max}` (``c_max``)
    * - .. _spec-l-3:
 
-       ``[L-3]``
+       :speclit:`L-3`
      - a cap on the rate of bed change, ``|dz/dt| <= max_dz``. **Not
        implemented in ANUGA** -- listed so the gap in the numbering is not
        mistaken for an omission here. It is unrelated to the ``beta`` edge
        reconstruction limiter, which the tracers share.
    * - .. _spec-l-4:
 
-       ``[L-4]``
+       :speclit:`L-4`
      - the packing fraction :math:`c_\text{pack}` (``c_pack``) bounding
        near-bed concentration
    * - .. _spec-l-5:
 
-       ``[L-5]``
+       :speclit:`L-5`
      - the non-erodible base
 
 .. _sediment_references:
