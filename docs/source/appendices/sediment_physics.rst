@@ -396,10 +396,10 @@ default:
      - :spec:`T-6`
      - default: ``f_c`` from the domain's Manning ``n``. Ordinary flood and channel work.
    * - ``'wilson'``
-     - ``[T-8..T-12]``
+     - :spec:`T-8` to :spec:`T-10`
      - depth-dependent, from grain size. Shallow flow over coarse beds, where relative submergence matters.
    * - ``'larsen_lamb'``
-     - ``[T-13..T-15]``
+     - :spec:`T-13` to :spec:`T-15`
      - partitions total stress into grain and form drag. Bedforms or roughness elements, where only the grain part drives sediment.
 
 ``bed`` is ``'sand'`` or ``'gravel'``; ``grain_size`` (m) is the roughness length
