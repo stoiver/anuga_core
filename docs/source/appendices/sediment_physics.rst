@@ -352,7 +352,8 @@ drives the flow. It is also what the older ``Bed_shear_erosion_operator`` used,
 which makes it the closure to pick when reproducing a model built on that
 operator; see :ref:`coming_from_erosion_operators`.
 
-The three are interchangeable by construction: the kernel returns ``tau_b/rho``,
+The three are interchangeable by construction: the kernel returns
+:math:`\tau_b/\rho`,
 so everything downstream is unchanged by the choice.
 
 .. _72-set_sediment_friction----what:
@@ -576,10 +577,10 @@ with :math:`C_1 = 18`, :math:`C_2 = 0.4` for smooth spheres, and
      - expression
      - when
    * - ``'d_star'``
-     - ``D = d* c v_s``, :spec:`D-1`
+     - :math:`D = d^{*}\, c\, v_s`, :spec:`D-1`
      - default; always deposits
    * - ``'threshold'``
-     - :spec:`D-2`, deposition only where ``tau_b < tau_d``
+     - :spec:`D-2`, deposition only where :math:`\tau_b < \tau_d`
      - when you need deposition suppressed under strong flow
 
 ``tau_d`` (Pa) is the threshold for ``'threshold'`` and is ignored otherwise.
@@ -636,9 +637,11 @@ quantity is depth-averaged. ``d* = c_b/c`` bridges them.
    * - value
      - meaning
    * - ``'constant'``
-     - ``d*`` is whatever each class was given (1.0 = well-mixed). Default.
+     - :math:`d^{*}` is whatever each grain size was given
+       (:math:`d^{*}=1` is well-mixed). Default.
    * - ``'rouse'``
-     - ``d*`` from the Rouse profile :spec:`S-4`, recomputed per cell per step
+     - :math:`d^{*}` from the Rouse profile :spec:`S-4`, recomputed per cell
+       per step
 
 ``'constant'`` with ``d* = 1`` is the well-mixed assumption: fine sediment,
 vigorous mixing, shallow flow. It is also what the analytic decay solutions
@@ -647,7 +650,7 @@ assume, so use it when comparing against them.
 ``'rouse'`` is the physical choice when the profile is stratified -- coarser
 grains, or deeper and slower flow, where near-bed concentration genuinely
 exceeds the mean. It costs an evaluation of the fitted ``d*(Z, a/h)``
-polynomial per cell per class per step (§9.5 of the spec; 28 terms, maximum
+polynomial per cell per grain size per step (§9.5 of the spec; 28 terms, maximum
 error 0.82% over ``Z`` in [0.01, 2.5], ``a/h`` in [1e-3, 0.15], clamped at the
 edges rather than extrapolated).
 
@@ -776,11 +779,11 @@ summaries, and renumbering would only break the correspondence.
    * - Label
      - Term
    * - :spec:`S-1`
-     - settling velocity ``v_s``, Ferguson & Church (2004)
+     - settling velocity :math:`v_s`, Ferguson & Church (2004)
    * - :spec:`S-2`
-     - Rouse number ``Z = v_s / (kappa u*)``
+     - Rouse number :math:`Z = v_s/(\kappa\, u_*)`
    * - :spec:`S-4`
-     - the Rouse near-bed concentration ratio ``d*(Z, a/h)``
+     - the Rouse near-bed concentration ratio :math:`d^{*}(Z,\, a/h)`
 
 **Erosion**
 
@@ -807,9 +810,9 @@ summaries, and renumbering would only break the correspondence.
    * - Label
      - Term
    * - :spec:`D-1`
-     - ``D = d* c v_s``
+     - :math:`D = d^{*}\, c\, v_s`
    * - :spec:`D-2`
-     - threshold deposition, ``D = v_s c (1 - tau_b/tau_d)``
+     - threshold deposition, :math:`D = v_s\, c\,(1 - \tau_b/\tau_d)`
 
 **Bed shear and friction**
 
@@ -820,13 +823,14 @@ summaries, and renumbering would only break the correspondence.
    * - Label
      - Term
    * - :spec:`T-1`
-     - quadratic drag, ``tau_b = rho f_c |v|^2`` -- the default closure
+     - quadratic drag, :math:`\tau_b = \rho\, f_c\, |\mathbf{v}|^2`
+       -- the default closure
    * - :spec:`T-2`
-     - shear velocity ``u* = |v| sqrt(f_c)``
+     - shear velocity :math:`u_* = |\mathbf{v}|\sqrt{f_c}`
    * - :spec:`T-3`
-     - dimensionless stress ``tau* = f_c |v|^2 / (R g d)``
+     - dimensionless stress :math:`\tau^{*} = f_c |\mathbf{v}|^2/(R\, g\, d)`
    * - :spec:`T-4`
-     - excess stress ``tau_x = tau* - tau_c*``
+     - excess stress :math:`\tau_x = \tau^{*} - \tau_c^{*}`
    * - :spec:`T-5`
      - the depth-limiting velocity form ANUGA uses
    * - .. _spec-t-6:
@@ -836,12 +840,13 @@ summaries, and renumbering would only break the correspondence.
    * - .. _spec-t-7:
 
        ``[T-7]``
-     - depth-slope closure, ``tau_b = rho g h S`` with ``S`` the BED slope
+     - depth-slope closure, :math:`\tau_b = \rho\, g\, h\, S` with
+       :math:`S` the **bed** slope
    * - .. _spec-t-7e:
 
        ``[T-7e]``
-     - energy-slope closure, the same ``tau_b = rho g h S`` with ``S`` the
-       FREE-SURFACE slope
+     - energy-slope closure, the same :math:`\tau_b = \rho\, g\, h\, S`
+       with :math:`S` the **free-surface** slope
    * - .. _spec-t-8:
        .. _spec-t-10:
 
@@ -862,13 +867,14 @@ summaries, and renumbering would only break the correspondence.
    * - Label
      - Term
    * - :spec:`K-1`, :spec:`K-2`
-     - power law, ``q_b* = K tau_x^m``
+     - power law, :math:`q_b^{*} = K\, \tau_x^{\,m}`
    * - :spec:`K-3`
-     - bed change from bedload, ``dz/dt = -(1/(1-lambda)) div q_b``
+     - bed change from bedload,
+       :math:`\partial z/\partial t = -\dfrac{1}{1-\lambda}\,\nabla\cdot\mathbf{q}_b`
    * - .. _spec-k-4:
 
        ``[K-4]``
-     - the per-cell bedload transport vector ``q_b``
+     - the per-cell bedload transport vector :math:`\mathbf{q}_b`
    * - :spec:`K-5`
      - Engelund & Hansen total load, no threshold
 
@@ -881,7 +887,8 @@ summaries, and renumbering would only break the correspondence.
    * - Label
      - Term
    * - :spec:`G-3`
-     - the suspended source term, ``m_s <- m_s + dt (E_s - D_s)``, including
+     - the suspended source term,
+       :math:`m_s \leftarrow m_s + \Delta t\,(E_s - D_s)`, including
        any external source
    * - :spec:`G-4`
      - Exner bed evolution from the suspended exchange
@@ -903,7 +910,7 @@ summaries, and renumbering would only break the correspondence.
    * - .. _spec-l-2:
 
        ``[L-2]``
-     - the concentration ceiling ``c_max``
+     - the concentration ceiling :math:`c_{\max}` (``c_max``)
    * - .. _spec-l-3:
 
        ``[L-3]``
@@ -914,7 +921,8 @@ summaries, and renumbering would only break the correspondence.
    * - .. _spec-l-4:
 
        ``[L-4]``
-     - the packing fraction ``c_pack`` bounding near-bed concentration
+     - the packing fraction :math:`c_\text{pack}` (``c_pack``) bounding
+       near-bed concentration
    * - .. _spec-l-5:
 
        ``[L-5]``
