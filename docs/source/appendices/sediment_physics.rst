@@ -95,6 +95,10 @@ Notation
    * - :math:`\tau_d`
      - critical stress for *deposition*
      - Pa
+   * - :math:`S`
+     - excess-stress ratio, :math:`\tau^{*}/\tau_c^{*}-1`, in :spec:`E-1`;
+       water-surface slope in :spec:`T-7`, :spec:`T-7e`
+     - --
    * - :math:`u_*`
      - shear velocity, :math:`\sqrt{\tau_b/\rho}`
      - m s\ :sup:`-1`
@@ -144,13 +148,16 @@ typical one -- which is why the ``'wilson'`` closure below asks for
 
 .. warning::
 
-   Two symbols are overloaded, by long convention in this literature, and both
-   appear on this page.
+   Three symbols are overloaded, by long convention in this literature, and all
+   three appear on this page.
 
    :math:`D` is **grain diameter** in the shear and bedload relations, and the
    **deposition flux** in the mass balance. :math:`m` is the **conserved
    variable** :math:`h\,c` in the transport equation, and the **exponent** in
-   the bedload power law :math:`q_b^{*} = K\tau_x^{\,m}`.
+   the bedload power law :math:`q_b^{*} = K\tau_x^{\,m}`. :math:`S` is the
+   **excess-stress ratio** in the Smith & McLean entrainment :spec:`E-1`, and
+   the **water-surface slope** in the depth-slope closures :spec:`T-7` and
+   :spec:`T-7e`.
 
    Which is meant is unambiguous from the equation, but they are worth
    flagging.
@@ -305,7 +312,7 @@ The alternative depth-slope closure, :math:`\tau_b = \rho\,g\,h\,S`, is the one
 [aSM16]_ used, and is kept for reproducing anugaSed's results.
 
 
-Two independent choices feed ``tau_b``: how the stress is formed, and what
+Two independent choices feed :math:`\tau_b`: how the stress is formed, and what
 friction factor goes into it.
 
 .. _71-set_shear_closure----how:
@@ -758,6 +765,43 @@ antisymmetric and therefore conservative; see ``test_sediment_bedload.py``.
 
 .. _sediment_labels:
 
+.. index::
+   single: physics label; [D-1]
+   single: physics label; [D-2]
+   single: physics label; [E-1]
+   single: physics label; [E-2]
+   single: physics label; [E-3]
+   single: physics label; [E-4]
+   single: physics label; [E-5]
+   single: physics label; [G-3]
+   single: physics label; [G-4]
+   single: physics label; [G-5]
+   single: physics label; [K-1]
+   single: physics label; [K-2]
+   single: physics label; [K-3]
+   single: physics label; [K-4]
+   single: physics label; [K-5]
+   single: physics label; [L-1]
+   single: physics label; [L-2]
+   single: physics label; [L-3]
+   single: physics label; [L-4]
+   single: physics label; [L-5]
+   single: physics label; [S-1]
+   single: physics label; [S-2]
+   single: physics label; [S-4]
+   single: physics label; [T-1]
+   single: physics label; [T-2]
+   single: physics label; [T-3]
+   single: physics label; [T-4]
+   single: physics label; [T-5]
+   single: physics label; [T-6]
+   single: physics label; [T-7]
+   single: physics label; [T-7e]
+   single: physics label; [T-8]
+   single: physics label; [T-10]
+   single: physics label; [T-13]
+   single: physics label; [T-15]
+
 What the bracketed labels mean
 ------------------------------
 
@@ -765,6 +809,11 @@ Labels like :spec:`E-1` name a **term in the physics**, not a reference. They
 appear throughout this page, in the source comments, and in the output of
 ``domain.sediment_summary()``, so that a given term can be pointed at
 unambiguously wherever it comes up. The list below is what each one names.
+
+Every label below is also an index entry, grouped under **physics label** in
+the :ref:`genindex` -- which is the reliable way to look one up. The site
+search will not find ``[T-7]`` as typed: its tokeniser splits on the bracket
+and hyphen, so the label never enters the search index as a whole word.
 
 They originate in an internal specification that is not distributed with
 ANUGA; the numbering is kept because it is already in the code and the
