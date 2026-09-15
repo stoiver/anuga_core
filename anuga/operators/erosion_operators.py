@@ -32,7 +32,7 @@ def _erosion_migration_notice(op_name):
     GPU->CPU sync per RK step. Measured on 115k triangles they add 12.9x the
     overhead of the whole sediment transport module on GPU, and 3.3x on CPU,
     while modelling less. Most people reaching for them today want
-    domain.add_grain_size(); see anuga-community/anuga_core#310.
+    domain.add_sediment_fraction(); see anuga-community/anuga_core#310.
     """
     global _MIGRATION_NOTICE_SHOWN
     if _MIGRATION_NOTICE_SHOWN:
@@ -44,7 +44,7 @@ def _erosion_migration_notice(op_name):
         "under compute mode 'unified' they force a GPU<->CPU sync every RK "
         "step -- measured at 12.9x the overhead of the full sediment "
         "transport module on GPU (3.3x on CPU), for less physics and no mass "
-        "conservation. Consider domain.add_grain_size(...); "
+        "conservation. Consider domain.add_sediment_fraction(...); "
         "Bed_shear_erosion_operator in particular maps closely onto "
         "set_shear_closure('energy_slope') with a cohesive bed material. See "
         "the 'Coming from the erosion operators' section of the sediment "
