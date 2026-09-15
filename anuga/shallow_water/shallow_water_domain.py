@@ -93,6 +93,8 @@ def profileit(name):
     return inner
 #-----------------------------
 
+import warnings
+
 import numpy as num
 import sys
 import os
@@ -2165,6 +2167,39 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                 raise ValueError(
                     "wilson needs grain_size > 0 (D50 for sand, D84 for "
                     "gravel/boulder)")
+
+            # `bed` picks the curve; `grain_size` sets the relative submergence
+            # h/D it is evaluated at. They are independent, so a boulder curve
+            # at a sand-sized D is a well-formed calculation of nothing real --
+            # and it fails quietly and hugely. The gravel and boulder relations
+            # are logarithmic in h/D, so shrinking D inflates the submergence
+            # and drives f_c down: bed='boulder' at D = 2e-4 gives f_c = 0.0016
+            # against 0.031 at a plausible D = 0.5, a factor of 19 in f_c and
+            # therefore in tau_b. Measured end to end, that under-predicted
+            # scour four-fold.
+            #
+            # Bounds are deliberately loose -- roughly Wentworth, widened so
+            # the usual borderline choices pass. This warns, it does not
+            # refuse: an unusual bed is the user's call to make.
+            plausible = {'sand': (6.0e-5, 2.0e-3),
+                         'gravel': (2.0e-3, 0.25),
+                         'boulder': (0.05, 10.0)}
+            lo, hi = plausible[bed]
+            if not lo <= grain_size <= hi:
+                warnings.warn(
+                    "set_sediment_friction('wilson', bed=%r, grain_size=%g): "
+                    "grain_size looks implausible for a %s bed, which the "
+                    "relations expect to be roughly %g to %g m. `bed` only "
+                    "selects the curve; `grain_size` sets the relative "
+                    "submergence h/D it is evaluated at, and nothing "
+                    "cross-checks them, so a mismatch runs without error and "
+                    "can shift f_c -- and therefore tau_b -- by an order of "
+                    "magnitude. Note grain_size is the roughness length scale "
+                    "of the BED (D50 for sand, D84 for gravel/boulder), not "
+                    "the diameter passed to add_sediment_fraction()."
+                    % (bed, grain_size, bed, lo, hi),
+                    UserWarning, stacklevel=2)
+
             self.sediment_wilson_bed = beds[bed]
             self.sediment_wilson_D = float(grain_size)
 
