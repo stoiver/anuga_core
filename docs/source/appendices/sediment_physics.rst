@@ -18,6 +18,29 @@ assume, and how to tell which one your problem wants. Sources are cited by
 label -- [FG21]_, [RDy26]_ and so on -- and collected in `References`_ at the
 end.
 
+.. note::
+
+   **Two kinds of reference appear on this page, and only one of them is
+   something you can look up.**
+
+   *Citations* -- [FG21]_, [aSM16]_, [Rou37]_ and the rest -- are published
+   papers, listed in full under `References`_. Those are the sources for the
+   physics, and they are where to go to check a formulation.
+
+   *Spec numbers* -- "spec 4.1.1", "§9.5", "divergence D1" -- point into an
+   internal specification that is **not distributed with ANUGA**. They are
+   provenance for the implementation, not something a reader can follow, and
+   every statement they accompany is written to stand on its own without
+   them. They are kept only because the same numbering appears in the source
+   comments, so a maintainer reading the code and this page sees one scheme.
+
+   If you want to check what ANUGA actually does rather than what it intends:
+   the bracketed labels -- :spec:`E-1`, :spec:`T-7` and so on -- name each
+   term, are defined with their equations under
+   :ref:`sediment_labels`, and appear in the source and in
+   ``sediment_summary()``. The verification evidence is in
+   ``anuga/shallow_water/tests/test_sediment_*.py``.
+
 Where the sources disagree, they disagree about physics rather than notation,
 and the page says so. Erosion is the clearest case: the cohesive and
 non-cohesive routes are not competing fits to the same data but descriptions of
@@ -521,8 +544,8 @@ are in dimensional stress; that is the usual source of confusion between them.
    domain.set_bed_material('cohesive', tau_crit=0.088, K_e=6.742e-7)
    domain.set_bed_material('partheniades', tau_crit=0.088, K_e=...)
 
-The argument is the **material**, not the formula, because spec 4.1.1 is
-explicit that these describe different sediment rather than competing
+The argument is the **material**, not the formula, because these describe
+different sediment rather than competing
 descriptions of the same sediment. Picking the wrong one is a physics error.
 
 .. list-table::

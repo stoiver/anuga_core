@@ -1989,7 +1989,7 @@ A grain size is a tracer -- so it is transported by the machinery of
              '  shear closure      : %s' % shear,
              '  friction closure   : %s' % fric,
              '  bedload            : %s' % bl,
-             '  bed evolution      : %s  (spec 2.4 %s)'
+             '  bed evolution      : %s  (%s)'
              % (self.sediment_bed_evolution,
                 'Phase 4, evolving' if self.sediment_bed_evolution
                 else 'Phase 3, FIXED bed'),
@@ -2024,13 +2024,13 @@ A grain size is a tracer -- so it is transported by the machinery of
         else:
             L.append('  erodible base [L-5]: none (unlimited depth)')
         if self.sediment_repose_tan > 0.0:
-            L.append('  angle of repose    : %.1f degrees (spec 7), relax %.2g, '
+            L.append('  angle of repose    : %.1f degrees, relax %.2g, '
                      'max %d sweeps'
                      % (num.degrees(num.arctan(self.sediment_repose_tan)),
                         self.sediment_repose_relax,
                         self.sediment_repose_max_sweeps))
         else:
-            L.append('  angle of repose    : off (spec 7)')
+            L.append('  angle of repose    : off')
         if mask is None:
             L.append('  erodible region    : whole domain')
         else:
