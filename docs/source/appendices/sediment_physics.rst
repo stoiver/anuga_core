@@ -18,6 +18,29 @@ assume, and how to tell which one your problem wants. Sources are cited by
 label -- [FG21]_, [RDy26]_ and so on -- and collected in `References`_ at the
 end.
 
+.. note::
+
+   **Two kinds of reference appear on this page, and only one of them is
+   something you can look up.**
+
+   *Citations* -- [FG21]_, [aSM16]_, [Rou37]_ and the rest -- are published
+   papers, listed in full under `References`_. Those are the sources for the
+   physics, and they are where to go to check a formulation.
+
+   *Spec numbers* -- "spec 4.1.1", "§9.5", "divergence D1" -- point into an
+   internal specification that is **not distributed with ANUGA**. They are
+   provenance for the implementation, not something a reader can follow, and
+   every statement they accompany is written to stand on its own without
+   them. They are kept only because the same numbering appears in the source
+   comments, so a maintainer reading the code and this page sees one scheme.
+
+   If you want to check what ANUGA actually does rather than what it intends:
+   the bracketed labels -- :spec:`E-1`, :spec:`T-7` and so on -- name each
+   term, are defined with their equations under
+   :ref:`sediment_labels`, and appear in the source and in
+   ``sediment_summary()``. The verification evidence is in
+   ``anuga/shallow_water/tests/test_sediment_*.py``.
+
 Where the sources disagree, they disagree about physics rather than notation,
 and the page says so. Erosion is the clearest case: the cohesive and
 non-cohesive routes are not competing fits to the same data but descriptions of
@@ -209,12 +232,22 @@ moves by the volume it gains, allowing for pore space:
 
 .. math::
 
-   \frac{\partial z}{\partial t} = \frac{D - E}{1 - \lambda}
+   \frac{\partial z}{\partial t}
+   = \frac{1}{1 - \lambda}\sum_{s=1}^{N_s} \bigl(D_s - E_s\bigr)
    \qquad \text{[G-4]}
 
 with :math:`\lambda` the bed porosity, since a deposited volume
 :math:`(1-\lambda)\,dz` of grains fills a bed volume :math:`dz`. This is the
 Exner equation [Exn25]_, in the form used by [P14]_ and [FG21]_.
+
+The sum matters once there is more than one fraction: there is **one** bed,
+and every fraction exchanges with it. The kernel accumulates a single
+:math:`dz` per cell over :math:`s` and applies it once, so fractions can
+offset each other -- sand entraining while gravel deposits leaves the bed
+still, though neither process has stopped. There is no per-fraction bed and
+no stratigraphy: nothing records which fraction the last millimetre came
+from, which is why the erodible base :spec:`L-5` shares a shortage between
+fractions proportionally rather than by any order of priority.
 
 **Bedload.** When bedload is switched on it moves the bed too, by the divergence
 of the bedload transport vector :math:`\mathbf{q}_b`:
@@ -223,7 +256,9 @@ of the bedload transport vector :math:`\mathbf{q}_b`:
 
 .. math::
 
-   \frac{\partial z}{\partial t} = -\frac{1}{1 - \lambda}\,\nabla \cdot \mathbf{q}_b
+   \frac{\partial z}{\partial t}
+   = -\frac{1}{1 - \lambda}\,\nabla \cdot
+     \sum_{s=1}^{N_s} \mathbf{q}_{b,s}
    \qquad \text{[G-5]}
 
 Both act on the same :math:`z`, and when both are active their contributions sum.
@@ -521,8 +556,8 @@ are in dimensional stress; that is the usual source of confusion between them.
    domain.set_bed_material('cohesive', tau_crit=0.088, K_e=6.742e-7)
    domain.set_bed_material('partheniades', tau_crit=0.088, K_e=...)
 
-The argument is the **material**, not the formula, because spec 4.1.1 is
-explicit that these describe different sediment rather than competing
+The argument is the **material**, not the formula, because these describe
+different sediment rather than competing
 descriptions of the same sediment. Picking the wrong one is a physics error.
 
 .. list-table::

@@ -7,10 +7,14 @@ Sediment transport
 
 This documents the user-facing interface: every parameter, its units, its
 default, and how to choose between the alternative methods. It assumes you
-know ANUGA, and it does not derive the physics. Labels like :spec:`E-1` and the
-section numbers in the tables refer to the internal sediment specification,
-which is not distributed with ANUGA; they are kept as stable identifiers for
-each term rather than as links you can follow.
+know ANUGA, and it does not derive the physics.
+
+Labels like :spec:`E-1` name a term in the physics; they are defined, with
+their equations, under :ref:`sediment_labels`. Section numbers such as
+"spec 2.6" point into an internal specification **not distributed with
+ANUGA** -- they are provenance for the implementation, and every statement
+they accompany stands on its own without them. See the note at the top of
+:ref:`sediment_physics` for what to consult instead.
 
 A sediment fraction **is** a tracer with settling parameters attached, so
 :ref:`tracers` covers the transport, boundary and conservation machinery that
@@ -88,13 +92,13 @@ but the first is a default:
      shear closure      : quadratic drag, tau_b = rho f_c |v|^2   [T-1]
      friction closure   : constant n, from the domain friction quantity
      bedload            : off
-     bed evolution      : True  (spec 2.4 Phase 4, evolving)
+     bed evolution      : True  (Phase 4, evolving)
      porosity lambda    : 0.3
      c_max      [L-2]   : 0.3
      c_pack     [L-4]   : 0.65
      rho_w              : 1000 kg/m3
      erodible base [L-5]: none (unlimited depth)
-     angle of repose    : off (spec 7)
+     angle of repose    : off
      erodible region    : whole domain
      ([E-1] and the like are cross-references to the term in the physics;
       see the Sediment physics appendix -- the description before each
