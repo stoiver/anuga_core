@@ -54,6 +54,7 @@ It is now developed and maintained by a community of volunteers.
    parallel/advanced
    mathematical_background
    Sediment physics: choosing the laws <appendices/sediment_physics>
+   Sediment physics specification <appendices/physics_spec>
    Compute modes: legacy vs unified <appendices/compute_modes>
    appendices/profiling_gpu
    appendices/contributing

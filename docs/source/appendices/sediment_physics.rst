@@ -27,12 +27,11 @@ end.
    papers, listed in full under `References`_. Those are the sources for the
    physics, and they are where to go to check a formulation.
 
-   *Spec numbers* -- "spec 4.1.1", "§9.5", "divergence D1" -- point into an
-   internal specification that is **not distributed with ANUGA**. They are
-   provenance for the implementation, not something a reader can follow, and
-   every statement they accompany is written to stand on its own without
-   them. They are kept only because the same numbering appears in the source
-   comments, so a maintainer reading the code and this page sees one scheme.
+   *Spec numbers* -- "spec 4.1.1", "§9.5" -- point into
+   :doc:`physics_spec`, the specification the implementation was written
+   from, which is published alongside this page. Its section numbering is the
+   one used in the source comments too, so the code, this page and the
+   specification all refer to a term the same way.
 
    If you want to check what ANUGA actually does rather than what it intends:
    the bracketed labels -- :spec:`E-1`, :spec:`T-7` and so on -- name each
@@ -877,9 +876,9 @@ the :ref:`genindex` -- which is the reliable way to look one up. The site
 search will not find :speclit:`T-7` as typed: its tokeniser splits on the bracket
 and hyphen, so the label never enters the search index as a whole word.
 
-They originate in an internal specification that is not distributed with
-ANUGA; the numbering is kept because it is already in the code and the
-summaries, and renumbering would only break the correspondence.
+They originate in :doc:`physics_spec`, published alongside this page; the
+numbering is kept because it is already in the code and the summaries, and
+renumbering would only break the correspondence.
 
 **Settling and suspension**
 
