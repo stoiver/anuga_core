@@ -3,8 +3,8 @@
 This is the specification the sediment implementation was written from. Every
 equation is transcribed from a published, citable source, so each line of the
 implementation can point at an equation label here and at the paper behind it.
-The bracketed labels used throughout the ANUGA documentation -- `[E-1]`,
-`[T-7]`, `[G-4]` and the rest -- are defined in this document.
+The bracketed labels used throughout the ANUGA documentation -- {speclit}`E-1`,
+{speclit}`T-7`, {speclit}`G-4` and the rest -- are defined in this document.
 
 ```{note}
 This is the reference half of a longer internal document. Two sections are
@@ -22,7 +22,7 @@ equations, every closure, the numerical scheme and the parameter defaults.
 | **FG21** | Fassett, C.I. & Goudge, T.A. (2021), *Modeling the Hydrodynamics, Sediment Transport, and Valley Incision of Outlet-Forming Floods From Martian Crater Lakes*, JGR Planets 126, e2021JE006979. Equations 1–9 + Supporting Information S1–S5. |
 | **RDy26** | Feng, D., Tan, Z., Xu, D., Johnson, J. & Bisht, G. (2026), *RDycore-sediment v1.0*, EGUsphere preprint 2026-4859 (CC BY 4.0). Equations 1–13 + Appendix A1–A7. |
 | **aSM16** | Perignon, M.C. (2016), *Using the Sediment Transport and Vegetation Operators in ANUGA*, `anugaSed/docs/anugaSed_manual.pdf`, 4 May 2016. Equations 1–14. **This is the authoritative specification for the shipped code** and supersedes P14 where they differ. |
-| **DL09** | Davy, P. & Lague, D. (2009), *Fluvial erosion/transport equation of landscape evolution models revisited*, JGR Earth Surface 114, F03007, doi:10.1029/2008JF001146. Equations 2–8, 19. Source of the E–D framework and of `[S-4]`. |
+| **DL09** | Davy, P. & Lague, D. (2009), *Fluvial erosion/transport equation of landscape evolution models revisited*, JGR Earth Surface 114, F03007, doi:10.1029/2008JF001146. Equations 2–8, 19. Source of the E–D framework and of {speclit}`S-4`. |
 | **P13** | Perignon, M.C., Tucker, G.E., Griffin, E.R. & Friedman, J.M. (2013), JGR Earth Surface 118(3), 1193–1209, doi:10.1002/jgrf.20073. Rio Puerco lidar differencing — the field data for validation rung 8. |
 | **W04** | Wilson, L., Ghatan, G.J., Head, J.W. & Mitchell, K.L. (2004), JGR Planets 109, E09003, doi:10.1029/2004JE002281. Eqs 4, 13–17: Darcy–Weisbach `f_c` by bed type. |
 | **LL16** | Larsen, I.J. & Lamb, M.P. (2016), Nature 538, 229–232, doi:10.1038/nature19817. Methods: Manning–Strickler roughness closure. **Uses ANUGA.** |
@@ -124,7 +124,7 @@ washoff).
 > **Reconciliation note.** P14 Eq 3.4 writes the same balance as
 > `∂(Ch)/∂t = Ė − Ḋ − (∂q_sx/∂x + ∂q_sy/∂y)` with `q_s(x,y) = β C q(x,y)`, where
 > `q` is specific discharge and **β is the ratio of sediment transport speed to
-> water speed**. `[G-3]` is the β = 1 case. β is retained as an exposed parameter —
+> water speed**. {speclit}`G-3` is the β = 1 case. β is retained as an exposed parameter —
 > see the note on `beta` in the ANUGA sediment documentation.
 
 ### 2.3 Bed evolution (Exner)
@@ -143,7 +143,7 @@ Both act on the same `z`; when both operators are active the contributions sum.
 | Stage | Bed elevation | Bed → flow | Sediment → momentum | Reference model |
 |-------|---------------|-----------|---------------------|-----------------|
 | Phase 3 | fixed | no | no | RDy26 v1.0 |
-| Phase 4 | evolving via `[G-4]`,`[G-5]` | yes | no | FG21 |
+| Phase 4 | evolving via {speclit}`G-4`,{speclit}`G-5` | yes | no | FG21 |
 | not scoped | evolving | yes | yes | — |
 
 Neither reference model implements the momentum feedback. FG21 flags this as the
@@ -169,10 +169,10 @@ FG21, RDy26 and P14 all specify the same quadratic drag law, in different notati
 
 | Source | As written | Equivalent to |
 |--------|-----------|---------------|
-| FG21 Eq 1 | `τ = ρ f_c v²`, "f_c is the Darcy–Weisbach friction factor divided by 8" | `[T-1]` |
-| P14 Eq 3.7 | `τ* = u*²/(R g d_g)` with `u* = \|v\|√(f/8)` | `[T-1]` via `[T-3]` |
-| RDy26 A5–A7 | `C_D = g n² h⁻¹ᐟ³` ; `τ_b = ρ_w C_D (u² + v²)` | `[T-1]` with `f_c = C_D` |
-| aSM16 Eq 6 | `τ_b = ρ_w u*²` | `[T-1]` via `[T-2]`, but `u*` from `[T-7]` not `[T-2]` |
+| FG21 Eq 1 | `τ = ρ f_c v²`, "f_c is the Darcy–Weisbach friction factor divided by 8" | {speclit}`T-1` |
+| P14 Eq 3.7 | `τ* = u*²/(R g d_g)` with `u* = \|v\|√(f/8)` | {speclit}`T-1` via {speclit}`T-3` |
+| RDy26 A5–A7 | `C_D = g n² h⁻¹ᐟ³` ; `τ_b = ρ_w C_D (u² + v²)` | {speclit}`T-1` with `f_c = C_D` |
+| aSM16 Eq 6 | `τ_b = ρ_w u*²` | {speclit}`T-1` via {speclit}`T-2`, but `u*` from {speclit}`T-7` not {speclit}`T-2` |
 
 Shear velocity:
 
@@ -194,7 +194,7 @@ Excess Shields stress `[FG21 3]`:
 
 > **Typographic note on P14 Eq 3.7.** The thesis prints `u* = √(f/8)`, omitting the
 > velocity. `u*` must be a velocity and `√(f/8)` is dimensionless, so the intended
-> form is `[T-2]`. FG21 Eq 1 and RDy26 A7 both confirm the intent.
+> form is {speclit}`T-2`. FG21 Eq 1 and RDy26 A7 both confirm the intent.
 
 ### 3.2 Velocity regularisation
 
@@ -225,9 +225,9 @@ which is exactly RDy26 A5. Three selectable closures `[FG21 §2.2.3]`:
 |------|-----------|-------------|
 | `constant` | user supplies `n` | no |
 | `larsen_lamb` | constant `n` from bed roughness parameters `k_s`, `r_d`, `r_br`, `σ_br` — Larsen & Lamb (2016) Eqs 3–4 | no |
-| `wilson` | `f` as an empirical function of grain size and depth — Wilson et al. (2004) Eqs 13–15; `n` then follows from `[T-6]` | yes, spatially and temporally |
+| `wilson` | `f` as an empirical function of grain size and depth — Wilson et al. (2004) Eqs 13–15; `n` then follows from {speclit}`T-6` | yes, spatially and temporally |
 
-**In all three modes `f_c` still varies per cell per timestep**, because `[T-6]`
+**In all three modes `f_c` still varies per cell per timestep**, because {speclit}`T-6`
 depends on `h`. This is the coupling most easily missed.
 
 ### 3.3.1 ⚠ Friction-factor conventions — a factor-of-2 and factor-of-8 trap
@@ -258,13 +258,13 @@ channels); `D50`/`D84`/`D90` are bed clast percentiles.
 [T-12]   Fixed roughness  (8/f_c)^½ = 5.657 log₁₀(R/r) + 6.6303
 ```
 
-FG21 cite Eqs 13–15, i.e. `[T-8]`–`[T-10]`. `[T-11]` uses `d_s` = depth of water
-*plus* sediment; `[T-12]` uses roughness element size `r`. Velocity follows from
-`[W04 4]`: `U = ((8gRS)/f_c)^½`, which is `[T-1]` rearranged.
+FG21 cite Eqs 13–15, i.e. {speclit}`T-8`–{speclit}`T-10`. {speclit}`T-11` uses `d_s` = depth of water
+*plus* sediment; {speclit}`T-12` uses roughness element size `r`. Velocity follows from
+`[W04 4]`: `U = ((8gRS)/f_c)^½`, which is {speclit}`T-1` rearranged.
 
 > ### ⚠⚠ `f_c` ABOVE IS **NOT** THIS SPEC'S `f_c`.
 >
-> `[T-8]`–`[T-12]` reproduce W04's symbol verbatim, and **W04's `f_c` is the
+> {speclit}`T-8`–{speclit}`T-12` reproduce W04's symbol verbatim, and **W04's `f_c` is the
 > Darcy–Weisbach `f`, not `f/8`.** Their Eq 4, quoted immediately above, is
 > `U = ((8gRS)/f_c)^½` — the standard Darcy–Weisbach velocity, which carries `f`.
 > This spec's `f_c` is defined in §3.3.1 as `f/8`. The two collide on one symbol,
@@ -272,7 +272,7 @@ FG21 cite Eqs 13–15, i.e. `[T-8]`–`[T-10]`. `[T-11]` uses `d_s` = depth of w
 > into it by adopting W04's notation without converting.
 >
 > **The conversion, and a convenient cancellation.** Writing `X` for the
-> right-hand side of `[T-8]`–`[T-12]`:
+> right-hand side of {speclit}`T-8`–{speclit}`T-12`:
 >
 > ```
 >     X = (8/f_W04)^½   with  f_W04 = f      ⟹   f = 8/X²
@@ -284,7 +284,7 @@ FG21 cite Eqs 13–15, i.e. `[T-8]`–`[T-10]`. `[T-11]` uses `d_s` = depth of w
 > large**.
 >
 > **Confirmed against W04's own headline result.** They derive
-> `n = 0.0545 s m⁻¹ᐟ³` for Martian channels. Under `[T-6]`,
+> `n = 0.0545 s m⁻¹ᐟ³` for Martian channels. Under {speclit}`T-6`,
 > `n = √(f_c h^⅓ / g)` with *this spec's* `f_c`. Taking a sand bed at
 > `R/D50 = 1000` and Martian `g = 3.71 m s⁻²`, `X = 8.46 × 1000^0.1005 = 16.94`:
 >
@@ -318,12 +318,12 @@ measured `σ_br ≈ 5 m` across five reaches, giving `k_s = 20 m` and:
 n = 20^(1/6)/(8.1 × 9.81^½) = 0.0649 ≈ 0.065     ✓ matches LL16's stated value
 ```
 
-`n` is then **spatially and temporally uniform**; only `f_c` varies, through `[T-6]`.
+`n` is then **spatially and temporally uniform**; only `f_c` varies, through {speclit}`T-6`.
 
 > **LL16 used ANUGA.** Their Methods state "ANUGA implements bed friction with
 > Manning's roughness coefficient (n)" and that ANUGA generated their triangular
 > mesh from a USGS 10 m DEM. This is a *Nature* paper built on this codebase — worth
-> knowing both as provenance for `[T-13]`–`[T-15]` and as a citable precedent for
+> knowing both as provenance for {speclit}`T-13`–{speclit}`T-15` and as a citable precedent for
 > ANUGA in megaflood work. Note `σ_br` is a **site-measured** quantity: 5 m is Moses
 > Coulee, not a universal default.
 
@@ -355,21 +355,21 @@ This is a documented closure, not undocumented drift. It is the
 it assumes the energy slope equals the bed slope and that the flow is locally in
 equilibrium.
 
-**It should nonetheless be superseded by `[T-1]`, for three reasons:**
+**It should nonetheless be superseded by {speclit}`T-1`, for three reasons:**
 
 1. **Validity.** Normal-flow equilibrium is exactly what does not hold in a
    dam-breach, outburst or flash flood — the cases this add-on exists to model.
-   `[T-1]` makes no equilibrium assumption.
+   {speclit}`T-1` makes no equilibrium assumption.
 2. **`S` is taken from the bed, not the energy grade line.** `aSM16` says "`S` is the
    local slope of the bed". The energy slope `S_f = f_c|v|²/(gh)` is the correct
-   quantity, and substituting it into `[T-7]` recovers `[T-1]` identically. The
+   quantity, and substituting it into {speclit}`T-7` recovers {speclit}`T-1` identically. The
    commented-out energy-slope block in `aS16` shows this was recognised.
 3. **The clamp is not in the manual.** `aS16` applies `S ← min(S, mean(S)/2)`, a
    domain-global rescaling with no counterpart in `aSM16` and no physical basis.
-   Under `[T-1]` it is unnecessary.
+   Under {speclit}`T-1` it is unnecessary.
 
-Retain `[T-7]` behind a `legacy_depth_slope` flag for reproducing published
-anugaSed results. Default to `[T-1]`.
+Retain {speclit}`T-7` behind a `legacy_depth_slope` flag for reproducing published
+anugaSed results. Default to {speclit}`T-1`.
 
 ---
 
@@ -391,7 +391,7 @@ typographic. Both formulations should be implemented behind a selector.
 with `γ₀ = 0.0024` (empirical) and `τ_c* = 0.04` (FG21's choice for suspension).
 `E*` is a dimensionless near-bed reference concentration; 0.65 is the maximum
 packing fraction, so `E*` saturates rather than growing without bound. `E` is
-recovered as a flux by multiplying by the settling velocity `[E-2]`.
+recovered as a flux by multiplying by the settling velocity {speclit}`E-2`.
 
 **(b) Cohesive / fine-grained form** — Hanson (1990), Hanson & Simon (2001), as
 specified by `[aSM16 3–5]` and implemented in `aS16`:
@@ -402,7 +402,7 @@ specified by `[aSM16 3–5]` and implemented in `aS16`:
 [E-6]   τ_c = τ_c* (ρ_s − ρ) g D50
 ```
 
-`[E-5]` is the jet-test erodibility relation of Hanson & Simon (2001) for cohesive
+{speclit}`E-5` is the jet-test erodibility relation of Hanson & Simon (2001) for cohesive
 streambeds, `k_d = 0.2 τ_c^(−0.5)` in cm³ N⁻¹ s⁻¹; the `10⁻⁶` converts cm³ to m³.
 
 **(c) Partheniades form on dimensional stress** — as used by `[RDy26 A8]`, per bed
@@ -412,7 +412,7 @@ layer ℓ:
 [E-4]   E_ℓ^pot = K_e,ℓ · (τ_b − τ_c,ℓ)/τ_c,ℓ    for τ_b > τ_c,ℓ ; else 0
 ```
 
-Note `[E-4]` and `[E-3]` both use *dimensional* stress; `[E-1]` uses Shields stress.
+Note {speclit}`E-4` and {speclit}`E-3` both use *dimensional* stress; {speclit}`E-1` uses Shields stress.
 
 > **On the dimensions of `K_e`.**
 > Reading P14 alone suggests a dimensional inconsistency in `K_e`. It is an
@@ -424,17 +424,17 @@ Note `[E-4]` and `[E-3]` both use *dimensional* stress; `[E-1]` uses Shields str
 >   [m³ N⁻¹ s⁻¹] × [N m⁻²]  =  m s⁻¹   ✓
 > ```
 >
-> The shipped code implements `[E-3]`/`[E-5]` correctly and with proper provenance.
+> The shipped code implements {speclit}`E-3`/{speclit}`E-5` correctly and with proper provenance.
 > **No action needed.** P14 Eq 3.8 (`K_e = K_e* d_g √(Rgd_g)`, `K_e* = 12` after
 > Wilson 1966) is a different, non-cohesive parameterisation that the manual
 > abandoned; do not implement it.
 
 ### 4.1.1 Which erosion law? — a regime choice, not a preference
 
-`[E-1]` and `[E-3]` are **not competing formulations of the same physics**. They
+{speclit}`E-1` and {speclit}`E-3` are **not competing formulations of the same physics**. They
 describe different sediment:
 
-| | `[E-3]` cohesive | `[E-1]`/`[K-1]` non-cohesive |
+| | {speclit}`E-3` cohesive | {speclit}`E-1`/{speclit}`K-1` non-cohesive |
 |---|---|---|
 | Sediment | silt, clay, cohesive bank material | sand, gravel, boulders |
 | Threshold physics | inter-particle cohesion, jet-test calibrated | grain weight, Shields entrainment |
@@ -464,13 +464,13 @@ and is cheap, branch-free and GPU-friendly.
 A polynomial fit in the dimensionless particle size; more accurate for natural
 irregular grains, but requires transcription from Dietrich or FG21 S1.
 
-**Recommendation:** implement `[S-1]` as the default. It is fully specified here,
+**Recommendation:** implement {speclit}`S-1` as the default. It is fully specified here,
 dimensionally clean, and already the basis of the existing code. Add Dietrich as an
 option only if rung 7 (crater breach) needs it to reproduce FG21. Note DL09 themselves
 take settling velocities from Dietrich (1982).
 
-> **`[S-1]` numerically verified.** P13 §[54] reports `v_s = 0.00175 m s⁻¹` for
-> 0.045 mm quartz using Ferguson & Church (2004). Evaluating `[S-1]` at
+> **{speclit}`S-1` numerically verified.** P13 §[54] reports `v_s = 0.00175 m s⁻¹` for
+> 0.045 mm quartz using Ferguson & Church (2004). Evaluating {speclit}`S-1` at
 > `D = 4.5×10⁻⁵ m`, `R = 1.65`, `g = 9.81`, `ν = 10⁻⁶`:
 >
 > | `C₁` | `C₂` | `v_s` | error |
@@ -479,7 +479,7 @@ take settling velocities from Dietrich (1982).
 > | 18 | 1.0 | 0.00172 | −1.7% |
 > | 20 | 1.1 | 0.00155 | −11.2% |
 >
-> This confirms both the transcription of `[S-1]` and that the smooth-sphere
+> This confirms both the transcription of {speclit}`S-1` and that the smooth-sphere
 > constants `C₁ = 18`, `C₂ = 0.4` are the ones in use. Use this as a unit test.
 
 ### 4.3 Rouse number and the near-bed concentration profile
@@ -500,7 +500,7 @@ The sources diverge:
 | P14 Eq 3.9 | `D* = 1` — uniform suspension assumed, citing Nordin (1963), Griffin et al. (2014) |
 | **aSM16 Eq 10** | **the defining Rouse–Vanoni integral, from Davy & Lague (2009)** |
 | FG21 Fig 2 / S2 | `d*` a function of `Z`, plotted; numeric form only in Supporting Information S2 |
-| aS16 | 8-term polynomial in `Z`, plus a linear branch for `Z > 4` — a *fit* to `[S-4]` |
+| aS16 | 8-term polynomial in `Z`, plus a linear branch for `Z > 4` — a *fit* to {speclit}`S-4` |
 
 **The defining expression** `[aSM16 10]`, after Davy & Lague (2009), obtained by
 requiring that sediment discharge be the depth integral of concentration × velocity
@@ -512,7 +512,7 @@ over a Rouse–Vanoni concentration profile and a logarithmic velocity profile:
                ∫ₐʰ ((h−z)/(h−a) · a/z)^Z ln(z/z₀) dz
 ```
 
-with `Z` the Rouse number `[S-2]`, `z₀` the roughness length and `a` the reference
+with `Z` the Rouse number {speclit}`S-2`, `z₀` the roughness length and `a` the reference
 height near the bed.
 
 > **The profile factor is misprinted in DL09 as published.**
@@ -553,7 +553,7 @@ height near the bed.
 > Everything downstream in this document, and the implementation, uses the
 > corrected form.
 
-**`[S-4]` is confirmed as `[DL09 19]`** — the manual's Eq 10 reproduces it exactly.
+**{speclit}`S-4` is confirmed as `[DL09 19]`** — the manual's Eq 10 reproduces it exactly.
 DL09 derive it by assuming a Rouse–Vanoni concentration profile and a logarithmic
 velocity profile, and integrating `c_s(z)u(z)` from a reference height `a` to `h`.
 
@@ -581,7 +581,7 @@ close to 1 for large rivers or fine particles, and becomes ≫ 1 for small river
 coarse particles where entrainment is largely bedload.
 
 > **On the shipped polynomial.**
-> It is a fit to `[S-4]`. Its fixed 1 m depth is a limitation rather than a
+> It is a fit to {speclit}`S-4`. Its fixed 1 m depth is a limitation rather than a
 > defect:
 >
 > - `d*` depends *mostly on `Z`*, and `Z` is computed per cell from the actual `u*`.
@@ -592,12 +592,12 @@ coarse particles where entrainment is largely bedload.
 >   rapidly mainly as a function of `a/h`". A single-depth fit is weakest precisely
 >   there. **Quantify `d*` sensitivity to `a/h` across the `Z` range of interest
 >   before deciding whether a depth-dependent fit is warranted.**
-> - `a`, the near-bed reference height, is a required input to `[S-4]` that `aSM16`
+> - `a`, the near-bed reference height, is a required input to {speclit}`S-4` that `aSM16`
 >   does not state. Recover it from the code, document it, and expose it.
 >
-> Remaining engineering (tracked as **S1a**): `[S-4]` is a 1-D quadrature per cell,
+> Remaining engineering (tracked as **S1a**): {speclit}`S-4` is a 1-D quadrature per cell,
 > far too expensive inside a GPU kernel every step, so a fitted form is the right
-> answer. Regenerate the fit from `[S-4]`, document its `Z` range, and make
+> answer. Regenerate the fit from {speclit}`S-4`, document its `Z` range, and make
 > out-of-range behaviour explicit rather than extrapolating a polynomial. Keep
 > `d* = 1` available as the P14/P13 limiting case and the 10-timestep refresh as a
 > tunable rather than a hard-coded stride.
@@ -606,7 +606,7 @@ coarse particles where entrainment is largely bedload.
 > `test_rouse.py` (12/12) and `core_rouse_d_star()`.
 >
 > **S1b first, because it changes S1a.** The `a/h` sensitivity, from the
-> corrected `[S-4]` at `z₀/h = 10⁻⁴`:
+> corrected {speclit}`S-4` at `z₀/h = 10⁻⁴`:
 >
 > | `Z` | `a/h`=0.01 | 0.02 | 0.05 | 0.10 | spread |
 > |-----|-----------:|-----:|-----:|-----:|-------:|
@@ -667,7 +667,7 @@ distance a particle travels in the flow before being trapped on the bed.
 
 It is the length over which the sediment load relaxes toward capacity. `ξ → 0`
 recovers transport-limited (local-capacity) behaviour; `ξ → ∞` recovers
-detachment-limited. **The explicit `E − D` balance of `[G-3]` exists precisely
+detachment-limited. **The explicit `E − D` balance of {speclit}`G-3` exists precisely
 because `ξ` is finite** — the flow is *not* instantaneously at capacity.
 
 Evaluated for the Rio Puerco 2006 flood from P13's own parameters
@@ -705,11 +705,11 @@ RDy26 A12 uses a different, threshold-based form with a critical *deposition* st
 Setting `τ_d,s = 0` disables deposition entirely — RDy26 uses this for their passive
 transport benchmarks, which is a useful test hook worth preserving.
 
-**Recommendation:** `[D-1]` as default (consistent with the `d*` machinery of §4.3),
-`[D-2]` available for the layered bed model and required to reproduce RDy26's
+**Recommendation:** {speclit}`D-1` as default (consistent with the `d*` machinery of §4.3),
+{speclit}`D-2` available for the layered bed model and required to reproduce RDy26's
 passive-transport validation cases.
 
-⚠ When `d* ≠ 1`, `[D-1]` **must** be evaluated with the near-bed ceiling `[L-4]`
+⚠ When `d* ≠ 1`, {speclit}`D-1` **must** be evaluated with the near-bed ceiling {speclit}`L-4`
 of §4.5(d). Without it the equilibrium `d*` makes the deposition rate diverge as
 shear vanishes.
 
@@ -747,7 +747,7 @@ FG21 is explicit that this is a stability device set "nonphysically large" so it
 reduction in transport efficiency. Requirements for our implementation:
 
 - user-settable, default deliberately large;
-- **count and report firings** — a run where `[L-3]` fires often is not trustworthy;
+- **count and report firings** — a run where {speclit}`L-3` fires often is not trustworthy;
 - rescale consistently (FG21 rescale erosion in *all* changing cells, preserving
   relative pattern) rather than clipping cell-by-cell.
 
@@ -758,12 +758,12 @@ reduction in transport efficiency. Requirements for our implementation:
 [L-4]   c_b = d*(Z) · c_s  ≤  c_pack               c_pack = 0.65
 ```
 
-`[D-1]` is `D = c_b v_s`, and **no source bounds `c_b`**. It needs bounding, for a
-reason that only appears once `[S-4]` is used inside a transient solver.
+{speclit}`D-1` is `D = c_b v_s`, and **no source bounds `c_b`**. It needs bounding, for a
+reason that only appears once {speclit}`S-4` is used inside a transient solver.
 
 `d*` is derived from the **equilibrium** Rouse–Vanoni profile, which presupposes a
 suspension maintained by shear. As shear vanishes that premise fails: `u* → 0`, so
-`Z = v_s/(κu*) → ∞` `[S-2]`, and `d*` grows without bound — in the fitted
+`Z = v_s/(κu*) → ∞` {speclit}`S-2`, and `d*` grows without bound — in the fitted
 implementation it saturates at its range clamp, `d* ≈ 250` at `a/h = 0.01`. The
 deposition rate `d* c v_s` then becomes enormous *precisely where the physical
 settling rate should be at its most ordinary*.
@@ -774,22 +774,22 @@ one second. The physical timescale is `h/v_s ≈ 125 s`. At `t = 1 s` the median
 number was 2.34 while `max|u|` was still 0.11 m s⁻¹ — the flow had barely started.
 
 `c_b` is a concentration, so it cannot exceed maximum packing. `0.65` is the same
-constant that bounds `E*` in `[E-1]`, where it appears for exactly this reason, so
-`[L-4]` introduces no new parameter. With the bound the same case removes 26.0% in
+constant that bounds `E*` in {speclit}`E-1`, where it appears for exactly this reason, so
+{speclit}`L-4` introduces no new parameter. With the bound the same case removes 26.0% in
 the first second, matching the packing-limited rate `c_pack v_s / m` to two figures.
 
 Scope and interactions:
 
 - **Inactive in the well-mixed limit.** With `d* = 1`, `c_b = c_s ≤ c_max = 0.30`
-  by `[L-2]`, comfortably below `c_pack`. `[L-4]` therefore changes nothing in the
+  by {speclit}`L-2`, comfortably below `c_pack`. {speclit}`L-4` therefore changes nothing in the
   P14/P13 `d* = 1` configuration, and only engages at moderate-to-high `Z`.
-- **Does not conflict with `[L-1]`.** `[L-4]` bounds the deposition *rate*;
-  `[L-1]` bounds the *net source* by what is present. `[L-4]` applies first and
-  can only reduce a removal, so `[L-1]` remains the binding positivity guarantee.
+- **Does not conflict with {speclit}`L-1`.** {speclit}`L-4` bounds the deposition *rate*;
+  {speclit}`L-1` bounds the *net source* by what is present. {speclit}`L-4` applies first and
+  can only reduce a removal, so {speclit}`L-1` remains the binding positivity guarantee.
 - **`c_pack` should be exposed**, defaulting to 0.65, alongside `c_max`.
 
-> **Provenance.** `[L-4]` is **not** in P14, FG21, RDy26, DL09 or `aSM16`. It is
-> required by the combination of an equilibrium profile (`[S-4]`) with a transient
+> **Provenance.** {speclit}`L-4` is **not** in P14, FG21, RDy26, DL09 or `aSM16`. It is
+> required by the combination of an equilibrium profile ({speclit}`S-4`) with a transient
 > solver, which none of those sources does in this form: DL09 derive `d*` for a
 > steady sediment-discharge relation, and `aS16` evaluate it at a fixed 1 m depth
 > every 10 steps. Flagged here rather than buried in code, because it is a
@@ -803,7 +803,7 @@ Scope and interactions:
 [L-5]   z(x, y, t) ≥ z_base(x, y)            z_base a per-cell field, default −∞
 ```
 
-Erosion in `[G-4]`/`[G-5]` is otherwise unbounded below: the bed lowers for as long
+Erosion in {speclit}`G-4`/{speclit}`G-5` is otherwise unbounded below: the bed lowers for as long
 as the flow can lift material. That is right for a deep alluvial bed and wrong
 wherever the erodible layer is finite — a reach floored by an outcrop, a lined
 culvert, a dam apron, a soil layer of known depth over rock. `z_base` is a **field,
@@ -817,10 +817,10 @@ Applied to the **source**, never by clamping `z`. The erodible thickness
 ```
 
 and the erosive part of the source is scaled to satisfy it. Sediment that is not
-eroded never enters the water column, so `[G-3]` and `[G-4]` still use the same
-limited source and the budget closes exactly, as it does for `[L-1]` and `[L-2]`.
+eroded never enters the water column, so {speclit}`G-3` and {speclit}`G-4` still use the same
+limited source and the budget closes exactly, as it does for {speclit}`L-1` and {speclit}`L-2`.
 Clamping `z` afterwards would instead leave suspended sediment that came from
-nowhere — the same failure mode as the `[L-1]` sign bug (spec 12, D-obs).
+nowhere — the same failure mode as the {speclit}`L-1` sign bug (spec 12, D-obs).
 
 Scope and interactions:
 
@@ -833,15 +833,15 @@ Scope and interactions:
   stratigraphy is ever added, this rule is what must change.**
 - **Deposition is never scaled.** A shortage of bed material does not restrain
   deposition — deposition is what relieves it.
-- **Ordered after `[L-1]` and `[L-2]`.** Those bound the source by what the water
-  column holds and can hold; `[L-5]` bounds it by what the bed holds. It can only
-  reduce an erosive source, so it cannot defeat `[L-1]`'s positivity.
-- **Bedload `[K-3]`/`[G-5]` is limited differently, and less strictly.** Bedload is a
+- **Ordered after {speclit}`L-1` and {speclit}`L-2`.** Those bound the source by what the water
+  column holds and can hold; {speclit}`L-5` bounds it by what the bed holds. It can only
+  reduce an erosive source, so it cannot defeat {speclit}`L-1`'s positivity.
+- **Bedload {speclit}`K-3`/{speclit}`G-5` is limited differently, and less strictly.** Bedload is a
   divergence: clipping it cell-by-cell would create bed material, because one side of
   an edge would refuse to give up what the other has already received. The limit is
   therefore applied to the transport vector `q_b` and to whole edges — both of which
   the two cells sharing an edge evaluate identically, so the flux stays antisymmetric
-  and `[K-3]` stays exactly conservative. The cost is that the floor is **not exact
+  and {speclit}`K-3` stays exactly conservative. The cost is that the floor is **not exact
   under bedload**: closing an edge for a cell that cannot pay also cancels its
   neighbour's inflow, so the deficit migrates one cell per sweep. Measured overshoot
   5.1×10⁻⁶ m on a 1.0×10⁻² m layer (14 cells of 960). Driving it to zero requires the
@@ -859,7 +859,7 @@ region-based erosion operators in interface (the same `Region` polygon/circle/
 indices arguments) while differing from them in kind: those clamp `z` directly,
 which is sound only because they carry no sediment budget to violate.
 
-> **Provenance.** `[L-5]` is **not** in P14, FG21, RDy26, DL09 or `aSM16`, none of
+> **Provenance.** {speclit}`L-5` is **not** in P14, FG21, RDy26, DL09 or `aSM16`, none of
 > which limits the erodible depth. It is an engineering requirement rather than a
 > closure, and it is off by default, so every configuration in this spec is
 > unaffected unless a base is set.
@@ -892,7 +892,7 @@ timestep, the remaining time is applied to the next substrate layer, and so on.
 [B-7]   E_s = (1/Δt) Σ_ℓ ΔM_ℓ,s^ero
 ```
 
-with `E_ℓ^pot` from `[E-4]` and `M_ℓ = Σ_s M_ℓ,s` `[RDy26 7]`.
+with `E_ℓ^pot` from {speclit}`E-4` and `M_ℓ = Σ_s M_ℓ,s` `[RDy26 7]`.
 
 Erosion is disabled in shallow water `[RDy26 A8]`:
 
@@ -940,12 +940,12 @@ From `[FG21 §2.2.1]`, Eqs 1–6. Uses the shear stress chain of §3 directly.
 [K-3]   ∂z/∂t = −(1/(1−λ)) ∇·q_b                               [FG21 6]
 ```
 
-Parameter sets for `[K-1]`:
+Parameter sets for {speclit}`K-1`:
 
 | Set | `K` | `m` | `τ_c*` | Notes |
 |-----|-----|-----|--------|-------|
 | Wong & Parker (2006) Eq 24 | 3.97 | 1.5 | 0.0495 | MPM-tradition, reanalysed. Bedload only. Their Eq 23 is the alternative free-exponent fit (`K` = 4.93, `m` = 1.60, `τ_c*` = 0.0470) — confirm which FG21 used. |
-| Engelund & Hansen (1967) `[EH67 4.3.5]` | `0.05/f_c` | 2.5 | 0 (no threshold) | **Total load** — includes suspension implicitly. See `[K-5]`. |
+| Engelund & Hansen (1967) `[EH67 4.3.5]` | `0.05/f_c` | 2.5 | 0 (no threshold) | **Total load** — includes suspension implicitly. See {speclit}`K-5`. |
 
 > **Critical usage rule** `[FG21 §2.2.2]`: the suspended operator is **not** applied
 > when using Engelund & Hansen, because E&H already incorporates suspended
@@ -967,23 +967,23 @@ Converting to this spec's convention using §3.3.1 (`f_EH = 2 f_c`):
 [K-5]   q_b* = 0.05 · τ*^(5/2) / f_c                     total load, no threshold
 ```
 
-so in the `[K-1]` power-law form, `K = 0.05/f_c` and `m = 2.5`, with `τ_c* = 0`.
+so in the {speclit}`K-1` power-law form, `K = 0.05/f_c` and `m = 2.5`, with `τ_c* = 0`.
 
 > **Open item K1 — RESOLVED.** `K` is indeed friction-dependent, not constant, and
 > the familiar literature coefficient `0.05` is EH67's `0.1` after the factor-of-2
 > convention conversion. Two cautions carried forward:
 >
-> 1. **Do not apply a threshold.** `[K-5]` has none; subtracting `τ_c*` would be a
+> 1. **Do not apply a threshold.** {speclit}`K-5` has none; subtracting `τ_c*` would be a
 >    different model. This is also why EH67 must replace, not supplement, the
 >    suspended operator.
-> 2. **`θ` vs `θ'`.** EH67 derive `[K-5]` via the *effective* (skin-friction) bed
+> 2. **`θ` vs `θ'`.** EH67 derive {speclit}`K-5` via the *effective* (skin-friction) bed
 >    shear `θ'` — their Eq 4.2.4, `θ' − 0.06 = 0.4 θ²` — but the final empirical fit
->    4.3.5 is stated in terms of **total** `θ`, which is what `[K-5]` uses. Do not
+>    4.3.5 is stated in terms of **total** `θ`, which is what {speclit}`K-5` uses. Do not
 >    mix the two.
 
 **Vectorisation** `[FG21 §2.2.1]`: `q_b` is a scalar magnitude and must be
 partitioned into components. FG21 follow Parker (1998) Eqs 2.11–2.12: **the sediment
-transport vector is parallel to the boundary shear stress vector**. With `[T-1]`
+transport vector is parallel to the boundary shear stress vector**. With {speclit}`T-1`
 that means parallel to `(u, v)`:
 
 ```
@@ -993,7 +993,7 @@ that means parallel to `(u, v)`:
 > **Known defect to avoid.** FG21 report ~1% sediment mass conservation error in
 > their bedload operator, "equivalent to a sediment volume lost by advection out of
 > the domain without intermediate deposition", which they were unable to correct.
-> Computing `[K-3]` as a **flux difference across shared edges** — the same
+> Computing {speclit}`K-3` as a **flux difference across shared edges** — the same
 > `q_b·n·L` debited from one cell and credited to its neighbour — makes conservation
 > structural. Do not compute `∇·q_b` from a reconstructed cell-centred gradient.
 
@@ -1032,7 +1032,7 @@ both compute the identical volume,
         V = relax (|Δz| − tan θ_c d) / (1/A_k + 1/A_nb) / 3
 ```
 
-and the pair balances by construction. This is the same device that keeps `[K-3]`
+and the pair balances by construction. This is the same device that keeps {speclit}`K-3`
 conservative, and it is where this differs from ANUGA's `sanddune_erosion_operator`,
 which lowers an over-steep cell and lets the material vanish.
 
@@ -1082,7 +1082,7 @@ From `[aSM16 §4.2–4.3, Eqs 12–14]`, after Kean & Smith (2004) and Nepf (199
 `U_ref` is the flow velocity in the absence of vegetation, `d_s` the stem diameter,
 `λ` the mean stem spacing.
 
-> P14 Eq 3.11 omits `ρ` from `[V-1]`. `aSM16` Eq 12
+> P14 Eq 3.11 omits `ρ` from {speclit}`V-1`. `aSM16` Eq 12
 > includes it. The manual's form is dimensionally correct and is the one to implement.
 
 ### 8.2 Velocity reduction
@@ -1106,7 +1106,7 @@ Nepf (1999) to capture the effect of stem population density, via the force bala
 ```
 
 where `C_B` is the bed drag coefficient. `aSM16` fits `∂h/∂x` as a cubic in `αd`
-matched to Figure 6 of Nepf (1999), and solves `[V-4]` to obtain:
+matched to Figure 6 of Nepf (1999), and solves {speclit}`V-4` to obtain:
 
 ```
 [V-5]   C_D = 1.2                                                   if αd ≤ 0.006
@@ -1115,7 +1115,7 @@ matched to Figure 6 of Nepf (1999), and solves `[V-4]` to obtain:
 
 `C_D` is evaluated per cell whenever the stem-diameter or stem-spacing fields change.
 
-> **Caveat.** `[V-5]` is a fit to a fit — a cubic fit to a digitised figure, fed
+> **Caveat.** {speclit}`V-5` is a fit to a fit — a cubic fit to a digitised figure, fed
 > through a force balance. It is reasonable within the range of Nepf's experiments
 > and should not be extrapolated. Note the `(αd)⁻¹` term diverges as `αd → 0`, so the
 > `αd ≤ 0.006` branch is doing real work, not just simplification. Guard the boundary.
@@ -1170,7 +1170,7 @@ minimum required set.
 ### 9.4 Wet/dry
 
 Below the wet/dry threshold set `u = v = c_s = 0` `[RDy26 A21–A23]`. Note the
-separate, more conservative erosion threshold `[B-8]`.
+separate, more conservative erosion threshold {speclit}`B-8`.
 
 ### 9.5 Well-balancedness
 
@@ -1264,7 +1264,7 @@ Defaults are FG21 Table 2 / P14 §3.3.2 where stated. **All must be settable.**
    ```
    [P-1]   C(x) = (C₀ − S_P/(p v_s)) · exp(−p v_s x / q) + S_P/(p v_s)     [P13 6]
    ```
-   with `S_P` a local source term. Deviations from `[P-1]` are what P13 attribute to
+   with `S_P` a local source term. Deviations from {speclit}`P-1` are what P13 attribute to
    arroyo morphology and vegetation — so a 2-D model should reproduce the deviations,
    not just the profile.
 3. **Budget** — total aggradation within the study area, against the table above.
@@ -1304,8 +1304,8 @@ Implementation should cite these labels. Suggested mapping to the layer plan:
 - Feng, D. et al. (2026), *RDycore-sediment v1.0*, EGUsphere preprint 2026-4859. **doi:10.5194/egusphere-2026-4859**.
 - Ganti, V. et al. (2014) — cited by FG21 for the `d*` concept.
 - Hanson, G.J. (1990) — excess-shear entrainment for cohesive soils.
-- Hanson, G.J. & Simon, A. (2001), *Erodibility of cohesive streambeds in the loess area of the midwestern USA*, Hydrological Processes 15, 23–38. Source of `[E-5]`.
-- Nepf, H.M. (1999), *Drag, turbulence, and diffusion in flow through emergent vegetation*, Water Resources Research 35(2), 479–489. Figure 6; source of `[V-4]`,`[V-5]`.
+- Hanson, G.J. & Simon, A. (2001), *Erodibility of cohesive streambeds in the loess area of the midwestern USA*, Hydrological Processes 15, 23–38. Source of {speclit}`E-5`.
+- Nepf, H.M. (1999), *Drag, turbulence, and diffusion in flow through emergent vegetation*, Water Resources Research 35(2), 479–489. Figure 6; source of {speclit}`V-4`,{speclit}`V-5`.
 - Griffin, E.R. et al. (2005, 2014) — Rio Puerco vegetation and grain size.
 - Kean, J.W. & Smith, J.D. (2004) — vegetation drag.
 - Larsen, I.J. & Lamb, M.P. (2016), *Progressive incision of the Channeled Scablands by outburst floods*, Nature **538**(7624), 229–232. **doi:10.1038/nature19817**. Moses Coulee, Washington. Finding relevant here: including erosion thresholds gives flood discharges **5–10× smaller** than full-to-the-brim estimates.
