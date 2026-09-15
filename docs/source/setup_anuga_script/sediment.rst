@@ -11,10 +11,8 @@ know ANUGA, and it does not derive the physics.
 
 Labels like :spec:`E-1` name a term in the physics; they are defined, with
 their equations, under :ref:`sediment_labels`. Section numbers such as
-"spec 2.6" point into an internal specification **not distributed with
-ANUGA** -- they are provenance for the implementation, and every statement
-they accompany stands on its own without them. See the note at the top of
-:ref:`sediment_physics` for what to consult instead.
+"spec 2.6" point into :doc:`/appendices/physics_spec`, the specification the
+implementation was written from, which is published with these docs.
 
 A sediment fraction **is** a tracer with settling parameters attached, so
 :ref:`tracers` covers the transport, boundary and conservation machinery that

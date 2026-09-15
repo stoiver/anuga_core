@@ -52,6 +52,7 @@ extensions = [
     'sphinx_copybutton',
     'nbsphinx',
     'spec_label',
+    'myst_parser',      # renders the Markdown physics specification
 ]
 
 def linkcode_resolve(domain, info):
