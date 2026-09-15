@@ -7,7 +7,7 @@ Sediment physics: choosing the laws
 
 .. note::
 
-   **You can skip this page to begin with.** ``add_grain_size`` picks a
+   **You can skip this page to begin with.** ``add_sediment_fraction`` picks a
    working set of laws for a sand bed, and :ref:`sediment` shows how to run a
    model with them. This appendix is for when you need to say *which* physics,
    rather than accept the defaults.
@@ -103,7 +103,7 @@ Notation
      - shear velocity, :math:`\sqrt{\tau_b/\rho}`
      - m s\ :sup:`-1`
    * - :math:`c`, :math:`c_s`
-     - depth-averaged volumetric concentration (of grain size :math:`s`)
+     - depth-averaged volumetric concentration (of fraction :math:`s`)
      - --
    * - :math:`c_b`
      - near-bed concentration
@@ -136,7 +136,7 @@ Notation
      - bedload flux per unit width; its dimensionless form
      - m\ :sup:`2` s\ :sup:`-1`, --
    * - :math:`N_s`
-     - number of grain sizes
+     - number of sediment fractions
      - --
 
 **Grain-size percentiles.** :math:`D_{50}` is the median grain diameter: half
@@ -175,16 +175,16 @@ The equations being solved
 Everything on this page is a choice of closure for one of the terms below. It is
 worth reading the equations first: most of the parameters name a term here.
 
-A sediment grain size is a tracer, so it starts from :ref:`the tracer transport
+A sediment fraction is a tracer, so it starts from :ref:`the tracer transport
 equation <tracer_transport_equation>` -- the conserved variable is mass per unit
-area, :math:`m_s = h\,c_s`, for grain size :math:`s = 1 \dots N_s`. The state
+area, :math:`m_s = h\,c_s`, for fraction :math:`s = 1 \dots N_s`. The state
 vector the solver carries is
 
 .. math::
 
    \mathbf{U} = \begin{bmatrix} h & uh & vh & m_1 & \dots & m_{N_s}\end{bmatrix}^{T}
 
-**Suspended transport** [RDy26]_, which is [DL09]_ written per grain size. The
+**Suspended transport** [RDy26]_, which is [DL09]_ written per fraction. The
 tracer equation with a source: what the bed gives up and what settles out of
 the water column.
 
@@ -199,7 +199,7 @@ the water column.
    \qquad \text{[G-3]}
 
 :math:`E_s` is entrainment from the bed and :math:`D_s` deposition onto it, both
-per grain size. :math:`S_{m_s}` is an optional external supply -- hillslope yield,
+per fraction. :math:`S_{m_s}` is an optional external supply -- hillslope yield,
 a tributary load, rainfall washoff -- and is zero unless you set one.
 
 **Bed evolution.** What leaves the water column arrives at the bed, and the bed
@@ -647,7 +647,7 @@ quantity is depth-averaged. ``d* = c_b/c`` bridges them.
    * - value
      - meaning
    * - ``'constant'``
-     - :math:`d^{*}` is whatever each grain size was given
+     - :math:`d^{*}` is whatever each fraction was given
        (:math:`d^{*}=1` is well-mixed). Default.
    * - ``'rouse'``
      - :math:`d^{*}` from the Rouse profile :spec:`S-4`, recomputed per cell
@@ -660,7 +660,7 @@ assume, so use it when comparing against them.
 ``'rouse'`` is the physical choice when the profile is stratified -- coarser
 grains, or deeper and slower flow, where near-bed concentration genuinely
 exceeds the mean. It costs an evaluation of the fitted ``d*(Z, a/h)``
-polynomial per cell per grain size per step (§9.5 of the spec; 28 terms, maximum
+polynomial per cell per fraction per step (§9.5 of the spec; 28 terms, maximum
 error 0.82% over ``Z`` in [0.01, 2.5], ``a/h`` in [1e-3, 0.15], clamped at the
 edges rather than extrapolated).
 
