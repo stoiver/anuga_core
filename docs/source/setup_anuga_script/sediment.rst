@@ -16,7 +16,7 @@ ANUGA** -- they are provenance for the implementation, and every statement
 they accompany stands on its own without them. See the note at the top of
 :ref:`sediment_physics` for what to consult instead.
 
-A sediment grain size **is** a tracer with settling parameters attached, so
+A sediment fraction **is** a tracer with settling parameters attached, so
 :ref:`tracers` covers the transport, boundary and conservation machinery that
 this page builds on.
 
@@ -43,7 +43,7 @@ The shortest useful program
                         'top':    anuga.Reflective_boundary(domain),
                         'bottom': anuga.Reflective_boundary(domain)})
 
-   domain.add_grain_size('sand', diameter=2.0e-4)   # <- the only new line
+   domain.add_sediment_fraction('sand', diameter=2.0e-4)   # <- the only new line
 
    for t in domain.evolve(yieldstep=1.0, finaltime=30.0):
        pass
@@ -62,7 +62,7 @@ about 0.145.
    concentration everywhere, check the hydrodynamics before the sediment
    settings.
 
-``add_grain_size`` is the entry point. One call gives you a transported
+``add_sediment_fraction`` is the entry point. One call gives you a transported
 concentration, erosion, deposition, the settling velocity, the bed exchange,
 and the limiters, with defaults chosen for a sand bed. It creates the sediment
 operator and registers the fractional step for you, so there is nothing else to
@@ -85,10 +85,10 @@ but the first is a default:
 ::
 
    sediment configuration
-     grain sizes        : 1  --  sand (d=0.0002 m)
+     fractions          : 1  --  sand (d=0.0002 m)
      erosion            : Shields / Smith-McLean, non-cohesive (sand, gravel)   [E-1]
      deposition         : D = d* c v_s   [D-1]
-     near-bed d*        : constant, per grain size
+     near-bed d*        : constant, per fraction
      shear closure      : quadratic drag, tau_b = rho f_c |v|^2   [T-1]
      friction closure   : constant n, from the domain friction quantity
      bedload            : off
@@ -103,7 +103,7 @@ but the first is a default:
      ([E-1] and the like are cross-references to the term in the physics;
       see the Sediment physics appendix -- the description before each
       label is the whole story.)
-     per grain size:
+     per fraction:
        sand       d=0.0002 m  v_s=2.6695e-02 m/s  R=1.65  tau_c*=0.04
 
 Settling velocity in particular is *derived*, not set: if ``v_s`` is not what
@@ -130,8 +130,8 @@ Choices are made by naming the **physics**, never by setting a flag:
    * - ``initialize_sediment_operator(...)``
      - sediment transport on, and the domain-wide parameters
      - 2.2
-   * - ``add_grain_size(name, diameter, ...)``
-     - a grain size to carry, and its own properties
+   * - ``add_sediment_fraction(name, diameter, ...)``
+     - a sediment fraction to carry, and its own properties
      - 2.2
    * - ``set_bed_material(material, ...)``
      - the erosion law
@@ -201,16 +201,16 @@ a question of which call wins.
 .. code-block:: python
 
    domain.initialize_sediment_operator(porosity=0.28, rho_w=1000.0)  # the run
-   domain.add_grain_size('sand', diameter=2.0e-4)                    # a grain
-   domain.add_grain_size('silt', diameter=2.0e-5, tau_c_star=0.11)   # another
+   domain.add_sediment_fraction('sand', diameter=2.0e-4)                    # a grain
+   domain.add_sediment_fraction('silt', diameter=2.0e-5, tau_c_star=0.11)   # another
 
 ``initialize_sediment_operator`` takes what describes the **run**;
-``add_grain_size`` takes what describes **one grain size**. Neither accepts the
+``add_sediment_fraction`` takes what describes **one fraction**. Neither accepts the
 other's parameters -- passing ``diameter=`` to the first, or ``rho_w=`` to the
 second, is a ``TypeError`` rather than a silently ignored argument.
 
 The two may be called in either order, and ``initialize_sediment_operator`` is
-optional: ``add_grain_size`` creates the operator with default domain-wide
+optional: ``add_sediment_fraction`` creates the operator with default domain-wide
 parameters if none exists, which is why the program at the top of this page is
 a single line.
 
@@ -232,7 +232,7 @@ takes, and are documented there; passing them here is a convenience, and
 
 **One operator per domain.** Calling it again returns the same operator,
 applying any parameters given the second time. That is not just tidiness: the
-kernel makes a single pass over every registered grain size, so a second
+kernel makes a single pass over every registered fraction, so a second
 operator in the fractional-step list would apply the bed exchange twice per
 timestep.
 
@@ -246,12 +246,12 @@ order -- see :ref:`operator_order` below.
 
 .. _grain_sizes:
 
-``add_grain_size``
-~~~~~~~~~~~~~~~~~~
+``add_sediment_fraction``
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   domain.add_grain_size(
+   domain.add_sediment_fraction(
        name, diameter,
        rho_s=2650.0, tau_c_star=0.04, d_star=1.0, beta=None,
        initial_concentration=0.0, reference_height=None, **settling_kwargs)
@@ -299,36 +299,36 @@ order -- see :ref:`operator_order` below.
      - Rouse reference height :math:`a` in :spec:`S-4`; see
        :ref:`near_bed_d_star`
 
-Multiple grain sizes are independent: each has its own concentration, settling
+Multiple fractions are independent: each has its own concentration, settling
 velocity and critical stress, and each exchanges with the same bed. Call it
-once per grain size.
+once per fraction.
 
 There is no ``rho_w`` here. Water density is a property of the fluid, and there
 is one fluid, so it lives on ``initialize_sediment_operator`` and
 ``set_sediment_parameters``. Changing it afterwards recomputes :math:`R` and
-:math:`v_s` for every grain size already registered.
+:math:`v_s` for every fraction already registered.
 
 
-What belongs to a grain size, and what to the run
+What belongs to a fraction, and what to the run
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Only the grain's own properties are per grain size; every physics choice, and
+Only the grain's own properties are per fraction; every physics choice, and
 the bed itself, is shared.
 
 .. list-table::
    :header-rows: 1
    :widths: 40 60
 
-   * - Per grain size
+   * - Per fraction
      - Set by
    * - ``diameter``
-     - ``add_grain_size``
+     - ``add_sediment_fraction``
    * - settling velocity :math:`v_s`
      - computed from ``diameter``, ``rho_s`` and any ``settling_kwargs``
    * - ``tau_c_star``
-     - ``add_grain_size``
+     - ``add_sediment_fraction``
    * - ``d_star``, ``reference_height``
-     - ``add_grain_size``
+     - ``add_sediment_fraction``
    * - submerged specific gravity :math:`R`
      - computed from ``rho_s`` and the shared ``rho_w``
 
@@ -336,7 +336,7 @@ the bed itself, is shared.
    :header-rows: 1
    :widths: 40 60
 
-   * - Shared by every grain size
+   * - Shared by every fraction
      - Set by
    * - ``porosity``, ``c_max``, ``c_pack``, ``rho_w``, ``bed_evolution``
      - ``initialize_sediment_operator`` or ``set_sediment_parameters``
@@ -351,15 +351,15 @@ the bed itself, is shared.
    * - ``beta``
      - one ``beta_tracer`` for every tracer on the domain
    * - **the bed**
-     - one ``elevation``, which all grain sizes erode and deposit onto
+     - one ``elevation``, which all fractions erode and deposit onto
 
 Because the shared settings live on the **domain**, not on the operator, order
-does not matter: ``set_bed_material('cohesive')`` called after both grain sizes
+does not matter: ``set_bed_material('cohesive')`` called after both fractions
 are registered applies to both.
 
-Grain sizes occupy tracer slots in call order, so grain size ``s`` is tracer
+Fractions occupy tracer slots in call order, so fraction ``s`` is tracer
 ``s``. **The one ordering rule**: do not interleave ``add_tracer`` and
-``add_grain_size`` on the same domain if you rely on that correspondence.
+``add_sediment_fraction`` on the same domain if you rely on that correspondence.
 
 
 .. _operator_order:
@@ -370,7 +370,7 @@ Controlling operator order
 Fractional-step operators run in the order they are created. If another
 operator must run before the sediment one -- an external source that the bed
 exchange then consumes, say -- create the sediment operator at the point you
-want it in the sequence, and add the grain sizes afterwards:
+want it in the sequence, and add the fractions afterwards:
 
 .. code-block:: python
 
@@ -378,11 +378,11 @@ want it in the sequence, and add the grain sizes afterwards:
    domain.initialize_sediment_operator()    # then this
 
    for nm, d50 in grain_sizes:
-       domain.add_grain_size(nm, diameter=d50)
+       domain.add_sediment_fraction(nm, diameter=d50)
 
-``add_grain_size`` will not displace an operator that already exists, so the
-order established here survives however many grain sizes follow. Ordinary
-models do not need this: calling ``add_grain_size`` straight away, as
+``add_sediment_fraction`` will not displace an operator that already exists, so the
+order established here survives however many fractions follow. Ordinary
+models do not need this: calling ``add_sediment_fraction`` straight away, as
 everywhere else on this page, puts the operator in a sensible place by itself.
 
 
@@ -396,8 +396,8 @@ silt.
 
 .. code-block:: python
 
-   domain.add_grain_size('fine_sand', diameter=1.5e-4)
-   domain.add_grain_size('mud',       diameter=2.0e-5)
+   domain.add_sediment_fraction('fine_sand', diameter=1.5e-4)
+   domain.add_sediment_fraction('mud',       diameter=2.0e-5)
 
    domain.get_sediment_names()        # ['fine_sand', 'mud']
    domain.get_tracer('fine_sand')     # its concentration, per cell
@@ -408,7 +408,7 @@ non-empty string, unique on the domain, and it may not be
 * the name of a quantity -- ``stage``, ``elevation``, ``friction``,
   ``xmomentum``, ``ymomentum``, ``height``, ``x``, ``y``, ``xvelocity``,
   ``yvelocity``. Both a quantity and a tracer are written to the sww as
-  ``<name>_c``, so a grain size called ``stage`` would overwrite the stage in
+  ``<name>_c``, so a fraction called ``stage`` would overwrite the stage in
   the output.
 * anything beginning ``max_``, which is reserved for the running maxima
   ``Collect_max_quantities_operator`` writes.
@@ -422,27 +422,27 @@ when you open the file six months later.
    Do not confuse this with ``set_sediment_friction(bed='sand')``. **That**
    ``'sand'`` is one of a fixed set -- ``'sand'``, ``'gravel'``,
    ``'boulder'`` -- selecting a roughness closure, and has nothing to do with
-   what you called your grain size. ``name`` is the only sediment argument
+   what you called your fraction. ``name`` is the only sediment argument
    that is free text; every other choice below names a physics option from a
    fixed vocabulary.
 
 
-If you leave a grain size out
+If you leave a fraction out
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``name`` and ``diameter`` describe one grain size, so they travel together:
+``name`` and ``diameter`` describe one fraction, so they travel together:
 both are required positional parameters, and omitting either is a
 ``TypeError`` at the call rather than a partial registration.
 
 .. code-block:: python
 
-   domain.add_grain_size('sand')
-   # TypeError: add_grain_size() missing 1 required positional argument: 'diameter'
+   domain.add_sediment_fraction('sand')
+   # TypeError: add_sediment_fraction() missing 1 required positional argument: 'diameter'
 
-Setting sediment up with **no** grain size at all is legal, and is what
+Setting sediment up with **no** fraction at all is legal, and is what
 ``initialize_sediment_operator`` on its own does -- see :ref:`operator_order`.
 It is a configured run waiting for its sediment, not an error. But it is only
-useful as a step on the way to ``add_grain_size``: an operator with no grain
+useful as a step on the way to ``add_sediment_fraction``: an operator with no grain
 sizes transports nothing, and evolving that way warns rather than completing
 silently with the bed untouched.
 
@@ -450,17 +450,17 @@ silently with the bed untouched.
 
    **This includes bedload.** Moving the bed without carrying anything in
    suspension is a reasonable thing to want, and it does not remove the need
-   for a grain size: the diameter and :math:`R` that set the Shields stress
+   for a fraction: the diameter and :math:`R` that set the Shields stress
    -- and so the transport vector :math:`\mathbf{q}_b` -- live on a grain
    size. With none registered, the bedload kernel returns immediately and the
    bed does not move.
 
-   For bed evolution with no suspended sediment, register the grain size and
+   For bed evolution with no suspended sediment, register the fraction and
    choose the total-load formula, which turns the suspended exchange off:
 
    .. code-block:: python
 
-      domain.add_grain_size('sand', diameter=2.0e-4)
+      domain.add_sediment_fraction('sand', diameter=2.0e-4)
       domain.set_bedload('engelund_hansen')    # [K-5], total load
 
    On the channel at the top of this page that scours about 14 cm of bed while
@@ -583,7 +583,7 @@ from nowhere.
 Where several classes compete for the last of the material they are scaled by
 one shared proportional factor, not served in registration order: the bed
 carries no per-class stratigraphy, so no class has a better claim, and the
-answer must not depend on the order you registered the grain sizes.
+answer must not depend on the order you registered the fractions.
 Deposition is never scaled -- it is what replenishes the bed.
 
 The two transport routes give **different strengths of guarantee**, and it is
@@ -853,7 +853,7 @@ is :math:`\rho g h S` with :math:`S` the **energy** slope -- and then erodes
 
 .. code-block:: python
 
-   domain.add_grain_size('sand', diameter=2.0e-4)
+   domain.add_sediment_fraction('sand', diameter=2.0e-4)
    domain.set_shear_closure('energy_slope')            # tau_b = rho g h S   [T-7e]
    domain.set_bed_material('cohesive', tau_crit=1e-9,
                            K_e=0.5 / shear_factor)     # E = K_e tau_b
@@ -922,8 +922,8 @@ Choosing a configuration
 If you do not know where to start:
 
 - **Sand bed, flood or dam break, morphology wanted.** Defaults, plus one
-  grain size:
-  ``domain.add_grain_size('sand', diameter=2e-4)``. Add
+  sediment fraction:
+  ``domain.add_sediment_fraction('sand', diameter=2e-4)``. Add
   ``set_bedload('wong_parker_eq24')`` if the grains are coarse enough to move
   along the bed.
 - **Fine cohesive sediment, muddy estuary.** ``set_bed_material('cohesive')``

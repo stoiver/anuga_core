@@ -67,7 +67,7 @@ def test_energy_slope_differs_from_depth_slope_when_the_surface_is_not_parallel(
                         'right': Dirichlet_boundary([1.0, 0.0, 0.0]),
                         'top': Reflective_boundary(d),
                         'bottom': Reflective_boundary(d)})
-        d.add_grain_size('sand', diameter=2.0e-4)
+        d.add_sediment_fraction('sand', diameter=2.0e-4)
         d.set_shear_closure(closure)
         d.set_bed_material('cohesive', tau_crit=1e-9, K_e=1.0e-5)
         d.set_deposition(law='threshold', tau_d=0.0)
@@ -123,7 +123,7 @@ def test_the_two_closures_give_materially_different_erosion():
     for closure in ('quadratic_drag', 'depth_slope'):
         d = channel()
         d.set_shear_closure(closure)
-        d.add_grain_size(name='sand', diameter=1e-4, initial_concentration=0.0)
+        d.add_sediment_fraction(name='sand', diameter=1e-4, initial_concentration=0.0)
         d.evolve_to_end(finaltime=30.0)
         means[closure] = float(d.get_tracer('sand').mean())
 
