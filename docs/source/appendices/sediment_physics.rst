@@ -232,12 +232,22 @@ moves by the volume it gains, allowing for pore space:
 
 .. math::
 
-   \frac{\partial z}{\partial t} = \frac{D - E}{1 - \lambda}
+   \frac{\partial z}{\partial t}
+   = \frac{1}{1 - \lambda}\sum_{s=1}^{N_s} \bigl(D_s - E_s\bigr)
    \qquad \text{[G-4]}
 
 with :math:`\lambda` the bed porosity, since a deposited volume
 :math:`(1-\lambda)\,dz` of grains fills a bed volume :math:`dz`. This is the
 Exner equation [Exn25]_, in the form used by [P14]_ and [FG21]_.
+
+The sum matters once there is more than one fraction: there is **one** bed,
+and every fraction exchanges with it. The kernel accumulates a single
+:math:`dz` per cell over :math:`s` and applies it once, so fractions can
+offset each other -- sand entraining while gravel deposits leaves the bed
+still, though neither process has stopped. There is no per-fraction bed and
+no stratigraphy: nothing records which fraction the last millimetre came
+from, which is why the erodible base :spec:`L-5` shares a shortage between
+fractions proportionally rather than by any order of priority.
 
 **Bedload.** When bedload is switched on it moves the bed too, by the divergence
 of the bedload transport vector :math:`\mathbf{q}_b`:
@@ -246,7 +256,9 @@ of the bedload transport vector :math:`\mathbf{q}_b`:
 
 .. math::
 
-   \frac{\partial z}{\partial t} = -\frac{1}{1 - \lambda}\,\nabla \cdot \mathbf{q}_b
+   \frac{\partial z}{\partial t}
+   = -\frac{1}{1 - \lambda}\,\nabla \cdot
+     \sum_{s=1}^{N_s} \mathbf{q}_{b,s}
    \qquad \text{[G-5]}
 
 Both act on the same :math:`z`, and when both are active their contributions sum.
