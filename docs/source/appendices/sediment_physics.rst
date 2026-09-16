@@ -780,8 +780,9 @@ own.
    :math:`f` from grain size and depth. Not to be confused with [Wil66]_.
 
 .. [Wil66] Wilson, K. C. (1966). Bed-load transport at high shear stress.
-   *Journal of the Hydraulics Division*, 92(6), 49-59. Source of the erosion
-   coefficient cited by [P14]_ equation 3.8. Not the same Wilson as [Wil04]_.
+   *Journal of the Hydraulics Division*, 92(6), 49-59.
+   doi:10.1061/JYCEAJ.0001562. Source of the erosion coefficient cited by
+   [P14]_ equation 3.8. Not the same Wilson as [Wil04]_.
 
 .. [WP06] Wong, M. and Parker, G. (2006). Reanalysis and correction of bed-load
    relation of Meyer-Peter and Müller using their own database. *Journal of
