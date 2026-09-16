@@ -9,10 +9,10 @@ This documents the user-facing interface: every parameter, its units, its
 default, and how to choose between the alternative methods. It assumes you
 know ANUGA, and it does not derive the physics.
 
-Labels like :spec:`E-1` name a term in the physics; they are defined, with
-their equations, under :ref:`sediment_labels`. Section numbers such as
-"spec 2.6" point into :doc:`/appendices/physics_spec`, the specification the
-implementation was written from, which is published with these docs.
+Labels like :spec:`E-1` name a term in the physics; each links to the
+equation that defines it in :doc:`/appendices/physics_spec`, the
+specification the implementation was written from, which is published with
+these docs. Section numbers such as "spec 2.6" point into the same page.
 
 A sediment fraction **is** a tracer with settling parameters attached, so
 :ref:`tracers` covers the transport, boundary and conservation machinery that
@@ -173,10 +173,11 @@ Choices are made by naming the **physics**, never by setting a flag:
       The defaults are a working sand-bed configuration, so you can leave them
       alone until you need to say otherwise.
 
-   :ref:`sediment_labels`
-      What the bracketed labels mean. :spec:`E-1`, :spec:`T-1` and the rest name a
-      term in the physics; they appear in this page, in the source, and in the
-      output of ``sediment_summary()``.
+   :doc:`/appendices/physics_spec`
+      Where the bracketed labels are defined. :spec:`E-1`, :spec:`T-1` and the
+      rest name a term in the physics; they appear in this page, in the source,
+      and in the output of ``sediment_summary()``, and each links to its
+      equation there.
 
 Order does not matter, with one exception noted under :ref:`grain_sizes`
 below: call them before ``evolve()``, in whatever order reads best.

@@ -4,8 +4,9 @@ Labels like ``[G-4]`` name a term in the sediment physics rather than a
 reference, and they appear across the task page, the appendix and the source.
 Written as plain literals they gave the reader a name without saying where to
 find it, so ``:spec:`G-4``` renders ``[G-4]`` in the same monospace as before
-and links it to the equation it names -- or, for the labels that have no
-displayed equation, to its row in "What the bracketed labels mean".
+and links it to the equation that defines it in the physics specification
+(``appendices/physics_spec.md``), where every label has a ``(spec-x-n)=``
+target on the block that defines it.
 
 The target for label ``X-N`` is the RST label ``spec-x-n``. Resolution is done
 here rather than through ``:ref:`` because the std domain rebuilds the link
@@ -61,7 +62,7 @@ class ResolveSpecRefs(SphinxPostTransform):
             entry = std.anonlabels.get('spec-%s' % label.lower())
             if entry is None:
                 logger.warning('no anchor for spec label [%s]; expected a '
-                               '`.. _spec-%s:` target in the appendix',
+                               '`(spec-%s)=` target in physics_spec.md',
                                label, label.lower(),
                                location=(node['docname'], node.line))
                 node.replace_self(literal)
