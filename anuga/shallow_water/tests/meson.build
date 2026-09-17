@@ -7,6 +7,7 @@ python_sources = [
 'test_boundaries_sw.py',
 'test_extrapolation_sw.py',
 'test_flow_algorithms.py',
+'test_compute_mode_strict.py',
 'test_domain_c_struct.py',
 
 'test_flux.py',

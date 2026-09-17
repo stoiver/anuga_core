@@ -293,7 +293,27 @@ def gpu_startup_banner(numprocs: int,
     return lines
 
 
-def set_gpu_offload(enable: bool = True, verbose: bool = True) -> bool:
+# Boundary classes the unified (mode-2) path evaluates on the device, by class
+# name. Everything else is evaluated on the host each step and synced back,
+# which works but costs a host<->device round trip per step. This is the ONE
+# list; it used to be copied into nine methods with three different spellings
+# of the Flather class, so Flather boundaries silently took the host path in
+# most of them.
+GPU_BOUNDARY_TYPES = frozenset({
+    'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
+    'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
+    'Time_boundary', 'File_boundary', 'Field_boundary',
+    'Absorbing_wave_boundary', 'Characteristic_wave_boundary',
+    'Flather_external_stage_zero_velocity_boundary',
+})
+
+
+def _strict_compute_mode_from_env() -> bool:
+    """ANUGA_STRICT_COMPUTE_MODE=1 makes every domain strict by default."""
+    return os.environ.get('ANUGA_STRICT_COMPUTE_MODE', '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def set_gpu_offload(enable: bool = True, verbose: bool = True, strict: bool = False) -> bool:
     """Enable or disable GPU offload for mode-2 ('unified') domains, process-wide.
 
     This is a *process-level* switch, not per-domain: it affects every domain
@@ -318,29 +338,38 @@ def set_gpu_offload(enable: bool = True, verbose: bool = True) -> bool:
     verbose : bool
         Print a one-line confirmation.
 
+    strict : bool
+        If True, requesting ``enable=True`` on a build or machine that cannot
+        offload raises ``RuntimeError`` instead of warning and falling back to
+        the CPU. Use it in batch jobs, where a "GPU job" that quietly runs on
+        the CPU is the expensive failure. ``ANUGA_STRICT_COMPUTE_MODE=1`` in
+        the environment has the same effect.
+
     Returns
     -------
     bool
         The resolved offload state (:func:`gpu_offload_enabled`). Requesting
         ``enable=True`` on a build without offload support warns and returns
-        False — never hard-fails.
+        False — never hard-fails unless ``strict``.
     """
     import warnings
 
     ge = _gpu_ext_or_none()
     was_supported = gpu_offload_supported()
+    strict = strict or _strict_compute_mode_from_env()
 
     if enable:
         # Clear any prior disable BEFORE checking capability, so re-enabling is
         # not blocked by our own OMP_TARGET_OFFLOAD=disabled.
         os.environ.pop('OMP_TARGET_OFFLOAD', None)
         if not gpu_offload_supported():
-            warnings.warn(
-                "set_gpu_offload(True): this ANUGA build has no GPU offload support "
-                "(built with gpu_offload=false) or no device is present; 'unified' "
-                "domains will run on CPU multicore. Rebuild with -Dgpu_offload=true "
-                "and a GPU-capable compiler to enable offload.",
-                stacklevel=2)
+            msg = ("set_gpu_offload(True): this ANUGA build has no GPU offload support "
+                   "(built with gpu_offload=false) or no device is present; 'unified' "
+                   "domains will run on CPU multicore. Rebuild with -Dgpu_offload=true "
+                   "and a GPU-capable compiler to enable offload.")
+            if strict:
+                raise RuntimeError(msg + " (strict mode: refusing to fall back to the CPU)")
+            warnings.warn(msg, stacklevel=2)
             enable = False
     elif was_supported:
         # Disabling offload on a GPU build. This forces the unified kernels onto
@@ -4469,6 +4498,68 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
         nvtxRangePop()
 
+    def _init_gpu_boundary_info(self, gpu_dom) -> bool:
+        """Classify this domain's boundaries for the unified (mode-2) path.
+
+        Runs once per boundary configuration (``set_boundary`` clears the
+        cache). Fills the per-type lists the device path iterates over,
+        decides whether every boundary can be evaluated on the device
+        (``_gpu_all_on_gpu``), and if not sets up the host<->device edge sync
+        the host path needs.
+
+        Boundary types the device cannot evaluate are reported once with a
+        warning, or refused with ``RuntimeError`` in strict mode (see
+        :meth:`set_compute_mode`). Returns ``_gpu_all_on_gpu``.
+        """
+        if getattr(self, '_gpu_boundary_info_initialized', False):
+            return self._gpu_all_on_gpu
+
+        self._gpu_cpu_tags = []
+        self._gpu_cpu_boundary_types = []
+        self._gpu_all_on_gpu = True
+        self._gpu_transmissive_n_zero_t_boundaries = []
+        self._gpu_time_boundaries = []
+        self._gpu_absorbing_wave_boundaries = []
+        self._gpu_characteristic_wave_boundaries = []
+        self._gpu_flather_boundaries = []
+
+        for tag, B in self.boundary_map.items():
+            if B is None:
+                continue
+            btype = B.__class__.__name__
+            if btype not in GPU_BOUNDARY_TYPES:
+                self._gpu_cpu_tags.append(tag)
+                self._gpu_all_on_gpu = False
+                self._gpu_cpu_boundary_types.append((tag, btype))
+            elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
+                self._gpu_transmissive_n_zero_t_boundaries.append(B)
+            elif btype == 'Time_boundary':
+                self._gpu_time_boundaries.append(B)
+            elif btype == 'Absorbing_wave_boundary':
+                self._gpu_absorbing_wave_boundaries.append(B)
+            elif btype == 'Characteristic_wave_boundary':
+                self._gpu_characteristic_wave_boundaries.append(B)
+            elif btype == 'Flather_external_stage_zero_velocity_boundary':
+                self._gpu_flather_boundaries.append(B)
+
+        if not self._gpu_all_on_gpu:
+            msg = (
+                "compute mode 'unified': these boundaries are of types the device "
+                f"path cannot evaluate: {self._gpu_cpu_boundary_types}. They will be "
+                "evaluated on the host every step and their edge values synced to the "
+                "device, which is correct but costs a host<->device round trip per "
+                f"step. Device-evaluated types: {sorted(GPU_BOUNDARY_TYPES)}.")
+            if getattr(self, 'compute_mode_strict', False):
+                raise RuntimeError(msg + " (strict mode: refusing the host fallback)")
+            import warnings
+            warnings.warn(msg, stacklevel=3)
+            from .sw_domain_gpu_ext import init_boundary_edge_sync
+            boundary_cell_ids = num.unique(self.boundary_cells).astype(num.intc)
+            init_boundary_edge_sync(gpu_dom, boundary_cell_ids)
+
+        self._gpu_boundary_info_initialized = True
+        return self._gpu_all_on_gpu
+
     def update_boundary(self):
         """Go through list of boundary objects and update boundary values
         for all conserved quantities on boundary.
@@ -4511,44 +4602,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             gpu_dom = self.gpu_interface.gpu_dom
 
             # Lazily initialize GPU boundary info
-            GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
-                                  'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
-                                  'Time_boundary', 'File_boundary', 'Field_boundary',
-                                  'Absorbing_wave_boundary', 'Characteristic_wave_boundary',
-                                  'Flather_external_stage_zero_velocity_boundary'}
-
-            if not hasattr(self, '_gpu_boundary_info_initialized'):
-                self._gpu_cpu_tags = []
-                self._gpu_all_on_gpu = True
-                self._gpu_transmissive_n_zero_t_boundaries = []
-                self._gpu_time_boundaries = []
-                self._gpu_absorbing_wave_boundaries = []
-                self._gpu_characteristic_wave_boundaries = []
-                self._gpu_flather_boundaries = []
-
-                for tag, B in self.boundary_map.items():
-                    if B is not None:
-                        btype = B.__class__.__name__
-                        if btype not in GPU_BOUNDARY_TYPES:
-                            self._gpu_cpu_tags.append(tag)
-                            self._gpu_all_on_gpu = False
-                        elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
-                            self._gpu_transmissive_n_zero_t_boundaries.append(B)
-                        elif btype == 'Time_boundary':
-                            self._gpu_time_boundaries.append(B)
-                        elif btype == 'Absorbing_wave_boundary':
-                            self._gpu_absorbing_wave_boundaries.append(B)
-                        elif btype == 'Characteristic_wave_boundary':
-                            self._gpu_characteristic_wave_boundaries.append(B)
-                        elif btype == 'Flather_external_stage_zero_velocity_boundary':
-                            self._gpu_flather_boundaries.append(B)
-
-                # Set up boundary edge sync if we have ANY CPU-evaluated boundaries
-                if not self._gpu_all_on_gpu:
-                    boundary_cell_ids = np.unique(self.boundary_cells).astype(np.intc)
-                    init_boundary_edge_sync(gpu_dom, boundary_cell_ids)
-
-                self._gpu_boundary_info_initialized = True
+            self._init_gpu_boundary_info(gpu_dom)
 
             if self._gpu_all_on_gpu:
                 # All boundaries are GPU-supported - evaluate entirely on GPU
@@ -5676,47 +5730,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
         gpu_dom = self.gpu_interface.gpu_dom
 
-        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
-                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
-                              'Time_boundary', 'File_boundary', 'Field_boundary',
-                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary',
-                              'Flather_boundary'}
-
-        if not hasattr(self, '_gpu_boundary_info_initialized'):
-            self._gpu_cpu_tags = []
-            self._gpu_all_on_gpu = True
-            cpu_boundary_types = []
-            self._gpu_transmissive_n_zero_t_boundaries = []
-            self._gpu_time_boundaries = []
-            self._gpu_absorbing_wave_boundaries = []
-            self._gpu_characteristic_wave_boundaries = []
-            self._gpu_flather_boundaries = []
-
-            for tag, B in self.boundary_map.items():
-                if B is not None:
-                    btype = B.__class__.__name__
-                    if btype not in GPU_BOUNDARY_TYPES:
-                        self._gpu_cpu_tags.append(tag)
-                        self._gpu_all_on_gpu = False
-                        cpu_boundary_types.append((tag, btype))
-                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
-                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
-                    elif btype == 'Time_boundary':
-                        self._gpu_time_boundaries.append(B)
-                    elif btype == 'Absorbing_wave_boundary':
-                        self._gpu_absorbing_wave_boundaries.append(B)
-                    elif btype == 'Characteristic_wave_boundary':
-                        self._gpu_characteristic_wave_boundaries.append(B)
-                    elif btype == 'Flather_boundary':
-                        self._gpu_flather_boundaries.append(B)
-
-            if not self._gpu_all_on_gpu:
-                boundary_cell_ids = np.unique(self.boundary_cells).astype(np.intc)
-                init_boundary_edge_sync(gpu_dom, boundary_cell_ids)
-                print("WARNING: GPU boundary evaluation disabled - falling back to CPU")
-                print(f"  Unsupported boundary types: {cpu_boundary_types}")
-
-            self._gpu_boundary_info_initialized = True
+        self._init_gpu_boundary_info(gpu_dom)
 
         # Bootstrap: prev_dt=0 on first call → plain Euler step
         if not hasattr(self, '_ader2_prev_dt'):
@@ -5825,42 +5839,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
         gpu_dom = self.gpu_interface.gpu_dom
 
-        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
-                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
-                              'Time_boundary', 'File_boundary', 'Field_boundary',
-                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary'}
-
-        if not hasattr(self, '_gpu_boundary_info_initialized'):
-            self._gpu_cpu_tags = []
-            self._gpu_all_on_gpu = True
-            cpu_boundary_types = []
-            self._gpu_transmissive_n_zero_t_boundaries = []
-            self._gpu_time_boundaries = []
-            self._gpu_absorbing_wave_boundaries = []
-            self._gpu_characteristic_wave_boundaries = []
-
-            for tag, B in self.boundary_map.items():
-                if B is not None:
-                    btype = B.__class__.__name__
-                    if btype not in GPU_BOUNDARY_TYPES:
-                        self._gpu_cpu_tags.append(tag)
-                        self._gpu_all_on_gpu = False
-                        cpu_boundary_types.append((tag, btype))
-                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
-                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
-                    elif btype == 'Time_boundary':
-                        self._gpu_time_boundaries.append(B)
-                    elif btype == 'Absorbing_wave_boundary':
-                        self._gpu_absorbing_wave_boundaries.append(B)
-                    elif btype == 'Characteristic_wave_boundary':
-                        self._gpu_characteristic_wave_boundaries.append(B)
-
-            if not self._gpu_all_on_gpu:
-                print("WARNING: C ADER-2 loop requires all GPU-supported boundary types")
-                print("  Falling back to Python-orchestrated GPU loop")
-                print(f"  Unsupported types: {cpu_boundary_types}")
-
-            self._gpu_boundary_info_initialized = True
+        self._init_gpu_boundary_info(gpu_dom)
 
         if not self._gpu_all_on_gpu:
             return self._evolve_one_ader2_step_gpu(yieldstep, finaltime)
@@ -5969,44 +5948,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         gpu_dom = self.gpu_interface.gpu_dom
 
         # Supported GPU boundary types
-        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
-                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
-                              'Time_boundary', 'File_boundary', 'Field_boundary',
-                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary'}
-
-        # Lazy init: identify which boundaries need CPU evaluation vs GPU
-        if not hasattr(self, '_gpu_boundary_info_initialized'):
-            self._gpu_cpu_tags = []
-            self._gpu_all_on_gpu = True
-            cpu_boundary_types = []
-            self._gpu_transmissive_n_zero_t_boundaries = []
-            self._gpu_time_boundaries = []
-            self._gpu_absorbing_wave_boundaries = []
-            self._gpu_characteristic_wave_boundaries = []
-
-            for tag, B in self.boundary_map.items():
-                if B is not None:
-                    btype = B.__class__.__name__
-                    if btype not in GPU_BOUNDARY_TYPES:
-                        self._gpu_cpu_tags.append(tag)
-                        self._gpu_all_on_gpu = False
-                        cpu_boundary_types.append((tag, btype))
-                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
-                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
-                    elif btype == 'Time_boundary':
-                        self._gpu_time_boundaries.append(B)
-                    elif btype == 'Absorbing_wave_boundary':
-                        self._gpu_absorbing_wave_boundaries.append(B)
-                    elif btype == 'Characteristic_wave_boundary':
-                        self._gpu_characteristic_wave_boundaries.append(B)
-
-            if not self._gpu_all_on_gpu:
-                boundary_cell_ids = np.unique(self.boundary_cells).astype(np.intc)
-                init_boundary_edge_sync(gpu_dom, boundary_cell_ids)
-                print("WARNING: GPU boundary evaluation disabled - falling back to CPU")
-                print(f"  Unsupported boundary types: {cpu_boundary_types}")
-
-            self._gpu_boundary_info_initialized = True
+        self._init_gpu_boundary_info(gpu_dom)
 
         # Backup for RK2
         backup_conserved_quantities_gpu(gpu_dom)
@@ -6194,46 +6136,14 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             evaluate_absorbing_wave_boundary_gpu,
             set_characteristic_wave_value,
             evaluate_characteristic_wave_boundary_gpu,
+            set_flather_value,
+            evaluate_flather_boundary_gpu,
         )
         import numpy as np
 
         gpu_dom = self.gpu_interface.gpu_dom
 
-        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
-                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
-                              'Time_boundary', 'File_boundary', 'Field_boundary',
-                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary'}
-
-        if not hasattr(self, '_gpu_boundary_info_initialized'):
-            self._gpu_cpu_tags = []
-            self._gpu_all_on_gpu = True
-            cpu_boundary_types = []
-            self._gpu_transmissive_n_zero_t_boundaries = []
-            self._gpu_time_boundaries = []
-            self._gpu_absorbing_wave_boundaries = []
-            self._gpu_characteristic_wave_boundaries = []
-
-            for tag, B in self.boundary_map.items():
-                if B is not None:
-                    btype = B.__class__.__name__
-                    if btype not in GPU_BOUNDARY_TYPES:
-                        self._gpu_cpu_tags.append(tag)
-                        self._gpu_all_on_gpu = False
-                        cpu_boundary_types.append((tag, btype))
-                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
-                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
-                    elif btype == 'Time_boundary':
-                        self._gpu_time_boundaries.append(B)
-                    elif btype == 'Absorbing_wave_boundary':
-                        self._gpu_absorbing_wave_boundaries.append(B)
-                    elif btype == 'Characteristic_wave_boundary':
-                        self._gpu_characteristic_wave_boundaries.append(B)
-
-            if not self._gpu_all_on_gpu:
-                boundary_cell_ids = np.unique(self.boundary_cells).astype(np.intc)
-                init_boundary_edge_sync(gpu_dom, boundary_cell_ids)
-
-            self._gpu_boundary_info_initialized = True
+        self._init_gpu_boundary_info(gpu_dom)
 
         protect_gpu(gpu_dom)
         extrapolate_second_order_gpu(gpu_dom)
@@ -6270,6 +6180,14 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                     perturb = float(value[0])
                 set_characteristic_wave_value(gpu_dom, perturb)
             evaluate_characteristic_wave_boundary_gpu(gpu_dom)
+            for B in self._gpu_flather_boundaries:
+                value = B.get_boundary_values()
+                try:
+                    stage_val = float(value)
+                except (TypeError, ValueError):
+                    stage_val = float(value[0])
+                set_flather_value(gpu_dom, stage_val)
+            evaluate_flather_boundary_gpu(gpu_dom)
         else:
             # Host evaluation of any non-GPU boundary type (e.g.
             # Transmissive_momentum_set_stage_boundary), then sync edge values
@@ -6324,46 +6242,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
         gpu_dom = self.gpu_interface.gpu_dom
 
-        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
-                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
-                              'Time_boundary', 'File_boundary', 'Field_boundary',
-                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary',
-                              'Flather_boundary'}
-
-        if not hasattr(self, '_gpu_boundary_info_initialized'):
-            self._gpu_cpu_tags = []
-            self._gpu_all_on_gpu = True
-            cpu_boundary_types = []
-            self._gpu_transmissive_n_zero_t_boundaries = []
-            self._gpu_time_boundaries = []
-            self._gpu_absorbing_wave_boundaries = []
-            self._gpu_characteristic_wave_boundaries = []
-            self._gpu_flather_boundaries = []
-
-            for tag, B in self.boundary_map.items():
-                if B is not None:
-                    btype = B.__class__.__name__
-                    if btype not in GPU_BOUNDARY_TYPES:
-                        self._gpu_cpu_tags.append(tag)
-                        self._gpu_all_on_gpu = False
-                        cpu_boundary_types.append((tag, btype))
-                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
-                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
-                    elif btype == 'Time_boundary':
-                        self._gpu_time_boundaries.append(B)
-                    elif btype == 'Absorbing_wave_boundary':
-                        self._gpu_absorbing_wave_boundaries.append(B)
-                    elif btype == 'Characteristic_wave_boundary':
-                        self._gpu_characteristic_wave_boundaries.append(B)
-                    elif btype == 'Flather_boundary':
-                        self._gpu_flather_boundaries.append(B)
-
-            if not self._gpu_all_on_gpu:
-                print("WARNING: C Euler loop requires all GPU-supported boundary types")
-                print("  Falling back to Python-orchestrated GPU loop")
-                print("  Unsupported types: " + str(cpu_boundary_types))
-
-            self._gpu_boundary_info_initialized = True
+        self._init_gpu_boundary_info(gpu_dom)
 
         # Boundaries the C loop cannot evaluate on the device (e.g.
         # Transmissive_momentum_set_stage_boundary) are handled by the
@@ -6466,47 +6345,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         gpu_dom = self.gpu_interface.gpu_dom
 
         # Supported GPU boundary types
-        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
-                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
-                              'Time_boundary', 'File_boundary', 'Field_boundary',
-                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary',
-                              'Flather_boundary'}
-
-        # Lazy init: identify which boundaries need special handling
-        if not hasattr(self, '_gpu_boundary_info_initialized'):
-            self._gpu_cpu_tags = []
-            self._gpu_all_on_gpu = True
-            cpu_boundary_types = []
-            self._gpu_transmissive_n_zero_t_boundaries = []
-            self._gpu_time_boundaries = []
-            self._gpu_absorbing_wave_boundaries = []
-            self._gpu_characteristic_wave_boundaries = []
-            self._gpu_flather_boundaries = []
-
-            for tag, B in self.boundary_map.items():
-                if B is not None:
-                    btype = B.__class__.__name__
-                    if btype not in GPU_BOUNDARY_TYPES:
-                        self._gpu_cpu_tags.append(tag)
-                        self._gpu_all_on_gpu = False
-                        cpu_boundary_types.append((tag, btype))
-                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
-                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
-                    elif btype == 'Time_boundary':
-                        self._gpu_time_boundaries.append(B)
-                    elif btype == 'Absorbing_wave_boundary':
-                        self._gpu_absorbing_wave_boundaries.append(B)
-                    elif btype == 'Characteristic_wave_boundary':
-                        self._gpu_characteristic_wave_boundaries.append(B)
-                    elif btype == 'Flather_boundary':
-                        self._gpu_flather_boundaries.append(B)
-
-            if not self._gpu_all_on_gpu:
-                print("WARNING: C RK2 loop requires all GPU-supported boundary types")
-                print("  Falling back to Python-orchestrated GPU loop")
-                print(f"  Unsupported types: {cpu_boundary_types}")
-
-            self._gpu_boundary_info_initialized = True
+        self._init_gpu_boundary_info(gpu_dom)
 
         # If any boundary requires CPU, fall back to Python-orchestrated loop
         if not self._gpu_all_on_gpu:
@@ -6619,44 +6458,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         gpu_dom = self.gpu_interface.gpu_dom
 
         # Supported GPU boundary types
-        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
-                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
-                              'Time_boundary', 'File_boundary', 'Field_boundary',
-                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary'}
-
-        # Lazy init: identify which boundaries need CPU evaluation vs GPU
-        if not hasattr(self, '_gpu_boundary_info_initialized'):
-            self._gpu_cpu_tags = []
-            self._gpu_all_on_gpu = True
-            cpu_boundary_types = []
-            self._gpu_transmissive_n_zero_t_boundaries = []
-            self._gpu_time_boundaries = []
-            self._gpu_absorbing_wave_boundaries = []
-            self._gpu_characteristic_wave_boundaries = []
-
-            for tag, B in self.boundary_map.items():
-                if B is not None:
-                    btype = B.__class__.__name__
-                    if btype not in GPU_BOUNDARY_TYPES:
-                        self._gpu_cpu_tags.append(tag)
-                        self._gpu_all_on_gpu = False
-                        cpu_boundary_types.append((tag, btype))
-                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
-                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
-                    elif btype == 'Time_boundary':
-                        self._gpu_time_boundaries.append(B)
-                    elif btype == 'Absorbing_wave_boundary':
-                        self._gpu_absorbing_wave_boundaries.append(B)
-                    elif btype == 'Characteristic_wave_boundary':
-                        self._gpu_characteristic_wave_boundaries.append(B)
-
-            if not self._gpu_all_on_gpu:
-                boundary_cell_ids = np.unique(self.boundary_cells).astype(np.intc)
-                init_boundary_edge_sync(gpu_dom, boundary_cell_ids)
-                print("WARNING: GPU boundary evaluation disabled - falling back to CPU")
-                print(f"  Unsupported boundary types: {cpu_boundary_types}")
-
-            self._gpu_boundary_info_initialized = True
+        self._init_gpu_boundary_info(gpu_dom)
 
         def _eval_boundaries():
             """Evaluate all boundary conditions on GPU (or CPU fallback)."""
@@ -6806,47 +6608,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         gpu_dom = self.gpu_interface.gpu_dom
 
         # Supported GPU boundary types
-        GPU_BOUNDARY_TYPES = {'Reflective_boundary', 'Dirichlet_boundary', 'Transmissive_boundary',
-                              'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary',
-                              'Time_boundary', 'File_boundary', 'Field_boundary',
-                              'Absorbing_wave_boundary', 'Characteristic_wave_boundary',
-                              'Flather_boundary'}
-
-        # Lazy init: identify which boundaries need special handling
-        if not hasattr(self, '_gpu_boundary_info_initialized'):
-            self._gpu_cpu_tags = []
-            self._gpu_all_on_gpu = True
-            cpu_boundary_types = []
-            self._gpu_transmissive_n_zero_t_boundaries = []
-            self._gpu_time_boundaries = []
-            self._gpu_absorbing_wave_boundaries = []
-            self._gpu_characteristic_wave_boundaries = []
-            self._gpu_flather_boundaries = []
-
-            for tag, B in self.boundary_map.items():
-                if B is not None:
-                    btype = B.__class__.__name__
-                    if btype not in GPU_BOUNDARY_TYPES:
-                        self._gpu_cpu_tags.append(tag)
-                        self._gpu_all_on_gpu = False
-                        cpu_boundary_types.append((tag, btype))
-                    elif btype == 'Transmissive_n_momentum_zero_t_momentum_set_stage_boundary':
-                        self._gpu_transmissive_n_zero_t_boundaries.append(B)
-                    elif btype == 'Time_boundary':
-                        self._gpu_time_boundaries.append(B)
-                    elif btype == 'Absorbing_wave_boundary':
-                        self._gpu_absorbing_wave_boundaries.append(B)
-                    elif btype == 'Characteristic_wave_boundary':
-                        self._gpu_characteristic_wave_boundaries.append(B)
-                    elif btype == 'Flather_boundary':
-                        self._gpu_flather_boundaries.append(B)
-
-            if not self._gpu_all_on_gpu:
-                print("WARNING: C RK3 loop requires all GPU-supported boundary types")
-                print("  Falling back to Python-orchestrated GPU loop")
-                print(f"  Unsupported types: {cpu_boundary_types}")
-
-            self._gpu_boundary_info_initialized = True
+        self._init_gpu_boundary_info(gpu_dom)
 
         # If any boundary requires CPU, fall back to Python-orchestrated loop
         if not self._gpu_all_on_gpu:
@@ -7919,7 +7681,8 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         return {'gpu_offload': gpu_offload_enabled(), 'num_gpu_devices': ndev,
                 'mpi': mpi, 'modes': modes}
 
-    def set_compute_mode(self, mode: str = 'unified', verbose: bool = False) -> None:
+    def set_compute_mode(self, mode: str = 'unified', verbose: bool = False,
+                         strict: bool | None = None) -> None:
         """Select this domain's compute mode (per-domain).
 
         This is a per-domain setting — different domains in one script may use
@@ -7942,12 +7705,26 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
               (solver and operators). Runs CPU-multicore by default; offloads to
               a GPU only when GPU offload is enabled process-wide via
               :func:`anuga.set_gpu_offload` on a GPU-capable build.
+        strict : bool, optional
+            Fail instead of falling back. With ``strict=True`` every silent
+            downgrade of the requested mode becomes a ``RuntimeError``: the
+            MPI fallback from 'unified' to 'legacy', running on the CPU when
+            GPU offload is enabled but no device was found, and boundary types
+            the device path cannot evaluate (which otherwise run on the host
+            every step). Defaults to the domain's current setting, initially
+            ``ANUGA_STRICT_COMPUTE_MODE`` from the environment. Meant for
+            batch jobs, where a run that quietly does something slower than
+            what was asked for is the expensive failure.
         """
         import warnings
 
         if mode not in self.COMPUTE_MODES:
             raise ValueError(
                 f"Invalid compute mode {mode!r}. Must be one of {self.COMPUTE_MODES}.")
+
+        if strict is None:
+            strict = getattr(self, 'compute_mode_strict', _strict_compute_mode_from_env())
+        self.compute_mode_strict = bool(strict)
 
         requested = mode
         if mode == 'unified':
@@ -7963,14 +7740,15 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                     from anuga import myid
                 except Exception:
                     myid = 0
+                msg = (f"compute mode 'unified' selected under MPI ({numprocs} ranks) but "
+                       "this ANUGA build's sw_domain_gpu_ext was compiled without MPI; the "
+                       "C-level ghost exchange would be a silent no-op and give wrong "
+                       "parallel results. Falling back to 'legacy' (mode 1, Python MPI "
+                       "exchange). Rebuild with MPI to run 'unified' in parallel.")
+                if self.compute_mode_strict:
+                    raise RuntimeError(msg + " (strict mode: refusing to fall back)")
                 if myid == 0:
-                    warnings.warn(
-                        f"compute mode 'unified' selected under MPI ({numprocs} ranks) but "
-                        "this ANUGA build's sw_domain_gpu_ext was compiled without MPI; the "
-                        "C-level ghost exchange would be a silent no-op and give wrong "
-                        "parallel results. Falling back to 'legacy' (mode 1, Python MPI "
-                        "exchange). Rebuild with MPI to run 'unified' in parallel.",
-                        stacklevel=2)
+                    warnings.warn(msg, stacklevel=2)
                 mode = 'legacy'
 
         self.requested_compute_mode = requested
@@ -8146,21 +7924,36 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                 self.set_quantity('stage', num.maximum(stage_c, bed_c),
                                   location='centroids')
 
-            # Try OpenMP target offloading interface first
+            # Try OpenMP target offloading interface first. Only the build and
+            # setup are guarded: the checks that follow must not be swallowed
+            # by this except, which exists for "the unified extension is not
+            # available here", not for a strict-mode refusal.
+            omp_ok = False
             try:
                 from .sw_domain_gpu_omp import GPU_OMP_interface
                 self.gpu_interface = GPU_OMP_interface(self)
                 self.gpu_interface.setup()
-                # Only print from rank 0
+                omp_ok = True
+            except Exception as e:
+                self.gpu_interface = None
+                print(f'OpenMP GPU interface not available: {e}')
+
+            if omp_ok:
                 from anuga import myid, numprocs
                 omp_num_threads = os.environ.get('OMP_NUM_THREADS', '1')
                 # Offload is a process-wide decision (set_gpu_offload), resolved
                 # against the build. False on a CPU-only build: 'unified' is CPU
                 # multicore, not GPU.
                 self.gpu_offload_active = gpu_offload_enabled()
+                device_id = self.gpu_interface.gpu_dom.device_id
+                if self.compute_mode_strict and self.gpu_offload_active and device_id < 0:
+                    raise RuntimeError(
+                        "GPU offload is enabled but no GPU device was found, so this "
+                        "'unified' domain would run on the CPU via the OpenMP target host "
+                        "fallback (strict mode: refusing to fall back). Check nvidia-smi, "
+                        "the CUDA driver, and that this is a GPU-offload build.")
+                # Only print from rank 0
                 if myid == 0:
-                    device_id = self.gpu_interface.gpu_dom.device_id
-
                     # The number of GPUs the runtime can actually see — NOT numprocs.
                     try:
                         from anuga.shallow_water.sw_domain_gpu_ext import get_num_gpu_devices
@@ -8171,9 +7964,12 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                     for line in gpu_startup_banner(numprocs, num_devices, device_id,
                                                    self.gpu_offload_active, omp_num_threads):
                         print(line)
+
+                # Classify the boundaries now rather than on the first evolve
+                # step, so an unsupported type is reported (or, in strict mode,
+                # refused) at setup, before any batch time is spent.
+                self._init_gpu_boundary_info(self.gpu_interface.gpu_dom)
                 return
-            except Exception as e:
-                print(f'OpenMP GPU interface not available: {e}')
 
             # Fall back to CUDA/CuPy interface
             try:
@@ -8187,7 +7983,12 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             except Exception:
                 pass
 
-            # No GPU available
+            # No unified interface available at all
+            if self.compute_mode_strict:
+                raise RuntimeError(
+                    "compute mode 'unified' was requested but no unified (mode-2) "
+                    "interface could be set up in this build, so the domain would "
+                    "fall back to 'legacy' (strict mode: refusing to fall back).")
             from anuga import myid
             if myid == 0:
                 print('+==============================================================================+')
@@ -8204,6 +8005,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
 
 # FIXME (Ole): Does this do anything?
+
 def my_update_special_conditions(domain):
 
     pass
