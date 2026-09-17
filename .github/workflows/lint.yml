@@ -44,3 +44,28 @@ jobs:
 
       - name: Run ruff check
         run: ruff check anuga
+
+  c-analyzer:
+    # gcc -fanalyzer over the hand-written C sources (audit issue #342): it
+    # catches the unchecked malloc, the leak on an error path and the NULL
+    # dereference that code review tends to miss. Findings in third-party
+    # headers are filtered; anything else fails the job. See
+    # scripts/c_static_analysis.sh, which is what this runs and what you can
+    # run locally before pushing.
+    name: gcc -fanalyzer (C sources)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install numpy (for its C headers)
+        run: pip install numpy
+
+      - name: Show the compiler
+        run: gcc --version | head -1
+
+      - name: Run the analyser
+        run: bash scripts/c_static_analysis.sh

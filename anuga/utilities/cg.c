@@ -18,6 +18,7 @@
 	
 #include "math.h"
 #include "stdio.h"
+#include <stdlib.h>
 #include <stdint.h>
 #include "anuga_typedefs.h"
 
