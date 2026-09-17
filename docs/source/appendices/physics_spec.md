@@ -21,13 +21,13 @@ equations, every closure, the numerical scheme and the parameter defaults.
 | **P14** | Perignon, M.C. (2014), *A Rolling Stone Gathers No Moss*, PhD thesis, University of Colorado Boulder, §3.3.2. Equations 3.1–3.11. |
 | **FG21** | Fassett, C.I. & Goudge, T.A. (2021), *Modeling the Hydrodynamics, Sediment Transport, and Valley Incision of Outlet-Forming Floods From Martian Crater Lakes*, JGR Planets 126, e2021JE006979. Equations 1–9 + Supporting Information S1–S5. |
 | **RDy26** | Feng, D., Tan, Z., Xu, D., Johnson, J. & Bisht, G. (2026), *RDycore-sediment v1.0*, EGUsphere preprint 2026-4859 (CC BY 4.0). Equations 1–13 + Appendix A1–A7. |
-| **aSM16** | Perignon, M.C. (2016), *Using the Sediment Transport and Vegetation Operators in ANUGA*, `anugaSed/docs/anugaSed_manual.pdf`, 4 May 2016. Equations 1–14. **This is the authoritative specification for the shipped code** and supersedes P14 where they differ. |
+| **aSM16** | Perignon, M.C. (2016), *Using the Sediment Transport and Vegetation Operators in ANUGA*, [anugaSed/docs/anugaSed_manual.pdf](https://github.com/mperignon/anugaSed/blob/master/docs/anugaSed_manual.pdf), 4 May 2016. Equations 1–14. **This is the authoritative specification for the shipped code** and supersedes P14 where they differ. |
 | **DL09** | Davy, P. & Lague, D. (2009), *Fluvial erosion/transport equation of landscape evolution models revisited*, JGR Earth Surface 114, F03007, doi:10.1029/2008JF001146. Equations 2–8, 19. Source of the E–D framework and of {speclit}`S-4`. |
 | **P13** | Perignon, M.C., Tucker, G.E., Griffin, E.R. & Friedman, J.M. (2013), JGR Earth Surface 118(3), 1193–1209, doi:10.1002/jgrf.20073. Rio Puerco lidar differencing — the field data for validation rung 8. |
 | **W04** | Wilson, L., Ghatan, G.J., Head, J.W. & Mitchell, K.L. (2004), JGR Planets 109, E09003, doi:10.1029/2004JE002281. Eqs 4, 13–17: Darcy–Weisbach `f_c` by bed type. |
 | **LL16** | Larsen, I.J. & Lamb, M.P. (2016), Nature 538, 229–232, doi:10.1038/nature19817. Methods: Manning–Strickler roughness closure. **Uses ANUGA.** |
 | **EH67** | Engelund, F. & Hansen, E. (1967), *A Monograph on Sediment Transport in Alluvial Streams*, Teknisk Forlag. Eqs 3.1.3, 4.3.5. |
-| **aS16** | `anugaSed` source (Perignon 2016, MIT). |
+| **aS16** | [`anugaSed`](https://github.com/mperignon/anugaSed) source (Perignon 2016, MIT). |
 
 ## Clean-room statement
 

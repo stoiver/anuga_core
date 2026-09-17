@@ -792,8 +792,10 @@ own.
    :math:`K`.
 
 .. [aSM16] Perignon, M. C. (2016). *Using the Sediment Transport and Vegetation
-   Operators in ANUGA.* anugaSed manual. The authoritative specification for
-   the original anugaSed code.
+   Operators in ANUGA.* anugaSed manual,
+   https://github.com/mperignon/anugaSed/blob/master/docs/anugaSed_manual.pdf.
+   The authoritative specification for the original anugaSed code, which is
+   at https://github.com/mperignon/anugaSed.
 
 .. [vR84] van Rijn, L. C. (1984). Sediment transport, part II: suspended load
    transport. *Journal of Hydraulic Engineering*, 110(11), 1613-1641.
