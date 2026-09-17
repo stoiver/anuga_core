@@ -117,8 +117,9 @@ class Parallel_Inlet_operator(Inlet_operator):
             if op_id < 0:
                 raise RuntimeError(
                     f"Failed to register GPU parallel inlet operator '{getattr(self, 'label', repr(self))}': "
-                    f"slot limit exceeded (MAX_INLET_OPERATORS=32). "
-                    f"Reduce the number of Inlet_operator instances or increase MAX_INLET_OPERATORS in gpu_domain.h."
+                    f"the C init returned {op_id} (slot limit exceeded, out-of-range triangle "
+                    f"indices, or allocation failure; see stderr). If it is the slot limit, reduce "
+                    f"the number of Inlet_operator instances or increase MAX_INLET_OPERATORS in gpu_domain.h."
                 )
             self._gpu_op_id = op_id
             self._gpu_initialized = True

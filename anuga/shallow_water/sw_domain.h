@@ -40,6 +40,13 @@ struct domain {
     anuga_int extrapolate_velocity_second_order;
     anuga_int low_froude;
     anuga_int timestep_fluxcalls;
+    /* Substep bookkeeping for _openmp_compute_fluxes_central. Per domain,
+       so two domains evolving in one process (or one process, two threads)
+       do not interleave counters. Initialised once in Domain_C_struct and
+       never refreshed from Python. */
+    anuga_int flux_call_count;
+    anuga_int flux_base_call;
+    anuga_int flux_timestep_fluxcalls_seen;
     anuga_int ncol_riverwall_hydraulic_properties;
     anuga_int nrow_riverwall_hydraulic_properties;
 

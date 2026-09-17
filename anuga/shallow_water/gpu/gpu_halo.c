@@ -46,8 +46,27 @@ int gpu_halo_init(struct gpu_domain *GD,
                   int *flat_send_indices,
                   int *flat_recv_indices) {
     struct halo_exchange *H = &GD->halo;
+    int stride;
+#ifdef GPU_AWARE_MPI
+    int dev;
+#endif
 
     H->num_neighbors = num_neighbors;
+
+    // Start from a clean slate so gpu_halo_finalize() can be used as the
+    // single cleanup path if any allocation below fails.
+    H->neighbor_ranks = NULL;
+    H->send_counts = NULL;
+    H->recv_counts = NULL;
+    H->send_offsets = NULL;
+    H->recv_offsets = NULL;
+    H->flat_send_indices = NULL;
+    H->flat_recv_indices = NULL;
+    H->send_buffer = NULL;
+    H->recv_buffer = NULL;
+    H->host_send_buffer = NULL;
+    H->host_recv_buffer = NULL;
+    H->requests = NULL;
 
     if (num_neighbors == 0) {
         // No communication needed
@@ -60,6 +79,11 @@ int gpu_halo_init(struct gpu_domain *GD,
     H->recv_counts = (int *)malloc(num_neighbors * sizeof(int));
     H->send_offsets = (int *)malloc((num_neighbors + 1) * sizeof(int));
     H->recv_offsets = (int *)malloc((num_neighbors + 1) * sizeof(int));
+    if (!H->neighbor_ranks || !H->send_counts || !H->recv_counts ||
+        !H->send_offsets || !H->recv_offsets) {
+        fprintf(stderr, "ERROR: malloc failed for halo neighbour tables\n");
+        goto fail;
+    }
 
     memcpy(H->neighbor_ranks, neighbor_ranks, num_neighbors * sizeof(int));
     memcpy(H->send_counts, send_counts, num_neighbors * sizeof(int));
@@ -81,21 +105,25 @@ int gpu_halo_init(struct gpu_domain *GD,
     // Allocate and copy flattened index arrays
     H->flat_send_indices = (int *)malloc(H->total_send_size * sizeof(int));
     H->flat_recv_indices = (int *)malloc(H->total_recv_size * sizeof(int));
+    if (!H->flat_send_indices || !H->flat_recv_indices) {
+        fprintf(stderr, "ERROR: malloc failed for halo index arrays\n");
+        goto fail;
+    }
 
     memcpy(H->flat_send_indices, flat_send_indices, H->total_send_size * sizeof(int));
     memcpy(H->flat_recv_indices, flat_recv_indices, H->total_recv_size * sizeof(int));
 
     // Allocate communication buffers
     // stride quantities per element: stage, xmom, ymom, then one m per tracer
-    const int stride = gpu_halo_stride(GD);
+    stride = gpu_halo_stride(GD);
 #ifdef GPU_AWARE_MPI
     // Device buffers for GPU pack/unpack kernels
-    int dev = omp_get_default_device();
+    dev = omp_get_default_device();
     H->send_buffer = (double *)omp_target_alloc(stride * H->total_send_size * sizeof(double), dev);
     H->recv_buffer = (double *)omp_target_alloc(stride * H->total_recv_size * sizeof(double), dev);
     if (!H->send_buffer || !H->recv_buffer) {
         fprintf(stderr, "ERROR: omp_target_alloc failed for halo buffers\n");
-        return -1;
+        goto fail;
     }
     // Host staging buffers for MPI calls.
     // Some UCX transports (e.g. uct_mm shared-memory used intra-node) cannot
@@ -106,17 +134,25 @@ int gpu_halo_init(struct gpu_domain *GD,
     H->host_recv_buffer = (double *)malloc(stride * H->total_recv_size * sizeof(double));
     if (!H->host_send_buffer || !H->host_recv_buffer) {
         fprintf(stderr, "ERROR: malloc failed for halo host staging buffers\n");
-        return -1;
+        goto fail;
     }
 #else
     H->send_buffer = (double *)malloc(stride * H->total_send_size * sizeof(double));
     H->recv_buffer = (double *)malloc(stride * H->total_recv_size * sizeof(double));
     H->host_send_buffer = NULL;
     H->host_recv_buffer = NULL;
+    if (!H->send_buffer || !H->recv_buffer) {
+        fprintf(stderr, "ERROR: malloc failed for halo buffers\n");
+        goto fail;
+    }
 #endif
 
     // Allocate MPI request array
     H->requests = (MPI_Request *)malloc(2 * num_neighbors * sizeof(MPI_Request));
+    if (!H->requests) {
+        fprintf(stderr, "ERROR: malloc failed for halo MPI request array\n");
+        goto fail;
+    }
 
     if (GD->rank == 0) {
         printf("GPU halo exchange initialized:\n");
@@ -126,6 +162,13 @@ int gpu_halo_init(struct gpu_domain *GD,
     }
 
     return 0;
+
+fail:
+    // Release whatever was acquired before the failure. Every pointer is
+    // either NULL or a live allocation at this point, which is what
+    // gpu_halo_finalize expects.
+    gpu_halo_finalize(GD);
+    return -1;
 }
 
 void gpu_halo_finalize(struct gpu_domain *GD) {

@@ -50,16 +50,16 @@ cdef extern from "fitsmooth.c":
 	sparse_dok* make_dok()
 	int64_t _build_smoothing_matrix(int64_t n, int64_t* triangles, double* areas, double* vertex_coordinates, int64_t* strides, sparse_dok* smoothing_mat)
 	int64_t _build_matrix_AtA_Atz_points(int64_t N, int64_t* triangles, double* point_coordinates, double* point_values, int64_t zdims, int64_t npts, sparse_dok* AtA, double** Atz, quad_tree* quadtree)
-	void _combine_partial_AtA_Atz(sparse_dok* dok_AtA1, sparse_dok* dok_AtA2, double* Atz1, double* Atz2, int64_t n, int64_t zdim)
+	int64_t _combine_partial_AtA_Atz(sparse_dok* dok_AtA1, sparse_dok* dok_AtA2, double* Atz1, double* Atz2, int64_t n, int64_t zdim)
 	triangle* search(quad_tree* node ,double xp, double yp)
 	double* calculate_sigma(triangle* T, double x, double y)
 	int64_t quad_tree_node_count(quad_tree* tree)
 	int64_t get_dok_rows(sparse_dok* dok)
 	edge_t* find_dok_entry(sparse_dok* edgetable, edge_key_t key)
-	void add_sparse_dok(sparse_dok* dok1, double mult1, sparse_dok* dok2, double mult2)
+	int64_t add_sparse_dok(sparse_dok* dok1, double mult1, sparse_dok* dok2, double mult2)
 	sparse_csr* make_csr()
 	void delete_csr_matrix(sparse_csr* mat)
-	void convert_to_csr_ptr(sparse_csr* new_csr, sparse_dok* hashtable)
+	int64_t convert_to_csr_ptr(sparse_csr* new_csr, sparse_dok* hashtable)
 
 cdef delete_quad_tree_cap(object cap):
 	kill = <quad_tree* > PyCapsule_GetPointer(cap, "quad tree")
@@ -105,7 +105,10 @@ def build_quad_tree(np.ndarray[int64_t, ndim=2, mode="c"] triangles not None,\
 
 	n = triangles.shape[0]
 
-	return PyCapsule_New(<void* > _build_quad_tree(n, &triangles[0,0], &vertex_coordinates[0,0], &extents[0]), "quad tree", <PyCapsule_Destructor> delete_quad_tree_cap)
+	cdef quad_tree* tree = _build_quad_tree(n, &triangles[0,0], &vertex_coordinates[0,0], &extents[0])
+	if tree == NULL:
+		raise MemoryError("build_quad_tree: could not allocate the quad tree")
+	return PyCapsule_New(<void* > tree, "quad tree", <PyCapsule_Destructor> delete_quad_tree_cap)
 
 def build_smoothing_matrix(np.ndarray[int64_t, ndim=2, mode="c"] triangles not None,\
 							np.ndarray[double, ndim=1, mode="c"] areas not None,\
@@ -116,6 +119,8 @@ def build_smoothing_matrix(np.ndarray[int64_t, ndim=2, mode="c"] triangles not N
 
 	n = triangles.shape[0]
 	smoothing_mat = make_dok()
+	if smoothing_mat == NULL:
+		raise MemoryError("build_smoothing_matrix: could not allocate the sparse matrix")
 
 	err = _build_smoothing_matrix(n, &triangles[0,0], &areas[0], &vertex_coordinates[0,0], <int64_t* > &vertex_coordinates.strides[0], smoothing_mat)
 
@@ -144,6 +149,8 @@ def build_matrix_AtA_Atz_points(object tree, int64_t N,\
 	quadtree = <quad_tree* > PyCapsule_GetPointer(tree, "quad tree")
 
 	dok_AtA = make_dok()
+	if dok_AtA == NULL:
+		raise MemoryError("build_matrix_AtA_Atz_points: could not allocate the sparse matrix")
 
 	Atz = <double** > malloc(zdims * sizeof(double*))
 	for i in xrange(zdims):
@@ -182,7 +189,8 @@ def combine_partial_AtA_Atz(object AtA_cap1, object AtA_cap2,\
 	dok_AtA1 = <sparse_dok* > PyCapsule_GetPointer(AtA_cap1, "sparse dok")
 	dok_AtA2 = <sparse_dok* > PyCapsule_GetPointer(AtA_cap2, "sparse dok")
 
-	_combine_partial_AtA_Atz(dok_AtA1, dok_AtA2, &Atz1[0], &Atz2[0], n, zdim)
+	if _combine_partial_AtA_Atz(dok_AtA1, dok_AtA2, &Atz1[0], &Atz2[0], n, zdim) != 0:
+		raise MemoryError("combine_partial_AtA_Atz: could not allocate a sparse matrix entry")
 
 def individual_tree_search(object tree, np.ndarray[double, ndim=1, mode="c"] point):
 
@@ -263,7 +271,11 @@ def dok_to_csr(object cap):
 	dok = <sparse_dok* > PyCapsule_GetPointer(cap, "sparse dok")
 
 	csr = make_csr()
-	convert_to_csr_ptr(csr, dok)
+	if csr == NULL:
+		raise MemoryError("dok_to_csr: could not allocate the CSR matrix")
+	if convert_to_csr_ptr(csr, dok) != 0:
+		delete_csr_matrix(csr)
+		raise MemoryError("dok_to_csr: could not allocate the CSR arrays")
 
 	data    = c_double_array_to_list(csr.data,    csr.num_entries)
 	colind  = c_int_array_to_list(csr.colind,     csr.num_entries)
@@ -283,10 +295,15 @@ def build_matrix_B(object smoothing_mat_cap, object AtA_cap, double alpha):
 	smoothing_mat = <sparse_dok* > PyCapsule_GetPointer(smoothing_mat_cap, "sparse dok")
 	dok_AtA = <sparse_dok* > PyCapsule_GetPointer(AtA_cap, "sparse dok")
 
-	add_sparse_dok(smoothing_mat, alpha, dok_AtA, 1)
+	if add_sparse_dok(smoothing_mat, alpha, dok_AtA, 1) != 0:
+		raise MemoryError("build_matrix_B: could not allocate a sparse matrix entry")
 
 	B = make_csr()
-	convert_to_csr_ptr(B, smoothing_mat)
+	if B == NULL:
+		raise MemoryError("build_matrix_B: could not allocate the CSR matrix")
+	if convert_to_csr_ptr(B, smoothing_mat) != 0:
+		delete_csr_matrix(B)
+		raise MemoryError("build_matrix_B: could not allocate the CSR arrays")
 
 	data = c_double_array_to_list(B.data, B.num_entries)
 	colind = c_int_array_to_list(B.colind, B.num_entries)

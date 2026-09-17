@@ -74,6 +74,9 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		anuga_int extrapolate_velocity_second_order
 		anuga_int low_froude
 		anuga_int timestep_fluxcalls
+		anuga_int flux_call_count
+		anuga_int flux_base_call
+		anuga_int flux_timestep_fluxcalls_seen
 		anuga_int reconstruct_edge_bed
 		anuga_int num_owned_edges
 		anuga_int* owned_edges
@@ -280,6 +283,26 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.beta_vh_dry = domain_py_object.beta_vh_dry
 		
 
+cdef inline _check_shape(object arr, tuple expected, str name):
+	"""Raise if a Python-side array is not the shape the C struct assumes.
+
+	The C kernels index these arrays with raw pointers and no bounds
+	checks, so a wrong shape here is an out-of-bounds read or write in the
+	flux loop. This runs once per struct (re)fill, not per element.
+
+	None is allowed through: quantities with reduced storage (see
+	Quantity.__init__) have no edge, vertex or update arrays, and the
+	kernels that run for such domains never touch those pointers. The
+	check is about arrays that exist with the wrong shape.
+	"""
+	if arr is None:
+		return
+	cdef tuple got = tuple(arr.shape)
+	if got != expected:
+		raise ValueError(
+			"domain.%s has shape %s but the C domain struct expects %s"
+			% (name, got, expected))
+
 cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 
 	# these arraypointers are set once the domain is created
@@ -319,9 +342,32 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 	cdef object quantities
 	cdef object riverwallData
 
+	# Sizes the struct was filled with (get_python_domain_parameters runs
+	# first). Every array below is checked against them.
+	cdef anuga_int N = D.number_of_elements
+	cdef anuga_int B = D.boundary_length
+
 	#------------------------------------------------------
 	# Domain structures
 	#------------------------------------------------------
+	_check_shape(domain_py_object.neighbours, (N, 3), "neighbours")
+	_check_shape(domain_py_object.neighbour_edges, (N, 3), "neighbour_edges")
+	_check_shape(domain_py_object.surrogate_neighbours, (N, 3), "surrogate_neighbours")
+	_check_shape(domain_py_object.normals, (N, 6), "normals")
+	_check_shape(domain_py_object.edgelengths, (N, 3), "edgelengths")
+	_check_shape(domain_py_object.radii, (N,), "radii")
+	_check_shape(domain_py_object.areas, (N,), "areas")
+	_check_shape(domain_py_object.tri_full_flag, (N,), "tri_full_flag")
+	_check_shape(domain_py_object.vertex_coordinates, (3 * N, 2), "vertex_coordinates")
+	_check_shape(domain_py_object.edge_coordinates, (3 * N, 2), "edge_coordinates")
+	_check_shape(domain_py_object.centroid_coordinates, (N, 2), "centroid_coordinates")
+	_check_shape(domain_py_object.max_speed, (N,), "max_speed")
+	_check_shape(domain_py_object.number_of_boundaries, (N,), "number_of_boundaries")
+	_check_shape(domain_py_object.x_centroid_work, (N,), "x_centroid_work")
+	_check_shape(domain_py_object.y_centroid_work, (N,), "y_centroid_work")
+	if domain_py_object.edge_flux_type is not None:
+		_check_shape(domain_py_object.edge_flux_type, (3 * N,), "edge_flux_type")
+
 	neighbours = domain_py_object.neighbours
 	D.neighbours = &neighbours[0,0]
 	
@@ -417,6 +463,15 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 	cdef anuga_int[::1] sedi
 	cdef double[::1] tr1
 	if getattr(domain_py_object, 'number_of_tracers', 0) > 0:
+		ns = D.number_of_tracers
+		_check_shape(domain_py_object.tracer_centroid_values, (ns, N), "tracer_centroid_values")
+		_check_shape(domain_py_object.tracer_edge_values, (ns, 3 * N), "tracer_edge_values")
+		_check_shape(domain_py_object.tracer_boundary_values, (ns, B), "tracer_boundary_values")
+		_check_shape(domain_py_object.tracer_explicit_update, (ns, N), "tracer_explicit_update")
+		_check_shape(domain_py_object.tracer_conserved_values, (ns, N), "tracer_conserved_values")
+		_check_shape(domain_py_object.tracer_backup_values, (ns, N), "tracer_backup_values")
+		if domain_py_object.tracer_external_source is not None:
+			_check_shape(domain_py_object.tracer_external_source, (ns, N), "tracer_external_source")
 		tr2 = domain_py_object.tracer_centroid_values
 		D.tracer_centroid_values = &tr2[0, 0]
 		tr2 = domain_py_object.tracer_edge_values
@@ -506,6 +561,18 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 		D.tracer_boundary_flux_sum = NULL
 
 	quantities = domain_py_object.quantities
+	for _name in ("stage", "xmomentum", "ymomentum", "elevation", "height",
+	              "friction", "xvelocity", "yvelocity"):
+		_q = quantities[_name]
+		_check_shape(_q.centroid_values, (N,), _name + ".centroid_values")
+		_check_shape(_q.edge_values, (N, 3), _name + ".edge_values")
+		_check_shape(_q.vertex_values, (N, 3), _name + ".vertex_values")
+		_check_shape(_q.boundary_values, (B,), _name + ".boundary_values")
+	for _name in ("stage", "xmomentum", "ymomentum"):
+		_q = quantities[_name]
+		_check_shape(_q.explicit_update, (N,), _name + ".explicit_update")
+		_check_shape(_q.semi_implicit_update, (N,), _name + ".semi_implicit_update")
+		_check_shape(_q.centroid_backup_values, (N,), _name + ".centroid_backup_values")
 	stage = quantities["stage"]
 	xmomentum = quantities["xmomentum"]
 	ymomentum = quantities["ymomentum"]
@@ -693,6 +760,14 @@ cdef class Domain_C_struct:
 		# Initial fill from Python Domain
 		get_python_domain_parameters(self.domain_c_struct_ptr, self.domain_py_object)
 		get_python_domain_pointers(self.domain_c_struct_ptr, self.domain_py_object)
+
+		# Substep bookkeeping for _openmp_compute_fluxes_central. Set once
+		# here, not in get_python_domain_parameters, because a refresh of the
+		# struct from Python must not reset the count mid-timestep. The
+		# values match the module-level statics this replaces.
+		self.domain_c_struct_ptr.flux_call_count = 0
+		self.domain_c_struct_ptr.flux_base_call = 1
+		self.domain_c_struct_ptr.flux_timestep_fluxcalls_seen = 1
 
 		# Initial snapshot
 		self.domain_snapshot = self.domain_c_struct_ptr[0]
@@ -1282,6 +1357,18 @@ def manning_friction_flat(double g, double eps,
 	cdef anuga_int N
 	
 	N = w.shape[0]
+	if uh.shape[0] != N:
+		raise ValueError('manning_friction_flat: uh has length %d, expected %d' % (uh.shape[0], N))
+	if vh.shape[0] != N:
+		raise ValueError('manning_friction_flat: vh has length %d, expected %d' % (vh.shape[0], N))
+	if z_centroid.shape[0] != N:
+		raise ValueError('manning_friction_flat: z_centroid has length %d, expected %d' % (z_centroid.shape[0], N))
+	if eta.shape[0] != N:
+		raise ValueError('manning_friction_flat: eta has length %d, expected %d' % (eta.shape[0], N))
+	if xmom.shape[0] != N:
+		raise ValueError('manning_friction_flat: xmom has length %d, expected %d' % (xmom.shape[0], N))
+	if ymom.shape[0] != N:
+		raise ValueError('manning_friction_flat: ymom has length %d, expected %d' % (ymom.shape[0], N))
 	_openmp_manning_friction_flat(g, eps, N, &w[0], &z_centroid[0], &uh[0], &vh[0], &eta[0], &xmom[0], &ymom[0])
 
 # FIXME SR: Why is the order of arguments different from the C function?
@@ -1298,6 +1385,18 @@ def manning_friction_sloped(double g, double eps,
 	cdef anuga_int N
 	
 	N = w.shape[0]
+	if uh.shape[0] != N:
+		raise ValueError('manning_friction_sloped: uh has length %d, expected %d' % (uh.shape[0], N))
+	if vh.shape[0] != N:
+		raise ValueError('manning_friction_sloped: vh has length %d, expected %d' % (vh.shape[0], N))
+	if eta.shape[0] != N:
+		raise ValueError('manning_friction_sloped: eta has length %d, expected %d' % (eta.shape[0], N))
+	if xmom.shape[0] != N:
+		raise ValueError('manning_friction_sloped: xmom has length %d, expected %d' % (xmom.shape[0], N))
+	if ymom.shape[0] != N:
+		raise ValueError('manning_friction_sloped: ymom has length %d, expected %d' % (ymom.shape[0], N))
+	if x_vertex.shape[0] != N or z_vertex.shape[0] != N:
+		raise ValueError('manning_friction_sloped: x_vertex/z_vertex must have N rows')
 	_openmp_manning_friction_sloped(g, eps, N, &x_vertex[0,0], &w[0], &z_vertex[0,0], &uh[0], &vh[0], &eta[0], &xmom[0], &ymom[0])
 
 # FIXME SR: Why is the order of arguments different from the C function?
@@ -1314,6 +1413,18 @@ def manning_friction_sloped_edge_based(double g, double eps,
 	cdef anuga_int N
 	
 	N = w.shape[0]
+	if uh.shape[0] != N:
+		raise ValueError('manning_friction_sloped_edge_based: uh has length %d, expected %d' % (uh.shape[0], N))
+	if vh.shape[0] != N:
+		raise ValueError('manning_friction_sloped_edge_based: vh has length %d, expected %d' % (vh.shape[0], N))
+	if eta.shape[0] != N:
+		raise ValueError('manning_friction_sloped_edge_based: eta has length %d, expected %d' % (eta.shape[0], N))
+	if xmom.shape[0] != N:
+		raise ValueError('manning_friction_sloped_edge_based: xmom has length %d, expected %d' % (xmom.shape[0], N))
+	if ymom.shape[0] != N:
+		raise ValueError('manning_friction_sloped_edge_based: ymom has length %d, expected %d' % (ymom.shape[0], N))
+	if x_edge.shape[0] != N or z_edge.shape[0] != N:
+		raise ValueError('manning_friction_sloped_edge_based: x_edge/z_edge must have N rows')
 	_openmp_manning_friction_sloped_edge_based(g, eps, N, &x_edge[0,0], &w[0], &z_edge[0,0], &uh[0], &vh[0], &eta[0], &xmom[0], &ymom[0])
 
 
@@ -1450,14 +1561,14 @@ def gravity(object domain_py_object, update_domain_c_struct=False):
 	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=update_domain_c_struct)
 
 	err = _openmp_gravity(D)
-	if err == -1:
-		return None
+	if err != 0:
+		raise RuntimeError('gravity: C kernel _openmp_gravity failed with error code %d' % err)
 
 def gravity_wb(object domain_py_object, update_domain_c_struct=False):
 
 	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=update_domain_c_struct)
 
 	err = _openmp_gravity_wb(D)
-	if err == -1:
-		return None
+	if err != 0:
+		raise RuntimeError('gravity_wb: C kernel _openmp_gravity_wb failed with error code %d' % err)
 

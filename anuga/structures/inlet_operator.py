@@ -112,10 +112,12 @@ class Inlet_operator(anuga.Operator):
         if op_id < 0:
             warnings.warn(
                 f"Failed to register GPU inlet operator "
-                f"'{getattr(self, 'label', repr(self))}': slot limit exceeded "
-                f"(MAX_INLET_OPERATORS=32). Falling back to the Python path; "
+                f"'{getattr(self, 'label', repr(self))}' (the C init "
+                f"returned {op_id}: slot limit exceeded, out-of-range "
+                f"triangle indices, or allocation failure; see stderr). "
+                f"Falling back to the Python path. If it is the slot limit, "
                 f"reduce the number of Inlet_operator instances or increase "
-                f"MAX_INLET_OPERATORS in gpu_domain.h to use the GPU kernel.",
+                f"MAX_INLET_OPERATORS in gpu_domain.h.",
                 stacklevel=2,
             )
             return
