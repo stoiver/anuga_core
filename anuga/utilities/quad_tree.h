@@ -50,9 +50,9 @@ triangle * new_triangle(anuga_int index, double x1, double x2, double x3,
 // deletes entire list of triangles
 void delete_triangle_list(triangle * T);
 
-// take a point and calculate 'sigma' with the given triangle. returns
-// a pointer to malloc'ed memory of a double array.
-double * calculate_sigma(triangle * T,double x,double y);
+// take a point and calculate 'sigma' (its three barycentric weights) with
+// the given triangle, written into the caller's 3-element array.
+void calculate_sigma(triangle * T,double x,double y,double sigma[3]);
 
 // Tests to see if a triangle contains a given point,
 // returns a anuga_int value 0 false, 1 true.

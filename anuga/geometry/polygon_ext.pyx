@@ -94,5 +94,7 @@ def _separate_points_by_polygon(np.ndarray[double, ndim=2, mode="c"] points not 
         print ("Got %d points and %d polygon vertices" % (M,N))
 
     count = __separate_points_by_polygon(M, N, &points[0,0], &polygon[0,0], &indices[0], closed, verbose)
+    if count < 0:
+        raise MemoryError("separate_points_by_polygon: could not allocate the work array")
 
     return count
