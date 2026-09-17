@@ -10,6 +10,8 @@
 #ifndef GPU_DOMAIN_H
 #define GPU_DOMAIN_H
 
+#define GPU_LAST_ERROR_LEN 512
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -455,6 +457,11 @@ struct gpu_domain {
     int device_id;
     int gpu_aware_mpi;           // Runtime flag: 1 if GPU-aware MPI available
     int verbose;                 // 0 = silent (default), 1 = print init/mapping messages
+    // Last error message set by gpu_set_error(). Read back through
+    // get_last_error() in the Cython layer so a failed init raises with the
+    // reason, rather than the reason going only to a (possibly discarded)
+    // per-rank stderr.
+    char last_error[GPU_LAST_ERROR_LEN];
 
     // Active-set stepping: opt-in wet/dry fast path (domain.set_use_active_set()).
     // Prepared lazily on the first evolve step: builds the compacted
@@ -810,12 +817,18 @@ int gpu_culvert_init(struct gpu_domain *GD,
                      double init_smooth_Q, double init_smooth_delta_total_energy);
 void gpu_culvert_finalize(struct gpu_domain *GD, int culvert_id);
 void gpu_culverts_finalize_all(struct gpu_domain *GD);
-void gpu_culverts_map(struct gpu_domain *GD);
+int gpu_culverts_map(struct gpu_domain *GD);   // 0, or -1 if scratch could not be allocated
 void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep);
 // Read back a culvert's per-step reporting stats into out[5] =
 // {gain, discharge, velocity, driving_energy, delta_total_energy}. Returns 0 on
 // success, -1 if culvert_id is out of range. Values are non-zero only on the
 // proc that computed the discharge (the master proc).
 int gpu_culverts_get_report(struct gpu_domain *GD, int culvert_id, double *out);
+
+// Record an error message on the domain (printf-style) and echo it to stderr.
+// Functions that return an error code call this first so the Cython layer can
+// raise with the message (get_last_error).
+void gpu_set_error(struct gpu_domain *GD, const char *fmt, ...);
+const char *gpu_get_last_error(const struct gpu_domain *GD);
 
 #endif // GPU_DOMAIN_H

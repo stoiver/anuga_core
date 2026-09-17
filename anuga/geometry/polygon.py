@@ -567,7 +567,9 @@ def in_and_outside_polygon(points, polygon, closed=True, verbose=False):
 def separate_points_by_polygon(points, polygon,
                                closed=True,
                                check_input=True,
-                               verbose=False):
+                               verbose=False,
+                               rtol=0.0,
+                               atol=0.0):
     """Determine whether points are inside or outside a polygon
 
     Input:
@@ -577,6 +579,11 @@ def separate_points_by_polygon(points, polygon,
        regarded as belonging to the polygon (closed = True)
        or not (closed = False)
        check_input: Allows faster execution if set to False
+       rtol, atol - (optional) tolerances for deciding that a point lies ON
+       a polygon edge, as in point_on_line. The defaults of 0.0 mean exact
+       arithmetic, which is what this function has always used; pass e.g.
+       rtol=1.0e-5, atol=1.0e-8 to treat points within rounding of an edge
+       as on it (and so inside when closed=True).
 
     Outputs:
        indices: array of same length as points with indices of points falling
@@ -662,7 +669,8 @@ def separate_points_by_polygon(points, polygon,
     indices = num.zeros(M, int)
 
     count = _separate_points_by_polygon(points, polygon, indices,
-                                        int(closed), int(verbose))
+                                        int(closed), int(verbose),
+                                        float(rtol), float(atol))
 
     if verbose:
         log.info('Found %d points (out of %d) inside polygon' % (count, M))

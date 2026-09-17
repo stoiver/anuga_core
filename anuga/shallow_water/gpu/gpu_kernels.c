@@ -437,6 +437,16 @@ void gpu_active_set_prepare(struct gpu_domain *GD) {
     // discretization.
     if (D->owned_edges == NULL) {
         anuga_int *owned = (anuga_int *)malloc((size_t)(3 * n) * sizeof(anuga_int));
+        if (owned == NULL) {
+            // Cannot build the compacted edge list: run full steps instead.
+            if (GD->rank == 0) {
+                fprintf(stderr, "gpu: active-set stepping disabled: could not "
+                                "allocate the owned-edge list; running full steps\n");
+            }
+            GD->use_active_set = 0;
+            GD->as_prepared = 1;
+            return;
+        }
         anuga_int ne = 0;
         for (anuga_int p2 = 0; p2 < 3 * n; p2++) {
             const anuga_int nbr = D->neighbours[p2];

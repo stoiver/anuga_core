@@ -1,15 +1,6 @@
 
 inc_dir = include_directories('../utilities', incdir_numpy)
 
-# Compile the Cython-generated C code and additional C code
-py3.extension_module('mannings_operator_ext',
-  sources: ['mannings_operator_ext.pyx'],
-  include_directories: inc_dir,
-  dependencies: dependencies,
-  subdir: 'anuga/operators',
-  install: true,
-)
-
 py3.extension_module('kinematic_viscosity_operator_ext',
   sources: ['kinematic_viscosity_operator_ext.pyx'],
   include_directories: inc_dir,

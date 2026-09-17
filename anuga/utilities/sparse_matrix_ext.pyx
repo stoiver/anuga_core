@@ -50,7 +50,7 @@ cdef int64_t _serialise(sparse_dok* dok, dict serial_dok):
 	num_entries = dok.num_entries
 	edge = dok.edgetable
 
-	for k in xrange(num_entries):
+	for k in range(num_entries):
 
 		i = edge.key.i
 		j = edge.key.j

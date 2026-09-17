@@ -2,6 +2,7 @@
 // Split from sw_domain_gpu.c for maintainability
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -125,7 +126,7 @@ int gpu_check_device_memory(struct gpu_domain *GD) {
 
     // Only fail if we have a real memory figure AND it's insufficient
     if (total_bytes > 0 && free_bytes < required) {
-        fprintf(stderr,
+        gpu_set_error(GD,
             "\n[ANUGA GPU] ERROR (rank %d): Insufficient GPU memory.\n"
             "  Domain has %" PRId64 " triangles, estimated %.0f MB required.\n"
             "  GPU has %.0f MB free of %.0f MB total.\n"
@@ -252,7 +253,21 @@ void print_gpu_domain_info(struct gpu_domain *GD) {
 // Initialization and Cleanup
 // ============================================================================
 
+void gpu_set_error(struct gpu_domain *GD, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(GD->last_error, GPU_LAST_ERROR_LEN, fmt, ap);
+    va_end(ap);
+    gpu_set_error(GD, "[ANUGA GPU rank %d] %s", GD->rank, GD->last_error);
+    fflush(stderr);
+}
+
+const char *gpu_get_last_error(const struct gpu_domain *GD) {
+    return GD->last_error;
+}
+
 int gpu_domain_init(struct gpu_domain *GD, MPI_Comm comm, int rank, int nprocs) {
+    GD->last_error[0] = '\0';
     // Store MPI info
     GD->comm = comm;
     GD->rank = rank;
@@ -1562,16 +1577,24 @@ int gpu_boundary_edge_sync_init(struct gpu_domain *GD,
         return 0;  // Nothing to do
     }
 
-    // Allocate cell IDs array (copy from Python's array)
+    // Allocate cell IDs array (copy from Python's array) and staging buffers
     S->cell_ids = (int*)malloc(num_boundary_cells * sizeof(int));
-    memcpy(S->cell_ids, boundary_cell_ids, num_boundary_cells * sizeof(int));
-
-    // Allocate staging buffers
     S->stage_buf = (double*)malloc(S->buf_size * sizeof(double));
     S->xmom_buf = (double*)malloc(S->buf_size * sizeof(double));
     S->ymom_buf = (double*)malloc(S->buf_size * sizeof(double));
     S->bed_buf = (double*)malloc(S->buf_size * sizeof(double));
     S->height_buf = (double*)malloc(S->buf_size * sizeof(double));
+    if (!S->cell_ids || !S->stage_buf || !S->xmom_buf || !S->ymom_buf ||
+        !S->bed_buf || !S->height_buf) {
+        gpu_set_error(GD, "boundary edge sync: could not allocate staging for %d cells", num_boundary_cells);
+        free(S->cell_ids);  free(S->stage_buf); free(S->xmom_buf);
+        free(S->ymom_buf);  free(S->bed_buf);   free(S->height_buf);
+        S->cell_ids = NULL; S->stage_buf = S->xmom_buf = S->ymom_buf = S->bed_buf = S->height_buf = NULL;
+        S->num_boundary_cells = 0;
+        S->buf_size = 0;
+        return -1;
+    }
+    memcpy(S->cell_ids, boundary_cell_ids, num_boundary_cells * sizeof(int));
 
     // Map all buffers to GPU once
     int nc = num_boundary_cells;

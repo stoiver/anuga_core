@@ -81,7 +81,7 @@ int gpu_halo_init(struct gpu_domain *GD,
     H->recv_offsets = (int *)malloc((num_neighbors + 1) * sizeof(int));
     if (!H->neighbor_ranks || !H->send_counts || !H->recv_counts ||
         !H->send_offsets || !H->recv_offsets) {
-        fprintf(stderr, "ERROR: malloc failed for halo neighbour tables\n");
+        gpu_set_error(GD, "ERROR: malloc failed for halo neighbour tables");
         goto fail;
     }
 
@@ -106,7 +106,7 @@ int gpu_halo_init(struct gpu_domain *GD,
     H->flat_send_indices = (int *)malloc(H->total_send_size * sizeof(int));
     H->flat_recv_indices = (int *)malloc(H->total_recv_size * sizeof(int));
     if (!H->flat_send_indices || !H->flat_recv_indices) {
-        fprintf(stderr, "ERROR: malloc failed for halo index arrays\n");
+        gpu_set_error(GD, "ERROR: malloc failed for halo index arrays");
         goto fail;
     }
 
@@ -122,7 +122,7 @@ int gpu_halo_init(struct gpu_domain *GD,
     H->send_buffer = (double *)omp_target_alloc(stride * H->total_send_size * sizeof(double), dev);
     H->recv_buffer = (double *)omp_target_alloc(stride * H->total_recv_size * sizeof(double), dev);
     if (!H->send_buffer || !H->recv_buffer) {
-        fprintf(stderr, "ERROR: omp_target_alloc failed for halo buffers\n");
+        gpu_set_error(GD, "ERROR: omp_target_alloc failed for halo buffers");
         goto fail;
     }
     // Host staging buffers for MPI calls.
@@ -133,7 +133,7 @@ int gpu_halo_init(struct gpu_domain *GD,
     H->host_send_buffer = (double *)malloc(stride * H->total_send_size * sizeof(double));
     H->host_recv_buffer = (double *)malloc(stride * H->total_recv_size * sizeof(double));
     if (!H->host_send_buffer || !H->host_recv_buffer) {
-        fprintf(stderr, "ERROR: malloc failed for halo host staging buffers\n");
+        gpu_set_error(GD, "ERROR: malloc failed for halo host staging buffers");
         goto fail;
     }
 #else
@@ -142,7 +142,7 @@ int gpu_halo_init(struct gpu_domain *GD,
     H->host_send_buffer = NULL;
     H->host_recv_buffer = NULL;
     if (!H->send_buffer || !H->recv_buffer) {
-        fprintf(stderr, "ERROR: malloc failed for halo buffers\n");
+        gpu_set_error(GD, "ERROR: malloc failed for halo buffers");
         goto fail;
     }
 #endif
@@ -150,7 +150,7 @@ int gpu_halo_init(struct gpu_domain *GD,
     // Allocate MPI request array
     H->requests = (MPI_Request *)malloc(2 * num_neighbors * sizeof(MPI_Request));
     if (!H->requests) {
-        fprintf(stderr, "ERROR: malloc failed for halo MPI request array\n");
+        gpu_set_error(GD, "ERROR: malloc failed for halo MPI request array");
         goto fail;
     }
 

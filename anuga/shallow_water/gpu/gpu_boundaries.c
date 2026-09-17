@@ -34,7 +34,7 @@ int gpu_reflective_init(struct gpu_domain *GD, int num_edges,
     R->edge_ids = (int*)malloc(num_edges * sizeof(int));
 
     if (!R->boundary_indices || !R->vol_ids || !R->edge_ids) {
-        fprintf(stderr, "Failed to allocate reflective boundary arrays\n");
+        gpu_set_error(GD, "Failed to allocate reflective boundary arrays");
         return -1;
     }
 
@@ -164,7 +164,7 @@ int gpu_dirichlet_init(struct gpu_domain *GD, int num_edges,
 
     if (!D->boundary_indices || !D->vol_ids || !D->edge_ids ||
         !D->stage_values || !D->xmom_values || !D->ymom_values) {
-        fprintf(stderr, "Failed to allocate Dirichlet boundary arrays\n");
+        gpu_set_error(GD, "Failed to allocate Dirichlet boundary arrays");
         return -1;
     }
 
@@ -277,7 +277,7 @@ int gpu_transmissive_init(struct gpu_domain *GD, int num_edges,
     T->edge_ids = (int*)malloc(num_edges * sizeof(int));
 
     if (!T->boundary_indices || !T->vol_ids || !T->edge_ids) {
-        fprintf(stderr, "Failed to allocate Transmissive boundary arrays\n");
+        gpu_set_error(GD, "Failed to allocate Transmissive boundary arrays");
         return -1;
     }
 
@@ -391,7 +391,7 @@ int gpu_transmissive_n_zero_t_init(struct gpu_domain *GD, int num_edges,
     B->edge_ids = (int*)malloc(num_edges * sizeof(int));
 
     if (!B->boundary_indices || !B->vol_ids || !B->edge_ids) {
-        fprintf(stderr, "Failed to allocate transmissive_n_zero_t boundary arrays\n");
+        gpu_set_error(GD, "Failed to allocate transmissive_n_zero_t boundary arrays");
         return -1;
     }
 
@@ -520,7 +520,7 @@ int gpu_file_boundary_init(struct gpu_domain *GD, int num_edges,
 
     if (!B->boundary_indices || !B->vol_ids || !B->edge_ids ||
         !B->stage_values || !B->xmom_values || !B->ymom_values) {
-        fprintf(stderr, "Failed to allocate file_boundary arrays\n");
+        gpu_set_error(GD, "Failed to allocate file_boundary arrays");
         return -1;
     }
 
@@ -652,7 +652,7 @@ int gpu_time_boundary_init(struct gpu_domain *GD, int num_edges,
 
     if (!B->boundary_indices || !B->vol_ids || !B->edge_ids ||
         !B->stage_values || !B->xmom_values || !B->ymom_values) {
-        fprintf(stderr, "Failed to allocate time_boundary arrays\n");
+        gpu_set_error(GD, "Failed to allocate time_boundary arrays");
         return -1;
     }
 
@@ -784,7 +784,7 @@ int gpu_absorbing_wave_init(struct gpu_domain *GD, int num_edges,
     B->edge_ids         = (int*)malloc(num_edges * sizeof(int));
 
     if (!B->boundary_indices || !B->vol_ids || !B->edge_ids) {
-        fprintf(stderr, "Failed to allocate absorbing_wave_boundary arrays\n");
+        gpu_set_error(GD, "Failed to allocate absorbing_wave_boundary arrays");
         return -1;
     }
 
@@ -914,7 +914,7 @@ int gpu_characteristic_wave_init(struct gpu_domain *GD, int num_edges,
     B->edge_ids         = (int*)malloc(num_edges * sizeof(int));
 
     if (!B->boundary_indices || !B->vol_ids || !B->edge_ids) {
-        fprintf(stderr, "Failed to allocate characteristic_wave_boundary arrays\n");
+        gpu_set_error(GD, "Failed to allocate characteristic_wave_boundary arrays");
         return -1;
     }
 
@@ -1058,7 +1058,7 @@ int gpu_flather_init(struct gpu_domain *GD, int num_edges,
     B->edge_ids         = (int*)malloc(num_edges * sizeof(int));
 
     if (!B->boundary_indices || !B->vol_ids || !B->edge_ids) {
-        fprintf(stderr, "Failed to allocate flather_boundary arrays\n");
+        gpu_set_error(GD, "Failed to allocate flather_boundary arrays");
         return -1;
     }
 
