@@ -296,10 +296,9 @@ anuga_int __interpolate_polyline(anuga_int number_of_nodes,
 
     neighbour_id = gauge_neighbour_id[j];
 
-    // FIXME(Ole): I am convinced that gauge_neighbour_id can be discarded, but need to check with John J.
-    // Keep it for now (17 Jan 2009)
-    // When gone, we can simply interpolate between neighbouring nodes, i.e. neighbour_id = j+1.
-    // and the test below becomes something like: if j < number_of_nodes...
+    // gauge_neighbour_id[j] names the node that segment j runs to, and is -1
+    // for the last node of a polyline. It is passed in rather than assumed to
+    // be j+1 so a set of disjoint polylines can share one array; keep it.
 
     if (neighbour_id >= 0)
     {
@@ -660,16 +659,16 @@ anuga_int __separate_points_by_polygon(const anuga_int M, // Number of points
                                      double *polygon,
                                      anuga_int *indices, // M-Array for storage indices
                                      const anuga_int closed,
-                                     const anuga_int verbose)
+                                     const anuga_int verbose,
+                                     const double rtol,  // tolerances for the
+                                     const double atol)  // point-on-edge test
 {
 
-  double minpx, maxpx, minpy, maxpy, rtol = 0.0, atol = 0.0;
+  double minpx, maxpx, minpy, maxpy;
   anuga_int outside_index, inside_index;
 
   // Find min and max of poly used for optimisation when points
   // are far away from polygon
-
-  // FIXME(Ole): Pass in rtol and atol from Python
 
   minpx = polygon[0];
   maxpx = minpx;
@@ -772,90 +771,3 @@ anuga_int __separate_points_by_polygon(const anuga_int M, // Number of points
 
   return inside_index;
 }
-// anuga_int __separate_points_by_polygon(anuga_int M,     // Number of points
-// 				 anuga_int N,     // Number of polygon vertices
-// 				 double* points,
-// 				 double* polygon,
-// 				 anuga_int* indices,  // M-Array for storage indices
-// 				 anuga_int closed,
-// 				 anuga_int verbose) {
-
-//   double minpx, maxpx, minpy, maxpy, x, y, px_i, py_i, px_j, py_j, rtol=0.0, atol=0.0;
-//   anuga_int i, j, k, outside_index, inside_index, inside;
-
-//   // Find min and max of poly used for optimisation when points
-//   // are far away from polygon
-
-//   // FIXME(Ole): Pass in rtol and atol from Python
-
-//   minpx = polygon[0]; maxpx = minpx;
-//   minpy = polygon[1]; maxpy = minpy;
-
-//   for (i=0; i<N; i++) {
-//     px_i = polygon[2*i];
-//     py_i = polygon[2*i + 1];
-
-//     if (px_i < minpx) minpx = px_i;
-//     if (px_i > maxpx) maxpx = px_i;
-//     if (py_i < minpy) minpy = py_i;
-//     if (py_i > maxpy) maxpy = py_i;
-//   }
-
-//   // Begin main loop (for each point)
-//   inside_index = 0;    // Keep track of points inside
-//   outside_index = M-1; // Keep track of points outside (starting from end)
-//   if (verbose){
-//      printf("Separating %ld points\n", M);
-//   }
-//   for (k=0; k<M; k++) {
-//     if (verbose){
-//       if (k %((M+10)/10)==0) printf("Doing %ld of %ld\n", k, M);
-//     }
-
-//     x = points[2*k];
-//     y = points[2*k + 1];
-
-//     inside = 0;
-
-//     // Optimisation
-//     if ((x > maxpx) || (x < minpx) || (y > maxpy) || (y < minpy)) {
-//       // Nothing
-//     } else {
-//       // Check polygon
-//       for (i=0; i<N; i++) {
-//         j = (i+1)%N;
-
-//         px_i = polygon[2*i];
-//         py_i = polygon[2*i+1];
-//         px_j = polygon[2*j];
-//         py_j = polygon[2*j+1];
-
-//         // Check for case where point is contained in line segment
-//         if (__point_on_line(x, y, px_i, py_i, px_j, py_j, rtol, atol)) {
-// 	  if (closed == 1) {
-// 	    inside = 1;
-// 	  } else {
-// 	    inside = 0;
-// 	  }
-// 	  break;
-//         } else {
-//           //Check if truly inside polygon
-// 	  if ( ((py_i < y) && (py_j >= y)) ||
-// 	       ((py_j < y) && (py_i >= y)) ) {
-// 	    if (px_i + (y-py_i)/(py_j-py_i)*(px_j-px_i) < x)
-// 	      inside = 1-inside;
-// 	  }
-//         }
-//       }
-//     }
-//     if (inside == 1) {
-//       indices[inside_index] = k;
-//       inside_index += 1;
-//     } else {
-//       indices[outside_index] = k;
-//       outside_index -= 1;
-//     }
-//   } // End k
-
-//   return inside_index;
-// }
