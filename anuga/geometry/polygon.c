@@ -15,6 +15,7 @@
 #include "math.h"
 #include "stdint.h"
 #include "stdio.h"
+#include <stdlib.h>
 #include "anuga_typedefs.h"
 #define YES 1
 #define NO 0
@@ -690,19 +691,18 @@ anuga_int __separate_points_by_polygon(const anuga_int M, // Number of points
       maxpy = py_i;
   }
 
-  // Begin main loop (for each point)
-  inside_index = 0;      // Keep track of points inside
-  outside_index = M - 1; // Keep track of points outside (starting from end)
-  // if (verbose){
-  //    printf("Separating %ld points\n", M);
-  // }
-  // TODO, JLGV: Use OpenMP to parallelise this loop
+  // Main loop, in two passes. The inside/outside test for each point is
+  // independent, so it runs in parallel into a flag array; the compaction
+  // into `indices` is order dependent (inside points in increasing k from
+  // the front, outside points in decreasing k from the back) and stays
+  // serial, so the output is identical to the old single loop.
+  unsigned char *inside_flag = (unsigned char *)malloc((size_t)(M > 0 ? M : 1));
+  if (inside_flag == NULL)
+    return -1;
+
+#pragma omp parallel for schedule(static)
   for (int k = 0; k < M; k++)
   {
-    // if (verbose){
-    //   if (k %((M+10)/10)==0) printf("Doing %ld of %ld\n", k, M);
-    // }
-
     double x = points[2 * k];
     double y = points[2 * k + 1];
 
@@ -750,7 +750,14 @@ anuga_int __separate_points_by_polygon(const anuga_int M, // Number of points
         }
       }
     }
-    if (inside == 1)
+    inside_flag[k] = (unsigned char)inside;
+  } // End k (parallel)
+
+  inside_index = 0;      // Keep track of points inside
+  outside_index = M - 1; // Keep track of points outside (starting from end)
+  for (int k = 0; k < M; k++)
+  {
+    if (inside_flag[k])
     {
       indices[inside_index] = k;
       inside_index += 1;
@@ -760,7 +767,8 @@ anuga_int __separate_points_by_polygon(const anuga_int M, // Number of points
       indices[outside_index] = k;
       outside_index -= 1;
     }
-  } // End k
+  }
+  free(inside_flag);
 
   return inside_index;
 }
