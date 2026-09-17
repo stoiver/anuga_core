@@ -84,19 +84,17 @@ void delete_triangle_list(triangle * T)
   }
 }
 
-double * calculate_sigma(triangle * T,double x,double y)
+void calculate_sigma(triangle * T,double x,double y,double sigma[3])
 {
-
-
-	// FIXME SR: Should remove this malloc and just pass a pointer to array
-	double  * ret_sigma = malloc(3 * sizeof(double));
-	ret_sigma[0] = dot_points(x - T->x2, y - T->y2, T->nx1, T->ny1)/
+	/* Barycentric weights of (x, y) in T, written into the caller's array.
+	   This used to malloc a 3-double array per call, inside the OpenMP
+	   fitting loop, and every caller freed it straight after use. */
+	sigma[0] = dot_points(x - T->x2, y - T->y2, T->nx1, T->ny1)/
 					dot_points(T->x1 - T->x2, T->y1 - T->y2, T->nx1, T->ny1);
-	ret_sigma[1] = dot_points(x - T->x3, y - T->y3, T->nx2, T->ny2)/
+	sigma[1] = dot_points(x - T->x3, y - T->y3, T->nx2, T->ny2)/
 					dot_points(T->x2 - T->x3, T->y2 - T->y3, T->nx2, T->ny2);
-	ret_sigma[2] = dot_points(x - T->x1, y - T->y1, T->nx3, T->ny3)/
+	sigma[2] = dot_points(x - T->x1, y - T->y1, T->nx3, T->ny3)/
 					dot_points(T->x3 - T->x1, T->y3 - T->y1, T->nx3, T->ny3);
-	return ret_sigma;				
 }
 
 double dist(double x,

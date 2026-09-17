@@ -215,7 +215,8 @@ anuga_int _build_matrix_AtA_Atz_points(anuga_int N,
         triangle * T = search(quadtree,x,y);
 
         if(T!=NULL){
-            double * sigma = calculate_sigma(T,x,y);
+            double sigma[3];
+            calculate_sigma(T,x,y,sigma);
             anuga_int js[3];
             for(i=0;i<3;i++){
                 js[i]=triangles[3*(T->index)+i];
@@ -238,8 +239,6 @@ anuga_int _build_matrix_AtA_Atz_points(anuga_int N,
                 }                        
             }
             }
-            free(sigma);
-            sigma=NULL;
 
        } 
     }

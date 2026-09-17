@@ -52,7 +52,7 @@ cdef extern from "fitsmooth.c":
 	int64_t _build_matrix_AtA_Atz_points(int64_t N, int64_t* triangles, double* point_coordinates, double* point_values, int64_t zdims, int64_t npts, sparse_dok* AtA, double** Atz, quad_tree* quadtree)
 	int64_t _combine_partial_AtA_Atz(sparse_dok* dok_AtA1, sparse_dok* dok_AtA2, double* Atz1, double* Atz2, int64_t n, int64_t zdim)
 	triangle* search(quad_tree* node ,double xp, double yp)
-	double* calculate_sigma(triangle* T, double x, double y)
+	void calculate_sigma(triangle* T, double x, double y, double* sigma)
 	int64_t quad_tree_node_count(quad_tree* tree)
 	int64_t get_dok_rows(sparse_dok* dok)
 	edge_t* find_dok_entry(sparse_dok* edgetable, edge_key_t key)
@@ -196,7 +196,7 @@ def individual_tree_search(object tree, np.ndarray[double, ndim=1, mode="c"] poi
 
 	cdef quad_tree* quadtree
 	cdef double xp,yp
-	cdef double* sigma
+	cdef double sigma[3]
 	cdef triangle* T
 	cdef int64_t found
 	cdef int64_t index
@@ -210,9 +210,8 @@ def individual_tree_search(object tree, np.ndarray[double, ndim=1, mode="c"] poi
 	sigmalist = []
 
 	if T != NULL:
-		sigma = calculate_sigma(T, xp, yp)
+		calculate_sigma(T, xp, yp, sigma)
 		sigmalist = c_double_array_to_list(sigma, 3)
-		free(sigma)
 		found = 1
 		index = T.index
 	else:
