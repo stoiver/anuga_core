@@ -72,16 +72,36 @@ int gpu_inlet_operator_init(struct gpu_domain *GD, int num_indices,
         return op_id;
     }
 
+    // Validate the indices before acquiring anything, so a bad operator
+    // never reaches the device and there is nothing to unwind.
+    {
+        int64_t n_elements = GD->D.number_of_elements;
+        int bad = 0;
+        for (int k = 0; k < num_indices; k++) {
+            if (indices[k] < 0 || indices[k] >= n_elements) {
+                fprintf(stderr, "[Rank %d] ERROR: inlet_operator %d index[%d]=%d out of range [0,%ld)\n",
+                        GD->rank, op_id, k, indices[k], (long)n_elements);
+                bad = 1;
+            }
+        }
+        if (bad) {
+            op->active = 0;
+            return -1;
+        }
+    }
+
     // Allocate and copy index/area arrays
     op->indices = (int*)malloc(num_indices * sizeof(int));
     op->areas = (double*)malloc(num_indices * sizeof(double));
+    op->scratch_stages = NULL;
+    op->scratch_bed = NULL;
+    op->scratch_xmom = NULL;
+    op->scratch_ymom = NULL;
+    op->scratch_depths = NULL;
 
     if (!op->indices || !op->areas) {
         fprintf(stderr, "Failed to allocate inlet_operator arrays\n");
-        if (op->indices) free(op->indices);
-        if (op->areas) free(op->areas);
-        op->active = 0;
-        return -1;
+        goto fail;
     }
 
     memcpy(op->indices, indices, num_indices * sizeof(int));
@@ -99,6 +119,11 @@ int gpu_inlet_operator_init(struct gpu_domain *GD, int num_indices,
     op->scratch_xmom = (double*)malloc(num_indices * sizeof(double));
     op->scratch_ymom = (double*)malloc(num_indices * sizeof(double));
     op->scratch_depths = (double*)malloc(num_indices * sizeof(double));
+    if (!op->scratch_stages || !op->scratch_bed || !op->scratch_xmom ||
+        !op->scratch_ymom || !op->scratch_depths) {
+        fprintf(stderr, "Failed to allocate inlet_operator scratch buffers\n");
+        goto fail;
+    }
 
     // Map to GPU if already initialized
     if (GD->gpu_initialized) {
@@ -126,26 +151,12 @@ int gpu_inlet_operator_init(struct gpu_domain *GD, int num_indices,
                         "indices_present=%d areas_present=%d idx=%p ar=%p ni=%d\n",
                         GD->rank, op_id, chk_idx, chk_ar, (void*)idx, (void*)ar, ni);
                 fflush(stderr);
+                goto fail;
             }
         }
     }
 
     IO->num_operators++;
-
-    // Bounds check indices against domain size
-    int64_t n_elements = GD->D.number_of_elements;
-    int bad = 0;
-    for (int k = 0; k < num_indices; k++) {
-        if (op->indices[k] < 0 || op->indices[k] >= n_elements) {
-            fprintf(stderr, "[Rank %d] ERROR: inlet_operator %d index[%d]=%d out of range [0,%ld)\n",
-                    GD->rank, op_id, k, op->indices[k], (long)n_elements);
-            bad = 1;
-        }
-    }
-    if (bad) {
-        fprintf(stderr, "[Rank %d] ERROR: inlet_operator %d has out-of-range indices!\n",
-                GD->rank, op_id);
-    }
 
     //printf("[Rank %d] Inlet_operator %d initialized: %d indices (GPU mapped: %d) "
     //       "indices=%p areas=%p scratch_s=%p scratch_b=%p scratch_x=%p scratch_y=%p scratch_d=%p\n",
@@ -157,6 +168,35 @@ int gpu_inlet_operator_init(struct gpu_domain *GD, int num_indices,
     //fflush(stdout);
 
     return op_id;
+
+fail:
+    // Unwind in reverse: unmap from the device if we got that far (the
+    // mapped flag is set right after enter data), then free host memory.
+    // gpu_inlet_operator_finalize does exactly that and tolerates NULLs,
+    // but it also decrements num_operators, which we have not incremented.
+    if (op->mapped && op->num_indices > 0) {
+        int ni = op->num_indices;
+        int *idx = op->indices;
+        double *ar = op->areas;
+        double *ss = op->scratch_stages;
+        double *sb = op->scratch_bed;
+        double *sx = op->scratch_xmom;
+        double *sy = op->scratch_ymom;
+        double *sd = op->scratch_depths;
+        #pragma omp target exit data map(delete: idx[0:ni], ar[0:ni], \
+            ss[0:ni], sb[0:ni], sx[0:ni], sy[0:ni], sd[0:ni])
+        op->mapped = 0;
+    }
+    free(op->indices);        op->indices = NULL;
+    free(op->areas);          op->areas = NULL;
+    free(op->scratch_stages); op->scratch_stages = NULL;
+    free(op->scratch_bed);    op->scratch_bed = NULL;
+    free(op->scratch_xmom);   op->scratch_xmom = NULL;
+    free(op->scratch_ymom);   op->scratch_ymom = NULL;
+    free(op->scratch_depths); op->scratch_depths = NULL;
+    op->num_indices = 0;
+    op->active = 0;
+    return -1;
 }
 
 void gpu_inlet_operator_finalize(struct gpu_domain *GD, int op_id) {
