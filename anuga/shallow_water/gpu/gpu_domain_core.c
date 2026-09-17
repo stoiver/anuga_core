@@ -1577,16 +1577,24 @@ int gpu_boundary_edge_sync_init(struct gpu_domain *GD,
         return 0;  // Nothing to do
     }
 
-    // Allocate cell IDs array (copy from Python's array)
+    // Allocate cell IDs array (copy from Python's array) and staging buffers
     S->cell_ids = (int*)malloc(num_boundary_cells * sizeof(int));
-    memcpy(S->cell_ids, boundary_cell_ids, num_boundary_cells * sizeof(int));
-
-    // Allocate staging buffers
     S->stage_buf = (double*)malloc(S->buf_size * sizeof(double));
     S->xmom_buf = (double*)malloc(S->buf_size * sizeof(double));
     S->ymom_buf = (double*)malloc(S->buf_size * sizeof(double));
     S->bed_buf = (double*)malloc(S->buf_size * sizeof(double));
     S->height_buf = (double*)malloc(S->buf_size * sizeof(double));
+    if (!S->cell_ids || !S->stage_buf || !S->xmom_buf || !S->ymom_buf ||
+        !S->bed_buf || !S->height_buf) {
+        gpu_set_error(GD, "boundary edge sync: could not allocate staging for %d cells", num_boundary_cells);
+        free(S->cell_ids);  free(S->stage_buf); free(S->xmom_buf);
+        free(S->ymom_buf);  free(S->bed_buf);   free(S->height_buf);
+        S->cell_ids = NULL; S->stage_buf = S->xmom_buf = S->ymom_buf = S->bed_buf = S->height_buf = NULL;
+        S->num_boundary_cells = 0;
+        S->buf_size = 0;
+        return -1;
+    }
+    memcpy(S->cell_ids, boundary_cell_ids, num_boundary_cells * sizeof(int));
 
     // Map all buffers to GPU once
     int nc = num_boundary_cells;

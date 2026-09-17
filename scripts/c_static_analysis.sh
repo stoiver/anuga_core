@@ -4,6 +4,11 @@
 #
 #     bash scripts/c_static_analysis.sh            # analyse, fail on any finding
 #     bash scripts/c_static_analysis.sh --list     # just list the files it would analyse
+#     CC=gcc-13 bash scripts/c_static_analysis.sh  # a specific gcc (CI pins one; see lint.yml)
+#
+# Different gcc versions report different things, so a finding that only one
+# version raises is normal: fix it if it is real, or add it to EXCLUDE below
+# with a note if it is not.
 #
 # Every *.c under anuga/ that is not a Cython-generated *_ext.c is compiled to
 # /dev/null with -fanalyzer and the include paths meson uses. Findings inside
@@ -29,7 +34,7 @@ EXCLUDE='uthash\.h|gpu_rate_operator\.c:[0-9]+:[0-9]+: warning: leak of .malloc'
 
 status=0
 for f in $FILES; do
-    out=$(gcc "${CFLAGS[@]}" -c "$f" -o /dev/null 2>&1)
+    out=$("${CC:-gcc}" "${CFLAGS[@]}" -c "$f" -o /dev/null 2>&1)
     rc=$?
     findings=$(printf '%s\n' "$out" | grep -E 'warning:|error:' | grep -Ev "$EXCLUDE" || true)
     if [ $rc -ne 0 ] || [ -n "$findings" ]; then
@@ -41,6 +46,6 @@ for f in $FILES; do
 done
 
 if [ $status -eq 0 ]; then
-    echo "gcc -fanalyzer: no findings in $(echo "$FILES" | wc -l) files"
+    echo "$("${CC:-gcc}" --version | head -1): -fanalyzer found nothing in $(echo "$FILES" | wc -l) files"
 fi
 exit $status

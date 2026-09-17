@@ -426,7 +426,7 @@ float** _read_mux2(int32_t numSrc,
     if (error_code != 0) {
         printf("urs.c: Internal function _read_mux2_headers failed: Error code = %d\n", 
             error_code);
-
+        free_mux2_headers(hd);   // already released on that path; harmless and explicit
         return NULL;
     }
 
