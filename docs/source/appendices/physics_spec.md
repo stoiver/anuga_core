@@ -21,13 +21,13 @@ equations, every closure, the numerical scheme and the parameter defaults.
 | **P14** | Perignon, M.C. (2014), *A Rolling Stone Gathers No Moss*, PhD thesis, University of Colorado Boulder, §3.3.2. Equations 3.1–3.11. |
 | **FG21** | Fassett, C.I. & Goudge, T.A. (2021), *Modeling the Hydrodynamics, Sediment Transport, and Valley Incision of Outlet-Forming Floods From Martian Crater Lakes*, JGR Planets 126, e2021JE006979. Equations 1–9 + Supporting Information S1–S5. |
 | **RDy26** | Feng, D., Tan, Z., Xu, D., Johnson, J. & Bisht, G. (2026), *RDycore-sediment v1.0*, EGUsphere preprint 2026-4859 (CC BY 4.0). Equations 1–13 + Appendix A1–A7. |
-| **aSM16** | Perignon, M.C. (2016), *Using the Sediment Transport and Vegetation Operators in ANUGA*, `anugaSed/docs/anugaSed_manual.pdf`, 4 May 2016. Equations 1–14. **This is the authoritative specification for the shipped code** and supersedes P14 where they differ. |
+| **aSM16** | Perignon, M.C. (2016), *Using the Sediment Transport and Vegetation Operators in ANUGA*, [anugaSed/docs/anugaSed_manual.pdf](https://github.com/mperignon/anugaSed/blob/master/docs/anugaSed_manual.pdf), 4 May 2016. Equations 1–14. **This is the authoritative specification for the shipped code** and supersedes P14 where they differ. |
 | **DL09** | Davy, P. & Lague, D. (2009), *Fluvial erosion/transport equation of landscape evolution models revisited*, JGR Earth Surface 114, F03007, doi:10.1029/2008JF001146. Equations 2–8, 19. Source of the E–D framework and of {speclit}`S-4`. |
 | **P13** | Perignon, M.C., Tucker, G.E., Griffin, E.R. & Friedman, J.M. (2013), JGR Earth Surface 118(3), 1193–1209, doi:10.1002/jgrf.20073. Rio Puerco lidar differencing — the field data for validation rung 8. |
 | **W04** | Wilson, L., Ghatan, G.J., Head, J.W. & Mitchell, K.L. (2004), JGR Planets 109, E09003, doi:10.1029/2004JE002281. Eqs 4, 13–17: Darcy–Weisbach `f_c` by bed type. |
 | **LL16** | Larsen, I.J. & Lamb, M.P. (2016), Nature 538, 229–232, doi:10.1038/nature19817. Methods: Manning–Strickler roughness closure. **Uses ANUGA.** |
 | **EH67** | Engelund, F. & Hansen, E. (1967), *A Monograph on Sediment Transport in Alluvial Streams*, Teknisk Forlag. Eqs 3.1.3, 4.3.5. |
-| **aS16** | `anugaSed` source (Perignon 2016, MIT). |
+| **aS16** | [`anugaSed`](https://github.com/mperignon/anugaSed) source (Perignon 2016, MIT). |
 
 ## Clean-room statement
 
@@ -88,8 +88,9 @@ rises under net deposition.
 ANUGA already solves the conservative shallow water equations; this is stated only
 to fix notation. `[P14 3.1–3.3]`, `[RDy26 3–5]`:
 
-```
-∂U/∂t + ∂E/∂x + ∂G/∂y = S ,     U = [h, hu, hv]ᵀ
+```{math}
+
+\frac{\partial \mathbf{U}}{\partial t} + \frac{\partial \mathbf{E}}{\partial x} + \frac{\partial \mathbf{G}}{\partial y} = \mathbf{S}, \qquad \mathbf{U} = \begin{bmatrix} h & hu & hv \end{bmatrix}^{T}
 ```
 
 with bed friction slope and bed slope in `S`. Sediment does **not** modify these
@@ -103,8 +104,12 @@ The prognostic sediment variable is **mass per unit area**, not concentration
 ```{index} single: physics label; [G-1]
 ```
 (spec-g-1)=
-```
-[G-1]   m_s = h · c_s                                    s = 1 … N_s
+```{math}
+:nowrap:
+
+\begin{align}
+m_s = h\,c_s, \qquad s = 1 \dots N_s \tag{G-1}
+\end{align}
 ```
 
 State vector `[RDy26 2]`:
@@ -112,8 +117,12 @@ State vector `[RDy26 2]`:
 ```{index} single: physics label; [G-2]
 ```
 (spec-g-2)=
-```
-[G-2]   U = [ h, hu, hv, m_1, m_2, …, m_N_s ]ᵀ
+```{math}
+:nowrap:
+
+\begin{align}
+\mathbf{U} = \begin{bmatrix} h & hu & hv & m_1 & m_2 & \dots & m_{N_s} \end{bmatrix}^{T} \tag{G-2}
+\end{align}
 ```
 
 Conservative transport, one equation per class `[RDy26 6]`, which is `[DL09 4]`
@@ -123,8 +132,12 @@ written per class — DL09 give it in Lagrangian form,
 ```{index} single: physics label; [G-3]
 ```
 (spec-g-3)=
-```
-[G-3]   ∂m_s/∂t + ∂(u m_s)/∂x + ∂(v m_s)/∂y = E_s − D_s + S_ms
+```{math}
+:nowrap:
+
+\begin{align}
+\frac{\partial m_s}{\partial t} + \frac{\partial (u\,m_s)}{\partial x} + \frac{\partial (v\,m_s)}{\partial y} = E_s - D_s + S_{m_s} \tag{G-3}
+\end{align}
 ```
 
 `S_ms` is an optional external source (hillslope yield, tributary load, rainfall
@@ -144,9 +157,13 @@ washoff).
 ```
 (spec-g-4)=
 (spec-g-5)=
-```
-[G-4]   ∂z/∂t = (D − E)/(1 − λ)                         suspended contribution
-[G-5]   ∂z/∂t = −(1/(1 − λ)) ∇·q_b                      bedload contribution
+```{math}
+:nowrap:
+
+\begin{align}
+\frac{\partial z}{\partial t} &= \frac{D - E}{1 - \lambda} && \text{suspended contribution} \tag{G-4} \\
+\frac{\partial z}{\partial t} &= -\frac{1}{1 - \lambda}\,\nabla\cdot\mathbf{q}_b && \text{bedload contribution} \tag{G-5}
+\end{align}
 ```
 
 Both act on the same `z`; when both operators are active the contributions sum.
@@ -179,8 +196,12 @@ FG21, RDy26 and P14 all specify the same quadratic drag law, in different notati
 ```{index} single: physics label; [T-1]
 ```
 (spec-t-1)=
-```
-[T-1]   τ_b = ρ · f_c · |v|²           where f_c ≡ f/8
+```{math}
+:nowrap:
+
+\begin{align}
+\tau_b = \rho\, f_c\, |\mathbf{v}|^2, \qquad f_c \equiv f/8 \tag{T-1}
+\end{align}
 ```
 
 | Source | As written | Equivalent to |
@@ -195,8 +216,12 @@ Shear velocity:
 ```{index} single: physics label; [T-2]
 ```
 (spec-t-2)=
-```
-[T-2]   u* = √(τ_b/ρ) = |v| √(f_c) = |v| √(f/8)
+```{math}
+:nowrap:
+
+\begin{align}
+u_* = \sqrt{\tau_b/\rho} = |\mathbf{v}|\sqrt{f_c} = |\mathbf{v}|\sqrt{f/8} \tag{T-2}
+\end{align}
 ```
 
 Shields stress `[FG21 2]`, `[P14 3.7]`:
@@ -204,8 +229,12 @@ Shields stress `[FG21 2]`, `[P14 3.7]`:
 ```{index} single: physics label; [T-3]
 ```
 (spec-t-3)=
-```
-[T-3]   τ* = τ_b / ((ρ_s − ρ) g D) = u*² / (R g D)
+```{math}
+:nowrap:
+
+\begin{align}
+\tau^{*} = \frac{\tau_b}{(\rho_s - \rho)\, g\, D} = \frac{u_*^2}{R\, g\, D} \tag{T-3}
+\end{align}
 ```
 
 Excess Shields stress `[FG21 3]`:
@@ -213,8 +242,12 @@ Excess Shields stress `[FG21 3]`:
 ```{index} single: physics label; [T-4]
 ```
 (spec-t-4)=
-```
-[T-4]   τ_x = τ* − τ_c*
+```{math}
+:nowrap:
+
+\begin{align}
+\tau_x = \tau^{*} - \tau_c^{*} \tag{T-4}
+\end{align}
 ```
 
 > **Typographic note on P14 Eq 3.7.** The thesis prints `u* = √(f/8)`, omitting the
@@ -230,8 +263,12 @@ form to avoid division by near-zero depth. RDy26 A22–A23 explicitly adopts
 ```{index} single: physics label; [T-5]
 ```
 (spec-t-5)=
-```
-[T-5]   u = (uh)·h / (h² + h_ε²)        v = (vh)·h / (h² + h_ε²)
+```{math}
+:nowrap:
+
+\begin{align}
+u = \frac{(uh)\,h}{h^2 + h_\epsilon^2}, \qquad v = \frac{(vh)\,h}{h^2 + h_\epsilon^2} \tag{T-5}
+\end{align}
 ```
 
 with `h_ε` a regularisation depth (`aS16` uses 1×10⁻⁶). Set `u = v = c_s = 0`
@@ -246,8 +283,12 @@ The Manning ↔ Darcy–Weisbach bridge `[FG21 9]` is:
 ```{index} single: physics label; [T-6]
 ```
 (spec-t-6)=
-```
-[T-6]   f = 8 g n² / h^(1/3)        ⟺   f_c = C_D = g n² h^(−1/3)
+```{math}
+:nowrap:
+
+\begin{align}
+f = \frac{8\, g\, n^2}{h^{1/3}} \quad\Longleftrightarrow\quad f_c = C_D = g\, n^2\, h^{-1/3} \tag{T-6}
+\end{align}
 ```
 
 which is exactly RDy26 A5. Three selectable closures `[FG21 §2.2.3]`:
@@ -288,12 +329,16 @@ channels); `D50`/`D84`/`D90` are bed clast percentiles.
 (spec-t-10)=
 (spec-t-11)=
 (spec-t-12)=
-```
-[T-8]    Sand bed         (8/f_c)^½ = 8.46 (R/D50)^0.1005
-[T-9]    Gravel bed       (8/f_c)^½ = 5.75 log₁₀(R/D84) + 3.514
-[T-10]   Boulder bed      (8/f_c)^½ = 5.62 log₁₀(R/D84) + 4.0
-[T-11]   Steep pool-fall  (8/f_c)^½ = 4.60 log₁₀(d_s/D90) + 4.203
-[T-12]   Fixed roughness  (8/f_c)^½ = 5.657 log₁₀(R/r) + 6.6303
+```{math}
+:nowrap:
+
+\begin{align}
+\text{Sand bed} & \quad (8/f_c)^{1/2} = 8.46\,(R/D_{50})^{0.1005} \tag{T-8} \\
+\text{Gravel bed} & \quad (8/f_c)^{1/2} = 5.75\,\log_{10}(R/D_{84}) + 3.514 \tag{T-9} \\
+\text{Boulder bed} & \quad (8/f_c)^{1/2} = 5.62\,\log_{10}(R/D_{84}) + 4.0 \tag{T-10} \\
+\text{Steep pool-fall} & \quad (8/f_c)^{1/2} = 4.60\,\log_{10}(d_s/D_{90}) + 4.203 \tag{T-11} \\
+\text{Fixed roughness} & \quad (8/f_c)^{1/2} = 5.657\,\log_{10}(R/r) + 6.6303 \tag{T-12}
+\end{align}
 ```
 
 FG21 cite Eqs 13–15, i.e. {speclit}`T-8`–{speclit}`T-10`. {speclit}`T-11` uses `d_s` = depth of water
@@ -347,18 +392,23 @@ unsimplified Eqs 7a/7b, 8–9, 10, 11 (also in §14's source).
 (spec-t-13)=
 (spec-t-14)=
 (spec-t-15)=
-```
-[T-13]   u/u* = 8.1 (h/k_s)^(1/6)              Manning–Strickler
-[T-14]   n = k_s^(1/6) / (8.1 √g)              rearranged with the Manning equation
-[T-15]   k_s = r_d · r_br · σ_br               bedrock roughness length scale
+```{math}
+:nowrap:
+
+\begin{align}
+\frac{u}{u_*} &= 8.1\,\left(\frac{h}{k_s}\right)^{1/6} && \text{Manning–Strickler} \tag{T-13} \\
+n &= \frac{k_s^{1/6}}{8.1\,\sqrt{g}} && \text{rearranged with the Manning equation} \tag{T-14} \\
+k_s &= r_d\, r_{br}\, \sigma_{br} && \text{bedrock roughness length scale} \tag{T-15}
+\end{align}
 ```
 
 `r_d` and `r_br` are hydraulic roughness scaling parameters and `σ_br` is one
 standard deviation of bedrock bed elevation. LL16 set `r_d = 2`, `r_br = 2`, and
 measured `σ_br ≈ 5 m` across five reaches, giving `k_s = 20 m` and:
 
-```
-n = 20^(1/6)/(8.1 × 9.81^½) = 0.0649 ≈ 0.065     ✓ matches LL16's stated value
+```{math}
+
+n = \frac{20^{1/6}}{8.1\,\sqrt{9.81}} = 0.0649 \approx 0.065 \qquad \text{matches LL16's stated value}
 ```
 
 `n` is then **spatially and temporally uniform**; only `f_c` varies, through {speclit}`T-6`.
@@ -393,9 +443,13 @@ n = 20^(1/6)/(8.1 × 9.81^½) = 0.0649 ≈ 0.065     ✓ matches LL16's stated v
 ```
 (spec-t-7)=
 (spec-t-7e)=
-```
-[T-7]   τ_b = ρ g h S       ⟹   u* = √(g S h)              [aSM16 6–7]
-[T-7e]  τ_b = ρ g h S_f                                    S_f the free-surface slope
+```{math}
+:nowrap:
+
+\begin{align}
+\tau_b &= \rho\, g\, h\, S \quad\Longrightarrow\quad u_* = \sqrt{g\, S\, h} && \text{[aSM16 6–7]} \tag{T-7} \\
+\tau_b &= \rho\, g\, h\, S_f && S_f \text{ the free-surface slope} \tag{T-7e}
+\end{align}
 ```
 
 {speclit}`T-7e` is ANUGA's variant, not in the sources: the same depth–slope
@@ -440,9 +494,13 @@ typographic. Both formulations should be implemented behind a selector.
 ```
 (spec-e-1)=
 (spec-e-2)=
-```
-[E-1]   E* = 0.65 · γ₀ S / (1 + γ₀ S)        S = τ*/τ_c* − 1
-[E-2]   E  = v_s · E*
+```{math}
+:nowrap:
+
+\begin{align}
+E^{*} &= \frac{0.65\,\gamma_0\, S}{1 + \gamma_0\, S}, \qquad S = \frac{\tau^{*}}{\tau_c^{*}} - 1 \tag{E-1} \\
+E &= v_s\, E^{*} \tag{E-2}
+\end{align}
 ```
 
 with `γ₀ = 0.0024` (empirical) and `τ_c* = 0.04` (FG21's choice for suspension).
@@ -458,10 +516,14 @@ specified by `[aSM16 3–5]` and implemented in `aS16`:
 (spec-e-3)=
 (spec-e-5)=
 (spec-e-6)=
-```
-[E-3]   Ė = K_e (τ_b − τ_c)                             DIMENSIONAL stress, Pa
-[E-5]   K_e = 0.2×10⁻⁶ / τ_c^0.5                        [m³ N⁻¹ s⁻¹]
-[E-6]   τ_c = τ_c* (ρ_s − ρ) g D50
+```{math}
+:nowrap:
+
+\begin{align}
+\dot{E} &= K_e\,(\tau_b - \tau_c) && \text{dimensional stress, Pa} \tag{E-3} \\
+K_e &= \frac{0.2\times 10^{-6}}{\tau_c^{0.5}} && [\mathrm{m^3\,N^{-1}\,s^{-1}}] \tag{E-5} \\
+\tau_c &= \tau_c^{*}\,(\rho_s - \rho)\, g\, D_{50} \tag{E-6}
+\end{align}
 ```
 
 {speclit}`E-5` is the jet-test erodibility relation of Hanson & Simon (2001) for cohesive
@@ -473,8 +535,12 @@ layer ℓ:
 ```{index} single: physics label; [E-4]
 ```
 (spec-e-4)=
-```
-[E-4]   E_ℓ^pot = K_e,ℓ · (τ_b − τ_c,ℓ)/τ_c,ℓ    for τ_b > τ_c,ℓ ; else 0
+```{math}
+:nowrap:
+
+\begin{align}
+E_\ell^{\mathrm{pot}} = \begin{cases} K_{e,\ell}\, \dfrac{\tau_b - \tau_{c,\ell}}{\tau_{c,\ell}} & \tau_b > \tau_{c,\ell} \\[4pt] 0 & \text{otherwise} \end{cases} \tag{E-4}
+\end{align}
 ```
 
 Note {speclit}`E-4` and {speclit}`E-3` both use *dimensional* stress; {speclit}`E-1` uses Shields stress.
@@ -520,8 +586,12 @@ Two published options; they differ in provenance, not in intent.
 ```{index} single: physics label; [S-1]
 ```
 (spec-s-1)=
-```
-[S-1]   v_s = R g d_g² / ( C₁ ν + √(0.75 C₂ R g d_g³) )
+```{math}
+:nowrap:
+
+\begin{align}
+v_s = \frac{R\, g\, d_g^2}{C_1\,\nu + \sqrt{0.75\, C_2\, R\, g\, d_g^3}} \tag{S-1}
+\end{align}
 ```
 
 with `C₁ = 18`, `C₂ = 0.4` for smooth spheres (1.0 and 1.1 respectively for natural
@@ -556,9 +626,13 @@ take settling velocities from Dietrich (1982).
 ```
 (spec-s-2)=
 (spec-s-3)=
-```
-[S-2]   Z = v_s / (κ u*)                    κ = 0.41
-[S-3]   c_b = c · d*(Z)
+```{math}
+:nowrap:
+
+\begin{align}
+Z &= \frac{v_s}{\kappa\, u_*}, \qquad \kappa = 0.41 \tag{S-2} \\
+c_b &= c\; d^{*}(Z) \tag{S-3}
+\end{align}
 ```
 
 `d*` is the ratio of near-bed to depth-averaged concentration. Physically: at low
@@ -581,10 +655,12 @@ over a Rouse–Vanoni concentration profile and a logarithmic velocity profile:
 ```{index} single: physics label; [S-4]
 ```
 (spec-s-4)=
-```
-                 ∫ₐʰ ln(z/z₀) dz
-[S-4]   d*  =  ─────────────────────────────────
-               ∫ₐʰ ((h−z)/(h−a) · a/z)^Z ln(z/z₀) dz
+```{math}
+:nowrap:
+
+\begin{align}
+d^{*} = \frac{\displaystyle\int_a^h \ln(z/z_0)\,dz}{\displaystyle\int_a^h \left(\frac{h - z}{h - a}\cdot\frac{a}{z}\right)^{Z} \ln(z/z_0)\,dz} \tag{S-4}
+\end{align}
 ```
 
 with `Z` the Rouse number {speclit}`S-2`, `z₀` the roughness length and `a` the reference
@@ -739,8 +815,12 @@ distance a particle travels in the flow before being trapped on the bed.
 ```{index} single: physics label; [S-5]
 ```
 (spec-s-5)=
-```
-[S-5]   ξ = q / (d* v_s)                                 [DL09 8]
+```{math}
+:nowrap:
+
+\begin{align}
+\xi = \frac{q}{d^{*}\, v_s} \qquad \text{[DL09 8]} \tag{S-5}
+\end{align}
 ```
 
 It is the length over which the sediment load relaxes toward capacity. `ξ → 0`
@@ -751,8 +831,9 @@ because `ξ` is finite** — the flow is *not* instantaneously at capacity.
 Evaluated for the Rio Puerco 2006 flood from P13's own parameters
 (`q = 2.66 m² s⁻¹`, `d* = 1`, `v_s = 0.00175 m s⁻¹`):
 
-```
-ξ ≈ 1520 m  —  about 6.5× the 235 m mean arroyo width
+```{math}
+
+\xi \approx 1520\ \mathrm{m}, \qquad \text{about } 6.5\times \text{ the 235 m mean arroyo width}
 ```
 
 DL09 note the same generally: "except for coarse sand, the disequilibrium length is
@@ -773,8 +854,12 @@ about larger than the river width".
 ```{index} single: physics label; [D-1]
 ```
 (spec-d-1)=
-```
-[D-1]   D = c_b · v_s = d*(Z) · c · v_s          [P14 3.9], [FG21 §2.2.2]
+```{math}
+:nowrap:
+
+\begin{align}
+D = c_b\, v_s = d^{*}(Z)\, c\, v_s \qquad \text{[P14 3.9], [FG21 §2.2.2]} \tag{D-1}
+\end{align}
 ```
 
 RDy26 A12 uses a different, threshold-based form with a critical *deposition* stress:
@@ -782,8 +867,12 @@ RDy26 A12 uses a different, threshold-based form with a critical *deposition* st
 ```{index} single: physics label; [D-2]
 ```
 (spec-d-2)=
-```
-[D-2]   D_s = w_s c_s (1 − τ_b/τ_d,s)     if τ_d,s > 0 and τ_b < τ_d,s ; else 0
+```{math}
+:nowrap:
+
+\begin{align}
+D_s = \begin{cases} w_s\, c_s\,\left(1 - \dfrac{\tau_b}{\tau_{d,s}}\right) & \tau_{d,s} > 0 \text{ and } \tau_b < \tau_{d,s} \\[4pt] 0 & \text{otherwise} \end{cases} \tag{D-2}
+\end{align}
 ```
 
 Setting `τ_d,s = 0` disables deposition entirely — RDy26 uses this for their passive
@@ -806,8 +895,12 @@ Four distinct limiters, easily confused. All four are needed.
 ```{index} single: physics label; [L-1]
 ```
 (spec-l-1)=
-```
-[L-1]   F_s^net = E_s − D_s  ≥  − m_s / Δt
+```{math}
+:nowrap:
+
+\begin{align}
+F_s^{\mathrm{net}} = E_s - D_s \;\ge\; -\frac{m_s}{\Delta t} \tag{L-1}
+\end{align}
 ```
 
 Deposition can never remove more suspended sediment than is present. This is a
@@ -819,8 +912,12 @@ concentration clamp.
 ```{index} single: physics label; [L-2]
 ```
 (spec-l-2)=
-```
-[L-2]   c_s ≤ c_max                     FG21: c_max = 0.30 by volume
+```{math}
+:nowrap:
+
+\begin{align}
+c_s \le c_{\max} \qquad \text{FG21: } c_{\max} = 0.30 \text{ by volume} \tag{L-2}
+\end{align}
 ```
 
 FG21 notes this matters mainly for the finest grain sizes (1–2 mm in their runs).
@@ -831,8 +928,12 @@ FG21 notes this matters mainly for the finest grain sizes (1–2 mm in their run
 ```{index} single: physics label; [L-3]
 ```
 (spec-l-3)=
-```
-[L-3]   |∂z/∂t| ≤ max_dz               FG21: 5 m/s (deliberately non-physical)
+```{math}
+:nowrap:
+
+\begin{align}
+\left|\frac{\partial z}{\partial t}\right| \le \mathrm{max\_dz} \qquad \text{FG21: 5 m/s (deliberately non-physical)} \tag{L-3}
+\end{align}
 ```
 
 FG21 is explicit that this is a stability device set "nonphysically large" so it
@@ -854,8 +955,12 @@ edge-reconstruction limiter, which the tracers share with the flow variables.
 ```{index} single: physics label; [L-4]
 ```
 (spec-l-4)=
-```
-[L-4]   c_b = d*(Z) · c_s  ≤  c_pack               c_pack = 0.65
+```{math}
+:nowrap:
+
+\begin{align}
+c_b = d^{*}(Z)\, c_s \;\le\; c_{\mathrm{pack}}, \qquad c_{\mathrm{pack}} = 0.65 \tag{L-4}
+\end{align}
 ```
 
 {speclit}`D-1` is `D = c_b v_s`, and **no source bounds `c_b`**. It needs bounding, for a
@@ -902,8 +1007,12 @@ Scope and interactions:
 ```{index} single: physics label; [L-5]
 ```
 (spec-l-5)=
-```
-[L-5]   z(x, y, t) ≥ z_base(x, y)            z_base a per-cell field, default −∞
+```{math}
+:nowrap:
+
+\begin{align}
+z(x, y, t) \ge z_{\mathrm{base}}(x, y) \qquad z_{\mathrm{base}} \text{ a per-cell field, default } -\infty \tag{L-5}
+\end{align}
 ```
 
 Erosion in {speclit}`G-4`/{speclit}`G-5` is otherwise unbounded below: the bed lowers for as long
@@ -915,8 +1024,9 @@ not a constant**, because bedrock is a surface.
 Applied to the **source**, never by clamping `z`. The erodible thickness
 `T = z − z_base` bounds the net removal over a step, so for the suspended exchange
 
-```
-        Σ_s F_s^net  ≤  T (1 − λ) / Δt
+```{math}
+
+\sum_s F_s^{\mathrm{net}} \;\le\; \frac{T\,(1 - \lambda)}{\Delta t}
 ```
 
 and the erosive part of the source is scaled to satisfy it. Sediment that is not
@@ -983,11 +1093,15 @@ area `M_ℓ,s` [kg m⁻²].
 (spec-b-2)=
 (spec-b-3)=
 (spec-b-4)=
-```
-[B-1]   Σ_s f_s = 1                                    class fractions
-[B-2]   M_ℓ,s(0) = f_s · C_ℓ · H_ℓ                     C_ℓ layer concentration, H_ℓ thickness
-[B-3]   ρ_grain(0) = Σ_s f_s ρ_s                       bulk particle density
-[B-4]   φ_ℓ = 1 − C_ℓ/ρ_grain                          layer porosity
+```{math}
+:nowrap:
+
+\begin{align}
+\sum_s f_s &= 1 && \text{class fractions} \tag{B-1} \\
+M_{\ell,s}(0) &= f_s\, C_\ell\, H_\ell && C_\ell \text{ layer concentration, } H_\ell \text{ thickness} \tag{B-2} \\
+\rho_{\mathrm{grain}}(0) &= \sum_s f_s\, \rho_s && \text{bulk particle density} \tag{B-3} \\
+\phi_\ell &= 1 - \frac{C_\ell}{\rho_{\mathrm{grain}}} && \text{layer porosity} \tag{B-4}
+\end{align}
 ```
 
 ### 5.2 Erosion through the stack
@@ -1000,10 +1114,14 @@ timestep, the remaining time is applied to the next substrate layer, and so on.
 (spec-b-5)=
 (spec-b-6)=
 (spec-b-7)=
-```
-[B-5]   ΔM_ℓ^ero  = min( M_ℓ , E_ℓ^pot · Δt_ℓ )        Δt_ℓ = time layer ℓ is exposed
-[B-6]   ΔM_ℓ,s^ero = ΔM_ℓ^ero · (M_ℓ,s / M_ℓ)          partition by composition
-[B-7]   E_s = (1/Δt) Σ_ℓ ΔM_ℓ,s^ero
+```{math}
+:nowrap:
+
+\begin{align}
+\Delta M_\ell^{\mathrm{ero}} &= \min\!\left(M_\ell,\; E_\ell^{\mathrm{pot}}\, \Delta t_\ell\right) && \Delta t_\ell = \text{time layer } \ell \text{ is exposed} \tag{B-5} \\
+\Delta M_{\ell,s}^{\mathrm{ero}} &= \Delta M_\ell^{\mathrm{ero}}\, \frac{M_{\ell,s}}{M_\ell} && \text{partition by composition} \tag{B-6} \\
+E_s &= \frac{1}{\Delta t} \sum_\ell \Delta M_{\ell,s}^{\mathrm{ero}} \tag{B-7}
+\end{align}
 ```
 
 with `E_ℓ^pot` from {speclit}`E-4` and `M_ℓ = Σ_s M_ℓ,s` `[RDy26 7]`.
@@ -1013,8 +1131,12 @@ Erosion is disabled in shallow water `[RDy26 A8]`:
 ```{index} single: physics label; [B-8]
 ```
 (spec-b-8)=
-```
-[B-8]   h < h_min,ero = max(0.1 m, 10·h_wet)   ⟹   no erosion
+```{math}
+:nowrap:
+
+\begin{align}
+h < h_{\min,\mathrm{ero}} = \max(0.1\ \mathrm{m},\; 10\, h_{\mathrm{wet}}) \quad\Longrightarrow\quad \text{no erosion} \tag{B-8}
+\end{align}
 ```
 
 where `h_wet` is the solver's wet/dry threshold. **This threshold matters** — it is
@@ -1028,10 +1150,14 @@ thin films where velocity is poorly resolved.
 (spec-b-9)=
 (spec-b-10)=
 (spec-b-11)=
-```
-[B-9]    ΔM_A,s^dep = max(0, (E_s − F_s^net)·Δt)
-[B-10]   H_ℓ = M_ℓ / (ρ̄_ℓ (1 − φ_ℓ))
-[B-11]   ρ̄_ℓ = Σ_s (M_ℓ,s/M_ℓ) ρ_s
+```{math}
+:nowrap:
+
+\begin{align}
+\Delta M_{A,s}^{\mathrm{dep}} &= \max\!\left(0,\; (E_s - F_s^{\mathrm{net}})\,\Delta t\right) \tag{B-9} \\
+H_\ell &= \frac{M_\ell}{\bar\rho_\ell\,(1 - \phi_\ell)} \tag{B-10} \\
+\bar\rho_\ell &= \sum_s \frac{M_{\ell,s}}{M_\ell}\, \rho_s \tag{B-11}
+\end{align}
 ```
 
 After exchange, if the active layer exceeds its prescribed thickness `H_A`, the
@@ -1042,8 +1168,9 @@ is updated by mixing with the donor layer `[RDy26 A16]`.
 
 ### 5.4 Memory
 
-```
-bytes = N_classes × N_layers × N_cells × 8
+```{math}
+
+\text{bytes} = N_{\mathrm{classes}} \times N_{\mathrm{layers}} \times N_{\mathrm{cells}} \times 8
 ```
 
 5 classes × 32 layers × 5×10⁶ cells = **6.4 GB** for the bed alone, before
@@ -1061,10 +1188,14 @@ From `[FG21 §2.2.1]`, Eqs 1–6. Uses the shear stress chain of §3 directly.
 (spec-k-1)=
 (spec-k-2)=
 (spec-k-3)=
-```
-[K-1]   q_b* = K · τ_x^m                                       [FG21 4]
-[K-2]   q_b  = q_b* · √((ρ_s/ρ − 1) g) · D^1.5                 [FG21 5]
-[K-3]   ∂z/∂t = −(1/(1−λ)) ∇·q_b                               [FG21 6]
+```{math}
+:nowrap:
+
+\begin{align}
+q_b^{*} &= K\, \tau_x^{\,m} && \text{[FG21 4]} \tag{K-1} \\
+q_b &= q_b^{*}\, \sqrt{(\rho_s/\rho - 1)\, g}\; D^{1.5} && \text{[FG21 5]} \tag{K-2} \\
+\frac{\partial z}{\partial t} &= -\frac{1}{1 - \lambda}\,\nabla\cdot\mathbf{q}_b && \text{[FG21 6]} \tag{K-3}
+\end{align}
 ```
 
 Parameter sets for {speclit}`K-1`:
@@ -1082,8 +1213,9 @@ Parameter sets for {speclit}`K-1`:
 
 EH67 write their transport relation as
 
-```
-        f_EH · Φ = 0.1 θ^(5/2)                                   [EH67 4.3.5]
+```{math}
+
+f_{EH}\, \Phi = 0.1\, \theta^{5/2} \qquad \text{[EH67 4.3.5]}
 ```
 
 where `Φ = q_T/√((s−1)g d³)` is dimensionless **total** sediment discharge, `θ` is
@@ -1093,8 +1225,12 @@ Converting to this spec's convention using §3.3.1 (`f_EH = 2 f_c`):
 ```{index} single: physics label; [K-5]
 ```
 (spec-k-5)=
-```
-[K-5]   q_b* = 0.05 · τ*^(5/2) / f_c                     total load, no threshold
+```{math}
+:nowrap:
+
+\begin{align}
+q_b^{*} = \frac{0.05\, (\tau^{*})^{5/2}}{f_c} \qquad \text{total load, no threshold} \tag{K-5}
+\end{align}
 ```
 
 so in the {speclit}`K-1` power-law form, `K = 0.05/f_c` and `m = 2.5`, with `τ_c* = 0`.
@@ -1119,8 +1255,12 @@ that means parallel to `(u, v)`:
 ```{index} single: physics label; [K-4]
 ```
 (spec-k-4)=
-```
-[K-4]   q_bx = q_b · u/|v|          q_by = q_b · v/|v|
+```{math}
+:nowrap:
+
+\begin{align}
+q_{bx} = q_b\, \frac{u}{|\mathbf{v}|}, \qquad q_{by} = q_b\, \frac{v}{|\mathbf{v}|} \tag{K-4}
+\end{align}
 ```
 
 > **Known defect to avoid.** FG21 report ~1% sediment mass conservation error in
@@ -1161,8 +1301,9 @@ Three of the four requirements are met as written. Mass conservation is exact
 incidental: the transfer is computed per **edge** from data both cells share, so
 both compute the identical volume,
 
-```
-        V = relax (|Δz| − tan θ_c d) / (1/A_k + 1/A_nb) / 3
+```{math}
+
+V = \frac{\mathrm{relax}\,\left(|\Delta z| - \tan\theta_c\, d\right)}{3\,\left(1/A_k + 1/A_{nb}\right)}
 ```
 
 and the pair balances by construction. This is the same device that keeps {speclit}`K-3`
@@ -1211,9 +1352,13 @@ From `[aSM16 §4.2–4.3, Eqs 12–14]`, after Kean & Smith (2004) and Nepf (199
 ```
 (spec-v-1)=
 (spec-v-2)=
-```
-[V-1]   F_D = ½ ρ C_D α U_ref²                          [aSM16 12]
-[V-2]   α  = d_s / λ²                                   projected plant area per unit volume [m⁻¹]
+```{math}
+:nowrap:
+
+\begin{align}
+F_D &= \tfrac{1}{2}\, \rho\, C_D\, \alpha\, U_{\mathrm{ref}}^2 && \text{[aSM16 12]} \tag{V-1} \\
+\alpha &= \frac{d_s}{\lambda^2} && \text{projected plant area per unit volume } [\mathrm{m^{-1}}] \tag{V-2}
+\end{align}
 ```
 
 `U_ref` is the flow velocity in the absence of vegetation, `d_s` the stem diameter,
@@ -1227,8 +1372,12 @@ From `[aSM16 §4.2–4.3, Eqs 12–14]`, after Kean & Smith (2004) and Nepf (199
 ```{index} single: physics label; [V-3]
 ```
 (spec-v-3)=
-```
-[V-3]   U = U_ref − F_D Δt                              [aSM16 13]
+```{math}
+:nowrap:
+
+\begin{align}
+U = U_{\mathrm{ref}} - F_D\, \Delta t \qquad \text{[aSM16 13]} \tag{V-3}
+\end{align}
 ```
 
 **Constraint stated in `aSM16`:** the drag force may reduce the flow velocity to
@@ -1244,8 +1393,12 @@ Nepf (1999) to capture the effect of stem population density, via the force bala
 ```{index} single: physics label; [V-4]
 ```
 (spec-v-4)=
-```
-[V-4]   (1 − αd) C_B U² + ½ C_D α d (h/d) U² = g h ∂h/∂x
+```{math}
+:nowrap:
+
+\begin{align}
+(1 - \alpha d)\, C_B\, U^2 + \tfrac{1}{2}\, C_D\, \alpha\, d\, \frac{h}{d}\, U^2 = g\, h\, \frac{\partial h}{\partial x} \tag{V-4}
+\end{align}
 ```
 
 where `C_B` is the bed drag coefficient. `aSM16` fits `∂h/∂x` as a cubic in `αd`
@@ -1254,9 +1407,12 @@ matched to Figure 6 of Nepf (1999), and solves {speclit}`V-4` to obtain:
 ```{index} single: physics label; [V-5]
 ```
 (spec-v-5)=
-```
-[V-5]   C_D = 1.2                                                   if αd ≤ 0.006
-        C_D = 56.11(αd)² − 15.28(αd) + 1.3 − 5.465×10⁻⁴ (αd)⁻¹      if αd > 0.006
+```{math}
+:nowrap:
+
+\begin{align}
+C_D = \begin{cases} 1.2 & \alpha d \le 0.006 \\[4pt] 56.11\,(\alpha d)^2 - 15.28\,(\alpha d) + 1.3 - 5.465\times 10^{-4}\,(\alpha d)^{-1} & \alpha d > 0.006 \end{cases} \tag{V-5}
+\end{align}
 ```
 
 `C_D` is evaluated per cell whenever the stem-diameter or stem-spacing fields change.
@@ -1283,10 +1439,13 @@ This is the L1 design, and `[RDy26 §2.3, 12–13]` specifies it exactly:
 ```
 (spec-n-1)=
 (spec-n-2)=
-```
-[N-1]   c_s^up = c_s,L   if  F̂_water ≥ 0
-                 c_s,R   if  F̂_water < 0
-[N-2]   F̂_s = F̂_water · c_s^up
+```{math}
+:nowrap:
+
+\begin{align}
+c_s^{\mathrm{up}} &= \begin{cases} c_{s,L} & \hat F_{\mathrm{water}} \ge 0 \\ c_{s,R} & \hat F_{\mathrm{water}} < 0 \end{cases} \tag{N-1} \\
+\hat F_s &= \hat F_{\mathrm{water}}\; c_s^{\mathrm{up}} \tag{N-2}
+\end{align}
 ```
 
 RDy26 states plainly: *"This upwind sediment-transport scheme is conservative for
@@ -1309,8 +1468,12 @@ regardless of cell size ratio.
 ```{index} single: physics label; [N-3]
 ```
 (spec-n-3)=
-```
-[N-3]   dU_i/dt = −(1/A_i) Σ_{e∈∂i} σ_i,e L_e F̂_e + S_i
+```{math}
+:nowrap:
+
+\begin{align}
+\frac{d\mathbf{U}_i}{dt} = -\frac{1}{A_i} \sum_{e\in\partial i} \sigma_{i,e}\, L_e\, \hat{\mathbf F}_e + \mathbf{S}_i \tag{N-3}
+\end{align}
 ```
 
 ### 9.3 Boundary conditions
