@@ -44,13 +44,16 @@ int gpu_inlet_operator_init(struct gpu_domain *GD, int num_indices,
         if (!IO->ops[i].active) { op_id = i; break; }
     }
     if (op_id < 0) {
-        if (grow_inlet_ops(IO) != 0) return -1;
+        if (grow_inlet_ops(IO) != 0) {
+            gpu_set_error(GD, "inlet operator table could not be grown");
+            return -1;
+        }
         for (int i = 0; i < IO->capacity; i++) {
             if (!IO->ops[i].active) { op_id = i; break; }
         }
     }
     if (op_id < 0) {
-        fprintf(stderr, "ERROR: No free inlet operator slots after grow\n");
+        gpu_set_error(GD, "ERROR: No free inlet operator slots after grow");
         return -1;
     }
 
@@ -79,7 +82,7 @@ int gpu_inlet_operator_init(struct gpu_domain *GD, int num_indices,
         int bad = 0;
         for (int k = 0; k < num_indices; k++) {
             if (indices[k] < 0 || indices[k] >= n_elements) {
-                fprintf(stderr, "[Rank %d] ERROR: inlet_operator %d index[%d]=%d out of range [0,%ld)\n",
+                gpu_set_error(GD, "[Rank %d] ERROR: inlet_operator %d index[%d]=%d out of range [0,%ld)",
                         GD->rank, op_id, k, indices[k], (long)n_elements);
                 bad = 1;
             }
@@ -100,7 +103,7 @@ int gpu_inlet_operator_init(struct gpu_domain *GD, int num_indices,
     op->scratch_depths = NULL;
 
     if (!op->indices || !op->areas) {
-        fprintf(stderr, "Failed to allocate inlet_operator arrays\n");
+        gpu_set_error(GD, "Failed to allocate inlet_operator arrays");
         goto fail;
     }
 
@@ -121,7 +124,7 @@ int gpu_inlet_operator_init(struct gpu_domain *GD, int num_indices,
     op->scratch_depths = (double*)malloc(num_indices * sizeof(double));
     if (!op->scratch_stages || !op->scratch_bed || !op->scratch_xmom ||
         !op->scratch_ymom || !op->scratch_depths) {
-        fprintf(stderr, "Failed to allocate inlet_operator scratch buffers\n");
+        gpu_set_error(GD, "Failed to allocate inlet_operator scratch buffers");
         goto fail;
     }
 
@@ -147,8 +150,8 @@ int gpu_inlet_operator_init(struct gpu_domain *GD, int num_indices,
             int chk_idx = omp_target_is_present(idx, GD->device_id);
             int chk_ar = omp_target_is_present(ar, GD->device_id);
             if (!chk_idx || !chk_ar) {
-                fprintf(stderr, "[Rank %d] ERROR: Inlet_operator %d mapping FAILED after enter data! "
-                        "indices_present=%d areas_present=%d idx=%p ar=%p ni=%d\n",
+                gpu_set_error(GD, "[Rank %d] ERROR: Inlet_operator %d mapping FAILED after enter data! "
+                        "indices_present=%d areas_present=%d idx=%p ar=%p ni=%d",
                         GD->rank, op_id, chk_idx, chk_ar, (void*)idx, (void*)ar, ni);
                 fflush(stderr);
                 goto fail;
@@ -265,8 +268,8 @@ double gpu_inlet_get_volume(struct gpu_domain *GD, int op_id) {
         int present_sc = omp_target_is_present(stage_c, omp_get_default_device());
         int present_bc = omp_target_is_present(bed_c, omp_get_default_device());
         if (!present_idx || !present_ar || !present_sc || !present_bc) {
-            fprintf(stderr, "[Rank %d] gpu_inlet_get_volume op=%d: MISSING device mapping! "
-                    "indices=%d areas=%d stage_c=%d bed_c=%d\n",
+            gpu_set_error(GD, "[Rank %d] gpu_inlet_get_volume op=%d: MISSING device mapping! "
+                    "indices=%d areas=%d stage_c=%d bed_c=%d",
                     GD->rank, op_id, present_idx, present_ar, present_sc, present_bc);
             fflush(stderr);
             return 0.0;
@@ -308,8 +311,8 @@ void gpu_inlet_get_velocities(struct gpu_domain *GD, int op_id,
         int present_sy = omp_target_is_present(op->scratch_ymom, GD->device_id);
         if (!present_idx || !present_sc || !present_bc || !present_xc || !present_yc ||
             !present_sd || !present_sx || !present_sy) {
-            fprintf(stderr, "[Rank %d] gpu_inlet_get_velocities op=%d: MISSING mapping! "
-                    "idx=%d sc=%d bc=%d xc=%d yc=%d sd=%d sx=%d sy=%d\n",
+            gpu_set_error(GD, "[Rank %d] gpu_inlet_get_velocities op=%d: MISSING mapping! "
+                    "idx=%d sc=%d bc=%d xc=%d yc=%d sd=%d sx=%d sy=%d",
                     GD->rank, op_id, present_idx, present_sc, present_bc,
                     present_xc, present_yc, present_sd, present_sx, present_sy);
             fflush(stderr);
@@ -480,6 +483,13 @@ void gpu_inlet_set_stages_evenly(struct gpu_domain *GD, int op_id, double volume
 
     // CPU sort: argsort by stage (10-100 elements, trivial)
     int *stages_order = (int*)malloc(n * sizeof(int));
+    double *summed_areas = (double*)malloc(n * sizeof(double));
+    double *summed_volume = (double*)malloc(n * sizeof(double));
+    if (!stages_order || !summed_areas || !summed_volume) {
+        gpu_set_error(GD, "gpu_inlet_set_stages_evenly op=%d: could not allocate %d-element work arrays", op_id, n);
+        free(stages_order); free(summed_areas); free(summed_volume);
+        return;
+    }
     for (int k = 0; k < n; k++) stages_order[k] = k;
 
     // Simple insertion sort (n is small, 10-100)
@@ -495,14 +505,12 @@ void gpu_inlet_set_stages_evenly(struct gpu_domain *GD, int op_id, double volume
     }
 
     // Accumulate areas of cells ordered by stage
-    double *summed_areas = (double*)malloc(n * sizeof(double));
     summed_areas[0] = areas_local[stages_order[0]];
     for (int k = 1; k < n; k++) {
         summed_areas[k] = summed_areas[k-1] + areas_local[stages_order[k]];
     }
 
     // Accumulate the volume needed to fill cells
-    double *summed_volume = (double*)malloc(n * sizeof(double));
     summed_volume[0] = 0.0;
     for (int k = 1; k < n; k++) {
         summed_volume[k] = summed_volume[k-1] +

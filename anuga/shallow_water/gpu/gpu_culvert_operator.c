@@ -564,7 +564,7 @@ int gpu_culvert_init(struct gpu_domain *GD,
         struct culvert_state *ns = (struct culvert_state*)
             realloc(CO->state, new_cap * sizeof(struct culvert_state));
         if (!np || !ni || !ns) {
-            fprintf(stderr, "ERROR: Failed to grow culvert_operators to %d slots\n", new_cap);
+            gpu_set_error(GD, "ERROR: Failed to grow culvert_operators to %d slots", new_cap);
             // The realloc that DID succeed owns the surviving copy of the inlet
             // staging pointers; free them through whichever array that is, so the
             // teardown below does not leak them.
@@ -609,7 +609,7 @@ int gpu_culvert_init(struct gpu_domain *GD,
                                    &ci->inlet0_indices, &ci->inlet0_areas) != 0 ||
         culvert_copy_inlet_staging(inlet1_num, inlet1_indices, inlet1_areas,
                                    &ci->inlet1_indices, &ci->inlet1_areas) != 0) {
-        fprintf(stderr, "ERROR: Failed to allocate inlet staging for %d/%d triangles\n",
+        gpu_set_error(GD, "ERROR: Failed to allocate inlet staging for %d/%d triangles",
                 inlet0_num, inlet1_num);
         culvert_free_inlet_staging(ci);
         return -1;
@@ -725,11 +725,11 @@ void gpu_culverts_finalize_all(struct gpu_domain *GD) {
 // Call AFTER all culverts are registered AND GPU domain is initialized
 // ============================================================================
 
-void gpu_culverts_map(struct gpu_domain *GD) {
+int gpu_culverts_map(struct gpu_domain *GD) {
     struct culvert_operators *CO = &GD->culvert_ops;
 
-    if (CO->num_culverts == 0) return;
-    if (CO->mapped) return;
+    if (CO->num_culverts == 0) return 0;
+    if (CO->mapped) return 0;
 
     omp_set_default_device(gpu_compute_device(GD));
 
@@ -742,6 +742,11 @@ void gpu_culverts_map(struct gpu_domain *GD) {
     CO->scratch_xmom = (double*)calloc(ne, sizeof(double));
     CO->scratch_ymom = (double*)calloc(ne, sizeof(double));
     CO->scratch_elev = (double*)calloc(ne, sizeof(double));
+    if (!CO->scratch_enquiry_indices || !CO->scratch_stage || !CO->scratch_xmom ||
+        !CO->scratch_ymom || !CO->scratch_elev) {
+        gpu_set_error(GD, "gpu_culverts_map: could not allocate enquiry scratch for %d culverts", nc);
+        return -1;
+    }
 
     // Enquiry indices are constant for the life of the domain. Remote enquiry
     // points (index < 0) are parked at 0; their gathered values are overwritten
@@ -761,6 +766,12 @@ void gpu_culverts_map(struct gpu_domain *GD) {
     CO->scratch_slot_shift = (double*)calloc(ne, sizeof(double));
     CO->scratch_slot_xmom  = (double*)calloc(ne, sizeof(double));
     CO->scratch_slot_ymom  = (double*)calloc(ne, sizeof(double));
+    if (!CO->scratch_avg_stage || !CO->scratch_avg_depth || !CO->scratch_avg_xmom ||
+        !CO->scratch_avg_ymom || !CO->scratch_slot_shift || !CO->scratch_slot_xmom ||
+        !CO->scratch_slot_ymom) {
+        gpu_set_error(GD, "gpu_culverts_map: could not allocate inlet accumulators for %d culverts", nc);
+        return -1;
+    }
 
     // --- Flattened inlet-triangle metadata (constant) ---
     CO->total_inlet_triangles = 0;
@@ -773,6 +784,11 @@ void gpu_culverts_map(struct gpu_domain *GD) {
     CO->scratch_inlet_areas = (double*)calloc(nt, sizeof(double));
     CO->scratch_slot_start = (int*)calloc(ne, sizeof(int));
     CO->scratch_slot_count = (int*)calloc(ne, sizeof(int));
+    if (!CO->scratch_inlet_indices || !CO->scratch_inlet_areas ||
+        !CO->scratch_slot_start || !CO->scratch_slot_count) {
+        gpu_set_error(GD, "gpu_culverts_map: could not allocate inlet index scratch for %d culverts", nc);
+        return -1;
+    }
 
     // Flatten inlet indices/areas and record each inlet's contiguous range.
     int offset = 0;
@@ -824,6 +840,7 @@ void gpu_culverts_map(struct gpu_domain *GD) {
 
     CO->mapped = 1;
     CO->initialized = 1;
+    return 0;
 }
 
 // ============================================================================
@@ -1824,6 +1841,7 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep) {
 
     // Per-culvert working data, sized to the actual culvert count.
     if (culvert_host_scratch_ensure(CO, nc) != 0) {
+        gpu_set_error(GD, "host scratch for %d culverts could not be allocated; culverts not applied this step", nc);
         NVTX_POP();
         return;
     }

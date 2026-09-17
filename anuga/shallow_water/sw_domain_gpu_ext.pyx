@@ -214,6 +214,7 @@ cdef extern from "gpu_domain.h" nogil:
         int device_id
         int gpu_aware_mpi
         int verbose
+        char last_error[512]
         halo_exchange halo
         inlet_operators inlet_ops
         max_quantities_info max_qty
@@ -426,7 +427,7 @@ cdef extern from "gpu_domain.h" nogil:
                          double init_smooth_Q, double init_smooth_delta_total_energy)
     void gpu_culvert_finalize(gpu_domain *GD, int culvert_id)
     void gpu_culverts_finalize_all(gpu_domain *GD)
-    void gpu_culverts_map(gpu_domain *GD)
+    int gpu_culverts_map(gpu_domain *GD)
     void gpu_culverts_apply_all(gpu_domain *GD, double timestep)
     int gpu_culverts_get_report(gpu_domain *GD, int culvert_id, double *out)
 
@@ -1118,6 +1119,15 @@ cdef void build_halo_from_dicts(gpu_domain *GD, object domain_object):
 # Public Python API
 # ============================================================================
 
+def get_last_error(GPUDomain gpu_dom):
+    """The last error message recorded by the C layer (gpu_set_error).
+
+    Every C init function that returns an error code records the reason
+    here first; the wrappers include it in the exception they raise.
+    """
+    return gpu_dom.GD.last_error.decode('utf-8', 'replace')
+
+
 def init_gpu_domain(object domain_object, bint verbose=True):
     """
     Initialize GPU domain from Python domain object.
@@ -1561,8 +1571,9 @@ def init_reflective_boundary(GPUDomain gpu_dom, object domain_object):
     edge_ids_arr = np.ascontiguousarray(domain_object.boundary_edges[ids], dtype=np.intc)
 
     # Call C init
-    gpu_reflective_init(&gpu_dom.GD, num_edges,
-                        &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0])
+    if     gpu_reflective_init(&gpu_dom.GD, num_edges,
+                           &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0]) != 0:
+        raise RuntimeError('init_reflective_boundary: ' + get_last_error(gpu_dom))
 
 
 def evaluate_reflective_boundary_gpu(GPUDomain gpu_dom):
@@ -1627,9 +1638,10 @@ def init_dirichlet_boundary(GPUDomain gpu_dom, object domain_object):
     xmom_values_arr = np.ascontiguousarray(all_xmom, dtype=np.float64)
     ymom_values_arr = np.ascontiguousarray(all_ymom, dtype=np.float64)
 
-    gpu_dirichlet_init(&gpu_dom.GD, num_edges,
-                       &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0],
-                       &stage_values_arr[0], &xmom_values_arr[0], &ymom_values_arr[0])
+    if     gpu_dirichlet_init(&gpu_dom.GD, num_edges,
+                          &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0],
+                          &stage_values_arr[0], &xmom_values_arr[0], &ymom_values_arr[0]) != 0:
+        raise RuntimeError('init_dirichlet_boundary: ' + get_last_error(gpu_dom))
 
 
 def evaluate_dirichlet_boundary_gpu(GPUDomain gpu_dom):
@@ -1678,9 +1690,10 @@ def init_transmissive_boundary(GPUDomain gpu_dom, object domain_object):
     vol_ids_arr = np.ascontiguousarray(domain_object.boundary_cells[ids], dtype=np.intc)
     edge_ids_arr = np.ascontiguousarray(domain_object.boundary_edges[ids], dtype=np.intc)
 
-    gpu_transmissive_init(&gpu_dom.GD, num_edges,
-                          &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0],
-                          use_centroid)
+    if     gpu_transmissive_init(&gpu_dom.GD, num_edges,
+                             &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0],
+                             use_centroid) != 0:
+        raise RuntimeError('init_transmissive_boundary: ' + get_last_error(gpu_dom))
 
 
 def evaluate_transmissive_boundary_gpu(GPUDomain gpu_dom):
@@ -1726,8 +1739,9 @@ def init_transmissive_n_zero_t_boundary(GPUDomain gpu_dom, object domain_object)
     vol_ids_arr = np.ascontiguousarray(domain_object.boundary_cells[ids], dtype=np.intc)
     edge_ids_arr = np.ascontiguousarray(domain_object.boundary_edges[ids], dtype=np.intc)
 
-    gpu_transmissive_n_zero_t_init(&gpu_dom.GD, num_edges,
-                                   &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0])
+    if     gpu_transmissive_n_zero_t_init(&gpu_dom.GD, num_edges,
+                                      &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0]) != 0:
+        raise RuntimeError('init_transmissive_n_zero_t_boundary: ' + get_last_error(gpu_dom))
 
 
 def set_transmissive_n_zero_t_stage(GPUDomain gpu_dom, double stage_value):
@@ -1794,8 +1808,9 @@ def init_file_boundary(GPUDomain gpu_dom, object domain_object):
     vol_ids_arr  = np.ascontiguousarray(domain_object.boundary_cells[ids],  dtype=np.intc)
     edge_ids_arr = np.ascontiguousarray(domain_object.boundary_edges[ids], dtype=np.intc)
 
-    gpu_file_boundary_init(&gpu_dom.GD, num_edges,
-                           &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0])
+    if     gpu_file_boundary_init(&gpu_dom.GD, num_edges,
+                              &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0]) != 0:
+        raise RuntimeError('init_file_boundary_boundary: ' + get_last_error(gpu_dom))
 
     # Store edge metadata for per-timestep Python evaluation
     # List of (B, vol_id, edge_id) in the same order as boundary_indices
@@ -1873,8 +1888,9 @@ def init_time_boundary(GPUDomain gpu_dom, object domain_object):
     vol_ids_arr = np.ascontiguousarray(domain_object.boundary_cells[ids], dtype=np.intc)
     edge_ids_arr = np.ascontiguousarray(domain_object.boundary_edges[ids], dtype=np.intc)
 
-    gpu_time_boundary_init(&gpu_dom.GD, num_edges,
-                           &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0])
+    if     gpu_time_boundary_init(&gpu_dom.GD, num_edges,
+                              &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0]) != 0:
+        raise RuntimeError('init_time_boundary_boundary: ' + get_last_error(gpu_dom))
 
 
 def set_time_boundary_values(GPUDomain gpu_dom,
@@ -1936,8 +1952,9 @@ def init_absorbing_wave_boundary(GPUDomain gpu_dom, object domain_object):
     vol_ids_arr  = np.ascontiguousarray(domain_object.boundary_cells[ids],  dtype=np.intc)
     edge_ids_arr = np.ascontiguousarray(domain_object.boundary_edges[ids], dtype=np.intc)
 
-    gpu_absorbing_wave_init(&gpu_dom.GD, num_edges,
-                            &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0])
+    if     gpu_absorbing_wave_init(&gpu_dom.GD, num_edges,
+                               &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0]) != 0:
+        raise RuntimeError('init_absorbing_wave_boundary: ' + get_last_error(gpu_dom))
     return num_edges
 
 
@@ -1990,9 +2007,10 @@ def init_characteristic_wave_boundary(GPUDomain gpu_dom, object domain_object):
     vol_ids_arr  = np.ascontiguousarray(domain_object.boundary_cells[ids],  dtype=np.intc)
     edge_ids_arr = np.ascontiguousarray(domain_object.boundary_edges[ids], dtype=np.intc)
 
-    gpu_characteristic_wave_init(&gpu_dom.GD, num_edges,
-                                 &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0],
-                                 bg_stage)
+    if     gpu_characteristic_wave_init(&gpu_dom.GD, num_edges,
+                                    &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0],
+                                    bg_stage) != 0:
+        raise RuntimeError('init_characteristic_wave_boundary: ' + get_last_error(gpu_dom))
     return num_edges
 
 
@@ -2044,8 +2062,9 @@ def init_flather_boundary(GPUDomain gpu_dom, object domain_object):
     vol_ids_arr  = np.ascontiguousarray(domain_object.boundary_cells[ids],  dtype=np.intc)
     edge_ids_arr = np.ascontiguousarray(domain_object.boundary_edges[ids], dtype=np.intc)
 
-    gpu_flather_init(&gpu_dom.GD, num_edges,
-                     &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0])
+    if     gpu_flather_init(&gpu_dom.GD, num_edges,
+                        &boundary_indices[0], &vol_ids_arr[0], &edge_ids_arr[0]) != 0:
+        raise RuntimeError('init_flather_boundary: ' + get_last_error(gpu_dom))
     return num_edges
 
 
@@ -2378,8 +2397,11 @@ def init_rate_operator(GPUDomain gpu_dom,
         num_full = len(full_indices)
         full_ptr = &full_indices[0]
 
-    return gpu_rate_operator_init(&gpu_dom.GD, num_indices, &indices[0],
+    ret = gpu_rate_operator_init(&gpu_dom.GD, num_indices, &indices[0],
                                   &areas[0], full_ptr, num_full)
+    if ret < 0:
+        raise RuntimeError('init_rate_operator: ' + get_last_error(gpu_dom))
+    return ret
 
 
 def finalize_rate_operator(GPUDomain gpu_dom, int op_id):
@@ -2489,7 +2511,10 @@ def init_max_quantities_gpu(GPUDomain gpu_dom, int n, double velocity_zero_heigh
 
     Returns 0 on success, -1 on allocation failure.
     """
-    return gpu_max_quantities_init(&gpu_dom.GD, n, velocity_zero_height)
+    ret = gpu_max_quantities_init(&gpu_dom.GD, n, velocity_zero_height)
+    if ret < 0:
+        raise RuntimeError('init_max_quantities_gpu: ' + get_last_error(gpu_dom))
+    return ret
 
 
 def update_max_quantities_gpu(GPUDomain gpu_dom):
@@ -2569,7 +2594,10 @@ def init_inlet_operator(GPUDomain gpu_dom,
         Returns -1 on error
     """
     cdef int num_indices = len(indices)
-    return gpu_inlet_operator_init(&gpu_dom.GD, num_indices, &indices[0], &areas[0])
+    ret = gpu_inlet_operator_init(&gpu_dom.GD, num_indices, &indices[0], &areas[0])
+    if ret < 0:
+        raise RuntimeError('init_inlet_operator: ' + get_last_error(gpu_dom))
+    return ret
 
 
 def finalize_inlet_operator(GPUDomain gpu_dom, int op_id):
@@ -2744,7 +2772,7 @@ def init_culvert_operator(GPUDomain gpu_dom,
     cdef int *p_inlet1 = &inlet1_indices[0] if n1 > 0 else NULL
     cdef double *p_area1 = &inlet1_areas[0] if n1 > 0 else NULL
 
-    return gpu_culvert_init(&gpu_dom.GD, &p,
+    ret = gpu_culvert_init(&gpu_dom.GD, &p,
                             enquiry_index_0, enquiry_index_1,
                             n0, p_inlet0, p_area0,
                             n1, p_inlet1, p_area1,
@@ -2752,6 +2780,9 @@ def init_culvert_operator(GPUDomain gpu_dom,
                             inlet_master_proc_0, inlet_master_proc_1,
                             is_local, mpi_tag_base,
                             init_smooth_Q, init_smooth_delta_total_energy)
+    if ret < 0:
+        raise RuntimeError('init_culvert_operator: ' + get_last_error(gpu_dom))
+    return ret
 
 
 def finalize_culvert_operator(GPUDomain gpu_dom, int culvert_id):
@@ -2766,7 +2797,8 @@ def finalize_all_culvert_operators(GPUDomain gpu_dom):
 
 def map_culvert_operators(GPUDomain gpu_dom):
     """Map culvert scratch buffers to GPU. Call after all culverts registered."""
-    gpu_culverts_map(&gpu_dom.GD)
+    if gpu_culverts_map(&gpu_dom.GD) != 0:
+        raise RuntimeError('map_culverts: ' + get_last_error(gpu_dom))
 
 
 def apply_all_culvert_operators(GPUDomain gpu_dom, double timestep):

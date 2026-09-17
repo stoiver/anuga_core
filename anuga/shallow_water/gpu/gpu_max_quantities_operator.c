@@ -44,7 +44,7 @@ int gpu_max_quantities_init(struct gpu_domain *GD, int n, double velocity_zero_h
 
     if (!MQ->max_stage || !MQ->max_depth || !MQ->max_speed || !MQ->max_uh
             || (MQ->n_tracers > 0 && !MQ->max_tracer)) {
-        fprintf(stderr, "ERROR: gpu_max_quantities_init: allocation failed\n");
+        gpu_set_error(GD, "ERROR: gpu_max_quantities_init: allocation failed");
         free(MQ->max_stage); free(MQ->max_depth);
         free(MQ->max_speed); free(MQ->max_uh); free(MQ->max_tracer);
         MQ->max_stage = MQ->max_depth = MQ->max_speed = MQ->max_uh = NULL;
@@ -61,8 +61,10 @@ int gpu_max_quantities_init(struct gpu_domain *GD, int n, double velocity_zero_h
     }
 
     // Concentration is non-negative, so 0 is the floor rather than a sentinel.
-    for (int k = 0; k < MQ->n_tracers * n; k++) {
-        MQ->max_tracer[k] = 0.0;
+    if (MQ->max_tracer != NULL) {
+        for (int k = 0; k < MQ->n_tracers * n; k++) {
+            MQ->max_tracer[k] = 0.0;
+        }
     }
 
     if (GD->gpu_initialized) {

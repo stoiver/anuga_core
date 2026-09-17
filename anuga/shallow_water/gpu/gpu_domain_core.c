@@ -2,6 +2,7 @@
 // Split from sw_domain_gpu.c for maintainability
 
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -125,7 +126,7 @@ int gpu_check_device_memory(struct gpu_domain *GD) {
 
     // Only fail if we have a real memory figure AND it's insufficient
     if (total_bytes > 0 && free_bytes < required) {
-        fprintf(stderr,
+        gpu_set_error(GD,
             "\n[ANUGA GPU] ERROR (rank %d): Insufficient GPU memory.\n"
             "  Domain has %" PRId64 " triangles, estimated %.0f MB required.\n"
             "  GPU has %.0f MB free of %.0f MB total.\n"
@@ -252,7 +253,21 @@ void print_gpu_domain_info(struct gpu_domain *GD) {
 // Initialization and Cleanup
 // ============================================================================
 
+void gpu_set_error(struct gpu_domain *GD, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(GD->last_error, GPU_LAST_ERROR_LEN, fmt, ap);
+    va_end(ap);
+    gpu_set_error(GD, "[ANUGA GPU rank %d] %s", GD->rank, GD->last_error);
+    fflush(stderr);
+}
+
+const char *gpu_get_last_error(const struct gpu_domain *GD) {
+    return GD->last_error;
+}
+
 int gpu_domain_init(struct gpu_domain *GD, MPI_Comm comm, int rank, int nprocs) {
+    GD->last_error[0] = '\0';
     // Store MPI info
     GD->comm = comm;
     GD->rank = rank;

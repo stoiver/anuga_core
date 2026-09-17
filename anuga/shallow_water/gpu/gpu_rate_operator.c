@@ -43,13 +43,16 @@ int gpu_rate_operator_init(struct gpu_domain *GD, int num_indices, int *indices,
         if (!RO->ops[i].active) { op_id = i; break; }
     }
     if (op_id < 0) {
-        if (grow_rate_ops(RO) != 0) return -1;
+        if (grow_rate_ops(RO) != 0) {
+            gpu_set_error(GD, "rate operator table could not be grown");
+            return -1;
+        }
         for (int i = 0; i < RO->capacity; i++) {
             if (!RO->ops[i].active) { op_id = i; break; }
         }
     }
     if (op_id < 0) {
-        fprintf(stderr, "ERROR: No free rate operator slots after grow\n");
+        gpu_set_error(GD, "ERROR: No free rate operator slots after grow");
         return -1;
     }
 
@@ -75,7 +78,7 @@ int gpu_rate_operator_init(struct gpu_domain *GD, int num_indices, int *indices,
     op->mass_areas = (double*)malloc(num_indices * sizeof(double));
 
     if (!op->indices || !op->mass_areas) {
-        fprintf(stderr, "Failed to allocate rate_operator arrays\n");
+        gpu_set_error(GD, "Failed to allocate rate_operator arrays");
         if (op->indices) free(op->indices);
         if (op->mass_areas) free(op->mass_areas);
         op->active = 0;
@@ -295,6 +298,12 @@ double gpu_rate_operator_apply_array(struct gpu_domain *GD, int op_id,
         if (op->rate_array_cache) free(op->rate_array_cache);
 
         op->rate_array_cache = (double*)malloc(rate_array_size * sizeof(double));
+        if (op->rate_array_cache == NULL) {
+            gpu_set_error(GD, "rate operator %d: could not allocate a %d-element rate cache; rate not applied this step", op_id, rate_array_size);
+            op->rate_array_size = 0;
+            op->rate_array_mapped = 0;
+            return 0.0;
+        }
         op->rate_array_size = rate_array_size;
         op->rate_array_mapped = 0;
         rate_changed = 1;  // Force update since we reallocated
