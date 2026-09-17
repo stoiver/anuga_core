@@ -202,7 +202,7 @@ void _openmp_manning_friction_flat(const double g, const double eps, const anuga
 {
 
   anuga_int k;
-  const double seven_thirds = 7.0 / 3.0;
+  const double seven_thirds = ANUGA_SEVEN_THIRDS;
 
 #pragma omp parallel for schedule(static) firstprivate(eps, g, seven_thirds)
   for (k = 0; k < N; k++)
@@ -234,8 +234,8 @@ void _openmp_manning_friction_sloped(const double g, const double eps, const anu
                                      double *__restrict eta, double *__restrict xmom_update, double *__restrict ymom_update)
 {
 
-  const double one_third = 1.0 / 3.0;
-  const double seven_thirds = 7.0 / 3.0;
+  const double one_third = ANUGA_ONE_THIRD;
+  const double seven_thirds = ANUGA_SEVEN_THIRDS;
 
 #pragma omp parallel for schedule(static) firstprivate(eps, g, one_third, seven_thirds)
   for (anuga_int k = 0; k < N; k++)
@@ -283,8 +283,8 @@ void _openmp_manning_friction_sloped_edge_based(const double g, const double eps
                                      double *__restrict eta, double *__restrict xmom_update, double *__restrict ymom_update)
 {
 
-  const double one_third = 1.0 / 3.0;
-  const double seven_thirds = 7.0 / 3.0;
+  const double one_third = ANUGA_ONE_THIRD;
+  const double seven_thirds = ANUGA_SEVEN_THIRDS;
 
 #pragma omp parallel for schedule(static) firstprivate(eps, g, one_third, seven_thirds)
   for (anuga_int k = 0; k < N; k++)

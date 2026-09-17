@@ -13,6 +13,7 @@
 #include <omp.h>
 
 #include "sw_domain.h"
+#include "anuga_constants.h"
 #include "core_kernels.h"
 #include "gpu_omp_macros.h"
 #include "gpu_device_helpers.h"
@@ -29,8 +30,8 @@ void core_extrapolate_centroid_pass(struct domain *D) {
     // Parameters for hfactor computation (wet-dry limiting)
     const anuga_int n_tracers_x = D->number_of_tracers;
 
-    double a_tmp = 0.3;
-    double b_tmp = 0.1;
+    double a_tmp = ANUGA_HFACTOR_A;
+    double b_tmp = ANUGA_HFACTOR_B;
     double c_tmp = 1.0 / (a_tmp - b_tmp);
     double d_tmp = 1.0 - (c_tmp * a_tmp);
 
@@ -141,8 +142,8 @@ void core_extrapolate_edge_pass_on(struct domain *D, double predictor_dt,
     double g_pred = D->g;                       // used by the predictor tail only
 
     // Parameters for hfactor computation (wet-dry limiting)
-    double a_tmp = 0.3;
-    double b_tmp = 0.1;
+    double a_tmp = ANUGA_HFACTOR_A;
+    double b_tmp = ANUGA_HFACTOR_B;
     double c_tmp = 1.0 / (a_tmp - b_tmp);
     double d_tmp = 1.0 - (c_tmp * a_tmp);
 
@@ -1805,7 +1806,7 @@ void core_forcing_and_update_on(struct domain *D, double timestep,
     anuga_int n = D->number_of_elements;
     double g = D->g;
     double minimum_allowed_height = D->minimum_allowed_height;
-    double seven_thirds = 7.0 / 3.0;
+    double seven_thirds = ANUGA_SEVEN_THIRDS;
 
     double * restrict stage_cv = D->stage_centroid_values;
     double * restrict xmom_cv = D->xmom_centroid_values;
@@ -2243,7 +2244,7 @@ void core_manning_friction_flat_semi_implicit(struct domain *D) {
     anuga_int n = D->number_of_elements;
     double g = D->g;
     double minimum_allowed_height = D->minimum_allowed_height;
-    double seven_thirds = 7.0 / 3.0;
+    double seven_thirds = ANUGA_SEVEN_THIRDS;
 
     double * restrict stage_cv = D->stage_centroid_values;
     double * restrict bed_cv = D->bed_centroid_values;
@@ -2324,7 +2325,7 @@ void core_manning_friction_sloped_semi_implicit(struct domain *D) {
             double ymom = ymom_cv[k];
 
             double S = -g * eta * eta * sqrt(xmom * xmom + ymom * ymom) * slope;
-            S /= pow(h, 7.0 / 3.0);
+            S /= pow(h, ANUGA_SEVEN_THIRDS);
 
             xmom_siu[k] += S;
             ymom_siu[k] += S;
@@ -2356,8 +2357,8 @@ void core_manning_friction_sloped_semi_implicit_edge_based(struct domain *D) {
     double * restrict xmom_siu   = D->xmom_semi_implicit_update;
     double * restrict ymom_siu   = D->ymom_semi_implicit_update;
 
-    const double one_third   = 1.0 / 3.0;
-    const double seven_thirds = 7.0 / 3.0;
+    const double one_third   = ANUGA_ONE_THIRD;
+    const double seven_thirds = ANUGA_SEVEN_THIRDS;
 
     OMP_PARALLEL_LOOP
     for (anuga_int k = 0; k < n; k++) {
@@ -3118,7 +3119,7 @@ void core_flux_apply_and_update(struct domain *D, double timestep,
     anuga_int n = D->number_of_elements;
     double g = D->g;
     double minimum_allowed_height = D->minimum_allowed_height;
-    double seven_thirds = 7.0 / 3.0;
+    double seven_thirds = ANUGA_SEVEN_THIRDS;
 
     double * restrict stage_cv = D->stage_centroid_values;
     double * restrict xmom_cv = D->xmom_centroid_values;
