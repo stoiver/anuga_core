@@ -38,6 +38,11 @@ python benchmarks/run_kernel_benchmarks.py --output /tmp/after.json
 python benchmarks/run_kernel_benchmarks.py --compare /tmp/before.json /tmp/after.json
 ```
 
+`--threads N` sets the OpenMP thread count before the domain is built; without
+it the count is `OMP_NUM_THREADS`, or ANUGA's default of 1 when that is unset.
+The count actually used is printed and recorded in the JSON, and `--compare`
+warns when the two files were run with different counts.
+
 `--compare` prints the per-kernel change and exits non-zero if any kernel
 slowed by more than `--threshold` (default 10%), so it can gate a CI job. The
 few-microsecond kernels are noisy at the default size; use a larger `--nx`
