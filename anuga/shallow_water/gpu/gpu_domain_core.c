@@ -258,7 +258,7 @@ void gpu_set_error(struct gpu_domain *GD, const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(GD->last_error, GPU_LAST_ERROR_LEN, fmt, ap);
     va_end(ap);
-    gpu_set_error(GD, "[ANUGA GPU rank %d] %s", GD->rank, GD->last_error);
+    fprintf(stderr, "[ANUGA GPU rank %d] %s\n", GD->rank, GD->last_error);
     fflush(stderr);
 }
 
