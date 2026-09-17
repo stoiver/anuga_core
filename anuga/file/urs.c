@@ -232,6 +232,11 @@ int32_t _read_mux2_headers(int32_t numSrc,
         fprintf(stderr, "No mux2 source files given\n");
         return -1;
     }
+    if (hd->fros != NULL || hd->lros != NULL || hd->mytgs0 != NULL)
+    {
+        fprintf(stderr, "_read_mux2_headers: the header struct must start empty\n");
+        return -4;
+    }
 
     // Loop over all sources, read headers and check compatibility
     for (i = 0; i < numSrc; i++)
@@ -247,7 +252,11 @@ int32_t _read_mux2_headers(int32_t numSrc,
             rc = -1; goto fail;
         }
 
-        if (!i)
+        // First file: read the station count and allocate the header arrays.
+        // Keyed on the arrays not existing yet rather than on i == 0, which is
+        // the same thing on every real run but lets gcc's analyser see that
+        // the allocation cannot happen twice.
+        if (hd->mytgs0 == NULL)
         {
             elements_read = fread(total_number_of_stations, sizeof(int32_t), 1, fp);
             if ((int32_t) elements_read == 0 && ferror(fp)){
@@ -291,6 +300,10 @@ int32_t _read_mux2_headers(int32_t numSrc,
                 rc = -1; goto fail;   
             }
 
+            if (mytgs == NULL)   // cannot happen after the first file; keeps the analyser honest
+            {
+                rc = -4; goto fail;
+            }
             block_size = numsta*sizeof(struct tgsrwg);
             elements_read = fread(mytgs, block_size, 1, fp); 
             if ((int32_t) elements_read == 0 && ferror(fp)){
