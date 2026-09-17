@@ -77,7 +77,7 @@ cdef c_double_array_to_list(double* mat, int64_t cols):
 	lst = []
 	if not(isinstance(lst, list)):
 		return None
-	for j in xrange(cols):
+	for j in range(cols):
 		try:
 			lst.append(mat[j])
 		except:
@@ -90,7 +90,7 @@ cdef c_int_array_to_list(int64_t* mat, int64_t cols):
 	lst = []
 	if not(isinstance(lst, list)):
 		return None
-	for j in xrange(cols):
+	for j in range(cols):
 		try:
 			lst.append(mat[j])
 		except:
@@ -153,7 +153,7 @@ def build_matrix_AtA_Atz_points(object tree, int64_t N,\
 		raise MemoryError("build_matrix_AtA_Atz_points: could not allocate the sparse matrix")
 
 	Atz = <double** > malloc(zdims * sizeof(double*))
-	for i in xrange(zdims):
+	for i in range(zdims):
 		Atz[i] = <double* > malloc(N * sizeof(double))
 
 	err = _build_matrix_AtA_Atz_points(N, &triangles[0,0],\
@@ -170,7 +170,7 @@ def build_matrix_AtA_Atz_points(object tree, int64_t N,\
 	AtA_cap = PyCapsule_New(<void* > dok_AtA, "sparse dok", <PyCapsule_Destructor> delete_dok_cap)
 
 	Atz_ret = []
-	for i in xrange(zdims):
+	for i in range(zdims):
 		Atz_ret.append(c_double_array_to_list(Atz[i],N))
 		free(Atz[i])
 	free(Atz)
@@ -243,9 +243,9 @@ def return_full_D(object D_cap, int64_t n):
 	assert D_mat.num_rows <= n and get_dok_rows(D_mat) <= n, "fitsmooth.return_full_D: sparse_dok is bigger than size specified for return."
 
 	ret_D = []
-	for i in xrange(n):
+	for i in range(n):
 		temp = []
-		for j in xrange(n):
+		for j in range(n):
 			key.i = i
 			key.j = j
 			s = find_dok_entry(D_mat, key)
