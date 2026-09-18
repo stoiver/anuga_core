@@ -2932,15 +2932,13 @@ class Test_GPU_ForcingOperators(unittest.TestCase):
     """Wind_stress / Barometric_pressure / Rate OPERATORS must give identical
     results in mode 1 (legacy) and mode 2 (unified).
 
-    These fractional-step operators are the supported replacements for the
-    deprecated Wind_stress / Barometric_pressure / Rainfall FORCING-FUNCTION
-    classes. Mode 2 silently skips the forcing-function classes (it applies
-    forcing in C and only handles Manning friction — see
-    _warn_unsupported_mode2_forcing and the warnings under
-    ANUGA_DEFAULT_COMPUTE_MODE=unified), but fractional-step operators are
-    applied by apply_fractional_steps() in BOTH modes. This mirrors
-    test_forcing.py's wind/pressure evolve tests, but for the operators and
-    across both compute modes — confirming the operators really are applied in
+    These fractional-step operators replaced the Wind_stress /
+    Barometric_pressure / Rainfall forcing-function classes (removed in 4.1).
+    Mode 2 skips Python forcing_terms (it applies forcing in C and only
+    handles Manning friction — see _warn_unsupported_mode2_forcing), but
+    fractional-step operators are applied by apply_fractional_steps() in BOTH
+    modes. This mirrors test_forcing.py's wind/pressure evolve tests across
+    both compute modes — confirming the operators really are applied in
     unified mode and agree with legacy.
     """
 

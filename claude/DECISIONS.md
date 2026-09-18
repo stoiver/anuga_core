@@ -519,3 +519,18 @@ old write's.
 **Non-idempotence**: the old `stage = bed + depth` write could be applied twice
 harmlessly; leveling cannot. The mode-2 MPI path therefore does not scatter in PHASE 3b —
 the batched PHASE 4 scatter already covers a non-master rank's own inlet.
+
+### Forcing-function classes removed; file-driven fields kept via the operators (2026-09-18)
+
+**Context:** P2.10 — the deprecated classes were the only way to drive wind /
+pressure from an sww or tms file (`use_coordinates=False`, the `_fast` variants).
+`Barometric_pressure_operator` explicitly refused `use_coordinates=False`.
+
+**Decision:** Remove the classes (4.1 breaking change, announced in 4.0.0) but
+carry the file pathway over rather than drop it: both operators take
+`use_coordinates=False` with a `file_function` (centroids for wind, nodes for
+pressure) and evaluate the file's precomputed time series for all points in one
+vectorised step (`evaluate_file_function_all_points`), which is what the `_fast`
+classes were hand-rolling. Rainfall/inflow tests assert on stage deltas after a
+single operator call (`domain.timestep = 1.0; op()`), not on `explicit_update`,
+so they no longer need a legacy-mode pin.

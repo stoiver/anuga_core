@@ -1,3 +1,27 @@
+# ANUGA 4.1.0 (unreleased)
+
+## Breaking changes
+
+* **The legacy forcing-function classes have been removed**, as announced in
+  4.0.0: `Rainfall`, `Inflow`, `Wind_stress`, `Wind_stress_fast`,
+  `Barometric_pressure`, `Barometric_pressure_fast` and `General_forcing` are
+  gone from `anuga.shallow_water.forcing`, and `anuga.Inflow`, `anuga.Rainfall`
+  and `anuga.Wind_stress` are no longer exported. Use `Rate_operator.rainfall()`
+  / `Rate_operator.inflow()`, `Wind_stress_operator` and
+  `Barometric_pressure_operator`, which work in both compute modes. Note the
+  rainfall units change from mm/s to mm/hr. See `UPGRADING_TO_4.0.md` §2.
+  `Cross_section` stays in `anuga.shallow_water.forcing`.
+
+## Smaller improvements
+
+* `Wind_stress_operator` and `Barometric_pressure_operator` accept
+  `use_coordinates=False` with a `file_function`, replacing the file-driven
+  wind and pressure fields of the removed `_fast` classes. The file's
+  precomputed time series is interpolated for every point at once
+  (`anuga.utilities.function_utils.evaluate_file_function_all_points`).
+
+---
+
 # ANUGA 4.0.0
 
 First release on the 4.x line, and the first release of the work that has been

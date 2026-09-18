@@ -252,10 +252,6 @@ from anuga.tsunami_source.smf import slide_tsunami, slump_tsunami
 
 # -----------------------------
 # Forcing
-# These are old, should use operators
-# -----------------------------
-from anuga.shallow_water.forcing import Inflow, Rainfall, Wind_stress
-
 # -----------------------------
 # File conversion utilities
 # -----------------------------
@@ -490,10 +486,6 @@ __all__ = [
     'Inlet_operator',
     'Internal_boundary_operator',
     'Weir_orifice_trapezoid_operator',
-    # Forcing (legacy)
-    'Inflow',
-    'Rainfall',
-    'Wind_stress',
     # Geometry and polygon utilities
     'inside_polygon',
     'plot_polygons',
