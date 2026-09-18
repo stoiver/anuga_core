@@ -12,6 +12,17 @@
   rainfall units change from mm/s to mm/hr. See `UPGRADING_TO_4.0.md` §2.
   `Cross_section` stays in `anuga.shallow_water.forcing`.
 
+## Selected fixes
+
+* Sediment transport: the bed slope for the `'depth_slope'` shear closure
+  (and the surface slope for `'energy_slope'`) is now the least-squares
+  gradient of the centroid values over the cell and its neighbours. It was
+  read from the edge values, which the DE algorithms rebuild every step
+  through the hydrodynamic limiter: cells along a reflective wall saw no
+  slope and never eroded, and the slope was reduced wherever the limiter
+  engaged. Results change for those closures near boundaries, kinks and
+  steps; `'quadratic_drag'` (the default) is unaffected.
+
 ## Smaller improvements
 
 * `Wind_stress_operator` and `Barometric_pressure_operator` accept

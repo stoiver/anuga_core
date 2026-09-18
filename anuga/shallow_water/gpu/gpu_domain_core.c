@@ -856,9 +856,10 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
         // Mapped inside the same n_sediment_classes guard as everything
         // above, which is what allocates them.
         double *sed_sl = GD->D.sediment_source_limited;
+        double *sed_sw = GD->D.sediment_slope_work;
         anuga_int *sed_ex = GD->D.sediment_bed_exhausted;
         double *sed_rdz = GD->D.sediment_repose_dz;
-        #pragma omp target enter data map(alloc: sed_sl[0:ncl*n], \
+        #pragma omp target enter data map(alloc: sed_sl[0:ncl*n], sed_sw[0:n], \
             sed_ex[0:n], sed_rdz[0:n])
         if (GD->D.sediment_has_z_base) {
             double *sed_zb = GD->D.sediment_z_base;
@@ -1299,10 +1300,11 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
 
         // [L-5]. Mirrors the enter-data above, on the same guard.
         double *sed_sl = GD->D.sediment_source_limited;
+        double *sed_sw = GD->D.sediment_slope_work;
         anuga_int *sed_ex = GD->D.sediment_bed_exhausted;
         double *sed_rdz = GD->D.sediment_repose_dz;
-        #pragma omp target exit data map(delete: sed_sl[0:ncl*n], sed_ex[0:n], \
-            sed_rdz[0:n])
+        #pragma omp target exit data map(delete: sed_sl[0:ncl*n], sed_sw[0:n], \
+            sed_ex[0:n], sed_rdz[0:n])
         if (GD->D.sediment_has_z_base) {
             double *sed_zb = GD->D.sediment_z_base;
             #pragma omp target exit data map(delete: sed_zb[0:n])

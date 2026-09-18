@@ -54,6 +54,7 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double sediment_repose_relax
 		anuga_int sediment_repose_max_sweeps
 		double* sediment_source_limited
+		double* sediment_slope_work
 		anuga_int* sediment_bed_exhausted
 		double* sediment_qbx
 		double* sediment_qby
@@ -511,6 +512,8 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 			# alongside them; z_base only when a base was actually set.
 			sed2 = domain_py_object.sediment_source_limited
 			D.sediment_source_limited = &sed2[0,0]
+			sed1 = domain_py_object.sediment_slope_work
+			D.sediment_slope_work = &sed1[0]
 			sedi = domain_py_object.sediment_bed_exhausted
 			D.sediment_bed_exhausted = &sedi[0]
 			sed1 = domain_py_object.sediment_repose_dz
@@ -531,6 +534,7 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 			D.sediment_qby = NULL
 			D.sediment_z_base = NULL
 			D.sediment_source_limited = NULL
+			D.sediment_slope_work = NULL
 			D.sediment_bed_exhausted = NULL
 			D.sediment_repose_dz = NULL
 		tr2 = domain_py_object.tracer_boundary_flux
@@ -548,6 +552,7 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 		D.sediment_qby = NULL
 		D.sediment_z_base = NULL
 		D.sediment_source_limited = NULL
+		D.sediment_slope_work = NULL
 		D.sediment_bed_exhausted = NULL
 		D.sediment_repose_dz = NULL
 		D.tracer_centroid_values = NULL

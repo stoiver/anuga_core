@@ -862,7 +862,14 @@ is :math:`\rho g h S` with :math:`S` the **energy** slope -- and then erodes
 
 Use ``'energy_slope'`` rather than ``'depth_slope'``: the old operator used the
 free-surface slope, and choosing the bed slope instead is what costs the
-agreement. On a sloping channel over 30 s, correlation of the bed-change field
+agreement. For both, :math:`S` is the least-squares gradient of the centroid
+values over the cell and its neighbours (one-sided at boundaries), not the
+edge values the limiter rebuilds each step, so a wall cell sees the same
+slope as its neighbours. ``'depth_slope'`` on an evolving bed feeds back on
+itself -- erosion roughens the bed and steeper local slopes erode faster --
+which is the closure's own property; anugaSed contains it with the global
+clamp described in the specification. Prefer the other two closures when
+the bed moves. On a sloping channel over 30 s, correlation of the bed-change field
 against the original operator:
 
 .. list-table::
