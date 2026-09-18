@@ -953,8 +953,12 @@ spec 10 -- Rio Puerco, the crater breach -- has been attempted; the evidence
 in ``anuga/shallow_water/tests/test_sediment_*.py`` is verification (the
 equations are solved correctly), which is a different claim from validation
 (they are the right equations for the field case). One step towards the
-latter is in the validation suite: ``validation_tests/analytical_exact/sediment_settling``
+latter is in the validation suite, which runs nightly with the other
+analytical cases: ``validation_tests/analytical_exact/sediment_settling``
 compares the deposition term, the sediment mass balance and the bed update
 against the reference solution for sediment settling out of still water, and
-runs nightly with the other analytical cases. The notebook
-:doc:`/examples/notebook_sediment_transport` walks through the same case.
+``validation_tests/analytical_exact/sediment_erosion`` compares the
+Smith--McLean entrainment law, its threshold and the depth-slope closure
+against the closed-form relaxation to the equilibrium concentration over a
+fixed bed. The notebook :doc:`/examples/notebook_sediment_transport` walks
+through the settling case.

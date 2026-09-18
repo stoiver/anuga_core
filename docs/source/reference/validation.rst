@@ -238,6 +238,42 @@ time-varying bed back from the SWW file.
 
 **Run time:** a few seconds.
 
+
+Sediment entrainment into still water — analytical solution
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Directory:** ``analytical_exact/sediment_erosion/``
+
+**Physical scenario:** A tank of still water 1 m deep over a fixed bed that
+is flat on one half and slopes at :math:`10^{-3}` on the other, with 0.5 mm
+sand and no initial load. There is no flow, so the case selects the
+depth-slope shear closure, under which the bed shear stress of a cell
+depends only on its depth and bed slope. The flat half sits below the
+Shields threshold and is the control; on the sloped half the Smith-McLean
+entrainment law :math:`E = v_s E^{*}` fires and the concentration relaxes
+to the equilibrium :math:`c_{eq} = E/(d^{*} v_s)` along a closed-form
+exponential with time constant :math:`h/(d^{*} v_s)`. The bed is held fixed
+because, with it evolving, the wall cells (whose reconstructed slope is
+zero) would not erode and the steps between them and their neighbours would
+feed back into the closure, leaving no cell with a known slope.
+
+**What is checked:** Every cell's concentration against its own closed-form
+curve at every output time (relative :math:`L^1` error below 1%, measured
+at a few :math:`10^{-4}`); that the flat half entrains nothing; that the
+final concentration is the equilibrium value; and that the free surface,
+the bed and the momenta do not move. The eight cells at the kink and along
+the far wall, whose slope the solver's limiter reduces, are compared against
+the slope they were given. It exercises the entrainment law and its
+threshold, the depth-slope closure, and the entrainment-deposition balance
+in the sediment mass equation.
+
+**Key techniques:** ``set_shear_closure('depth_slope')``,
+``set_bed_material('noncohesive')``,
+``initialize_sediment_operator(bed_evolution=False)``, recording the
+per-cell bed slope the kernel sees from the elevation edge values.
+
+**Run time:** a few seconds.
+
 Adding a new validation test
 ------------------------------
 
