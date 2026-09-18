@@ -534,3 +534,28 @@ vectorised step (`evaluate_file_function_all_points`), which is what the `_fast`
 classes were hand-rolling. Rainfall/inflow tests assert on stage deltas after a
 single operator call (`domain.timestep = 1.0; op()`), not on `explicit_update`,
 so they no longer need a legacy-mode pin.
+
+### Slope for the depth-slope / energy-slope closures comes from centroids, not edges (2026-09-18)
+
+**Context:** `core_tau_b_over_rho` took `S` for `[T-7]`/`[T-7e]` from the bed /
+stage EDGE values by the divergence theorem. The DE extrapolation rewrites those
+every step as limited stage minus limited height, so the erosion stress was
+whatever the hydrodynamic limiter left: zero along reflective walls (the ghost
+mirrors the interior), three-quarters at a kink. Found by the sediment_erosion
+validation case, whose wall cells never eroded.
+
+**Decision:** least-squares gradient of the CENTROID values over the cell and
+its neighbours, one-sided at boundaries (1D projection when the neighbours are
+collinear). A plane gives the exact slope in every cell; a slope discontinuity
+is smeared over one cell either side, which is inherent to any centroid stencil
+and acceptable. Computed in a pass of its own into `sediment_slope_work` (n),
+because the source loop writes the bed it would otherwise be reading through
+its neighbours: done inline, mode 1 and mode 2 disagreed at 1e-3 from the first
+step (`test_the_depth_slope_shear_closure_agrees` caught it). The bedload kernel
+already had a read-only first pass, so it takes the slope inline. Not done: reading the user's original elevation vertex values
+(would not track an evolving bed). Known and documented: `'depth_slope'` with
+bed evolution on is self-amplifying (erosion -> rougher bed -> steeper local
+slopes -> more erosion); measured 0.8 m of scour in 60 s on a 1e-3 slope in
+still water. That is the closure, not the gradient estimator -- the old edge
+slope diverged too -- and it is why the validation case holds the bed fixed.
+

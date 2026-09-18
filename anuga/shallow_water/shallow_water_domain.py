@@ -798,6 +798,9 @@ class Domain(Generic_Domain):
         self.sediment_bed_exhausted = None
         # Scratch for the source kernel, (ncl, n). Allocated with the classes.
         self.sediment_source_limited = None
+        # Scratch for the source kernel, (n): the per-cell slope of the
+        # depth-slope closures, computed in a pass of its own.
+        self.sediment_slope_work = None
         # Friction closure for the sediment kernel (spec 3.3). 'constant' is
         # the right default for ordinary flood work; see set_sediment_friction.
         self.sediment_friction_mode = 0
@@ -1274,6 +1277,9 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         # whenever n_sediment_classes > 0, so it must never be short.
         self.sediment_source_limited = num.zeros(
             (ncl, self.number_of_elements), dtype=num.float64)
+        if self.sediment_slope_work is None:
+            self.sediment_slope_work = num.zeros(self.number_of_elements,
+                                                 dtype=num.float64)
 
         self._sediment_names.append(name)
         self._sediment_rho_s.append(float(rho_s))
@@ -1689,6 +1695,21 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         magnitude, as `aSM16` Eqs 6-7 and hence anugaSed. This is the steady
         uniform (normal) flow approximation: it assumes the energy slope equals
         the **bed** slope and the flow is locally in equilibrium.
+
+        `S` is the magnitude of the least-squares gradient of the bed (or, for
+        `'energy_slope'`, the stage) centroid values over the cell and its
+        neighbours, one-sided at boundaries, so a plane gives its slope in
+        every cell, walls and corners included. It is NOT read from the edge
+        values, which the DE algorithms rebuild each step through the
+        hydrodynamic limiter (that gave zero slope along reflective walls).
+        A slope discontinuity is resolved over one cell either side.
+
+        With the bed evolving, `'depth_slope'` feeds back on itself: erosion
+        roughens the bed, a rougher bed has steeper local slopes, steeper
+        slopes erode faster. That is the closure, not the discretisation --
+        anugaSed contains it with the domain-global clamp the notes below
+        describe. Prefer `'quadratic_drag'` or `'energy_slope'` for
+        morphological runs.
 
         `'energy_slope'` -- `[T-7e]`, the same `tau_b = rho g h S` with `S` the
         **free-surface** slope magnitude instead. Under the shallow-water

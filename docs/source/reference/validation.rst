@@ -238,6 +238,41 @@ time-varying bed back from the SWW file.
 
 **Run time:** a few seconds.
 
+
+Sediment entrainment into still water — analytical solution
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Directory:** ``analytical_exact/sediment_erosion/``
+
+**Physical scenario:** A tank of still water 1 m deep over a fixed plane
+bed of slope :math:`10^{-3}`, with 0.5 mm sand and no initial load. There
+is no flow, so the case selects the depth-slope shear closure, under which
+the bed shear stress of a cell depends only on its depth and bed slope. The
+Smith-McLean entrainment law :math:`E = v_s E^{*}` fires and the
+concentration relaxes to the equilibrium :math:`c_{eq} = E/(d^{*} v_s)`
+along a closed-form exponential with time constant :math:`h/(d^{*} v_s)`,
+each cell on its own curve. A second fraction of the same grain with a
+critical Shields stress of 10, far above the stress the slope gives, is the
+threshold control and must stay at zero. The bed is held fixed because the
+depth-slope closure takes its slope from the bed itself and feeds back on
+any non-uniform erosion, so an evolving bed has no closed-form reference.
+
+**What is checked:** Every cell's concentration against its own curve at
+every output time (relative :math:`L^1` error below 1%, measured at a few
+:math:`10^{-4}`, worst cell included, so the slope estimate must reproduce
+the plane along the walls and in the corners); that the control fraction is
+never entrained; that the final concentration is the equilibrium value; and
+that the free surface, the bed and the momenta do not move. It exercises the
+entrainment law and its threshold, the depth-slope closure, and the
+entrainment-deposition balance in the sediment mass equation.
+
+**Key techniques:** ``set_shear_closure('depth_slope')``,
+``set_bed_material('noncohesive')``, a second ``add_sediment_fraction``
+with a high ``tau_c_star`` as the control,
+``initialize_sediment_operator(bed_evolution=False)``.
+
+**Run time:** a few seconds.
+
 Adding a new validation test
 ------------------------------
 

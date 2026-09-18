@@ -690,6 +690,63 @@ static inline double core_rouse_d_star(double Z, double a_h) {
     return (d < 1.0) ? 1.0 : d;
 }
 
+/* Slope magnitude of a centroid field at cell k for [T-7]/[T-7e]: the
+ * least-squares gradient over the cell and its neighbours, one-sided at
+ * boundaries (the gradient along the line when the neighbours are
+ * collinear or there is only one). A plane gives its slope in every cell,
+ * walls and corners included.
+ *
+ * Centroid values, not edge values. The DE algorithms rebuild the bed and
+ * stage edge values every step as (limited stage) - (limited height), so a
+ * slope read from the edges is whatever the hydrodynamic limiter left: zero
+ * in the cells along a reflective wall (the ghost mirrors the interior, so
+ * the reconstruction sees no gradient toward it) and reduced wherever the
+ * limiter engages -- kinks, steps, scarps, exactly where erosion matters.
+ * The wall cells of a uniformly sloping bed then never eroded while their
+ * neighbours did. The centroid gradient is the actual slope of the field
+ * the solver carries, tracks an evolving bed, and at a wall the internal
+ * neighbours still determine it.
+ *
+ * READS ITS NEIGHBOURS, so it must not run inside a loop that writes the
+ * field: see sediment_slope_work in sw_domain.h. */
+static inline double core_centroid_slope(const double * restrict f,
+                                         const anuga_int * restrict neighbours,
+                                         const anuga_geom_t * restrict cc,
+                                         anuga_int k) {
+    const double fk = f[k];
+    const double xk = cc[2 * k];
+    const double yk = cc[2 * k + 1];
+    double sxx = 0.0, sxy = 0.0, syy = 0.0, sxf = 0.0, syf = 0.0;
+    for (anuga_int i = 0; i < 3; i++) {
+        const anuga_int n = neighbours[3 * k + i];
+        if (n < 0) {
+            continue;                            /* boundary edge: one-sided */
+        }
+        const double dx = cc[2 * n] - xk;
+        const double dy = cc[2 * n + 1] - yk;
+        const double df = f[n] - fk;
+        sxx += dx * dx;
+        sxy += dx * dy;
+        syy += dy * dy;
+        sxf += dx * df;
+        syf += dy * df;
+    }
+    double gx, gy;
+    const double det = sxx * syy - sxy * sxy;
+    const double trace = sxx + syy;
+    if (det > 1.0e-12 * trace * trace) {
+        gx = (syy * sxf - sxy * syf) / det;      /* the least-squares plane */
+        gy = (sxx * syf - sxy * sxf) / det;
+    } else if (trace > 0.0) {
+        gx = sxf / trace;                        /* along the one line the */
+        gy = syf / trace;                        /* data determine */
+    } else {
+        gx = 0.0;                                /* isolated cell */
+        gy = 0.0;
+    }
+    return sqrt(gx * gx + gy * gy);
+}
+
 /* tau_b / rho for a cell, under either shear closure (spec 3.1 / 3.4).
  *
  *   [T-1]  tau_b/rho = f_c |v|^2          quadratic drag, no equilibrium
@@ -701,38 +758,18 @@ static inline double core_rouse_d_star(double Z, double a_h) {
  * which the density cancels, and the dimensional stress the cohesive route
  * needs is simply rho_w times this.
  *
- * S is a gradient magnitude from the divergence theorem over the cell's own
- * edges, so this stays cell-local and offloads. WHICH surface supplies it is
- * the closure: the bed for [T-7], the free surface for [T-7e]. The two agree
- * only in steady uniform flow, which is [T-7]'s stated assumption; where the
- * flow is not in equilibrium the free-surface slope is the better estimate of
- * what drives it, and it is what the older Bed_shear_erosion_operator used. */
+ * S is core_centroid_slope of the bed for [T-7] and of the free surface for
+ * [T-7e], computed by the caller beforehand. The two agree only in steady
+ * uniform flow, which is [T-7]'s stated assumption; where the flow is not in
+ * equilibrium the free-surface slope is the better estimate of what drives
+ * it, and it is what the older Bed_shear_erosion_operator used. */
 static inline double core_tau_b_over_rho(anuga_int closure, double f_c,
                                          double vel2, double grav, double h,
-                                         const double * restrict bed_ev,
-                                         const double * restrict stage_ev,
-                                         const anuga_geom_t * restrict normals,
-                                         const anuga_geom_t * restrict edgelengths,
-                                         double area, anuga_int k) {
+                                         double S) {
     if (closure != 1 && closure != 2) {
         return f_c * vel2;                       /* [T-1] */
     }
-    /* [T-7]:  grad z = (1/A) sum_e z_e n_e L_e   (bed slope)
-     * [T-7e]: grad w = (1/A) sum_e w_e n_e L_e   (free-surface slope) */
-    const double * restrict surf_ev = (closure == 2) ? stage_ev : bed_ev;
-    double gx = 0.0, gy = 0.0;
-    for (anuga_int i = 0; i < 3; i++) {
-        const double ze = surf_ev[3 * k + i];
-        const double L = edgelengths[3 * k + i];
-        gx += ze * normals[6 * k + 2 * i] * L;
-        gy += ze * normals[6 * k + 2 * i + 1] * L;
-    }
-    if (area > 0.0) {
-        gx /= area;
-        gy /= area;
-    }
-    const double S = sqrt(gx * gx + gy * gy);
-    return grav * h * S;
+    return grav * h * S;                         /* [T-7] / [T-7e] */
 }
 
 // ============================================================================
@@ -784,7 +821,6 @@ void core_apply_bedload(struct domain *D, double timestep) {
     double * restrict stage_cv = D->stage_centroid_values;
     double * restrict bed_cv = D->bed_centroid_values;
     double * restrict bed_ev = D->bed_edge_values;
-    double * restrict stage_ev = D->stage_edge_values;
     double * restrict xmom_cv = D->xmom_centroid_values;
     double * restrict ymom_cv = D->ymom_centroid_values;
     double * restrict friction_cv = D->friction_centroid_values;
@@ -793,6 +829,7 @@ void core_apply_bedload(struct domain *D, double timestep) {
     double * restrict qbx = D->sediment_qbx;
     double * restrict qby = D->sediment_qby;
     anuga_int * restrict neighbours = D->neighbours;
+    anuga_geom_t * restrict cc = D->centroid_coordinates;
     anuga_geom_t * restrict normals = D->normals;
     anuga_geom_t * restrict edgelengths = D->edgelengths;
     anuga_geom_t * restrict areas = D->areas;
@@ -841,10 +878,13 @@ void core_apply_bedload(struct domain *D, double timestep) {
             f_c = grav * nman * nman / cbrt(h);
         }
 
-        /* Same closure as the suspended source: [T-1], [T-7] or [T-7e]. */
+        /* Same closure as the suspended source: [T-1], [T-7] or [T-7e].
+         * This pass only reads the bed, so the slope can be taken here. */
+        const double S = (shear_closure == 1) ? core_centroid_slope(bed_cv, neighbours, cc, k)
+                       : (shear_closure == 2) ? core_centroid_slope(stage_cv, neighbours, cc, k)
+                       : 0.0;
         const double tbr = core_tau_b_over_rho(shear_closure, f_c, vel2, grav,
-                                               h, bed_ev, stage_ev, normals,
-                                               edgelengths, areas[k], k);
+                                               h, S);
 
         double q_b_total = 0.0;
         for (anuga_int s = 0; s < n_classes; s++) {
@@ -1280,11 +1320,9 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     double * restrict sedR = D->sediment_R;
     double * restrict tau_c_star = D->sediment_tau_c_star;
     double * restrict a_ref = D->sediment_reference_height;
-    double * restrict bed_ev_r = D->bed_edge_values;
-    double * restrict stage_ev_r = D->stage_edge_values;
-    anuga_geom_t * restrict normals_r = D->normals;
-    anuga_geom_t * restrict edgelengths_r = D->edgelengths;
-    anuga_geom_t * restrict areas_r = D->areas;
+    anuga_int * restrict neighbours_r = D->neighbours;
+    anuga_geom_t * restrict cc_r = D->centroid_coordinates;
+    double * restrict slope_w = D->sediment_slope_work;
     const anuga_int d_star_mode = D->sediment_d_star_mode;
     const double a_h_floor = D->sediment_a_h_floor;
     const double c_pack = D->sediment_c_pack;
@@ -1312,6 +1350,19 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     double * restrict z_base = D->sediment_z_base;
     const anuga_int has_z_base = (D->sediment_has_z_base && z_base != NULL);
     double * restrict src_lim = D->sediment_source_limited;
+
+    /* The slope for [T-7]/[T-7e], in a pass of its own. It reads the
+     * neighbours' bed (or stage) centroids, and the loop below WRITES the
+     * bed when it evolves, so taken inside that loop it would see whatever a
+     * preceding iteration or another thread had already done to a
+     * neighbour: loop-order dependent, and mode 1 and mode 2 disagreed. */
+    if (shear_closure == 1 || shear_closure == 2) {
+        const double * restrict f = (shear_closure == 2) ? stage_cv : bed_cv;
+        OMP_PARALLEL_LOOP
+        for (anuga_int k = 0; k < n; k++) {
+            slope_w[k] = core_centroid_slope(f, neighbours_r, cc_r, k);
+        }
+    }
 
     OMP_PARALLEL_LOOP
     for (anuga_int k = 0; k < n; k++) {
@@ -1371,9 +1422,10 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
         }
 
         /* tau_b/rho under the selected closure: [T-1], [T-7] or [T-7e]. */
+        const double S = (shear_closure == 1 || shear_closure == 2)
+                       ? slope_w[k] : 0.0;
         const double tbr = core_tau_b_over_rho(shear_closure, f_c, vel2, grav,
-                                               h, bed_ev_r, stage_ev_r, normals_r,
-                                               edgelengths_r, areas_r[k], k);
+                                               h, S);
 
         for (anuga_int s = 0; s < n_classes; s++) {
             const anuga_int idx = s * n + k;

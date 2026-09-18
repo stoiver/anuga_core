@@ -139,6 +139,7 @@ cdef extern from "gpu_domain.h" nogil:
         double sediment_repose_relax
         int64_t sediment_repose_max_sweeps
         double* sediment_source_limited
+        double* sediment_slope_work
         int64_t* sediment_bed_exhausted
         double* sediment_qbx
         double* sediment_qby
@@ -941,6 +942,8 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         # dereferenced whenever a class exists, the base only when set.
         sed2 = domain_object.sediment_source_limited
         D.sediment_source_limited = &sed2[0,0]
+        sed1 = domain_object.sediment_slope_work
+        D.sediment_slope_work = &sed1[0]
         sedi = domain_object.sediment_bed_exhausted
         D.sediment_bed_exhausted = &sedi[0]
         sed1 = domain_object.sediment_repose_dz
@@ -961,6 +964,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.sediment_qby = NULL
         D.sediment_z_base = NULL
         D.sediment_source_limited = NULL
+        D.sediment_slope_work = NULL
         D.sediment_bed_exhausted = NULL
         D.sediment_repose_dz = NULL
     # Phase 2: wire the tracer arrays for the device. The pointers must be set

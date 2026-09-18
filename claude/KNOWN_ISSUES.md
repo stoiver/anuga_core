@@ -5,6 +5,20 @@ or require caution when working in specific areas.
 
 ---
 
+## Sediment
+
+### `'depth_slope'` shear closure is self-amplifying on an evolving bed (2026-09-18)
+
+`[T-7]` `tau_b = rho g h S` takes `S` from the bed itself. Once the bed evolves,
+any non-uniform erosion steepens local slopes, which raises `tau_b`, which erodes
+faster: a tank of still water on a 1e-3 slope scoured 0.8 m in 60 s and a
+fraction with `tau_c* = 10` (30x above the stress the imposed slope gives) was
+entrained. anugaSed keeps this in check with the undocumented domain-global
+clamp `S <- min(S, mean(S)/2)` that PHYSICS_SPEC D1a describes; ANUGA does not
+apply it. Use `'quadratic_drag'` (default) or `'energy_slope'` when the bed
+moves; `'depth_slope'` is for reproducing published anugaSed results and for
+fixed-bed checks (`validation_tests/analytical_exact/sediment_erosion`).
+
 ## Structures
 
 ### A culvert in still water amplifies roundoff (not a mode-1 vs mode-2 problem)

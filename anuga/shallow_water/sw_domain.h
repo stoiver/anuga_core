@@ -386,6 +386,15 @@ struct domain {
      * order, which is not physics. */
     double* sediment_source_limited;   /* (ncl*n) [G-3] bed exchange, per class */
 
+    /* Bed (or free-surface) slope magnitude per cell for the depth-slope
+     * closures [T-7]/[T-7e], filled by a pass of its own BEFORE the source
+     * loop. The slope is a gradient over the cell's neighbours' centroid
+     * values, and the source loop writes those same values (bed evolution),
+     * so computing it inside that loop would read a neighbour a preceding
+     * iteration or another thread had already moved: the answer then
+     * depended on loop order, and mode 1 and mode 2 disagreed. */
+    double* sediment_slope_work;       /* (n) S for [T-7]/[T-7e], scratch */
+
     /* Whether each cell had reached its base at the START of the bedload
      * step, snapshotted because bedload's second pass WRITES bed elevation
      * while reading its neighbours' state. Testing bed_cv against z_base
