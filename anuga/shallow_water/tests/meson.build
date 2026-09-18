@@ -11,6 +11,7 @@ python_sources = [
 'test_domain_c_struct.py',
 
 'test_flux.py',
+'test_gpu_error_reporting.py',
 'test_operator_timing.py',
 'test_physics_sw.py',
 'test_regression_snapshots.py',

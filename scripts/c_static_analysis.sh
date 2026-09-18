@@ -24,7 +24,10 @@ FILES=$(find anuga -name '*.c' -not -name '*_ext.c' | sort)
 
 if [ "${1:-}" = "--list" ]; then echo "$FILES"; exit 0; fi
 
-CFLAGS=(-fanalyzer -fopenmp -DCPU_ONLY_MODE
+# -Winfinite-recursion: a function that unconditionally calls itself. Not an
+# analyser check, but it is the one that would have caught gpu_set_error
+# echoing through itself, so it rides along.
+CFLAGS=(-fanalyzer -Winfinite-recursion -fopenmp -DCPU_ONLY_MODE
         -I anuga/utilities -I anuga/shallow_water -I anuga/shallow_water/gpu -I "$NUMPY_INC")
 # Third-party headers whose findings are not ours to fix, plus one known
 # false positive: the analyser reports the rate-operator cache malloc in
