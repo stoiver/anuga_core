@@ -67,5 +67,7 @@ mode and its OpenMP target offloading, see :ref:`compute_modes` and
 `Centre for Development of Advanced Computing (C-DAC) <https://www.cdac.in/>`_,
 India, and the `National Computational Infrastructure (NCI) <https://nci.org.au/>`_,
 Australia. NCI's Gadi supercomputer provided the GPU systems on which that
-work was developed, tested and benchmarked. We thank both organisations for
-their contribution and support.
+work was developed, tested and benchmarked, and NCI supported the work through
+Jorge Luis Gálvez Vallejo; C-DAC contributed through Samir Shaikh and
+colleagues. We thank both organisations, and the people involved, for their
+contribution and support.

@@ -5,4 +5,5 @@
    (C-DAC) <https://www.cdac.in/>`_, India, and the `National Computational
    Infrastructure (NCI) <https://nci.org.au/>`_, Australia, whose Gadi
    supercomputer provided the GPU systems it was developed, tested and
-   benchmarked on. See :ref:`acknowledgements`.
+   benchmarked on -- with the support of Jorge Luis Gálvez Vallejo (NCI) and
+   Samir Shaikh (C-DAC), among others. See :ref:`acknowledgements`.

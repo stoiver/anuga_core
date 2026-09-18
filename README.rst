@@ -195,8 +195,10 @@ The GPU and multicore solver introduced in ANUGA 4.0 (the unified compute
 mode and its OpenMP target offloading) was developed in collaboration with the
 `Centre for Development of Advanced Computing (C-DAC) <https://www.cdac.in/>`_,
 India, and the `National Computational Infrastructure (NCI) <https://nci.org.au/>`_,
-Australia. NCI's Gadi supercomputer provided the GPU systems on which that work
-was developed, tested and benchmarked. We thank both organisations for their
+Australia. NCI's Gadi supercomputer provided the GPU systems on which that
+work was developed, tested and benchmarked, and NCI supported the work through
+Jorge Luis Gálvez Vallejo; C-DAC contributed through Samir Shaikh and
+colleagues. We thank both organisations, and the people involved, for their
 contribution and support.
 
 License information
