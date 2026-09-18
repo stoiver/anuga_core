@@ -11,6 +11,8 @@ and momentum updates — to a GPU using
 `OpenMP target offloading <https://www.openmp.org/spec-html/5.0/openmpsu57.html>`_.
 No CUDA or Python GPU libraries are required.
 
+.. include:: /appendices/gpu_acknowledgement.inc
+
 .. note::
 
    The GPU backend is experimental and under active development.  The API

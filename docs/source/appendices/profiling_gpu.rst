@@ -124,3 +124,5 @@ Nsight GUIs there. For a quick terminal summary of an ``ncu`` report:
 .. code-block:: bash
 
    ncu --import my_profile_anuga_fluxes.ncu-rep --page details | less
+
+.. include:: /appendices/gpu_acknowledgement.inc
