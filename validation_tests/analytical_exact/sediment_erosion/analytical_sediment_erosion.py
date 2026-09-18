@@ -1,20 +1,18 @@
 """Entrainment of bed sediment into still water: the reference solution.
 
-A tank of still water stands over a fixed bed that is flat on one half and
-slopes gently on the other. There is no flow, so the quadratic-drag closure
-would give zero shear; the run instead selects the depth-slope closure
-[T-7], under which the bed shear stress of a cell is a function of its
-depth and its bed slope alone:
+A tank of still water stands over a fixed plane bed of gentle slope S.
+There is no flow, so the quadratic-drag closure would give zero shear; the
+run instead selects the depth-slope closure [T-7], under which the bed
+shear stress of a cell is a function of its depth and its bed slope alone:
 
     tau_b / rho = g h S .                                   [T-7]
 
-On the flat half S = 0, the Shields stress is below the critical value and
-nothing happens: that half is the control. On the sloped half the Shields
-stress
+The Shields stress
 
     tau* = (tau_b / rho) / (R g d) = h S / (R d)             [T-3]
 
-exceeds tau_c*, and the non-cohesive entrainment law fires,
+exceeds the critical value tau_c* of the sand fraction, and the
+non-cohesive entrainment law fires,
 
     E = v_s E*,   E* = 0.65 gamma0 X / (1 + gamma0 X),   X = tau*/tau_c* - 1
                                                            [E-1], [E-2]
@@ -22,6 +20,9 @@ exceeds tau_c*, and the non-cohesive entrainment law fires,
 while deposition returns sediment to the bed at the well-mixed rate
 
     D = d* v_s c .                                          [D-1]
+
+A second fraction of the same grain but a critical stress far above tau*
+has X < 0 and is never entrained: that is the threshold control.
 
 With no flow there is no advection, so every cell is a closed system, and
 with the bed held fixed h is constant. The sediment mass per unit area
@@ -34,13 +35,14 @@ whose solution from c = 0 is a relaxation to the equilibrium concentration
     c_eq = E / (d* v_s) = E* / d* ,
     c(t) = c_eq (1 - exp(-t / T)),      T = h / (d* v_s) .
 
-The bed is held fixed deliberately. With bed evolution on, the cells along
-the far wall (whose reconstructed bed slope is zero) would not erode while
-their neighbours did, and the steps that opened between them would enter the
-depth-slope closure through the reconstructed bed edge values. That is the
-model doing what it should, but the slope of each cell would then no longer
-be a known constant and the case would have no closed-form reference. The
-bed update [G-4] is checked by the settling case instead.
+Every cell follows its own curve, since h varies along the slope.
+
+The bed is held fixed deliberately. The depth-slope closure takes S from
+the bed itself, so once the bed evolves any non-uniform erosion steepens
+local slopes, which raises tau_b, which erodes faster: the case has no
+closed-form reference and, left to run, scours metres. That is a property
+of the closure (anugaSed contains it with a domain-global clamp), not of
+the discretisation. The bed update [G-4] is checked by the settling case.
 """
 import numpy as np
 
