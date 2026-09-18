@@ -222,7 +222,8 @@ Stephen Roberts, Jorge Luis Gálvez Vallejo, wangshuo, Samir Shaikh, and everyon
 who reported issues against 3.3.x.
 
 The GPU and multicore solver was developed in collaboration with the Centre for
-Development of Advanced Computing (C-DAC), India, and the National Computational
+Development of Advanced Computing (C-DAC), India, as part of a catchment flood
+prediction project aimed at two-day forecasts, and the National Computational
 Infrastructure (NCI), Australia, whose Gadi supercomputer provided the GPU
-systems it was developed, tested and benchmarked on. NCI supported the work
-through Jorge Luis Gálvez Vallejo, and C-DAC through Samir Shaikh and colleagues.
+systems it was developed, tested and benchmarked on. Thanks to Samir Shaikh,
+Rutvik Gulhane and Parikshit (C-DAC) and Jorge Luis Gálvez Vallejo (NCI).
