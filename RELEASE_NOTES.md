@@ -220,3 +220,8 @@ semi-implicit term, not an operator.
 
 Stephen Roberts, Jorge Luis Gálvez Vallejo, wangshuo, Samir Shaikh, and everyone
 who reported issues against 3.3.x.
+
+The GPU and multicore solver was developed in collaboration with the Centre for
+Development of Advanced Computing (C-DAC), India, and the National Computational
+Infrastructure (NCI), Australia, whose Gadi supercomputer provided the GPU
+systems it was developed, tested and benchmarked on.

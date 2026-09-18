@@ -212,3 +212,5 @@ The standard argument parser (used by the benchmark/example scripts) exposes:
    :ref:`use_parallel_openmp`, :ref:`use_parallel_mpi`
       Multi-threaded and multi-process parallelism (independent of the
       legacy/unified choice).
+
+.. include:: /appendices/gpu_acknowledgement.inc
