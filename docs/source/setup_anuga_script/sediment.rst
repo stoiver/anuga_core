@@ -951,6 +951,10 @@ What is not implemented
 Vegetation drag (spec 8) is Phase 5 and absent. Neither validation rung of
 spec 10 -- Rio Puerco, the crater breach -- has been attempted; the evidence
 in ``anuga/shallow_water/tests/test_sediment_*.py`` is verification (the
-equations are solved
-correctly), which is a different claim from validation (they are the right
-equations for the field case).
+equations are solved correctly), which is a different claim from validation
+(they are the right equations for the field case). One step towards the
+latter is in the validation suite: ``validation_tests/analytical_exact/sediment_settling``
+compares the deposition term, the sediment mass balance and the bed update
+against the reference solution for sediment settling out of still water, and
+runs nightly with the other analytical cases. The notebook
+:doc:`/examples/notebook_sediment_transport` walks through the same case.

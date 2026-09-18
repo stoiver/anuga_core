@@ -211,6 +211,33 @@ benchmark problem 2).
 **Run time:** 10–30 minutes depending on mesh resolution and hardware.
 
 
+Sediment settling in still water — analytical solution
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Directory:** ``analytical_exact/sediment_settling/``
+
+**Physical scenario:** A tank of still water 1 m deep carries a uniform
+volumetric concentration of 0.01 of 100 micron sediment. There is no flow, so
+nothing is entrained; the sediment settles onto the bed at the deposition
+rate :math:`D = d^{*} v_s c` with a constant near-bed profile factor, and the
+bed rises by the deposited volume over the packing fraction. The depth falls
+as the bed rises, which feeds back on the depth-averaged concentration; the
+reference solution integrates that coupled system to machine precision, and
+reduces to a plain exponential when the feedback is dropped.
+
+**What is checked:** The cell-mean concentration and bed rise against the
+reference at every output time (relative :math:`L^1` error below 1%); that
+every cell follows the same curve; that the free surface does not move; and
+that the sediment mass in the water column plus the bed stays at its initial
+value. It exercises the deposition term, the sediment mass balance and the
+bed update of the sediment transport operator.
+
+**Key techniques:** ``add_sediment_fraction`` with ``initial_concentration``,
+``set_deposition(near_bed='constant')``, reading the tracer and the
+time-varying bed back from the SWW file.
+
+**Run time:** a few seconds.
+
 Adding a new validation test
 ------------------------------
 
