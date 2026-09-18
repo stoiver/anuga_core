@@ -69,6 +69,6 @@ India, and the `National Computational Infrastructure (NCI) <https://nci.org.au/
 Australia. The C-DAC collaboration is part of a catchment flood prediction
 project aimed at two-day flood forecasts, and grew out of GPU hackathons held
 from 2023; NCI's Gadi supercomputer provided the GPU systems on which the work
-was developed, tested and benchmarked. We thank Samir Shaikh, Rutvik Gulhane
-and Parikshit (C-DAC) and Jorge Luis Gálvez Vallejo (NCI) for their
+was developed, tested and benchmarked. We thank Samir Shaikh, Shweta Das, Rutvik
+Gulhane and Parikshit (C-DAC) and Jorge Luis Gálvez Vallejo (NCI) for their
 contributions, and both organisations for their support.
