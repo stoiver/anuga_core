@@ -4696,7 +4696,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         if self.multiprocessor_mode == MULTIPROCESSOR_GPU:
             # GPU mode: use GPU Manning friction, fall back to CPU for others.
             # Forcing terms may be plain functions (with __name__) or callable
-            # operator objects (Rainfall, Wind_stress, ...) which have none.
+            # objects which have none.
             for f in self.forcing_terms:
                 if getattr(f, '__name__', None) == 'manning_friction_semi_implicit':
                     self.gpu_interface.manning_friction_kernel(self)
@@ -4717,10 +4717,11 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         in mode 2.
 
         The mode-2 C step loop applies forcing in C and only handles Manning
-        friction, so Python ``forcing_terms`` (e.g. the Rainfall / Wind_stress /
-        Barometric_pressure forcing-function classes) are NOT applied — they are
-        silently skipped. Use the equivalent operators instead. This converts
-        that silent correctness gap into a loud, actionable message.
+        friction, so user-supplied Python ``forcing_terms`` are NOT applied —
+        they are silently skipped. Use fractional-step operators instead
+        (``Rate_operator``, ``Wind_stress_operator``,
+        ``Barometric_pressure_operator``, or a custom ``Operator``). This
+        converts that silent correctness gap into a loud, actionable message.
         """
         if getattr(self, '_warned_mode2_forcing', False):
             return
