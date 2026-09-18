@@ -6,5 +6,5 @@
    prediction project, and the `National Computational Infrastructure (NCI)
    <https://nci.org.au/>`_, Australia, whose Gadi supercomputer provided the
    GPU systems it was developed, tested and benchmarked on. We thank Samir
-   Shaikh, Shweta Das, Rutvik Gulhane and Parikshit (C-DAC) and Jorge Luis Gálvez Vallejo
+   Shaikh, Shweta Das and Rutvik Gulhane (C-DAC) and Jorge Luis Gálvez Vallejo
    (NCI). See :ref:`acknowledgements`.
