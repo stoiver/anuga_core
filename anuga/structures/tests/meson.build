@@ -6,6 +6,7 @@ python_sources = [
   'test_internal_boundary_functions.py',
   'test_internal_boundary_operator.py',
   'test_riverwall_structure.py',
+  'test_structure_inlet_region_consistency.py',
   'test_structure_operator.py',
   'test_weir_orifice_trapezoid_operator.py',
 ]

@@ -10,6 +10,42 @@ from anuga.utilities.numerical_tools import ensure_numeric
 from anuga.structures.inlet_enquiry import Inlet_enquiry
 
 
+def inlet_polygons(exchange_lines, end_points, apron):
+    """The exchange regions of a two-inlet structure, one polygon per inlet.
+
+    Each exchange line is extended back by the apron into a quadrilateral,
+    exactly as Structure_operator builds ``poly0``/``poly1``; with no apron
+    the lines themselves are returned. Shared by Parallel_Structure_operator
+    and the operator factory, so the processors allocated to an inlet are
+    the ones that hold triangles of the region the inlet actually uses.
+    """
+    lines = [ensure_numeric(line, float) for line in exchange_lines]
+    if apron is None:
+        return lines
+    line0, line1 = lines
+    n = len(line0)
+    if n == 4:
+        outward0 = line0[3] - line0[2]
+        outward1 = line1[3] - line1[2]
+    else:
+        if end_points is None:
+            centre0 = 0.5 * (line0[0] + line0[1])
+            centre1 = 0.5 * (line1[0] + line1[1])
+            culvert_vector = centre1 - centre0
+        else:
+            end_points = ensure_numeric(end_points, float)
+            culvert_vector = end_points[1] - end_points[0]
+        outward0 = culvert_vector
+        outward1 = -culvert_vector
+    polys = []
+    for line, outward in ((line0, outward0), (line1, outward1)):
+        length = math.sqrt(num.sum(outward**2))
+        assert length > 0.0, 'The length of the outward vector is less than 0'
+        offset = -apron * outward / length
+        polys.append(num.array([line[0], line[1], line[1] + offset, line[0] + offset]))
+    return polys
+
+
 class Parallel_Structure_operator(anuga.Operator):
     """Parallel Structure Operator - transfer water from one rectangular box to another.
     Sets up the geometry of problem
@@ -198,7 +234,7 @@ class Parallel_Structure_operator(anuga.Operator):
 
             self.inlets.append(parallel_inlet_enquiry.Parallel_Inlet_enquiry(
                                self.domain,
-                               line0,
+                               poly0,
                                enquiry_point0,
                                invert_elevation = invert_elevation0,
                                outward_culvert_vector = outward_vector0,
@@ -235,7 +271,7 @@ class Parallel_Structure_operator(anuga.Operator):
 
             self.inlets.append(parallel_inlet_enquiry.Parallel_Inlet_enquiry(
                                self.domain,
-                               line1,
+                               poly1,
                                enquiry_point1,
                                invert_elevation = invert_elevation1,
                                outward_culvert_vector = outward_vector1,

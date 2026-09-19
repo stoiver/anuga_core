@@ -14,6 +14,16 @@
 
 ## Selected fixes
 
+* Structure operators (`Boyd_box_operator`, `Boyd_pipe_operator`,
+  `Weir_orifice_trapezoid_operator`, `Internal_boundary_operator`) built their
+  inlets from different regions depending on whether mpi4py was installed:
+  the sequential class used the exchange line extended back by the apron,
+  the parallel class (which the factory returns whenever mpi4py imports, on a
+  serial domain too) computed the same polygon and then used the bare line
+  (#367). Both now use the line plus apron, and the processors allocated to
+  an inlet under MPI are chosen from that same region. Discharge and drained
+  volume change for structure users whose install had mpi4py, by the apron's
+  share of the exchange area.
 * Line regions (`Region(line=...)`, `Set_quantity(line=...)`, the exchange
   lines of the structure operators, and the edges of an expanded polygon
   region) selected a compiler-dependent set of triangles when the line lay on
