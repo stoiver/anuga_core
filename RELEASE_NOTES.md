@@ -14,6 +14,16 @@
 
 ## Selected fixes
 
+* Line regions (`Region(line=...)`, `Set_quantity(line=...)`, the exchange
+  lines of the structure operators, and the edges of an expanded polygon
+  region) selected a compiler-dependent set of triangles when the line lay on
+  mesh lines: the same script gave a 68% larger inlet area under one compiler
+  than another (#231). The segment-triangle test is now tolerance-aware
+  clipping with one rule: a triangle is selected when the segment passes
+  through or along it with positive length, and not when it only touches a
+  vertex or ends on an edge from outside. Selections change wherever a line
+  touched triangles at a point: a 10 m exchange line on a 5 m mesh line now
+  selects the 8 triangles along it rather than 32 (or 54).
 * Two runs writing the same SWW file used to interleave their frames on the
   shared time dimension, giving a file that opened fine and held plausible
   data with a non-monotonic time variable (#232). The writer now holds a
