@@ -908,7 +908,7 @@ def write_polygon(polygon, filename=None):
 
     fid = open(filename, 'w')
     for point in polygon:
-        fid.write('%f, %f\n' % point)
+        fid.write('%f, %f\n' % tuple(point))   # a list or array row, not only a tuple
     fid.close()
 
 

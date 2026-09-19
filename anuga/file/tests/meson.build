@@ -1,5 +1,6 @@
 python_sources = [
  'test_csv.py',
+ 'test_gpkg.py',
  'test_mux.py',
  'test_netcdf_nc.py',
  'test_read_sww.py',

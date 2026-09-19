@@ -53,6 +53,13 @@
 
 ## Smaller improvements
 
+* GeoPackage in and out (#39, #40): `gpkg2polygons()` / `polygons2gpkg()`
+  read and write polygon and polyline layers with attributes and a CRS as
+  the `[x, y]` lists ANUGA's regions, buildings and breaklines take, and
+  `polygon_csv_files2gpkg()` / `gpkg2polygon_csv_files()` and
+  `building_csv2gpkg()` / `gpkg2building_csv()` convert the two CSV
+  conventions ANUGA already reads. Needs `fiona` and `shapely`
+  (`anuga[data]`), imported only on call.
 * `Domain.get_water_volume()` and `compute_total_volume()` take `region=` (an
   `anuga.Region`) or `indices=` to sum the water in part of the domain, as
   `Quantity.get_integral()` already did (#22). Regional queries do not enter
