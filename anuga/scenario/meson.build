@@ -18,6 +18,7 @@ python_sources = [
     'setup_pumping_stations.py',
     'setup_rainfall.py',
     'setup_riverwalls.py',
+    'setup_sediment.py',
     'setup_weirs.py',
     'spatially_averaged_function.py',
 ]

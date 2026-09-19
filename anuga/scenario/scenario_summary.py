@@ -310,6 +310,7 @@ def build_summary_html(config_path, base_dir=None):
     bridges = cfg.get('bridges', [])
     pumps = cfg.get('pumping_stations', [])
     erosion = cfg.get('erosion', [])
+    sediment = cfg.get('sediment', {})
     irs = m.get('interior_regions', [])
 
     scenario = str(p.get('scenario', os.path.splitext(os.path.basename(config_path))[0]))
@@ -360,6 +361,10 @@ def build_summary_html(config_path, base_dir=None):
         stats.append(_stat(len(pumps), 'pumping stations'))
     if erosion:
         stats.append(_stat(len(erosion), 'erosion operators'))
+    if sediment:
+        fractions = sediment.get('fractions', [])
+        note = ', '.join(str(f.get('name', '?')) for f in fractions)
+        stats.append(_stat(len(fractions), 'sediment fractions', note))
 
     # ---- badges ----------------------------------------------------------
     badges = []

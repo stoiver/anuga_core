@@ -89,6 +89,20 @@ class TestScenarioSummary(unittest.TestCase):
         self.assertNotIn('http://', html)
         self.assertNotIn('https://', html)
 
+    def test_sediment_fractions_counted(self):
+        html = build_summary_html(self._write(_BASE + """
+            [sediment]
+            porosity = 0.3
+            [[sediment.fractions]]
+            name = "sand"
+            diameter = 2.0e-4
+            [[sediment.fractions]]
+            name = "silt"
+            diameter = 2.0e-5
+        """))
+        self.assertIn('sediment fractions', html)
+        self.assertIn('sand, silt', html)
+
     def test_friction_breakdown_present(self):
         html = build_summary_html(self._write(_BASE))
         self.assertIn("Friction", html)
