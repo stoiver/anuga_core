@@ -61,8 +61,31 @@ def _release_all_sww_locks():
 
 
 def _pid_is_alive(pid):
+    """Whether a process with this id exists. Never signals or touches it."""
+    if os.name == 'nt':
+        # os.kill(pid, 0) is NOT a probe on Windows: it calls TerminateProcess
+        # on a live process and raises a generic OSError on a dead one. Ask
+        # the kernel for a query-only handle instead.
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        ERROR_ACCESS_DENIED = 5
+        STILL_ACTIVE = 259
+        handle = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            # No such process (ERROR_INVALID_PARAMETER), or one we may not
+            # open, which nonetheless exists.
+            return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+        try:
+            code = wintypes.DWORD()
+            if k32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return code.value == STILL_ACTIVE
+            return True
+        finally:
+            k32.CloseHandle(handle)
     try:
-        os.kill(pid, 0)
+        os.kill(pid, 0)       # signal 0: existence check only, on POSIX
     except ProcessLookupError:
         return False
     except PermissionError:
