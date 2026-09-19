@@ -25,6 +25,10 @@
 
 ## Smaller improvements
 
+* `Domain.get_water_volume()` and `compute_total_volume()` take `region=` (an
+  `anuga.Region`) or `indices=` to sum the water in part of the domain, as
+  `Quantity.get_integral()` already did (#22). Regional queries do not enter
+  `volume_history`.
 * `Wind_stress_operator` and `Barometric_pressure_operator` accept
   `use_coordinates=False` with a `file_function`, replacing the file-driven
   wind and pressure fields of the removed `_fast` classes. The file's

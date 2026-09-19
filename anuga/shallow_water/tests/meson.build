@@ -21,6 +21,7 @@ python_sources = [
 'test_active_set.py',
 'test_compute_mode.py',
 'test_domain_reference_docs.py',
+'test_water_volume_region.py',
 'test_tracers.py',
 'test_tracers_boundary.py',
 'test_tracers_sww.py',
