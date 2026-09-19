@@ -141,6 +141,20 @@ SWW files are also used as **input** to :func:`File_boundary` and
    # Memory-bounded merge: process 100 timesteps at a time
    domain.sww_merge(delete_old=True, chunk_size=100)
 
+**One writer per file.** While a run is writing an SWW file it holds a
+sidecar lock, ``<name>.sww.lock``, recording its process id and host. A second
+run that would create the same file stops with ``SWWFileInUseError`` naming
+the other run; give each run its own ``set_name()`` or ``set_datadir()`` (a
+parameter sweep launched concurrently from one script is the usual way to
+collide). A lock left by a run that has died is taken over with a warning; a
+lock from another host cannot be checked and must be deleted by hand once that
+run is known to be finished. As a second guard, the writer refuses to append a
+frame earlier than the last one on file that rewrites no existing frame, which
+is what two interleaved writers produce (``SWWTimeOrderError``). Re-running a
+model under the same name in one session, calling ``evolve()`` again from
+where it stopped, and resuming from a checkpoint (which rewrites frames already
+on file) are unaffected.
+
 **Post-processing conversions**
 
 .. code-block:: python

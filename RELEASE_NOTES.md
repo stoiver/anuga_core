@@ -14,6 +14,14 @@
 
 ## Selected fixes
 
+* Two runs writing the same SWW file used to interleave their frames on the
+  shared time dimension, giving a file that opened fine and held plausible
+  data with a non-monotonic time variable (#232). The writer now holds a
+  sidecar `<name>.sww.lock` for the life of the run and a second run that
+  would create the same file stops with `SWWFileInUseError`; stale locks from
+  dead processes are taken over with a warning. It also refuses to append a
+  frame earlier than the last one on file that rewrites no existing frame
+  (`SWWTimeOrderError`); checkpoint resumes, which rewrite frames, still work.
 * Sediment transport: the bed slope for the `'depth_slope'` shear closure
   (and the surface slope for `'energy_slope'`) is now the least-squares
   gradient of the centroid values over the cell and its neighbours. It was

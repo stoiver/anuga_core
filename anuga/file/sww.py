@@ -1,6 +1,7 @@
 """ Classes to read an SWW file.
 """
 
+import os
 import numpy
 import numpy as num
 from anuga.utilities.file_utils import create_filename
@@ -21,6 +22,162 @@ from anuga.coordinate_transforms.geo_reference import Geo_reference
 
 class DataFileNotOpenError(Exception):
     pass
+
+
+class SWWFileInUseError(Exception):
+    """Another live process is writing this SWW file."""
+    pass
+
+
+class SWWTimeOrderError(Exception):
+    """A frame about to be written is earlier than the last frame on file."""
+    pass
+
+
+# ---------------------------------------------------------------------------
+# Writer lock
+#
+# The SWW path is set entirely by domain.set_name() / set_datadir(), and the
+# writer opens the file afresh in append mode at every yieldstep, so two runs
+# that happen to share a name both append to the same file and their frames
+# interleave on the unlimited time dimension. The result opens fine and every
+# frame holds plausible data; only the time variable, which is no longer
+# monotonic, gives it away (anuga-community/anuga_core#232). The netCDF
+# library holds no lock between those opens, so a sidecar '<file>.sww.lock'
+# is taken when the file is created and held until the interpreter exits.
+# ---------------------------------------------------------------------------
+
+_held_sww_locks = set()
+
+
+def sww_lock_path(filename):
+    """The sidecar lock file for an SWW file."""
+    return filename + '.lock'
+
+
+def _release_all_sww_locks():
+    for path in list(_held_sww_locks):
+        release_sww_lock(path)
+
+
+def _pid_is_alive(pid):
+    """Whether a process with this id exists. Never signals or touches it."""
+    if os.name == 'nt':
+        # os.kill(pid, 0) is NOT a probe on Windows: it calls TerminateProcess
+        # on a live process and raises a generic OSError on a dead one. Ask
+        # the kernel for a query-only handle instead.
+        import ctypes
+        from ctypes import wintypes
+        k32 = ctypes.WinDLL('kernel32', use_last_error=True)
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        ERROR_ACCESS_DENIED = 5
+        STILL_ACTIVE = 259
+        handle = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            # No such process (ERROR_INVALID_PARAMETER), or one we may not
+            # open, which nonetheless exists.
+            return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+        try:
+            code = wintypes.DWORD()
+            if k32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return code.value == STILL_ACTIVE
+            return True
+        finally:
+            k32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)       # signal 0: existence check only, on POSIX
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True           # exists, owned by someone else
+    except OSError:
+        return True           # cannot tell: treat as alive
+    return True
+
+
+def _read_sww_lock(path):
+    """The (pid, host) recorded in a lock file, or (None, None)."""
+    pid = host = None
+    try:
+        with open(path) as f:
+            for line in f:
+                key, _, value = line.strip().partition('=')
+                if key == 'pid':
+                    try:
+                        pid = int(value)
+                    except ValueError:
+                        pid = None
+                elif key == 'host':
+                    host = value
+    except OSError:
+        pass
+    return pid, host
+
+
+def acquire_sww_lock(filename):
+    """Take the writer lock for `filename`, or raise SWWFileInUseError.
+
+    A lock left by a process that is no longer running (a crash, a kill)
+    is taken over with a warning. A lock held by this very process is
+    taken over silently: re-running a model under the same name in one
+    session is normal. A lock from another host cannot be checked for
+    liveness and is respected; the message says how to clear it.
+    """
+    import atexit
+    import socket
+    import sys
+    import time as _time
+    import warnings
+
+    path = sww_lock_path(filename)
+    me = os.getpid()
+    host = socket.gethostname()
+
+    if os.path.exists(path):
+        pid, other_host = _read_sww_lock(path)
+        same_host = (other_host is None or other_host == host)
+        if pid == me:
+            pass                                    # our own earlier run
+        elif same_host and pid is not None and not _pid_is_alive(pid):
+            warnings.warn(
+                'Taking over the SWW writer lock %s left by process %d, '
+                'which is no longer running' % (path, pid), stacklevel=3)
+        else:
+            who = 'process %s on %s' % (pid, other_host or host)
+            raise SWWFileInUseError(
+                'The SWW file %s is being written by another run (%s, lock '
+                'file %s). Two runs appending to one SWW file interleave '
+                'their frames and produce a file that is silently wrong. '
+                'Give this run its own name with domain.set_name() or its '
+                'own directory with domain.set_datadir(); if that run is '
+                'known to be dead, delete the lock file.'
+                % (filename, who, path))
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    with os.fdopen(fd, 'w') as f:
+        f.write('pid=%d\nhost=%s\nstarted=%s\nscript=%s\n'
+                % (me, host, _time.strftime('%Y-%m-%dT%H:%M:%S'),
+                   sys.argv[0] if sys.argv else ''))
+    if not _held_sww_locks:
+        atexit.register(_release_all_sww_locks)
+    _held_sww_locks.add(path)
+    return path
+
+
+def release_sww_lock(path):
+    """Remove a lock this process holds. Safe to call twice."""
+    _held_sww_locks.discard(path)
+    pid, _ = _read_sww_lock(path)
+    if pid == os.getpid():
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
 
 
 class DataMissingValuesError(Exception):
@@ -171,6 +328,11 @@ class SWW_file(Data_format):
         else:
             self._tracer_names = []
 
+        # Refuse to create a file another live run is writing (#232).
+        self._lock = None
+        if mode[0] == 'w':
+            self._lock = acquire_sww_lock(self.filename)
+
         # NetCDF file definition
         fid = NetCDFFile(self.filename, mode)
         if mode[0] == 'w':
@@ -231,6 +393,14 @@ class SWW_file(Data_format):
                                        ('singleton',))
 
         fid.close()
+
+    def release(self):
+        """Give up the writer lock. Called when the writer moves on to a
+        continuation file; otherwise the lock is released at exit."""
+        lock = getattr(self, '_lock', None)      # absent on writers unpickled
+        if lock is not None:                     # from before the lock existed
+            release_sww_lock(lock)
+            self._lock = None
 
     def store_connectivity(self):
         """Store information about nodes, triangles and static quantities
@@ -326,6 +496,27 @@ class SWW_file(Data_format):
         # Check to see if the file is already too big:
         time = fid.variables['time'][:]
 
+        # Frames must not go backwards. A frame at or before the last one on
+        # file is legitimate only when it REWRITES an existing frame: a
+        # checkpoint resume, or a second evolve() re-storing its starting
+        # frame (Write_sww.store_quantities finds that slot). A time earlier
+        # than the last frame that matches no frame at all is what a second
+        # process appending to this file produces (#232); it used to be
+        # appended with a log warning, leaving a file that opens fine, holds
+        # plausible data and has a non-monotonic time variable.
+        t_new = self.domain.relative_time
+        if len(time) > 0 and t_new < time[-1]:
+            tol = 1.0e-9 * max(1.0, abs(t_new))       # as store_quantities
+            if not num.any(num.abs(time - t_new) <= tol):
+                fid.close()
+                raise SWWTimeOrderError(
+                    'Refusing to append a frame at t=%g to %s, whose last '
+                    'frame is at t=%g and which holds no frame at that time '
+                    'to rewrite. Another process is writing this file (see '
+                    'the lock file %s), or the model time went backwards.'
+                    % (t_new, self.filename, time[-1],
+                       sww_lock_path(self.filename)))
+
         i = len(time) + 1
         file_size = stat(self.filename)[6]
         file_size_increase = file_size//i
@@ -359,8 +550,9 @@ class SWW_file(Data_format):
                 log.info('    saving file to %s'
                              % next_data_structure.filename)
 
-            # Set up the new data_structure
+            # Set up the new data_structure; this file is finished with
             self.domain.writer = next_data_structure
+            self.release()
 
             # Store connectivity and first timestep
             next_data_structure.store_connectivity()

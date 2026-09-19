@@ -31,6 +31,7 @@ anuga/_version.py
 *.txt
 *.vim
 *.sww
+*.sww.lock
 *.tif
 *.xml
 *.pts
