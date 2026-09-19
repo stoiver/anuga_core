@@ -28,6 +28,10 @@ summary; the sections that follow describe each format in detail.
    * - ``.msh``
      - NetCDF
      - Triangular mesh (binary equivalent of TSH)
+   * - ``.gpkg``
+     - GeoPackage
+     - Polygons and polylines with attributes, editable in QGIS; regions,
+       buildings, breaklines (needs ``fiona`` and ``shapely``)
    * - ``.dem``
      - NetCDF
      - Regular Digital Elevation Model (intermediate ANUGA format)
@@ -300,6 +304,53 @@ Convert ASC to DEM, then DEM to a point cloud:
    # Convert DEM to a point cloud (PTS) for fitting onto a mesh
    anuga.dem2pts('elevation.dem', use_cache=False, verbose=True)
 
+
+GeoPackage — GPKG
+-----------------
+
+A `GeoPackage <https://www.geopackage.org/>`_ holds vector layers with
+attributes in one file that QGIS and every other GIS read and write. ANUGA
+reads a polygon or polyline layer straight into the lists of ``[x, y]``
+points its regions, buildings and breaklines take, and writes them back, so
+a model's geometry can be drawn and edited in a GIS. Needs ``fiona`` and
+``shapely`` (``pip install "anuga[data]"``); they are imported only when
+these functions are called.
+
+.. code-block:: python
+
+   import anuga
+
+   # Read a layer: one (N, 2) array per feature plus its attributes.
+   # A MultiPolygon gives one entry per part. Rings come back un-closed,
+   # as ANUGA holds polygons.
+   houses, attrs = anuga.gpkg2polygons('houses.gpkg')          # first layer
+   walls, _ = anuga.gpkg2polygons('model.gpkg', layer='riverwalls')
+   for poly, a in zip(houses, attrs):
+       domain.set_quantity('elevation', a['floors'] * 3.0, polygon=poly)
+
+   # Write polygons with attributes and a CRS (EPSG code, 'EPSG:32756' or WKT)
+   anuga.polygons2gpkg([poly1, poly2], 'regions.gpkg',
+                       attributes=[{'name': 'pond'}, {'name': 'weir'}],
+                       crs=32756, layer='regions')
+   anuga.gpkg_layers('model.gpkg')
+
+The two CSV conventions ANUGA already reads convert both ways:
+
+.. code-block:: python
+
+   # one polygon per file, x,y rows, no header (what anuga.read_polygon reads,
+   # e.g. the Merewether case study's houses/): the file stem becomes a
+   # ``name`` field
+   anuga.polygon_csv_files2gpkg('houses/', 'houses.gpkg', crs=32756)
+   anuga.gpkg2polygon_csv_files('houses.gpkg', 'houses_edited/')
+
+   # easting,northing,id,floors in one file (what load_csv_as_polygons and
+   # load_csv_as_building_polygons read): id and floors become fields
+   anuga.building_csv2gpkg('buildings.csv', 'buildings.gpkg', crs=32756)
+   anuga.gpkg2building_csv('buildings.gpkg', 'buildings_edited.csv')
+
+Only exterior rings are read; holes are dropped, since ANUGA polygons have
+none.
 
 Point data — CSV, TXT and PTS
 -------------------------------

@@ -141,6 +141,11 @@ from anuga.abstract_2d_finite_volumes.mesh_factory import rectangular_cross, \
 from anuga.file.csv_file import load_csv_as_building_polygons,  \
                                 load_csv_as_polygons
 
+# GeoPackage in/out (fiona + shapely, imported on call)
+from anuga.file.gpkg import (polygons2gpkg, gpkg2polygons, gpkg_layers,
+                             polygon_csv_files2gpkg, gpkg2polygon_csv_files,
+                             building_csv2gpkg, gpkg2building_csv)
+
 from anuga.file.sts import create_sts_boundary
 
 from anuga.file.ungenerate import load_ungenerate
@@ -513,6 +518,13 @@ __all__ = [
     'load_checkpoint_file',
     'load_csv_as_building_polygons',
     'load_csv_as_polygons',
+    'polygons2gpkg',
+    'gpkg2polygons',
+    'gpkg_layers',
+    'polygon_csv_files2gpkg',
+    'gpkg2polygon_csv_files',
+    'building_csv2gpkg',
+    'gpkg2building_csv',
     'load_ungenerate',
     'sww2array',
     'sww2csv_gauges',
