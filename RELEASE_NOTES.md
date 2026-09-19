@@ -53,6 +53,11 @@
 
 ## Smaller improvements
 
+* A ready-made `anuga.Region` is accepted as `region=` by
+  `Quantity.set_values()` (and so `Domain.set_quantity()` and friends), the
+  erosion operators and `Set_w_uh_vh_operator`, alongside the existing
+  polygon, circle and index forms, so one region definition serves every
+  place it is needed (#15).
 * The TOML scenario interface configures sediment transport: a `[sediment]`
   table for the domain-wide choices (porosity, bed evolution, shear closure,
   bed material, deposition law, friction mode, bedload, angle of repose,

@@ -7,7 +7,11 @@ Operators are objects that modify domain quantities each timestep.  They are
 attached to a :class:`Domain` and called automatically during the evolve loop.
 All operators accept a *region* (polygon, centre+radius, or explicit triangle
 indices) so that their effect can be restricted to a spatial subset of the
-mesh.
+mesh. A ready-made :class:`~anuga.Region` object can be passed as
+``region=`` instead, and the same object can restrict
+``domain.set_quantity(..., region=...)`` and
+``domain.get_water_volume(region=...)``, so one region definition serves
+every place it is needed.
 
 .. contents:: Contents
    :local:

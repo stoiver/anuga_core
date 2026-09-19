@@ -100,6 +100,7 @@ class Sanddune_erosion_operator(Operator, Region)  :
                  domain,
                  threshold= 0.0,
                  base=0.0,
+                 region=None,
                  indices=None,
                  polygon=None,
                  center=None,
@@ -122,6 +123,13 @@ class Sanddune_erosion_operator(Operator, Region)  :
 
 
 
+        if region is not None:
+            # A ready-made anuga.Region: take its triangles
+            if any(x is not None for x in (indices, polygon, center, radius)):
+                raise ValueError('%s: cannot specify both a Region object and '
+                                 'polygon/center/radius/indices -- the Region '
+                                 'already encodes location' % type(self).__name__)
+            indices = region.get_indices(full_only=False)
         Region.__init__(self, domain,
                         indices=indices,
                         polygon=polygon,
