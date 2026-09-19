@@ -233,8 +233,30 @@ def not_polygon_overlap(triangles, polygon, verbose=False):
 
 
 def line_intersect(triangles, line, verbose=False):
-    """Determine which of a list of triangles intersect a line
+    """Determine which of a list of triangles a line segment passes through.
 
+    A triangle is selected when the part of the segment inside it has
+    positive length: the segment crosses its interior, ends inside it, or
+    runs along one of its edges. A segment lying along an edge shared by two
+    triangles selects both, so the selection depends only on the geometry.
+    A segment that merely touches a triangle at a vertex, or ends exactly on
+    one of its edges from outside, does not select it: that contact has no
+    length. The decision is made with tolerances relative to the segment and
+    triangle size, so a segment within rounding of a mesh line is treated as
+    on it, and the answer does not depend on the compiler (#231).
+
+    Parameters
+    ----------
+    triangles : array-like, (3*M, 2)
+        Vertex coordinates of M triangles, three consecutive rows each, as
+        ``domain.get_vertex_coordinates()`` returns them.
+    line : array-like, (2, 2)
+        The two end points of the segment.
+
+    Returns
+    -------
+    ndarray of int
+        Indices of the selected triangles, in mesh order.
     """
     line = ensure_numeric(line, float)
     triangles = ensure_numeric(triangles, float)

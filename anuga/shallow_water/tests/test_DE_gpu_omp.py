@@ -3460,8 +3460,12 @@ class Test_GPU_LargeInlet(unittest.TestCase):
     the actual total at map time, so the cap only ever constrained the host-side
     staging.
 
-    The geometry below gives 79 triangles per inlet — comfortably over the old
-    cap. apron=5.0 keeps the enquiry points clear of the (wide) inlet regions.
+    The geometry below gives 72 triangles per inlet — comfortably over the old
+    cap: a 40 m exchange line at x = 61, off the mesh lines (3.33 m apart), so
+    it cuts three of the four triangles in each of the 24 rectangles it
+    crosses. (On a mesh line it would select only the 48 along it, since
+    line-region selection is geometric, #231.) apron=5.0 keeps the enquiry
+    points clear of the (wide) inlet regions.
     """
 
     def _run(self, mode):
@@ -3480,8 +3484,8 @@ class Test_GPU_LargeInlet(unittest.TestCase):
         domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
 
         culvert = Boyd_box_operator(
-            domain, end_points=[[60.0, 25.0], [140.0, 25.0]],
-            losses=1.5, width=20.0, height=3.0, apron=5.0,
+            domain, end_points=[[61.0, 25.0], [139.0, 25.0]],
+            losses=1.5, width=40.0, height=3.0, apron=5.0,
             use_momentum_jet=False, use_velocity_head=False,
             manning=0.013, verbose=False)
         domain.set_multiprocessor_mode(mode)
@@ -3496,7 +3500,7 @@ class Test_GPU_LargeInlet(unittest.TestCase):
                 float(culvert.discharge))
 
     def test_inlet_larger_than_the_old_cap(self):
-        """An inlet of 79 triangles must register and give the mode-1 answer."""
+        """An inlet of 72 triangles must register and give the mode-1 answer."""
         sizes_1, stage_1, q_1 = self._run(1)
         sizes_2, stage_2, q_2 = self._run(2)
 
