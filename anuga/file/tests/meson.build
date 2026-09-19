@@ -5,6 +5,7 @@ python_sources = [
  'test_read_sww.py',
  'test_sts.py',
  'test_sww.py',
+ 'test_sww_lock.py',
  'test_ungenerate.py',
  'test_urs.py',
 ]
