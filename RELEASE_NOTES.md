@@ -53,6 +53,13 @@
 
 ## Smaller improvements
 
+* The TOML scenario interface configures sediment transport: a `[sediment]`
+  table for the domain-wide choices (porosity, bed evolution, shear closure,
+  bed material, deposition law, friction mode, bedload, angle of repose,
+  erodible base and regions) and `[[sediment.fractions]]` entries for the
+  grain fractions, with inflow concentrations per boundary tag. Validated
+  like the other sections, applied by `setup_sediment` in the generated run
+  script, counted in the scenario summary.
 * GeoPackage in and out (#39, #40): `gpkg2polygons()` / `polygons2gpkg()`
   read and write polygon and polyline layers with attributes and a CRS as
   the `[x, y]` lists ANUGA's regions, buildings and breaklines take, and

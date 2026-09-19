@@ -49,6 +49,7 @@ from anuga.scenario import (
     setup_bridges,
     setup_pumping_stations,
     setup_erosion,
+    setup_sediment,
     setup_boundary_conditions,
 )
 
@@ -88,6 +89,10 @@ setup_inlets.setup_inlets(domain, project)
 setup_bridges.setup_bridges(domain, project)
 setup_pumping_stations.setup_pumping_stations(domain, project)
 setup_erosion.setup_erosion(domain, project)
+
+# Sediment transport (suspended load, optional bedload and bed evolution),
+# from the [sediment] table. A no-op without one.
+setup_sediment.setup_sediment(domain, project)
 
 # ---------------------------------------------------------------------------
 # Boundary conditions (tags -> boundary objects, from the TOML)

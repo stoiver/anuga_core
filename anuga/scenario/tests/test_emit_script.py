@@ -31,6 +31,8 @@ class Test_emit_script(unittest.TestCase):
             'setup_riverwalls.setup_riverwalls(domain, project)',
             'setup_rainfall.setup_rainfall(domain, project)',
             'setup_inlets.setup_inlets(domain, project)',
+            'setup_erosion.setup_erosion(domain, project)',
+            'setup_sediment.setup_sediment(domain, project)',
             'setup_boundary_conditions.setup_boundary_conditions(domain, project)',
             'domain.evolve(',
         ]
