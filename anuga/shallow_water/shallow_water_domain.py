@@ -4324,41 +4324,82 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         global_max = MPI.COMM_WORLD.allreduce(local_max, op=MPI.MAX)
         return global_max
 
-    def get_water_volume(self) -> float:
+    def get_water_volume(self, region=None,
+                         indices: list[int] | num.ndarray | None = None) -> float:
+        """Volume of water (m^3) in the domain, or in part of it.
 
+        Parameters
+        ----------
+        region : Region, optional
+            Restrict the volume to the triangles of an
+            :class:`~anuga.Region` (built from a polygon, a circle or
+            explicit indices), as :meth:`Quantity.get_integral` does.
+        indices : array-like of int, optional
+            Restrict to these triangle indices instead. At most one of
+            `region` and `indices` may be given.
+
+        Returns
+        -------
+        float
+            The volume, summed across ranks under MPI (every rank must call
+            this). Only ghost-free (full) triangles are counted, so a region
+            straddling a partition boundary is not double-counted.
+
+        Notes
+        -----
+        The whole-domain volume is appended to ``volume_history``; a regional
+        query is not, since the history tracks the domain total. Under GPU
+        offload the whole-domain volume is reduced on the device; a regional
+        query syncs the state to the host first.
+
+        Examples
+        --------
+        >>> pond = anuga.Region(domain, polygon=[[0, 0], [10, 0], [10, 10], [0, 10]])
+        >>> domain.get_water_volume(region=pond)
+        """
         from anuga import numprocs
 
-        # GPU path: compute volume directly on GPU (avoids expensive D2H sync)
-        if self.multiprocessor_mode == MULTIPROCESSOR_GPU and self.gpu_interface is not None:
+        assert region is None or indices is None, \
+            'get_water_volume: give region or indices, not both'
+        partial = region is not None or indices is not None
+
+        if (self.multiprocessor_mode == MULTIPROCESSOR_GPU
+                and self.gpu_interface is not None and not partial):
+            # Whole domain: reduce on the device (avoids an expensive D2H sync)
             from anuga.shallow_water.sw_domain_gpu_ext import compute_water_volume_gpu
             volume = compute_water_volume_gpu(self.gpu_interface.gpu_dom)
-        elif not self.evolved_called:
-            Stage = self.quantities['stage']
-            Elev =  self.quantities['elevation']
-            h_c = Stage.centroid_values - Elev.centroid_values
-            from anuga import Quantity
-            Height = Quantity(self)
-            Height.set_values(h_c, location='centroids')
-            volume = Height.get_integral()
-        elif self.get_using_discontinuous_elevation():
-            Height = self.quantities['height']
-            volume = Height.get_integral()
         else:
-            Stage = self.quantities['stage']
-            Elev =  self.quantities['elevation']
-            Height = Stage-Elev
-            volume = Height.get_integral()
+            if (self.multiprocessor_mode == MULTIPROCESSOR_GPU
+                    and self.gpu_interface is not None):
+                self.gpu_interface.sync_from_device()
+            volume = self._height_quantity().get_integral(region=region,
+                                                          indices=indices)
 
-        if numprocs == 1:
+        if numprocs > 1:
+            # Use MPI_Allreduce instead of manual gather-broadcast
+            from mpi4py import MPI
+            volume = MPI.COMM_WORLD.allreduce(volume, op=MPI.SUM)
+
+        if not partial:
             self.volume_history.append(volume)
-            return volume
+        return volume
 
-        # Use MPI_Allreduce instead of manual gather-broadcast
-        from mpi4py import MPI
-        water_volume = MPI.COMM_WORLD.allreduce(volume, op=MPI.SUM)
+    def _height_quantity(self):
+        """The water depth as a Quantity, from the stage and elevation
+        centroids.
 
-        self.volume_history.append(water_volume)
-        return water_volume
+        Always rebuilt from stage - elevation rather than taken from the
+        'height' quantity: the device sync brings stage and elevation back to
+        the host but not height, so under GPU offload the stored height is
+        stale between yieldsteps. The two agree wherever height is current.
+        """
+        from anuga import Quantity
+        Stage = self.quantities['stage']
+        Elev = self.quantities['elevation']
+        Height = Quantity(self)
+        Height.set_values(Stage.centroid_values - Elev.centroid_values,
+                          location='centroids')
+        return Height
 
     def get_boundary_flux_integral(self) -> float:
         """Compute the boundary flux integral.
@@ -7335,13 +7376,14 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         return boundary_flows, total_boundary_inflow, total_boundary_outflow
 
 
-    def compute_total_volume(self) -> float:
-        """
-        Compute total volume (m^3) of water in entire domain
+    def compute_total_volume(self, region=None,
+                             indices: list[int] | num.ndarray | None = None) -> float:
+        """Total volume (m^3) of water in the domain, or in a region of it.
 
+        An alias of :meth:`get_water_volume`; see there for the arguments.
         """
 
-        return self.get_water_volume()
+        return self.get_water_volume(region=region, indices=indices)
 
 
     def volumetric_balance_statistics(self) -> str:
