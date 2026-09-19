@@ -559,3 +559,17 @@ slopes -> more erosion); measured 0.8 m of scour in 60 s on a 1e-3 slope in
 still water. That is the closure, not the gradient estimator -- the old edge
 slope diverged too -- and it is why the validation case holds the bed fixed.
 
+### GPU mode-2 time-varying boundaries stay on the Python-orchestrated loop (2026-09-19)
+
+**Context:** the single-call C RK loop pushes Python-evaluated boundaries to the
+device once per step, so RK2/RK3 substeps reused the step-start value (4 mm
+stage error on a rising tide, issue #170). PR #171 routed such domains to the
+Python-orchestrated GPU loop, which refreshes per substep and bit-matches mode 1
+at a measured cost of ≤4%.
+
+**Decision:** keep that routing as the design ("option B") and close #170.
+"Option A" (evaluate the boundary at each substep time in Python and pass a
+per-substep buffer into `evolve_one_rk*_step_gpu`) would buy back a few percent
+at the price of a device-mapped buffer and changes to every step function, and
+cannot be validated on real GPU hardware in CI until #333 has a runner.
+
