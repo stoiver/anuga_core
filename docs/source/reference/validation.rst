@@ -276,6 +276,39 @@ time-varying bed back from the SWW file.
 
 **Run time:** a few seconds.
 
+Settling basin with flow — analytical solution
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Directory:** ``analytical_exact/sediment_settling_basin/``
+
+**Physical scenario:** A straight channel 300 m long carrying a uniform
+steady flow (flat frictionless bed, 1 m deep, 0.5 m/s, held exact by
+Dirichlet boundaries at both ends). Sediment-laden water enters at the
+inflow with 100 micron silt at a fixed concentration; entrainment is
+switched off and the load settles at the well-mixed deposition rate. At
+steady state the concentration decays along the channel as
+:math:`c_0 e^{-x/L_s}` with the settling length :math:`L_s = q/(d^{*}v_s)`
+(62.5 m here), and the bed rises where the sediment lands at
+:math:`d^{*} v_s c(x)/(1-\lambda)`. The rising bed lowers the depth and
+raises the velocity together, so :math:`q` and :math:`L_s` are unchanged.
+
+**What is checked:** The steady concentration profile cell by cell
+(relative :math:`L^1` error below 1%, measured 5e-4); the bed-rise rate
+over the last 100 s (below 1%, measured 5e-4); that the flow stays the
+uniform steady state; that the profile is steady and uniform across the
+channel; and the sediment budget, net boundary inflow equals water column
+plus packed bed volume, to 1e-3 (measured 1e-14). It exercises the tracer
+advection scheme with an inflow boundary concentration, the deposition
+term, the bed update under deposition, and the tracer conservation
+accounting.
+
+**Key techniques:** ``set_tracer_boundary`` for the inflow concentration,
+``add_sediment_fraction(tau_c_star=0.0)`` to switch entrainment off,
+``check_tracer_conservation`` for the budget, ``Dirichlet_boundary`` at both
+ends of a frictionless channel for an exact uniform flow.
+
+**Run time:** a few seconds.
+
 Adding a new validation test
 ------------------------------
 

@@ -67,6 +67,13 @@
   closure can run on an evolving bed without feeding on the roughness it
   creates. `Domain.bed_slope_magnitude()` returns the slope the kernel uses.
   Both are available from the TOML `[sediment]` table.
+* Two sediment validation cases join the automated suite under
+  `validation_tests/analytical_exact/`: `sediment_erosion` (Smith-McLean
+  entrainment on an evolving bed with the slope frozen, checked against the
+  per-cell ODE) and `sediment_settling_basin` (a settling basin with flow,
+  whose steady concentration decays as `c0 exp(-x/L_s)` with
+  `L_s = q/(d* v_s)`, checked cell by cell together with the bed-rise rate
+  and the sediment budget between boundaries, water column and bed).
 * A ready-made `anuga.Region` is accepted as `region=` by
   `Quantity.set_values()` (and so `Domain.set_quantity()` and friends), the
   erosion operators and `Set_w_uh_vh_operator`, alongside the existing

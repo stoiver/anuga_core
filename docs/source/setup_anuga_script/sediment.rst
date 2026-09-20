@@ -972,5 +972,8 @@ against the reference solution for sediment settling out of still water, and
 ``validation_tests/analytical_exact/sediment_erosion`` compares the
 Smith--McLean entrainment law, its threshold, the depth-slope closure (slope
 frozen) and the bed lowering against the per-cell reference for a bed that
-erodes under still water. The notebook :doc:`/examples/notebook_sediment_transport` walks
+erodes under still water. ``validation_tests/analytical_exact/sediment_settling_basin``
+compares the steady concentration profile and bed-rise rate of a settling
+basin with flow against the closed-form exponential, and closes the
+sediment budget between boundaries, water column and bed. The notebook :doc:`/examples/notebook_sediment_transport` walks
 through the settling case.
