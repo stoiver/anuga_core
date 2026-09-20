@@ -514,8 +514,13 @@ anuga_int __triangle_line_intersect(double *line,
 
   if (u_len <= tol)
   {
-    /* A point, not a segment: inside the closed triangle or not. */
-    return __is_inside_triangle(line, triangle, 1, 1.0e-12, 1.0e-12);
+    /* A zero-length segment has no interior and selects nothing. It is
+     * what the two side edges of a structure's apron polygon are when
+     * apron = 0, and treating it as a point test pulled in the triangle
+     * across the channel bank at each end of a bridge's exchange line,
+     * which moved the bridge's discharge (the HEC-RAS bridge regressions
+     * caught it). A caller that wants a point test has is_inside_triangle. */
+    return 0;
   }
 
   double amin = 0.0, amax = 1.0;

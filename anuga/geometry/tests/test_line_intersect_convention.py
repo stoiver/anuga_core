@@ -81,3 +81,26 @@ def test_expected_count_along_a_long_mesh_line():
     idx = select(vc, [[60.0, 25.0], [140.0, 25.0]])   # y = 25 is a mesh line
     assert len(idx) == 2 * 16, len(idx)
     assert np.isclose(areas[idx].sum(), 32 * 3.125)
+
+
+def test_a_zero_length_segment_selects_nothing():
+    """The side edges of a structure's apron polygon when apron = 0. Treated
+    as a point test they pulled in the triangle across the channel bank at
+    each end of a bridge's exchange line and changed its discharge."""
+    d, vc, areas = mesh()
+    assert select(vc, [[60.0, 20.0], [60.0, 20.0]]) == []
+    assert select(vc, [[61.0, 21.0], [61.0, 21.0]]) == []      # strictly inside a triangle
+
+
+def test_a_zero_apron_polygon_selects_what_its_line_does():
+    """Region(poly=[p0, p1, p1, p0], expand_polygon=True) must equal
+    Region(line=[p0, p1]): a bridge with apron = 0 built exactly that."""
+    from anuga import Region, rectangular_cross_domain
+    d = rectangular_cross_domain(40, 20, len1=200.0, len2=50.0)
+    line = [[60.01, 19.99], [139.99, 19.99]]          # a hair off the mesh lines
+    by_line = Region(d, poly=line, expand_polygon=True)
+    degenerate = np.array([line[0], line[1], line[1], line[0]])
+    by_poly = Region(d, poly=degenerate, expand_polygon=True)
+    assert sorted(by_poly.indices.tolist()) == sorted(by_line.indices.tolist())
+    assert len(by_line.indices) > 0
+
