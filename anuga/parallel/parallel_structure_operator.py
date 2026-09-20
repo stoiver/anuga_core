@@ -20,7 +20,10 @@ def inlet_polygons(exchange_lines, end_points, apron):
     the ones that hold triangles of the region the inlet actually uses.
     """
     lines = [ensure_numeric(line, float) for line in exchange_lines]
-    if apron is None:
+    if apron is None or apron == 0.0:
+        # No apron: the exchange region is the line itself (a zero-offset
+        # polygon would be a zero-area quadrilateral that selects the same
+        # triangles, less clearly).
         return lines
     line0, line1 = lines
     n = len(line0)

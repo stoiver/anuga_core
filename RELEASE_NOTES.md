@@ -33,7 +33,14 @@
   through or along it with positive length, and not when it only touches a
   vertex or ends on an edge from outside. Selections change wherever a line
   touched triangles at a point: a 10 m exchange line on a 5 m mesh line now
-  selects the 8 triangles along it rather than 32 (or 54).
+  selects the 8 triangles along it rather than 32 (or 54), and an
+  `Inlet_operator` line that passes through mesh vertices now feeds only the
+  triangles it crosses, not every triangle meeting those vertices, so the
+  same inflow enters over a smaller area and the local stage at the inlet
+  is higher (the HEC-RAS bridge regression references were regenerated for
+  this; the gauge agreement was unchanged). A zero-length segment, such as
+  the side edges of a structure's apron polygon when `apron = 0`, selects
+  nothing.
 * Two runs writing the same SWW file used to interleave their frames on the
   shared time dimension, giving a file that opened fine and held plausible
   data with a non-monotonic time variable (#232). The writer now holds a
