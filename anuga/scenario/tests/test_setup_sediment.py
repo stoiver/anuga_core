@@ -46,7 +46,7 @@ class TestSetupSediment(unittest.TestCase):
         d = _make_domain()
         project = SimpleNamespace(sediment_data={
             'porosity': 0.28, 'c_max': 0.25, 'bed_evolution': False, 'rho_w': 1025.0,
-            'shear_closure': 'energy_slope',
+            'shear_closure': 'depth_slope', 'max_slope': 0.02, 'freeze_slope': True,
             'bed_material': 'cohesive', 'tau_crit': 0.088,
             'deposition_law': 'threshold', 'tau_d': 0.1, 'near_bed': 'rouse',
             'friction_mode': 'wilson', 'bed': 'gravel', 'grain_size': 0.02,
@@ -67,7 +67,9 @@ class TestSetupSediment(unittest.TestCase):
         self.assertAlmostEqual(d.sediment_c_max, 0.25)
         self.assertFalse(d.sediment_bed_evolution)
         self.assertAlmostEqual(d.sediment_rho_w, 1025.0)
-        self.assertEqual(d.sediment_shear_closure, 2)
+        self.assertEqual(d.sediment_shear_closure, 1)
+        self.assertAlmostEqual(d.sediment_max_slope, 0.02)
+        self.assertEqual(d.sediment_slope_frozen, 1)
         self.assertEqual(d.sediment_erosion_mode, 1)
         self.assertAlmostEqual(d.sediment_tau_crit, 0.088)
         self.assertEqual(d.sediment_deposition_mode, 1)

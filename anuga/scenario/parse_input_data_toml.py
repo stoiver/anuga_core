@@ -708,7 +708,7 @@ class ProjectDataTOML:
                         'engelund_hansen')
     SEDIMENT_KEYS = (
         'porosity', 'c_max', 'c_pack', 'bed_evolution', 'rho_w',
-        'shear_closure', 'bed_material', 'tau_crit', 'K_e',
+        'shear_closure', 'max_slope', 'freeze_slope', 'bed_material', 'tau_crit', 'K_e',
         'deposition_law', 'tau_d', 'near_bed', 'reference_height_floor',
         'friction_mode', 'k_s', 'sigma_br', 'r_d', 'r_br', 'bed', 'grain_size',
         'bedload', 'bedload_K', 'bedload_m', 'bedload_tau_c_star',
@@ -760,6 +760,17 @@ class ProjectDataTOML:
             d['bed_evolution'] = bool(sed['bed_evolution'])
 
         opt_choice('shear_closure', self.SEDIMENT_SHEAR_CLOSURES)
+        opt_float('max_slope', _v.non_negative)
+        if 'freeze_slope' in sed:
+            d['freeze_slope'] = bool(sed['freeze_slope'])
+            if d['freeze_slope'] and sed.get('shear_closure') != 'depth_slope':
+                _v.errors.append(
+                    f"[{sec}] 'freeze_slope' applies to shear_closure "
+                    f"'depth_slope' only")
+        if ('max_slope' in sed) and sed.get('shear_closure', 'quadratic_drag') == 'quadratic_drag':
+            _v.errors.append(
+                f"[{sec}] 'max_slope' applies to shear_closure 'depth_slope' "
+                f"or 'energy_slope'; quadratic_drag uses no slope")
         opt_choice('bed_material', self.SEDIMENT_BED_MATERIALS)
         opt_float('tau_crit', _v.positive)
         opt_float('K_e', _v.positive)

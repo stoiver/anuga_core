@@ -15,9 +15,11 @@ faster: a tank of still water on a 1e-3 slope scoured 0.8 m in 60 s and a
 fraction with `tau_c* = 10` (30x above the stress the imposed slope gives) was
 entrained. anugaSed keeps this in check with the undocumented domain-global
 clamp `S <- min(S, mean(S)/2)` that PHYSICS_SPEC D1a describes; ANUGA does not
-apply it. Use `'quadratic_drag'` (default) or `'energy_slope'` when the bed
-moves; `'depth_slope'` is for reproducing published anugaSed results and for
-fixed-bed checks (`validation_tests/analytical_exact/sediment_erosion`).
+apply that. Since 2026-09-20 `set_shear_closure` offers two explicit bounds:
+`max_slope` (a per-cell cap) and `freeze_slope=True` (S from the bed at setup,
+kept for the run), the latter being what the sediment_erosion validation case
+uses to evolve its bed. Without either, use `'quadratic_drag'` (default) or
+`'energy_slope'` when the bed moves.
 
 ## Structures
 

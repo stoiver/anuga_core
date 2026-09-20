@@ -281,6 +281,13 @@ struct domain {
      * divergence theorem, grad z = (1/A) sum_e z_e n_e L_e, using the edge
      * values already to hand. No neighbour access, so it offloads. */
     anuga_int sediment_shear_closure;
+    /* Bounds on S for [T-7]/[T-7e]. max_slope caps S (<= 0: no cap).
+     * slope_frozen (depth-slope only) keeps the S computed from the bed at
+     * setup, held in sediment_slope_work, instead of re-reading the evolving
+     * bed each step: the closure is otherwise self-amplifying, erosion
+     * roughening the bed it takes its stress from. */
+    double sediment_max_slope;
+    anuga_int sediment_slope_frozen;
 
     /* S_ms of [G-3]: an optional EXTERNAL source of suspended sediment --
      * hillslope yield, tributary load, rainfall washoff -- in m/s, i.e. the

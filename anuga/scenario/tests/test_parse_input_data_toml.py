@@ -2308,6 +2308,40 @@ class TestSediment(unittest.TestCase):
                          "'diameter'", "duplicate fraction name"):
             self.assertIn(fragment, msg)
 
+    def test_slope_bounds_parse_and_are_checked(self):
+        p = self._make("""
+            [sediment]
+            shear_closure = "depth_slope"
+            max_slope = 0.05
+            freeze_slope = true
+            [[sediment.fractions]]
+            name = "sand"
+            diameter = 2.0e-4
+        """)
+        self.assertAlmostEqual(p.sediment_data['max_slope'], 0.05)
+        self.assertTrue(p.sediment_data['freeze_slope'])
+        with self.assertRaises(ValueError) as cm:
+            self._make("""
+                [sediment]
+                shear_closure = "energy_slope"
+                freeze_slope = true
+                max_slope = -1.0
+                [[sediment.fractions]]
+                name = "sand"
+                diameter = 2.0e-4
+            """)
+        self.assertIn("'freeze_slope' applies", str(cm.exception))
+        self.assertIn("'max_slope'", str(cm.exception))
+        with self.assertRaises(ValueError) as cm:
+            self._make("""
+                [sediment]
+                max_slope = 0.1
+                [[sediment.fractions]]
+                name = "sand"
+                diameter = 2.0e-4
+            """)
+        self.assertIn("quadratic_drag uses no slope", str(cm.exception))
+
     def test_fixed_bed_does_not_flip_elevation_storage(self):
         p = self._make("""
             [sediment]

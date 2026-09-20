@@ -20,6 +20,7 @@
       ~Domain.apply_fractional_steps
       ~Domain.apply_protection_against_isolated_degenerate_timesteps
       ~Domain.backup_conserved_quantities
+      ~Domain.bed_slope_magnitude
       ~Domain.boundary_statistics
       ~Domain.build_boundary_dictionary
       ~Domain.build_tagged_elements_dictionary

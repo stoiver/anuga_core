@@ -60,6 +60,13 @@
 
 ## Smaller improvements
 
+* `set_shear_closure()` takes two bounds for the slope closures:
+  `max_slope` caps the per-cell slope (a stated replacement for anugaSed's
+  undocumented global clamp), and `freeze_slope=True` (depth-slope only)
+  takes the slope from the bed at setup and keeps it, so the anugaSed
+  closure can run on an evolving bed without feeding on the roughness it
+  creates. `Domain.bed_slope_magnitude()` returns the slope the kernel uses.
+  Both are available from the TOML `[sediment]` table.
 * A ready-made `anuga.Region` is accepted as `region=` by
   `Quantity.set_values()` (and so `Domain.set_quantity()` and friends), the
   erosion operators and `Set_w_uh_vh_operator`, alongside the existing

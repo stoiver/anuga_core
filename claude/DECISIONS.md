@@ -573,3 +573,21 @@ per-substep buffer into `evolve_one_rk*_step_gpu`) would buy back a few percent
 at the price of a device-mapped buffer and changes to every step function, and
 cannot be validated on real GPU hardware in CI until #333 has a runner.
 
+### Bounds for the depth-slope closure: a per-cell cap and a frozen slope (2026-09-20)
+
+**Context:** `'depth_slope'` reads S from the evolving bed and feeds on the
+roughness uneven erosion creates (KNOWN_ISSUES). anugaSed contains it with an
+undocumented domain-global clamp `S <- min(S, mean(S)/2)` that also divides by a
+mean cell size.
+
+**Decision:** two explicit, documented bounds on `set_shear_closure` rather than
+reproducing that clamp: `max_slope` caps S per cell (both slope closures), and
+`freeze_slope=True` (depth-slope only) takes S from the bed at setup and keeps it
+for the run. The frozen slope is computed on the host (`bed_slope_magnitude`, the
+kernel's least-squares estimator in numpy) into `sediment_slope_work`, which is
+now mapped `to:` the device so every interface rebuild re-uploads it; the kernel
+skips its slope pre-pass when frozen. Computed eagerly at `set_shear_closure`
+and again when the first grain size allocates the array (the later wins), so no
+device sync is needed mid-run. The sediment_erosion validation case now evolves
+its bed under a frozen slope against a per-cell ODE with depth feedback.
+

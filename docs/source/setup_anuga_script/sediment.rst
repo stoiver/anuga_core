@@ -868,8 +868,13 @@ edge values the limiter rebuilds each step, so a wall cell sees the same
 slope as its neighbours. ``'depth_slope'`` on an evolving bed feeds back on
 itself -- erosion roughens the bed and steeper local slopes erode faster --
 which is the closure's own property; anugaSed contains it with the global
-clamp described in the specification. Prefer the other two closures when
-the bed moves. On a sloping channel over 30 s, correlation of the bed-change field
+clamp described in the specification. ANUGA offers two stated bounds
+instead: ``set_shear_closure('depth_slope', max_slope=0.05)`` caps the slope
+per cell, and ``set_shear_closure('depth_slope', freeze_slope=True)`` takes
+the slope from the bed at setup and keeps it, so the closure sees the reach
+slope it was written for while the bed evolves under it
+(:meth:`~anuga.Domain.bed_slope_magnitude` returns that slope). Prefer the
+other two closures when the bed moves and neither bound is wanted. On a sloping channel over 30 s, correlation of the bed-change field
 against the original operator:
 
 .. list-table::
@@ -965,7 +970,7 @@ analytical cases: ``validation_tests/analytical_exact/sediment_settling``
 compares the deposition term, the sediment mass balance and the bed update
 against the reference solution for sediment settling out of still water, and
 ``validation_tests/analytical_exact/sediment_erosion`` compares the
-Smith--McLean entrainment law, its threshold and the depth-slope closure
-against the closed-form relaxation to the equilibrium concentration over a
-fixed bed. The notebook :doc:`/examples/notebook_sediment_transport` walks
+Smith--McLean entrainment law, its threshold, the depth-slope closure (slope
+frozen) and the bed lowering against the per-cell reference for a bed that
+erodes under still water. The notebook :doc:`/examples/notebook_sediment_transport` walks
 through the settling case.

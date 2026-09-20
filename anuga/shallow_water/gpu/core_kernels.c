@@ -817,6 +817,8 @@ void core_apply_bedload(struct domain *D, double timestep) {
     const anuga_int wbed = D->sediment_wilson_bed;
     const double wD = D->sediment_wilson_D;
     const anuga_int shear_closure = D->sediment_shear_closure;
+    const double max_slope = D->sediment_max_slope;
+    const anuga_int slope_frozen = D->sediment_slope_frozen;
 
     double * restrict stage_cv = D->stage_centroid_values;
     double * restrict bed_cv = D->bed_centroid_values;
@@ -830,6 +832,7 @@ void core_apply_bedload(struct domain *D, double timestep) {
     double * restrict qby = D->sediment_qby;
     anuga_int * restrict neighbours = D->neighbours;
     anuga_geom_t * restrict cc = D->centroid_coordinates;
+    double * restrict slope_w = D->sediment_slope_work;
     anuga_geom_t * restrict normals = D->normals;
     anuga_geom_t * restrict edgelengths = D->edgelengths;
     anuga_geom_t * restrict areas = D->areas;
@@ -880,9 +883,12 @@ void core_apply_bedload(struct domain *D, double timestep) {
 
         /* Same closure as the suspended source: [T-1], [T-7] or [T-7e].
          * This pass only reads the bed, so the slope can be taken here. */
-        const double S = (shear_closure == 1) ? core_centroid_slope(bed_cv, neighbours, cc, k)
-                       : (shear_closure == 2) ? core_centroid_slope(stage_cv, neighbours, cc, k)
-                       : 0.0;
+        double S = (shear_closure == 1)
+                     ? (slope_frozen ? slope_w[k]
+                                     : core_centroid_slope(bed_cv, neighbours, cc, k))
+                 : (shear_closure == 2) ? core_centroid_slope(stage_cv, neighbours, cc, k)
+                 : 0.0;
+        if (max_slope > 0.0 && S > max_slope) S = max_slope;
         const double tbr = core_tau_b_over_rho(shear_closure, f_c, vel2, grav,
                                                h, S);
 
@@ -1306,6 +1312,8 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     const anuga_int dep_mode = D->sediment_deposition_mode;
     const double tau_d = D->sediment_tau_d;
     const anuga_int shear_closure = D->sediment_shear_closure;
+    const double max_slope = D->sediment_max_slope;
+    const anuga_int slope_frozen = D->sediment_slope_frozen;
     const double h_eps = D->epsilon;
     const double grav = D->g;
 
@@ -1356,13 +1364,15 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
      * bed when it evolves, so taken inside that loop it would see whatever a
      * preceding iteration or another thread had already done to a
      * neighbour: loop-order dependent, and mode 1 and mode 2 disagreed. */
-    if (shear_closure == 1 || shear_closure == 2) {
+    if ((shear_closure == 1 && !slope_frozen) || shear_closure == 2) {
         const double * restrict f = (shear_closure == 2) ? stage_cv : bed_cv;
         OMP_PARALLEL_LOOP
         for (anuga_int k = 0; k < n; k++) {
             slope_w[k] = core_centroid_slope(f, neighbours_r, cc_r, k);
         }
     }
+    /* With a frozen depth-slope, slope_w holds the slope of the bed at
+     * setup (Domain.set_shear_closure / bed_slope_magnitude). */
 
     OMP_PARALLEL_LOOP
     for (anuga_int k = 0; k < n; k++) {
@@ -1422,8 +1432,9 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
         }
 
         /* tau_b/rho under the selected closure: [T-1], [T-7] or [T-7e]. */
-        const double S = (shear_closure == 1 || shear_closure == 2)
-                       ? slope_w[k] : 0.0;
+        double S = (shear_closure == 1 || shear_closure == 2)
+                 ? slope_w[k] : 0.0;
+        if (max_slope > 0.0 && S > max_slope) S = max_slope;
         const double tbr = core_tau_b_over_rho(shear_closure, f_c, vel2, grav,
                                                h, S);
 
