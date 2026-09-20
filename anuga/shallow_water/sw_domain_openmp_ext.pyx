@@ -63,6 +63,12 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double* sediment_qby
 		double* sediment_qba
 		double sediment_c_pack
+		anuga_int vegetation_mode
+		double vegetation_Cd
+		double vegetation_bed_chezy
+		double* veg_density_centroid_values
+		double* veg_diameter_centroid_values
+		double* veg_height_centroid_values
 		anuga_int sediment_friction_mode
 		double sediment_manning_ll
 		anuga_int sediment_wilson_bed
@@ -183,6 +189,7 @@ cdef extern from "sw_domain_openmp.c" nogil:
 	anuga_int _openmp_update_conserved_quantities(domain* D, double timestep)
 	void _openmp_manning_friction_flat_semi_implicit(domain *D)
 	void _openmp_manning_friction_sloped_semi_implicit(domain *D)
+	void _openmp_vegetation_friction_semi_implicit(domain *D)
 	void _openmp_manning_friction_sloped_semi_implicit_edge_based(domain *D)
 	anuga_int _openmp_saxpy_conserved_quantities(domain *D, double a, double b, double c)
 	anuga_int _openmp_backup_conserved_quantities(domain *D)
@@ -251,6 +258,21 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.sediment_bedload_K = getattr(domain_py_object, 'sediment_bedload_K', 3.97)
 	D.sediment_bedload_m = getattr(domain_py_object, 'sediment_bedload_m', 1.5)
 	D.sediment_bedload_tau_c_star = getattr(domain_py_object, 'sediment_bedload_tau_c_star', 0.0495)
+	cdef double[::1] veg1
+	D.vegetation_mode = getattr(domain_py_object, 'vegetation_mode', 0)
+	D.vegetation_Cd = getattr(domain_py_object, 'vegetation_Cd', 1.68)
+	D.vegetation_bed_chezy = getattr(domain_py_object, 'vegetation_bed_chezy', 65.0)
+	if D.vegetation_mode > 0:
+		veg1 = domain_py_object.quantities['veg_density'].centroid_values
+		D.veg_density_centroid_values = &veg1[0]
+		veg1 = domain_py_object.quantities['veg_diameter'].centroid_values
+		D.veg_diameter_centroid_values = &veg1[0]
+		veg1 = domain_py_object.quantities['veg_height'].centroid_values
+		D.veg_height_centroid_values = &veg1[0]
+	else:
+		D.veg_density_centroid_values = NULL
+		D.veg_diameter_centroid_values = NULL
+		D.veg_height_centroid_values = NULL
 	D.sediment_friction_mode = getattr(domain_py_object, 'sediment_friction_mode', 0)
 	D.sediment_manning_ll = getattr(domain_py_object, 'sediment_manning_ll', 0.065)
 	D.sediment_wilson_bed = getattr(domain_py_object, 'sediment_wilson_bed', 0)
@@ -1351,6 +1373,13 @@ def manning_friction_flat_semi_implicit(object domain_py_object, update_domain_c
 
 	with nogil:
 		_openmp_manning_friction_flat_semi_implicit(D)
+
+def vegetation_friction_semi_implicit(object domain_py_object, update_domain_c_struct=False):
+	"""Baptist vegetation drag (spec 8) into the semi-implicit update; no-op when off."""
+	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=update_domain_c_struct)
+
+	with nogil:
+		_openmp_vegetation_friction_semi_implicit(D)
 
 def manning_friction_sloped_semi_implicit(object domain_py_object, update_domain_c_struct=False):
 	

@@ -58,6 +58,7 @@ double core_negative_cells_volume(struct domain *D);
 
 // Manning friction (flat, semi-implicit)
 void core_manning_friction_flat_semi_implicit(struct domain *D);
+void core_vegetation_friction_semi_implicit(struct domain *D);
 
 // Manning friction (sloped, semi-implicit)
 void core_manning_friction_sloped_semi_implicit(struct domain *D);

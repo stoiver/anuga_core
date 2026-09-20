@@ -848,6 +848,11 @@ class Domain(Generic_Domain):
         from .friction import manning_friction_semi_implicit
         self.forcing_terms.append(manning_friction_semi_implicit)
 
+        # Vegetation drag (spec 8), off until set_vegetation_drag()
+        self.vegetation_mode = 0
+        self.vegetation_Cd = 1.68
+        self.vegetation_bed_chezy = 65.0
+
 
         #-------------------------------
         # Stored output
@@ -3810,6 +3815,68 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             #print(self.checkpoint_dir, self.checkpoint_step)
         else:
             self.checkpoint = False
+
+    VEGETATION_FORMULATIONS = {'off': 0, 'baptist': 1}
+
+    def set_vegetation_drag(self, density=None, diameter=None, height=None,
+                            formulation='baptist', Cd=1.68, bed_chezy=65.0):
+        """Add the drag of a field of stems to the friction (spec 8).
+
+        The vegetated cells get a friction slope from the Chezy coefficient
+        of Baptist et al. (2007),
+
+            Cv = (Cb^-2 + Cd m D min(h, hv) / (2 g))^-1/2
+                 + (sqrt(g) / kappa) ln(max(h, hv) / hv),
+
+        applied semi-implicitly like Manning friction and on top of it. Cells
+        with no stems are untouched, so open water keeps its Manning `n` and
+        vegetation carries `(m, D, hv)`, usually with `n` = 0 there. Stems
+        taller than the flow are emergent; when the flow overtops them the
+        logarithmic term adds the overflow.
+
+        Parameters
+        ----------
+        density, diameter, height : float, array or callable
+            Stem density `m` (stems per m^2), stem diameter `D` (m) and stem
+            height `hv` (m), given as `set_quantity` accepts them: a constant,
+            one value per cell centroid, or a function of x and y. They become
+            the quantities `veg_density`, `veg_diameter` and `veg_height`.
+            A cell with `m` = 0 or `hv` = 0 has no vegetation.
+        formulation : str
+            `'baptist'` (the only one so far) or `'off'`.
+        Cd : float
+            Stem drag coefficient, 1.68 (Delta-X Wax Lake model).
+        bed_chezy : float
+            Bed Chezy coefficient `Cb` inside the stems, 65.
+
+        Notes
+        -----
+        Runs in the friction kernel of both compute modes; on a GPU build
+        the three fields are mapped to the device once, so call this before
+        the first evolve or the device copy is stale. On a distributed run
+        call it after `distribute()`, on every rank, as for `set_quantity`.
+        """
+        if formulation not in self.VEGETATION_FORMULATIONS:
+            raise ValueError('unknown vegetation drag formulation %r; expected one of %r'
+                             % (formulation, sorted(self.VEGETATION_FORMULATIONS)))
+        mode = self.VEGETATION_FORMULATIONS[formulation]
+        if mode:
+            from anuga.abstract_2d_finite_volumes.quantity import Quantity
+            for name, value in (('veg_density', density), ('veg_diameter', diameter),
+                                ('veg_height', height)):
+                if value is None:
+                    raise ValueError('set_vegetation_drag needs density, diameter and height')
+                if name not in self.quantities:
+                    Quantity(self, name=name, register=True)
+                self.quantities[name].set_values(value, location='centroids')
+            self.vegetation_Cd = float(Cd)
+            self.vegetation_bed_chezy = float(bed_chezy)
+        self.vegetation_mode = mode
+
+        self._Domain_C_struct = None
+        self.gpu_interface = None
+        if hasattr(self, '_gpu_boundary_info_initialized'):
+            del self._gpu_boundary_info_initialized
 
     def set_sloped_mannings_function(self, flag: bool = True) -> None:
         """Set mannings friction function to use the sloped

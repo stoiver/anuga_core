@@ -175,6 +175,12 @@ void _openmp_manning_friction_flat_semi_implicit(const struct domain *__restrict
 
     
 
+void _openmp_vegetation_friction_semi_implicit(const struct domain *__restrict D)
+{
+    // Unified: calls core_vegetation_friction_semi_implicit from core_kernels.c
+    core_vegetation_friction_semi_implicit((struct domain *)D);
+}
+
 void _openmp_manning_friction_sloped_semi_implicit(const struct domain *__restrict D)
 {
     // Unified: calls core_manning_friction_sloped_semi_implicit from core_kernels.c

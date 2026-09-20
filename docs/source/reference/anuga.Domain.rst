@@ -231,6 +231,7 @@
       ~Domain.set_use_active_set
       ~Domain.set_use_kinematic_viscosity
       ~Domain.set_use_optimise_dry_cells
+      ~Domain.set_vegetation_drag
       ~Domain.set_using_centroid_averaging
       ~Domain.set_using_discontinuous_elevation
       ~Domain.set_zone

@@ -137,6 +137,17 @@ struct domain {
     
     double* friction_centroid_values;
 
+    /* Vegetation drag, spec 8 (Baptist et al. 2007), alongside Manning.
+     *   vegetation_mode 0 = off, 1 = baptist
+     * The three fields are the centroid values of the veg_density (stems per
+     * m^2), veg_diameter (m) and veg_height (m) quantities; NULL when off. */
+    anuga_int vegetation_mode;
+    double vegetation_Cd;            /* stem drag coefficient, 1.68 */
+    double vegetation_bed_chezy;     /* Cb, 65 */
+    double* veg_density_centroid_values;
+    double* veg_diameter_centroid_values;
+    double* veg_height_centroid_values;
+
     double* stage_backup_values;
     double* xmom_backup_values;
     double* ymom_backup_values;

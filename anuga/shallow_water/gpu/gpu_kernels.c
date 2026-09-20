@@ -222,6 +222,8 @@ void gpu_manning_friction(struct gpu_domain *GD) {
     } else {
         core_manning_friction_flat_semi_implicit(&GD->D);
     }
+    // Vegetation drag (spec 8) on top of Manning; returns at once when off.
+    core_vegetation_friction_semi_implicit(&GD->D);
 
     // Count FLOPs: 15 FLOPs per element (sqrt, pow, semi-implicit)
     if (GD->flops.enabled) {
@@ -237,11 +239,12 @@ void gpu_manning_friction(struct gpu_domain *GD) {
 // for why compute_fluxes and extrapolate cannot join them.
 //
 // Falls back to the separate kernels when sloped Manning is selected, since
-// that variant reads vertex values and is not inlined in the fused kernel.
+// that variant reads vertex values and is not inlined in the fused kernel,
+// and when vegetation drag is on, which only the separate path applies.
 void gpu_forcing_and_update(struct gpu_domain *GD, double timestep,
                             int apply_forcing, int do_saxpy,
                             double a, double b) {
-    if (apply_forcing && GD->use_sloped_mannings) {
+    if (apply_forcing && (GD->use_sloped_mannings || GD->D.vegetation_mode)) {
         gpu_manning_friction(GD);
         gpu_update_conserved_quantities(GD, timestep);
         if (do_saxpy) gpu_saxpy_conserved_quantities(GD, a, b);

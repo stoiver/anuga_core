@@ -2428,6 +2428,76 @@ void core_manning_friction_flat_semi_implicit(struct domain *D) {
 }
 
 // ============================================================================
+// Vegetation drag (Baptist et al. 2007), semi-implicit   spec 8
+// ============================================================================
+//
+// The drag of a field of stems on the flow, as a friction slope
+//
+//   d(uh)/dt = -g uh |q| / (Cv^2 h^2)
+//
+// with the vegetated Chezy coefficient of Baptist et al. (2007), J. Hydraul.
+// Res. 45, Eq (16):
+//
+//   Cv = (Cb^-2 + Cd m D min(h, hv) / (2 g))^-1/2
+//        + (sqrt(g) / kappa) ln(max(h, hv) / hv)
+//
+// Cb the bed Chezy coefficient, Cd the stem drag coefficient, m the stem
+// density (1/m^2), D the stem diameter (m), hv the stem height (m). Emergent
+// stems (h <= hv) give the first term alone; submerged stems add the
+// logarithmic overflow term. Same semi-implicit treatment as Manning: the
+// slope is accumulated into the semi-implicit update and applied as a
+// division in update_conserved_quantities, so it can only ever reduce the
+// momentum, never reverse it -- the constraint spec 8.2 asks for.
+//
+// Cells with no stems (m <= 0) are untouched, so the field lives alongside
+// Manning friction: open water carries n, vegetation carries (m, D, hv)
+// with n = 0, as in the Delta-X Wax Lake model this was written for.
+//
+// Cell-local, so it offloads like the Manning kernels.
+void core_vegetation_friction_semi_implicit(struct domain *D) {
+    if (D->vegetation_mode == 0) {
+        return;
+    }
+    const anuga_int n = D->number_of_elements;
+    const double g = D->g;
+    const double minimum_allowed_height = D->minimum_allowed_height;
+    const double a1 = 1.0 / (D->vegetation_bed_chezy * D->vegetation_bed_chezy);
+    const double Cd_over_2g = D->vegetation_Cd / (2.0 * g);
+    const double a3 = sqrt(g) / 0.4;      /* kappa = 0.4 */
+
+    double * restrict stage_cv = D->stage_centroid_values;
+    double * restrict bed_cv = D->bed_centroid_values;
+    double * restrict xmom_cv = D->xmom_centroid_values;
+    double * restrict ymom_cv = D->ymom_centroid_values;
+    double * restrict m_cv = D->veg_density_centroid_values;
+    double * restrict D_cv = D->veg_diameter_centroid_values;
+    double * restrict hv_cv = D->veg_height_centroid_values;
+    double * restrict xmom_siu = D->xmom_semi_implicit_update;
+    double * restrict ymom_siu = D->ymom_semi_implicit_update;
+
+    OMP_PARALLEL_LOOP
+    for (anuga_int k = 0; k < n; k++) {
+        const double m = m_cv[k];
+        if (!(m > 0.0)) continue;
+        const double h = stage_cv[k] - bed_cv[k];
+        if (h < minimum_allowed_height) continue;
+        const double hv = hv_cv[k];
+        if (!(hv > 0.0)) continue;
+        const double uh = xmom_cv[k];
+        const double vh = ymom_cv[k];
+        const double abs_mom = sqrt(uh * uh + vh * vh);
+        const double a2 = D_cv[k] * m * Cd_over_2g;
+        double Cv = 1.0 / sqrt(a1 + a2 * fmin(h, hv));
+        if (h > hv) {
+            Cv += a3 * log(h / hv);
+        }
+        const double S = -g * abs_mom / (Cv * Cv * h * h);
+        xmom_siu[k] += S * uh;
+        ymom_siu[k] += S * vh;
+    }
+}
+
+// ============================================================================
 // Manning friction (sloped, semi-implicit)
 // ============================================================================
 
