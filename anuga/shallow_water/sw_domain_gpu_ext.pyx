@@ -143,7 +143,9 @@ cdef extern from "gpu_domain.h" nogil:
         double* sediment_source_limited
         double* sediment_slope_work
         int64_t* sediment_bed_exhausted
+        int64_t* sediment_bedload_open
         double* sediment_qbx
+        double* sediment_qba
         double* sediment_qby
         double sediment_c_pack
         int64_t sediment_friction_mode
@@ -942,6 +944,8 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.sediment_qbx = &sed1[0]
         sed1 = domain_object.sediment_qby
         D.sediment_qby = &sed1[0]
+        sed1 = domain_object.sediment_qba
+        D.sediment_qba = &sed1[0]
         # [L-5]. See the note in the OpenMP binding: the scratch is
         # dereferenced whenever a class exists, the base only when set.
         sed2 = domain_object.sediment_source_limited
@@ -952,6 +956,11 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.sediment_bed_exhausted = &sedi[0]
         sed1 = domain_object.sediment_repose_dz
         D.sediment_repose_dz = &sed1[0]
+        sedi = domain_object.sediment_bedload_open
+        if sedi.shape[0] > 0:
+            D.sediment_bedload_open = &sedi[0]
+        else:
+            D.sediment_bedload_open = NULL
         if domain_object.sediment_has_z_base:
             sed1 = domain_object.sediment_z_base
             D.sediment_z_base = &sed1[0]
@@ -966,11 +975,13 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.sediment_reference_height = NULL
         D.sediment_qbx = NULL
         D.sediment_qby = NULL
+        D.sediment_qba = NULL
         D.sediment_z_base = NULL
         D.sediment_source_limited = NULL
         D.sediment_slope_work = NULL
         D.sediment_bed_exhausted = NULL
         D.sediment_repose_dz = NULL
+        D.sediment_bedload_open = NULL
     # Phase 2: wire the tracer arrays for the device. The pointers must be set
     # whenever number_of_tracers > 0 -- the shared kernels guard on that count
     # and dereference all six, so a NULL here is CUDA_ERROR_ILLEGAL_ADDRESS on

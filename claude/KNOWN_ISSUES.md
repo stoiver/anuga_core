@@ -738,3 +738,20 @@ SILENTLY WRONG results — the lake-at-rest well-balance check exploded from
 blocking assumptions the runtime override violates. Never benchmark this knob
 without a physics gate; `OMP_NUM_TEAMS` / `OMP_THREAD_LIMIT` were separately
 measured as safe-but-useless (nvc defaults are already right).
+
+## Bedload is first order in the bed
+
+The bedload edge flux is centred with Rusanov dissipation scaled by the
+bed-wave speed (`core_apply_bedload`, pass 2). That makes it monotone and
+exactly conservative, but first order: a migrating bed form is smoothed at
+O(dx). The `sediment_bed_hump` validation case measures 9.9% L1 error of the
+hump volume at 10 m cells and 5.5% at 5 m. The bare centred flux it replaced
+was unstable on that case (scour hole at the upstream toe, overshoot at the
+crest, noise fed back into the flow). The upgrade, if sharper bed forms are
+ever needed, is a limited (MUSCL) reconstruction of z at the edge feeding the
+same Rusanov flux.
+
+The bed update runs in a pass of its own (pass 3): the Rusanov term reads the
+neighbour's bed elevation, so writing the bed inside the divergence loop made
+the two sides of an edge see different states and broke conservation. Any
+future term that reads a neighbour's bed must keep that separation.

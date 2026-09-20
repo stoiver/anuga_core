@@ -58,8 +58,10 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double* sediment_source_limited
 		double* sediment_slope_work
 		anuga_int* sediment_bed_exhausted
+		anuga_int* sediment_bedload_open
 		double* sediment_qbx
 		double* sediment_qby
+		double* sediment_qba
 		double sediment_c_pack
 		anuga_int sediment_friction_mode
 		double sediment_manning_ll
@@ -511,6 +513,8 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 			D.sediment_qbx = &sed1[0]
 			sed1 = domain_py_object.sediment_qby
 			D.sediment_qby = &sed1[0]
+			sed1 = domain_py_object.sediment_qba
+			D.sediment_qba = &sed1[0]
 			# [L-5]. sediment_source_limited is dereferenced by the source
 			# kernel whenever there is a class, so it is bound unconditionally
 			# alongside them; z_base only when a base was actually set.
@@ -522,6 +526,11 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 			D.sediment_bed_exhausted = &sedi[0]
 			sed1 = domain_py_object.sediment_repose_dz
 			D.sediment_repose_dz = &sed1[0]
+			sedi = domain_py_object.sediment_bedload_open
+			if sedi.shape[0] > 0:
+				D.sediment_bedload_open = &sedi[0]
+			else:
+				D.sediment_bedload_open = NULL
 			if domain_py_object.sediment_has_z_base:
 				sed1 = domain_py_object.sediment_z_base
 				D.sediment_z_base = &sed1[0]
@@ -536,11 +545,13 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 			D.sediment_reference_height = NULL
 			D.sediment_qbx = NULL
 			D.sediment_qby = NULL
+			D.sediment_qba = NULL
 			D.sediment_z_base = NULL
 			D.sediment_source_limited = NULL
 			D.sediment_slope_work = NULL
 			D.sediment_bed_exhausted = NULL
 			D.sediment_repose_dz = NULL
+			D.sediment_bedload_open = NULL
 		tr2 = domain_py_object.tracer_boundary_flux
 		D.tracer_boundary_flux = &tr2[0, 0]
 		tr1 = domain_py_object.tracer_boundary_flux_sum
@@ -554,11 +565,13 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 		D.sediment_reference_height = NULL
 		D.sediment_qbx = NULL
 		D.sediment_qby = NULL
+		D.sediment_qba = NULL
 		D.sediment_z_base = NULL
 		D.sediment_source_limited = NULL
 		D.sediment_slope_work = NULL
 		D.sediment_bed_exhausted = NULL
 		D.sediment_repose_dz = NULL
+		D.sediment_bedload_open = NULL
 		D.tracer_centroid_values = NULL
 		D.tracer_edge_values = NULL
 		D.tracer_boundary_values = NULL

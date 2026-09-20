@@ -49,7 +49,8 @@ def setup_sediment(domain, project):
         domain.set_bedload(
             formula=sed['bedload'],
             K=sed.get('bedload_K'), m=sed.get('bedload_m'),
-            tau_c_star=sed.get('bedload_tau_c_star'))
+            tau_c_star=sed.get('bedload_tau_c_star'),
+            open_boundaries=sed.get('bedload_open_boundaries'))
 
     if 'angle_of_repose' in sed:
         domain.set_angle_of_repose(

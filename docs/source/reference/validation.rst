@@ -341,6 +341,38 @@ at both ends of a Manning channel for exact normal flow.
 
 **Run time:** a few seconds.
 
+Migrating bed hump under bedload — analytical solution
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Directory:** ``analytical_exact/sediment_bed_hump/``
+
+**Physical scenario:** The classic Exner test of Hudson and Sweby (2003).
+A frictionless channel 1000 m long carries uniform subcritical flow, 10 m
+deep at 1 m/s, held by Dirichlet boundaries at both ends, over a flat bed
+with a low sin-squared hump. Bedload follows Grass's law
+:math:`q_b = A_g u^3` and the bed moves by its divergence; the inflow and
+outflow are open to bedload. With the free surface and discharge frozen,
+Exner reduces to a scalar conservation law whose solution is carried along
+characteristics: the hump migrates downstream, faster the higher the bed,
+and its front steepens towards a shock. The run stops at half the shock
+time.
+
+**What is checked:** The bed against the characteristic solution cell by
+cell at the end of the run (relative :math:`L^1` error below 10% of the
+hump volume, measured 5.5% at 5 m cells and 9.9% at 10 m: the bedload
+flux is first order); the crest position (within two cells); that the bed
+volume is conserved, the flat reaches upstream and downstream do not move,
+and the flow stays close to uniform. It exercises the Grass law, the
+bedload divergence and bed update, and the open bedload boundaries. This
+case is what exposed the instability of the earlier bare centred bedload
+flux.
+
+**Key techniques:** ``set_bedload('grass', K=A_g, open_boundaries=(...))``,
+``initialize_sediment_operator(bed_evolution=True)``, a registered fraction
+whose grain size does not enter (Grass is total load).
+
+**Run time:** about a minute.
+
 Adding a new validation test
 ------------------------------
 

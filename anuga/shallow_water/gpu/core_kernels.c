@@ -779,6 +779,10 @@ static inline double core_tau_b_over_rho(anuga_int closure, double f_c,
 //   [K-1]  q_b* = K tau_x^m                 tau_x = tau* - tau_c*  [T-4]
 //   [K-5]  q_b* = 0.05 tau*^2.5 / f_c       Engelund-Hansen, no threshold
 //   [K-2]  q_b  = q_b* sqrt(R g) d^1.5
+//   [K-6]  q_b  = A_g |u|^m                 Grass, total load, no threshold;
+//                                           dimensional as it stands, so [K-2]
+//                                           does not apply and the classes do
+//                                           not enter
 //   [K-4]  q_b is parallel to the bed shear stress, hence to (u, v)
 //   [K-3]  dz/dt = -(1/(1-lambda)) div q_b
 //
@@ -787,13 +791,23 @@ static inline double core_tau_b_over_rho(anuga_int closure, double f_c,
 // redistributes bed material and conserves total bed volume exactly. That is
 // the property to test it with.
 //
-// Two passes, because the divergence at cell k needs its neighbours' q_b:
-// pass 1 fills the per-cell transport vector, pass 2 takes the divergence.
-// Both are ordinary cell loops, so both offload.
+// Three passes, because the divergence at cell k needs its neighbours' q_b
+// and, through the Rusanov term, their bed elevation: pass 1 fills the
+// per-cell transport vector, pass 2 takes the divergence into a scratch,
+// pass 3 applies it. The bed is not written until every cell has read it,
+// so the two sides of an edge always see the same state and the flux stays
+// antisymmetric. All are ordinary cell loops, so all offload.
 //
-// Edge flux is CENTRED; see the note at the flux itself for why upwinding was
-// tried and rejected. Boundary edges carry zero bedload flux, which is what
-// makes the closed-domain conservation test exact.
+// Edge flux is CENTRED WITH RUSANOV DISSIPATION; see the note at the flux
+// itself for why plain upwinding was tried and rejected, and why the bare
+// centred flux was not enough. Boundary edges carry zero bedload flux, which is what
+// makes the closed-domain conservation test exact -- unless the edge has been
+// declared OPEN (sediment_bedload_open, set per boundary tag from Python), in
+// which case the flux through it is the cell's own q_b.n: zero gradient, so
+// bedload leaves through an outflow at the rate it arrives and enters through
+// an inflow at the rate the first cell carries it away (equilibrium supply).
+// Without that an inflow cell exports and never imports, and digs a hole that
+// travels downstream at the bed-wave speed.
 void core_apply_bedload(struct domain *D, double timestep) {
     const anuga_int mode = D->sediment_bedload_mode;
     const anuga_int n_classes = D->n_sediment_classes;
@@ -830,6 +844,12 @@ void core_apply_bedload(struct domain *D, double timestep) {
     double * restrict sedR = D->sediment_R;
     double * restrict qbx = D->sediment_qbx;
     double * restrict qby = D->sediment_qby;
+    /* Rusanov coefficient per cell: |d q_b / d z| / |q_b| = gamma / h, so
+     * that gamma/h * |q_b . n| bounds the bed-wave speed across the edge. */
+    double * restrict qba = D->sediment_qba;
+    /* The bed change of this step, held until every cell has read the bed.
+     * The repose kernel's Jacobi scratch, free between its calls. */
+    double * restrict dzs = D->sediment_repose_dz;
     anuga_int * restrict neighbours = D->neighbours;
     anuga_geom_t * restrict cc = D->centroid_coordinates;
     double * restrict slope_w = D->sediment_slope_work;
@@ -842,6 +862,8 @@ void core_apply_bedload(struct domain *D, double timestep) {
     anuga_int * restrict exhausted = D->sediment_bed_exhausted;
     const anuga_int has_z_base = (D->sediment_has_z_base
                                   && z_base != NULL && exhausted != NULL);
+    /* Per boundary edge, indexed by -neighbour - 1: 1 where bedload passes. */
+    anuga_int * restrict bopen = D->sediment_bedload_open;
 
     if (one_minus_lambda <= 0.0) {
         return;
@@ -852,6 +874,7 @@ void core_apply_bedload(struct domain *D, double timestep) {
     for (anuga_int k = 0; k < n; k++) {
         qbx[k] = 0.0;
         qby[k] = 0.0;
+        qba[k] = 0.0;
 
         const double h = fmax(stage_cv[k] - bed_cv[k], 0.0);
         if (h <= minimum_allowed_height) {
@@ -892,28 +915,54 @@ void core_apply_bedload(struct domain *D, double timestep) {
         const double tbr = core_tau_b_over_rho(shear_closure, f_c, vel2, grav,
                                                h, S);
 
+        /* q_b_total is the magnitude; dq_total is h |dq_b/dz| at fixed q
+         * and w, which the Rusanov term below needs. With u = q/h: Grass
+         * q_b ~ u^m gives m q_b; the power law in the Shields stress, which
+         * goes as f_c u^2 ~ h^(-7/3) under Manning, gives m (7/3) (tau_star
+         * over tau_x) q_b per class; Engelund-Hansen, tau_star^2.5 over f_c
+         * ~ h^(-5.5), gives 5.5 q_b. Wilson's f_c varies less with h than
+         * Manning's, so 7/3 over-estimates there, which only adds
+         * dissipation. */
         double q_b_total = 0.0;
-        for (anuga_int s = 0; s < n_classes; s++) {
+        double dq_total = 0.0;
+        if (mode == 3) {
+            /* [K-6] Grass. A_g (in K) and the exponent (in m) are the whole
+             * law: no stress, no threshold, no grain size. */
+            q_b_total = K * pow(speed, mexp);
+            dq_total = mexp * q_b_total;
+        }
+        for (anuga_int s = 0; s < n_classes && mode != 3; s++) {
             const double Rgd = sedR[s] * grav * diam[s];
             if (!(Rgd > 0.0)) continue;
             const double tau_star = tbr / Rgd;
 
             double q_star;
+            double dfac;
             if (mode == 2) {
                 /* [K-5] Engelund-Hansen, total load, NO threshold. Subtracting
                  * tau_c* here would silently make it a different model. */
                 q_star = (f_c > 0.0) ? 0.05 * pow(tau_star, 2.5) / f_c : 0.0;
+                dfac = 5.5;
             } else {
                 const double tau_x = tau_star - tau_c_b;
                 q_star = (tau_x > 0.0) ? K * pow(tau_x, mexp) : 0.0;
+                dfac = (tau_x > 0.0) ? mexp * (7.0 / 3.0) * tau_star / tau_x
+                                     : 0.0;
             }
             if (q_star <= 0.0) continue;
 
             /* [K-2] */
-            q_b_total += q_star * sqrt(sedR[s] * grav) * pow(diam[s], 1.5);
+            const double q_bs = q_star * sqrt(sedR[s] * grav) * pow(diam[s], 1.5);
+            q_b_total += q_bs;
+            dq_total += dfac * q_bs;
         }
 
         if (q_b_total > 0.0) {
+            /* The Rusanov coefficient, gamma / h. Formed before the [L-5]
+             * cap below, which scales q_b and dq alike and can take both to
+             * zero on an exhausted cell. */
+            qba[k] = dq_total / (q_b_total * h);
+
             /* [L-5]. A cell cannot export bed material it does not have.
              * The limit is applied to the TRANSPORT VECTOR, not to the
              * divergence: both cells sharing an edge then form their flux
@@ -932,9 +981,16 @@ void core_apply_bedload(struct domain *D, double timestep) {
                 const double ey = q_b_total * v / speed;
                 for (anuga_int i = 0; i < 3; i++) {
                     const anuga_int ki = 3 * k + i;
-                    if (neighbours[ki] < 0) continue;
-                    const double qn = 0.5 * (ex * normals[6 * k + 2 * i]
-                                           + ey * normals[6 * k + 2 * i + 1]);
+                    const anuga_int nbk = neighbours[ki];
+                    double qn = ex * normals[6 * k + 2 * i]
+                              + ey * normals[6 * k + 2 * i + 1];
+                    if (nbk < 0) {
+                        /* An open boundary edge carries the whole of the
+                         * cell's own flux; a closed one carries none. */
+                        if (bopen == NULL || !bopen[-nbk - 1]) continue;
+                    } else {
+                        qn *= 0.5;
+                    }
                     if (qn > 0.0) own_out += qn * edgelengths[ki];
                 }
                 if (own_out > 0.0) {
@@ -978,10 +1034,19 @@ void core_apply_bedload(struct domain *D, double timestep) {
             for (anuga_int i = 0; i < 3; i++) {
                 const anuga_int ki = 3 * k + i;
                 const anuga_int nb = neighbours[ki];
-                if (nb < 0) continue;
-                const double qn = 0.5 *
-                    ((qbx[k] + qbx[nb]) * normals[6 * k + 2 * i]
-                   + (qby[k] + qby[nb]) * normals[6 * k + 2 * i + 1]);
+                double qn;
+                if (nb < 0) {
+                    if (bopen == NULL || !bopen[-nb - 1]) continue;
+                    qn = qbx[k] * normals[6 * k + 2 * i]
+                       + qby[k] * normals[6 * k + 2 * i + 1];
+                } else {
+                    const double nx = normals[6 * k + 2 * i];
+                    const double ny = normals[6 * k + 2 * i + 1];
+                    const double qk = qbx[k] * nx + qby[k] * ny;
+                    const double qb = qbx[nb] * nx + qby[nb] * ny;
+                    const double a = fmax(qba[k] * fabs(qk), qba[nb] * fabs(qb));
+                    qn = 0.5 * (qk + qb) - 0.5 * a * (bed_cv[nb] - bed_cv[k]);
+                }
                 outflux += qn * edgelengths[ki];
             }
             /* dz this step, if nothing were blocked. */
@@ -991,7 +1056,7 @@ void core_apply_bedload(struct domain *D, double timestep) {
         }
     }
 
-    /* ---- pass 2: divergence, and the bed update ---- */
+    /* ---- pass 2: divergence, into the scratch ---- */
     OMP_PARALLEL_LOOP
     for (anuga_int k = 0; k < n; k++) {
         const double qx_k = qbx[k];
@@ -1001,11 +1066,18 @@ void core_apply_bedload(struct domain *D, double timestep) {
         for (anuga_int i = 0; i < 3; i++) {
             const anuga_int ki = 3 * k + i;
             const anuga_int nb = neighbours[ki];
-            if (nb < 0) {
-                continue;            /* boundary: no bedload across it */
-            }
             const double nx = normals[6 * k + 2 * i];
             const double ny = normals[6 * k + 2 * i + 1];
+            if (nb < 0) {
+                /* Boundary: no bedload across it unless declared open, in
+                 * which case the flux is the cell's own q_b.n (zero
+                 * gradient). Only k's own exhaustion can close it. */
+                if (bopen == NULL || !bopen[-nb - 1]) continue;
+                double qn = qx_k * nx + qy_k * ny;
+                if (has_z_base && qn > 0.0 && exhausted[k]) qn = 0.0;
+                outflux += qn * edgelengths[ki];
+                continue;
+            }
 
             /* CENTRED edge flux: q_edge = (q_k + q_nb)/2.
              *
@@ -1026,11 +1098,22 @@ void core_apply_bedload(struct domain *D, double timestep) {
              * edge: bedload converging from both sides should deposit there,
              * not be attributed to one arbitrary donor.
              *
-             * If oscillations ever appear in an advection-dominated case, the
-             * upgrade is a Rusanov-type flux -- centred plus a dissipation
-             * term in (z_nb - z_k) -- not a bare donor switch. */
-            double qn = 0.5 * ((qx_k + qbx[nb]) * nx
-                             + (qy_k + qby[nb]) * ny);
+             * They did appear, in the migrating-hump validation case
+             * (sediment_bed_hump): under the bare centred flux the hump grew
+             * a scour hole at its upstream toe and an overshoot at its crest
+             * that fed back into the flow. So the flux is Rusanov: centred
+             * plus a dissipation term in (z_nb - z_k) scaled by a bound on
+             * the bed-wave speed, |d(q_b . n)/dz| = (gamma/h) |q_b . n| from
+             * pass 1, the larger of the two sides. It is still antisymmetric
+             * (both sides form the same a and the same difference with the
+             * opposite sign), so still exactly conservative, and continuous
+             * in the state. The dissipation vanishes where the bed is flat
+             * and where nothing moves, so the closed-domain and open-uniform
+             * tests are unchanged by it. */
+            const double qn_k = qx_k * nx + qy_k * ny;
+            const double qn_nb = qbx[nb] * nx + qby[nb] * ny;
+            const double a = fmax(qba[k] * fabs(qn_k), qba[nb] * fabs(qn_nb));
+            double qn = 0.5 * (qn_k + qn_nb) - 0.5 * a * (bed_cv[nb] - bed_cv[k]);
 
             /* [L-5]. A cell that cannot pay for this step's removal (pass
              * 1.5) may gain material but must not lose any, so close every
@@ -1042,8 +1125,8 @@ void core_apply_bedload(struct domain *D, double timestep) {
              * two tests in the same order, so both sides close the same edge
              * and neither can remove what the other did not give up. That is
              * what keeps bedload exactly conservative with a base present.
-             * It works on a snapshot taken in pass 1 rather than on live
-             * elevation, because this loop writes elevation as it goes. */
+             * It works on a snapshot taken in pass 1.5 so that both sides
+             * decide from the same state. */
             if (has_z_base) {
                 if (qn > 0.0 && exhausted[k])  qn = 0.0;
                 if (qn < 0.0 && exhausted[nb]) qn = 0.0;
@@ -1052,7 +1135,13 @@ void core_apply_bedload(struct domain *D, double timestep) {
         }
 
         /* [K-3]: dz/dt = -(1/(1-lambda)) div q_b, div q_b = outflux/area */
-        const double dz = -(timestep * outflux / areas[k]) / one_minus_lambda;
+        dzs[k] = -(timestep * outflux / areas[k]) / one_minus_lambda;
+    }
+
+    /* ---- pass 3: the bed update ---- */
+    OMP_PARALLEL_LOOP
+    for (anuga_int k = 0; k < n; k++) {
+        const double dz = dzs[k];
         if (dz != 0.0) {
             bed_cv[k] += dz;
             const anuga_int k3 = 3 * k;

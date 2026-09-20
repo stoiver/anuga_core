@@ -51,6 +51,7 @@ class TestSetupSediment(unittest.TestCase):
             'deposition_law': 'threshold', 'tau_d': 0.1, 'near_bed': 'rouse',
             'friction_mode': 'wilson', 'bed': 'gravel', 'grain_size': 0.02,
             'bedload': 'wong_parker_eq24', 'bedload_K': 3.0,
+            'bedload_open_boundaries': ['left', 'right'],
             'angle_of_repose': 34.0,
             'erodible_base_depth': 1.5,
             'fractions': [
@@ -78,6 +79,10 @@ class TestSetupSediment(unittest.TestCase):
         self.assertEqual(d.sediment_friction_mode, 2)
         self.assertEqual(d.sediment_wilson_bed, 1)
         self.assertAlmostEqual(d.sediment_bedload_K, 3.0)
+        self.assertEqual(d._sediment_bedload_open_tags, ('left', 'right'))
+        self.assertEqual(int(d.sediment_bedload_open.sum()),
+                         len(d.tag_boundary_cells['left'])
+                         + len(d.tag_boundary_cells['right']))
         self.assertGreater(d.sediment_repose_tan, 0.0)
         self.assertTrue(d.sediment_has_z_base)
         # the base is 1.5 m below the bed, except where the locked circle

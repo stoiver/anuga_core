@@ -644,6 +644,23 @@ vector :math:`\mathbf{q}_b`, following [Par98]_.
      - 2.5
      - 0
      - **total load**, no threshold
+   * - .. _spec-k-6:
+
+       Grass, as :speclit:`K-6`
+     - :math:`A_g` (given)
+     - 3
+     - 0
+     - **total load**, in velocity, not stress
+
+Grass's law is the one the classic Exner test cases are written in, and the
+only one with a closed-form reference: it is dimensional as it stands,
+
+.. math::
+
+   \mathbf{q}_b = A_g\, |\mathbf{u}|^{m-1}\, \mathbf{u} \qquad \text{[K-6]}
+
+so :speclit:`K-2` does not apply, no grain size enters, and :math:`A_g`
+(s\ :sup:`2`/m, between 0 and 1) is a calibration with no default.
 
 .. warning::
 
@@ -660,7 +677,10 @@ vector :math:`\mathbf{q}_b`, following [Par98]_.
    domain.set_bedload('wong_parker_eq24')   # K=3.97, m=1.5, tau_c*=0.0495
    domain.set_bedload('wong_parker_eq23')   # K=4.93, m=1.6, tau_c*=0.0470
    domain.set_bedload('engelund_hansen')
+   domain.set_bedload('grass', K=0.001)     # A_g = 0.001, m = 3
    domain.set_bedload('off')                # default
+   # bedload passes through these boundaries (zero gradient); all others closed
+   domain.set_bedload('grass', K=0.001, open_boundaries=('inflow', 'outflow'))
 
 Bedload :spec:`K-1`-:spec:`K-4` transports sediment along the bed rather than in
 suspension, and drives its own bed evolution term :spec:`G-5`. It is **off by
@@ -676,8 +696,22 @@ Eq 24 is the default. ``K``, ``m`` and ``tau_c_star`` override the formula's
 constants if you have a calibration.
 
 Bedload only redistributes: it moves sediment between cells and conserves the
-total exactly. The flux across each edge is centred, which is what makes it
-antisymmetric and therefore conservative; see ``test_sediment_bedload.py``.
+total exactly. The flux across each edge is centred with Rusanov dissipation
+scaled by a bound on the bed-wave speed, :math:`|\partial(\mathbf{q}_b
+\cdot \mathbf{n})/\partial z|`; both sides of an edge form the same flux
+with opposite sign, which is what makes it antisymmetric and therefore
+conservative, and the dissipation is what keeps a migrating bed form from
+growing oscillations (see the ``sediment_bed_hump`` validation case). The
+scheme is first order in the bed; see ``test_sediment_bedload.py``.
+
+Boundary edges carry no bedload unless their tag is named in
+``open_boundaries``, across which the flux is the cell's own
+:math:`\mathbf{q}_b \cdot \mathbf{n}` (zero gradient): an outflow carries
+bedload away at the rate it arrives, an inflow supplies it at the rate the
+first cell carries it off. Name the inflow and outflow of a reach, or the
+inflow cell exports and never imports and digs a hole that travels
+downstream at the bed-wave speed. Walls stay closed, which is what keeps a
+closed domain exactly conservative.
 
 
 .. _sediment_references:
