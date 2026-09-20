@@ -309,6 +309,38 @@ ends of a frictionless channel for an exact uniform flow.
 
 **Run time:** a few seconds.
 
+Equilibrium suspended load in normal flow — analytical solution
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Directory:** ``analytical_exact/sediment_equilibrium_flow/``
+
+**Physical scenario:** A plane channel 300 m long of slope 2e-4 with
+Manning roughness 0.03 carries uniform flow at its normal depth of 1 m,
+held by Dirichlet boundaries at both ends. Under the quadratic-drag shear
+closure with the Manning friction factor the bed stress in normal flow is
+exactly :math:`\rho g h S`, so the Shields stress of the 100 micron sand,
+the entrainment rate and the equilibrium concentration
+:math:`c_{eq} = E/(d^{*} v_s)` are closed-form. Clear water enters at the
+inflow and the load relaxes to the equilibrium along the channel as
+:math:`c_{eq}(1 - e^{-x/L_s})`, :math:`L_s = q/(d^{*} v_s)` (59 m here).
+The bed is held fixed so the flow and the reference stay exact.
+
+**What is checked:** The steady concentration profile cell by cell
+(relative :math:`L^1` error below 1%, measured 2e-4); the outflow
+concentration against the reference (1e-3); that the flow stays the normal
+flow (depth and discharge within 1e-3); that the profile is steady and
+uniform across the channel; and that the fixed bed does not move. It
+exercises the quadratic-drag closure with the Manning friction factor,
+the non-cohesive entrainment law in flowing water, its balance with
+deposition under advection, and ``bed_evolution=False``.
+
+**Key techniques:** ``set_shear_closure('quadratic_drag')`` (the default),
+``initialize_sediment_operator(bed_evolution=False)``,
+``set_tracer_boundary`` for the clear-water inflow, ``Dirichlet_boundary``
+at both ends of a Manning channel for exact normal flow.
+
+**Run time:** a few seconds.
+
 Adding a new validation test
 ------------------------------
 
