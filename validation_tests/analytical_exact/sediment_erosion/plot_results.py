@@ -19,13 +19,14 @@ law = (prm['v_s'], prm['R'], prm['diameter'], prm['tau_c_star'],
        prm['gamma0'], prm['d_star'])
 
 tt = numpy.linspace(0.0, t.max(), 400)
-c_ref = analytic.erosion(tt, h_cell, prm['S_bed'], *law)
-c_eq = analytic.equilibrium_concentration(h_cell, prm['S_bed'], *law)
+c_ref, z_ref, h_ref = analytic.erosion_with_feedback(
+    tt, h_cell, prm['S_bed'], *law, porosity=prm['porosity'], z0=z_all[0])
+c_fixed = analytic.erosion(tt, h_cell, prm['S_bed'], *law)
 
 pyplot.clf()
 pyplot.plot(t, c_all.mean(axis=1), 'b.', label='numerical, sand')
-pyplot.plot(tt, c_ref.mean(axis=1), 'r-', label='reference')
-pyplot.axhline(c_eq.mean(), color='k', ls='--', lw=0.8, label='equilibrium $c_{eq}$')
+pyplot.plot(tt, c_ref.mean(axis=1), 'r-', label='reference (bed evolving)')
+pyplot.plot(tt, c_fixed.mean(axis=1), 'k--', lw=0.8, label='fixed-bed exponential')
 pyplot.plot(t, c_ctl.mean(axis=1), 'g.', label='numerical, control fraction (below threshold)')
 pyplot.title('Depth-averaged concentration, tank mean')
 pyplot.xlabel('Time (s)')
@@ -34,8 +35,18 @@ pyplot.legend(loc='best')
 pyplot.savefig('concentration_plot.png')
 
 pyplot.clf()
+pyplot.plot(t, (z_all - z_all[0]).mean(axis=1), 'b.', label='numerical')
+pyplot.plot(tt, (z_ref - z_ref[0]).mean(axis=1), 'r-', label='reference')
+pyplot.title('Bed lowering from entrainment, tank mean')
+pyplot.xlabel('Time (s)')
+pyplot.ylabel('Bed change (m)')
+pyplot.legend(loc='best')
+pyplot.savefig('bed_lowering_plot.png')
+
+pyplot.clf()
 order = numpy.argsort(x_cell)
-c_ref_end = analytic.erosion(t[-1:], h_cell, prm['S_bed'], *law)[0]
+c_ref_end = analytic.erosion_with_feedback(t[-1:], h_cell, prm['S_bed'], *law,
+                                           porosity=prm['porosity'], z0=z_all[0])[0][0]
 pyplot.plot(x_cell[order], c_all[-1, order], 'b.', label='numerical, t = %g s' % t[-1])
 pyplot.plot(x_cell[order], c_ref_end[order], 'r-', lw=0.8, label='reference')
 pyplot.title('Concentration in every cell along the tank at the end of the run')

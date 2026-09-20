@@ -55,44 +55,55 @@ class Test_results(unittest.TestCase):
                prm['gamma0'], prm['d_star'])
 
         # Every cell against its own curve, at the one slope the bed was
-        # built with: the kernel's slope estimate must reproduce it in
-        # every cell, the ones along the walls and in the corners included.
-        c_ref = analytic.erosion(t, h_cell, prm['S_bed'], *law)
-        c_eq = analytic.equilibrium_concentration(h_cell, prm['S_bed'], *law)
+        # built with (frozen for the run): the kernel's slope estimate must
+        # reproduce it in every cell, the ones along the walls and in the
+        # corners included, and the bed must lower by the entrained volume.
+        c_ref, z_ref, h_ref = analytic.erosion_with_feedback(
+            t, h_cell, prm['S_bed'], *law, porosity=prm['porosity'], z0=z_num[0])
+        c_fixed = analytic.erosion(t, h_cell, prm['S_bed'], *law)
 
-        # Relative L1 error over the time series, all cells
+        # Relative L1 errors over the time series, all cells
         ec = numpy.sum(numpy.abs(c_num - c_ref)) / numpy.sum(numpy.abs(c_ref))
         # ... and the worst single cell, so a wall cell cannot hide in the mean
         ec_cell = (numpy.abs(c_num - c_ref).sum(axis=0)
                    / numpy.abs(c_ref).sum(axis=0)).max()
+        dz_num = z_num - z_num[0]
+        dz_ref = z_ref - z_ref[0]
+        ez = numpy.sum(numpy.abs(dz_num[1:] - dz_ref[1:])) / numpy.sum(numpy.abs(dz_ref[1:]))
         # Below threshold: nothing may be entrained into the control fraction
         c_control = numpy.abs(c_ctl).max()
-        # Equilibrium at the end (t_final >> h/v_s)
-        e_eq = numpy.abs(c_num[-1] / c_eq - 1.0).max()
-        # Still water over a fixed bed: nothing else may move
+        # The bed feedback is real: the fixed-bed curve must be distinguishable
+        feedback = numpy.abs(c_ref[-1] - c_fixed[-1]).max() / c_fixed[-1].max()
+        # Sediment mass: water column + bed = 0 (nothing to start with)
+        mass = (w_num - z_num) * c_num + (1.0 - prm['porosity']) * dz_num
+        emass = numpy.abs(mass).max() / ((w_num - z_num) * c_num).max()
+        # Still water: nothing else may move
         dw = numpy.abs(w_num - w_num[0]).max()
-        dz = numpy.abs(z_num - z_num[0]).max()
         mom = max(numpy.abs(uh).max(), numpy.abs(vh).max())
 
         print()
         print(indent + 'Relative L1 error in concentration, all cells:  %.3e' % ec)
         print(indent + 'Relative L1 error in concentration, worst cell: %.3e' % ec_cell)
+        print(indent + 'Relative L1 error in bed lowering:              %.3e' % ez)
         print(indent + 'Max concentration of the control fraction:      %.3e' % c_control)
-        print(indent + 'Max relative departure from c_eq at the end:    %.3e' % e_eq)
+        print(indent + 'Bed feedback on c at the end (vs fixed bed):    %.3e' % feedback)
+        print(indent + 'Max sediment mass imbalance (relative):         %.3e' % emass)
         print(indent + 'Max free-surface movement (m):                  %.3e' % dw)
-        print(indent + 'Max bed movement (m):                           %.3e' % dz)
         print(indent + 'Max |momentum|:                                 %.3e' % mom)
         print(indent + 'Concentration at the end: numerical %.4e, reference %.4e'
               % (c_num[-1].mean(), c_ref[-1].mean()))
+        print(indent + 'Bed lowering at the end:  numerical %.4e, reference %.4e'
+              % (dz_num[-1].mean(), dz_ref[-1].mean()))
 
         # The source is a first-order fractional step, so the error scales
         # with dt / (h / v_s): a few 1e-4 here.
         assert ec < 0.01, 'concentration relaxation off by %.2e' % ec
         assert ec_cell < 0.01, 'a cell is off by %.2e' % ec_cell
+        assert ez < 0.01, 'bed lowering off by %.2e' % ez
         assert c_control < 1.0e-12, 'entrainment below threshold: %.2e' % c_control
-        assert e_eq < 0.01, 'equilibrium concentration off by %.2e' % e_eq
+        assert feedback > 1.0e-3, 'the bed did not feed back on the concentration'
+        assert emass < 1.0e-3, 'sediment mass not conserved: %.2e' % emass
         assert dw < 1.0e-6, 'free surface moved by %.2e m' % dw
-        assert dz < 1.0e-12, 'fixed bed moved by %.2e m' % dz
         assert mom < 1.0e-8, 'still water acquired momentum %.2e' % mom
 
 

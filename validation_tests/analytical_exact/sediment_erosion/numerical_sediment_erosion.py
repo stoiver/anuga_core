@@ -1,17 +1,18 @@
 """Entrainment of bed sediment into a tank of still water.
 
-The bed is a fixed plane of gentle slope. With the depth-slope shear closure
-[T-7] the bed shear stress is a function of depth and bed slope alone, so
-the sand fraction is above its Shields threshold and is entrained until
-deposition balances it, while a second fraction with a critical stress far
-above the imposed one must stay at zero: that is the threshold control.
-There is no flow, so every cell is a closed system and relaxes to its
-equilibrium concentration along the closed-form curve in
-analytical_sediment_erosion.py. The run checks the entrainment law
-[E-1]/[E-2] and its threshold, the depth-slope closure in every cell (walls
-and corners included), and the balance with deposition [D-1] in the
-conserved sediment mass [G-3]. See the analytical module for why the bed is
-fixed.
+The bed is a plane of gentle slope. With the depth-slope shear closure
+[T-7], its slope FROZEN at the setup value, the bed shear stress of a cell
+is a function of its depth alone, so the sand fraction is above its Shields
+threshold and is entrained until deposition balances it, while a second
+fraction with a critical stress far above the imposed one must stay at
+zero: that is the threshold control. The bed evolves: it lowers by the net
+entrained volume over the packing fraction, the depth grows, and the stress
+with it. There is no flow, so every cell is a closed system and follows the
+per-cell reference in analytical_sediment_erosion.py. The run checks the
+entrainment law [E-1]/[E-2] and its threshold, the depth-slope closure in
+every cell (walls and corners included), the balance with deposition [D-1]
+in the conserved sediment mass [G-3], and the bed update [G-4] under
+erosion. See the analytical module for why the slope is frozen.
 """
 import json
 import numpy as np
@@ -63,9 +64,11 @@ domain.set_boundary({'left': Br, 'right': Br, 'top': Br, 'bottom': Br})
 
 # The sediment: one fraction, no initial load, the Shields (non-cohesive)
 # entrainment law with its default critical stress, the depth-slope shear
-# closure so that still water carries a bed stress, and a fixed bed.
-domain.initialize_sediment_operator(porosity=porosity, bed_evolution=False)
-domain.set_shear_closure('depth_slope')
+# closure so that still water carries a bed stress -- with its slope frozen
+# at the setup bed, so the closure does not feed on the roughness that
+# uneven erosion would otherwise create -- and an evolving bed.
+domain.initialize_sediment_operator(porosity=porosity, bed_evolution=True)
+domain.set_shear_closure('depth_slope', freeze_slope=True)
 domain.set_bed_material('noncohesive')
 domain.set_deposition(law='d_star', near_bed='constant')
 domain.add_sediment_fraction('sand', diameter=diameter, d_star=d_star,
