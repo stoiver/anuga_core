@@ -975,5 +975,8 @@ frozen) and the bed lowering against the per-cell reference for a bed that
 erodes under still water. ``validation_tests/analytical_exact/sediment_settling_basin``
 compares the steady concentration profile and bed-rise rate of a settling
 basin with flow against the closed-form exponential, and closes the
-sediment budget between boundaries, water column and bed. The notebook :doc:`/examples/notebook_sediment_transport` walks
+sediment budget between boundaries, water column and bed. ``validation_tests/analytical_exact/sediment_equilibrium_flow``
+compares the suspended load that clear water picks up in normal flow on a
+Manning slope, under the quadratic-drag closure, against the closed-form
+approach to the equilibrium concentration. The notebook :doc:`/examples/notebook_sediment_transport` walks
 through the settling case.
