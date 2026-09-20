@@ -214,3 +214,91 @@ def test_the_two_closures_give_materially_different_erosion():
     assert (abs(means['quadratic_drag'] - means['depth_slope'])
             > 0.01 * max(means.values())), (
         'the closures should differ materially, got %r' % means)
+
+
+def _still_tank(slope=0.001, bed_evolution=True, **closure_kwargs):
+    from anuga import rectangular_cross_domain
+    d = rectangular_cross_domain(20, 4, len1=20.0, len2=4.0)
+    d.set_flow_algorithm('DE1')
+    d.store = False
+    d.set_quantity('elevation', lambda x, y: -slope * x)
+    d.set_quantity('friction', 0.0)
+    d.set_quantity('stage', 1.0)
+    d.set_boundary({t: Reflective_boundary(d) for t in d.get_boundary_tags()})
+    d.initialize_sediment_operator(bed_evolution=bed_evolution)
+    d.set_shear_closure('depth_slope', **closure_kwargs)
+    d.set_deposition(law='d_star', near_bed='constant')
+    d.add_sediment_fraction('sand', diameter=5.0e-4, d_star=1.0)
+    d.add_sediment_fraction('control', diameter=5.0e-4, d_star=1.0, tau_c_star=10.0)
+    return d
+
+
+def test_bed_slope_magnitude_matches_the_kernel_mirror():
+    d = channel(slope=0.02)
+    S = d.bed_slope_magnitude()
+    assert np.allclose(S, 0.02, rtol=1e-9, atol=1e-12)
+    assert np.allclose(S, cell_slopes(d, d.quantities['elevation'].centroid_values))
+
+
+def test_max_slope_caps_the_stress():
+    """Still water on a 1e-2 slope with max_slope = 1e-3 must entrain at
+    the 1e-3 rate: the cap, not the bed, sets the stress."""
+    S, R, dia, tau_c, gamma0 = 0.01, 1.65, 5.0e-4, 0.04, 0.0024
+
+    def rate(slope, h):
+        X = h * slope / (R * dia) / tau_c - 1.0
+        return 0.65 * gamma0 * X / (1.0 + gamma0 * X)
+
+    d = _still_tank(slope=S, bed_evolution=False, max_slope=0.001)
+    v_s = float(d.sediment_settling_velocity[0])
+    h = (d.quantities['stage'].centroid_values - d.quantities['elevation'].centroid_values)
+    T = 0.2
+    d.evolve_to_end(finaltime=T)
+    c = d.get_tracer('sand')
+    expected = v_s * rate(0.001, h) * T * (1.0 - 0.5 * T * v_s / h) / h
+    assert np.allclose(c / expected, 1.0, atol=5e-3), (c / expected).min()
+    # and nowhere near the uncapped rate
+    assert (c < 0.5 * v_s * rate(S, h) * T / h).all()
+
+
+def test_frozen_slope_stops_the_feedback():
+    """Bed evolution on. Unfrozen, the closure runs away (the bed scours by
+    the order of a metre in a minute and even the tau_c* = 10 control is
+    entrained). Frozen at the setup slope, the control stays clean, the
+    kernel's slope stays at the setup value, and the bed lowers gently."""
+    d = _still_tank(freeze_slope=True)
+    assert d.sediment_slope_frozen == 1
+    assert np.allclose(d.sediment_slope_work, 0.001)
+    z0 = d.quantities['elevation'].centroid_values.copy()
+    d.evolve_to_end(finaltime=60.0)
+    assert np.allclose(d.sediment_slope_work, 0.001)       # untouched by the kernel
+    dz = d.quantities['elevation'].centroid_values - z0
+    assert dz.max() < 0.0 and dz.min() > -0.2, (dz.min(), dz.max())
+    assert d.get_tracer('control').max() == 0.0
+    assert 0.0 < d.get_tracer('sand').max() < 0.1
+
+
+def test_freeze_slope_is_taken_when_the_grain_is_registered():
+    """set_shear_closure before add_sediment_fraction: the array does not
+    exist yet, so the slope is recorded when the first grain allocates it."""
+    from anuga import rectangular_cross_domain
+    d = rectangular_cross_domain(10, 4, len1=10.0, len2=4.0)
+    d.set_quantity('elevation', lambda x, y: -0.003 * x)
+    d.set_quantity('stage', 1.0)
+    d.set_boundary({t: Reflective_boundary(d) for t in d.get_boundary_tags()})
+    d.set_shear_closure('depth_slope', freeze_slope=True)
+    d.add_sediment_fraction('sand', diameter=2.0e-4)
+    assert np.allclose(d.sediment_slope_work, 0.003)
+
+
+def test_freeze_slope_needs_the_depth_slope_closure():
+    d = channel()
+    with pytest.raises(ValueError, match='depth_slope'):
+        d.set_shear_closure('energy_slope', freeze_slope=True)
+    with pytest.raises(ValueError, match='max_slope'):
+        d.set_shear_closure('depth_slope', max_slope=-1.0)
+    d.set_shear_closure('depth_slope', max_slope=0.02, freeze_slope=True)
+    d.add_sediment_fraction('sand', diameter=2.0e-4)
+    assert 'capped at 0.02' in d.sediment_summary()
+    assert 'frozen' in d.sediment_summary()
+

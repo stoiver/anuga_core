@@ -25,7 +25,9 @@ def setup_sediment(domain, project):
         **given('porosity', 'c_max', 'c_pack', 'bed_evolution', 'rho_w'))
 
     if 'shear_closure' in sed:
-        domain.set_shear_closure(sed['shear_closure'])
+        domain.set_shear_closure(sed['shear_closure'],
+                                 max_slope=sed.get('max_slope'),
+                                 freeze_slope=sed.get('freeze_slope', False))
 
     if 'friction_mode' in sed:
         domain.set_sediment_friction(

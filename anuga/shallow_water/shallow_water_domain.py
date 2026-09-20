@@ -743,6 +743,8 @@ class Domain(Generic_Domain):
         # Bed shear closure, spec 3.1/3.4 (divergence D1). 0 = [T-1] quadratic
         # drag (default); 1 = [T-7] depth-slope, for reproducing anugaSed.
         self.sediment_shear_closure = 0
+        self.sediment_max_slope = 0.0           # cap on S for [T-7]/[T-7e]; 0 = none
+        self.sediment_slope_frozen = 0          # depth-slope S fixed at setup
         self.sediment_settling_velocity = None  # v_s        (ncl,)
         self.sediment_d_star = None             # d*(Z)      (ncl,)
         self.sediment_diameter = None           # d_g   [m]  (ncl,)
@@ -1280,6 +1282,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         if self.sediment_slope_work is None:
             self.sediment_slope_work = num.zeros(self.number_of_elements,
                                                  dtype=num.float64)
+        self._freeze_bed_slope()
 
         self._sediment_names.append(name)
         self._sediment_rho_s.append(float(rho_s))
@@ -1685,7 +1688,8 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         if hasattr(self, '_gpu_boundary_info_initialized'):
             del self._gpu_boundary_info_initialized
 
-    def set_shear_closure(self, closure='quadratic_drag'):
+    def set_shear_closure(self, closure='quadratic_drag', max_slope=None,
+                          freeze_slope=False):
         """Select how bed shear stress is obtained (spec 3.1 / 3.4).
 
         `'quadratic_drag'` (default) -- `[T-1]`, `tau_b = rho f_c |v|^2`. Makes
@@ -1708,8 +1712,27 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         roughens the bed, a rougher bed has steeper local slopes, steeper
         slopes erode faster. That is the closure, not the discretisation --
         anugaSed contains it with the domain-global clamp the notes below
-        describe. Prefer `'quadratic_drag'` or `'energy_slope'` for
-        morphological runs.
+        describe. Two explicit bounds are offered instead:
+
+        Parameters
+        ----------
+        max_slope : float, optional
+            Cap on `S` for `'depth_slope'` and `'energy_slope'`, applied per
+            cell each step. `None` (default) or 0: no cap. A stated,
+            spatially uniform bound in place of anugaSed's undocumented
+            `S <- min(S, mean(S)/2)`.
+        freeze_slope : bool, optional
+            `'depth_slope'` only. Take `S` from the bed as it is when this is
+            called (or when the first grain size is registered, whichever is
+            later; call it after `set_quantity('elevation', ...)`) and keep
+            it for the run, instead of re-reading the evolving bed each
+            step. `S` is then the reach slope the closure was written for,
+            the feedback is gone, and the bed can evolve under it. See
+            :meth:`bed_slope_magnitude`.
+
+        Prefer `'quadratic_drag'` or `'energy_slope'` for morphological
+        runs; `'depth_slope'` with `freeze_slope=True` is the reproducible
+        way to run the anugaSed closure on a moving bed.
 
         `'energy_slope'` -- `[T-7e]`, the same `tau_b = rho g h S` with `S` the
         **free-surface** slope magnitude instead. Under the shallow-water
@@ -1741,11 +1764,71 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         if closure not in closures:
             raise ValueError('unknown shear closure %r; expected one of %r'
                              % (closure, sorted(closures)))
+        if max_slope is not None and max_slope < 0.0:
+            raise ValueError('max_slope must be >= 0, got %g' % max_slope)
+        if freeze_slope and closure != 'depth_slope':
+            raise ValueError("freeze_slope applies to closure 'depth_slope' "
+                             "only: the free surface of 'energy_slope' moves, "
+                             "and 'quadratic_drag' uses no slope")
         self.sediment_shear_closure = closures[closure]
+        self.sediment_max_slope = float(max_slope) if max_slope else 0.0
+        self.sediment_slope_frozen = 1 if freeze_slope else 0
+        if freeze_slope:
+            self._freeze_bed_slope()
         self._Domain_C_struct = None
         self.gpu_interface = None
         if hasattr(self, '_gpu_boundary_info_initialized'):
             del self._gpu_boundary_info_initialized
+
+    def bed_slope_magnitude(self, values=None):
+        """The per-cell slope magnitude the depth-slope closure uses, `[T-7]`.
+
+        The least-squares gradient of the centroid `values` (default: the
+        elevation quantity) over each cell and its neighbours, one-sided at
+        boundaries, exactly as the sediment kernel computes it. Returns an
+        array of length `number_of_elements`.
+        """
+        if values is None:
+            values = self.quantities['elevation'].centroid_values
+        f = num.asarray(values, dtype=float)
+        cc = self.centroid_coordinates
+        nb = self.neighbours
+        n = len(f)
+        sxx = num.zeros(n); sxy = num.zeros(n); syy = num.zeros(n)
+        sxf = num.zeros(n); syf = num.zeros(n)
+        for i in range(3):
+            k = num.where(nb[:, i] >= 0)[0]
+            j = nb[k, i]
+            dx = cc[j, 0] - cc[k, 0]
+            dy = cc[j, 1] - cc[k, 1]
+            df = f[j] - f[k]
+            sxx[k] += dx * dx; sxy[k] += dx * dy; syy[k] += dy * dy
+            sxf[k] += dx * df; syf[k] += dy * df
+        det = sxx * syy - sxy * sxy
+        tr = sxx + syy
+        gx = num.zeros(n); gy = num.zeros(n)
+        plane = det > 1.0e-12 * tr * tr
+        gx[plane] = (syy[plane] * sxf[plane] - sxy[plane] * syf[plane]) / det[plane]
+        gy[plane] = (sxx[plane] * syf[plane] - sxy[plane] * sxf[plane]) / det[plane]
+        line = ~plane & (tr > 0.0)
+        gx[line] = sxf[line] / tr[line]
+        gy[line] = syf[line] / tr[line]
+        return num.sqrt(gx * gx + gy * gy)
+
+    def _freeze_bed_slope(self):
+        """Record the current bed slope for a frozen depth-slope closure.
+
+        Called by set_shear_closure(freeze_slope=True) and again when the
+        first grain size allocates the slope array; the later of the two
+        wins, so the bed as it stands when the sediment is fully configured
+        is what the run uses.
+        """
+        if not getattr(self, 'sediment_slope_frozen', 0):
+            return
+        if self.sediment_slope_work is None:
+            self.sediment_slope_work = num.zeros(self.number_of_elements,
+                                                 dtype=num.float64)
+        self.sediment_slope_work[:] = self.bed_slope_magnitude()
 
     def initialize_sediment_operator(self, porosity=None, c_max=None,
                                      c_pack=None, bed_evolution=None,
@@ -2013,6 +2096,14 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                  1: "depth-slope, tau_b = rho g h S (bed slope; aSM16)   [T-7]",
                  2: "energy-slope, tau_b = rho g h S (free surface)   [T-7e]"
                  }[self.sediment_shear_closure]
+        if self.sediment_shear_closure in (1, 2):
+            bounds = []
+            if self.sediment_max_slope > 0.0:
+                bounds.append("S capped at %g" % self.sediment_max_slope)
+            if self.sediment_slope_frozen:
+                bounds.append("S frozen at the setup bed")
+            if bounds:
+                shear += "; " + ", ".join(bounds)
         fric = {0: "constant n, from the domain friction quantity",
                 1: "larsen_lamb, n = %.5f   [T-13..15]" % self.sediment_manning_ll,
                 2: "wilson, bed=%s, D=%.4g m   [T-8..10]"

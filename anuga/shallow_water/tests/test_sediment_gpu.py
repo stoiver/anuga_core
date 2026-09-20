@@ -171,6 +171,21 @@ def test_the_depth_slope_shear_closure_agrees():
     assert np.abs(a - b).max() < 1e-8
 
 
+def test_the_frozen_capped_depth_slope_agrees():
+    """The frozen slope lives in a host array uploaded at map time and the
+    cap is a scalar; both must reach the device."""
+    def configure(mode):
+        d = channel(mode=mode, nxy=(20, 10), length=(200.0, 100.0))
+        d.set_shear_closure('depth_slope', max_slope=0.005, freeze_slope=True)
+        d.add_sediment_fraction(name='sand', diameter=1e-4, initial_concentration=0.0)
+        return d
+
+    a, b = _both(configure, 20.0, lambda d: (d.get_tracer('sand').copy(),
+                                             d.quantities['elevation'].centroid_values.copy()))
+    assert np.abs(a[0] - b[0]).max() < 1e-8
+    assert np.abs(a[1] - b[1]).max() < 1e-8
+
+
 def test_the_cohesive_erosion_route_agrees():
     def configure(mode):
         d = channel(mode=mode, nxy=(20, 10), length=(200.0, 100.0))

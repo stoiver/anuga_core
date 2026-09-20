@@ -784,7 +784,13 @@ default; an absent key leaves that default.
    # How bed shear stress is formed: quadratic_drag (default; velocity based),
    # depth_slope (bed slope; for reproducing anugaSed) or energy_slope
    # (free-surface slope; what the old Bed_shear_erosion_operator used).
+   # For the two slope closures, max_slope caps the slope, and for
+   # depth_slope freeze_slope = true takes the slope from the initial bed
+   # and keeps it, so the bed can evolve without the closure feeding on the
+   # roughness it creates.
    shear_closure = "quadratic_drag"
+   # max_slope = 0.05
+   # freeze_slope = true
 
    # Which erosion law, by naming the bed: noncohesive (default; Shields
    # entrainment, threshold per fraction via tau_c_star), cohesive
