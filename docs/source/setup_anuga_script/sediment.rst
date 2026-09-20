@@ -345,7 +345,8 @@ the bed itself, is shared.
      - ``set_deposition``
    * - shear closure; friction mode and its parameters
      - ``set_shear_closure``, ``set_sediment_friction``
-   * - bedload mode, ``K``, ``m``, and bedload's own ``tau_c_star``
+   * - bedload mode, ``K``, ``m``, bedload's own ``tau_c_star``, and the
+       boundaries open to it
      - ``set_bedload``
    * - ``beta``
      - one ``beta_tracer`` for every tracer on the domain
@@ -978,5 +979,8 @@ basin with flow against the closed-form exponential, and closes the
 sediment budget between boundaries, water column and bed. ``validation_tests/analytical_exact/sediment_equilibrium_flow``
 compares the suspended load that clear water picks up in normal flow on a
 Manning slope, under the quadratic-drag closure, against the closed-form
-approach to the equilibrium concentration. The notebook :doc:`/examples/notebook_sediment_transport` walks
+approach to the equilibrium concentration.
+``validation_tests/analytical_exact/sediment_bed_hump`` runs the classic
+Exner test, a bed hump migrating under Grass bedload, against its
+characteristic solution. The notebook :doc:`/examples/notebook_sediment_transport` walks
 through the settling case.

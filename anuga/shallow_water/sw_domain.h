@@ -347,6 +347,9 @@ struct domain {
      * neighbour's value. */
     double* sediment_qbx;
     double* sediment_qby;
+    /* Per-cell Rusanov coefficient for the bedload edge flux, gamma / h with
+     * gamma = h |dq_b/dz| / q_b at fixed discharge and stage. Scratch. */
+    double* sediment_qba;
 
     /* Friction closure for the sediment kernel, spec 3.3.
      *   0 = constant     n from friction_centroid_values (default)
@@ -411,6 +414,11 @@ struct domain {
      * about is no longer antisymmetric, which is precisely what makes the
      * scheme conservative. */
     anuga_int* sediment_bed_exhausted; /* (n) */
+    /* Per boundary edge (boundary_length), indexed by -neighbour - 1: 1 where
+     * bedload passes through the edge with the cell's own q_b.n (an inflow or
+     * outflow declared open in set_bedload), 0 where it is closed. NULL means
+     * every boundary edge is closed. */
+    anuga_int* sediment_bedload_open;
 
     /* ---- spec 7, angle-of-repose relaxation ------------------------------
      *

@@ -67,7 +67,28 @@
   closure can run on an evolving bed without feeding on the roughness it
   creates. `Domain.bed_slope_magnitude()` returns the slope the kernel uses.
   Both are available from the TOML `[sediment]` table.
-* Three sediment validation cases join the automated suite under
+* Bedload has the Grass law, `set_bedload('grass', K=A_g)`: total load,
+  `q_b = A_g |u|^(m-1) u` with `m` = 3, no threshold and no grain size, the
+  law the classic Exner test cases are written in. And bedload can now pass
+  through a boundary: `set_bedload(..., open_boundaries=('inflow',
+  'outflow'))` makes the flux across those edges the cell's own `q_b . n`
+  (zero gradient), so an outflow carries bedload away at the rate it arrives
+  and an inflow supplies it at the rate the first cell removes it. Every
+  boundary was closed before, so a reach's inflow cell exported bedload it
+  never received and dug a hole that travelled downstream. Walls stay
+  closed, and a closed domain is still exactly conservative. Both are in the
+  TOML `[sediment]` table as `bedload = "grass"`, `bedload_K` and
+  `bedload_open_boundaries`.
+* The bedload edge flux now carries Rusanov dissipation scaled by a bound
+  on the bed-wave speed, derived per formula. The bare centred flux was
+  unstable on a migrating bed form: in the new bed-hump validation case it
+  grew a scour hole at the upstream toe and an overshoot at the crest that
+  fed back into the flow. The flux is still antisymmetric, so bedload is
+  still exactly conservative, and the dissipation vanishes on a flat bed;
+  results change wherever bedload moves a bed form. The bed update is
+  applied in a pass of its own so that no cell reads a bed its neighbour
+  has already changed.
+* Four sediment validation cases join the automated suite under
   `validation_tests/analytical_exact/`: `sediment_erosion` (Smith-McLean
   entrainment on an evolving bed with the slope frozen, checked against the
   per-cell ODE), `sediment_settling_basin` (a settling basin with flow,
@@ -76,7 +97,9 @@
   and the sediment budget between boundaries, water column and bed) and
   `sediment_equilibrium_flow` (clear water in normal flow on a Manning
   slope, where quadratic drag gives `tau_b = rho g h S` exactly, picking up
-  its load as `c_eq (1 - exp(-x/L_s))`).
+  its load as `c_eq (1 - exp(-x/L_s))`) and `sediment_bed_hump` (the
+  Hudson-Sweby Exner test, a hump migrating under Grass bedload against its
+  characteristic solution).
 * A ready-made `anuga.Region` is accepted as `region=` by
   `Quantity.set_values()` (and so `Domain.set_quantity()` and friends), the
   erosion operators and `Set_w_uh_vh_operator`, alongside the existing

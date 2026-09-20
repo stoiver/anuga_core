@@ -705,13 +705,14 @@ class ProjectDataTOML:
     SEDIMENT_FRICTION_MODES = ('constant', 'larsen_lamb', 'wilson')
     SEDIMENT_WILSON_BEDS = ('sand', 'gravel', 'boulder')
     SEDIMENT_BEDLOAD = ('off', 'wong_parker_eq24', 'wong_parker_eq23',
-                        'engelund_hansen')
+                        'engelund_hansen', 'grass')
     SEDIMENT_KEYS = (
         'porosity', 'c_max', 'c_pack', 'bed_evolution', 'rho_w',
         'shear_closure', 'max_slope', 'freeze_slope', 'bed_material', 'tau_crit', 'K_e',
         'deposition_law', 'tau_d', 'near_bed', 'reference_height_floor',
         'friction_mode', 'k_s', 'sigma_br', 'r_d', 'r_br', 'bed', 'grain_size',
         'bedload', 'bedload_K', 'bedload_m', 'bedload_tau_c_star',
+        'bedload_open_boundaries',
         'angle_of_repose', 'repose_relax', 'repose_max_sweeps',
         'erodible_base_elevation', 'erodible_base_depth',
         'fractions', 'erodible_regions')
@@ -804,6 +805,21 @@ class ProjectDataTOML:
         opt_float('bedload_K', _v.positive)
         opt_float('bedload_m', _v.positive)
         opt_float('bedload_tau_c_star', _v.non_negative)
+        if sed.get('bedload') == 'grass' and 'bedload_K' not in sed:
+            _v.errors.append(
+                f"[{sec}] bedload 'grass' needs 'bedload_K', the Grass "
+                f"coefficient A_g (a calibration; there is no default)")
+        if 'bedload_open_boundaries' in sed:
+            tags = sed['bedload_open_boundaries']
+            if isinstance(tags, str):
+                tags = [tags]
+            if not isinstance(tags, list) or \
+                    not all(isinstance(t, str) for t in tags):
+                _v.errors.append(
+                    f"[{sec}] 'bedload_open_boundaries': expected a list of "
+                    f"boundary tags, got {sed['bedload_open_boundaries']!r}")
+            else:
+                d['bedload_open_boundaries'] = list(tags)
 
         opt_float('angle_of_repose',
                   lambda v, k, s: _v.in_range(v, 0.0, 90.0, k, s))

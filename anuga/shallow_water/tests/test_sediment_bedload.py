@@ -110,3 +110,101 @@ def test_under_engelund_hansen_suspended_mass_is_advected_not_exchanged():
     m1 = float((d.tracer_conserved_values[0] * d.areas).sum())
     assert abs(m1 - m0) <= 1e-9 * max(abs(m0), 1.0)
     assert np.isfinite(d.quantities['elevation'].centroid_values).all()
+
+
+# ---------------------------------------------------------------------------
+# Grass [K-6] and open boundaries
+# ---------------------------------------------------------------------------
+
+def _uniform_channel(open_boundaries=None, K=0.01):
+    """Uniform frictionless flow, 10 m deep at 1 m/s, held by Dirichlet
+    boundaries at both ends: under Grass every cell carries the same q_b, so
+    the bed must not move -- except at a closed inflow, which exports and
+    never imports."""
+    from anuga import Dirichlet_boundary
+    d = rectangular_cross_domain(20, 2, len1=100.0, len2=10.0)
+    d.set_flow_algorithm('DE1')
+    d.store = False
+    d.set_quantity('elevation', 0.1)
+    d.set_quantity('friction', 0.0)
+    d.set_quantity('stage', 10.0)
+    d.set_quantity('xmomentum', 10.0)
+    Bd = Dirichlet_boundary([10.0, 10.0, 0.0])
+    Br = Reflective_boundary(d)
+    d.set_boundary({'left': Bd, 'right': Bd, 'top': Br, 'bottom': Br})
+    d.initialize_sediment_operator(porosity=0.4, bed_evolution=True)
+    d.add_sediment_fraction(name='sand', diameter=1e-3,
+                            initial_concentration=0.0)
+    d.set_bedload('grass', K=K, open_boundaries=open_boundaries)
+    return d
+
+
+def test_grass_needs_its_coefficient():
+    """A_g is a calibration; there is no defensible default."""
+    with pytest.raises(ValueError):
+        channel().set_bedload('grass')
+
+
+def test_grass_is_total_load_with_no_threshold():
+    d = _gravel_channel()
+    d.set_bedload('grass', K=0.001)
+    assert d.sediment_bedload_mode == 3
+    assert d.sediment_bedload_m == 3.0
+    assert d.sediment_bedload_tau_c_star == 0.0
+    assert d._sediment_suspended_enabled is False
+    d.set_bedload('grass', K=0.001, m=2.5, tau_c_star=0.1)
+    assert d.sediment_bedload_m == 2.5
+    assert d.sediment_bedload_tau_c_star == 0.0, 'Grass has no threshold'
+
+
+def test_grass_transport_is_A_g_times_speed_cubed():
+    """[K-6] q_b = A_g |u|^m along the flow, read from the transport vector
+    the kernel leaves behind (mode 1 keeps it on the host)."""
+    d = _uniform_channel(open_boundaries=('left', 'right'), K=0.01)
+    d.set_compute_mode('legacy')
+    d.evolve_to_end(finaltime=1.0)
+    h = (d.quantities['stage'].centroid_values
+         - d.quantities['elevation'].centroid_values)
+    u = d.quantities['xmomentum'].centroid_values / h
+    v = d.quantities['ymomentum'].centroid_values / h
+    speed = np.hypot(u, v)
+    q = 0.01 * speed ** 3
+    assert np.allclose(d.sediment_qbx, q * u / speed, rtol=1e-6, atol=1e-12)
+    assert np.allclose(d.sediment_qby, q * v / speed, rtol=1e-6, atol=1e-12)
+
+
+def test_an_unknown_open_boundary_tag_is_rejected():
+    with pytest.raises(ValueError):
+        _uniform_channel(open_boundaries=('inflow',))
+
+
+def test_open_boundaries_flag_exactly_the_tagged_edges():
+    d = _uniform_channel(open_boundaries=('left',))
+    flags = d.sediment_bedload_open
+    assert flags.shape == (d.boundary_length,)
+    left = np.asarray(d.tag_boundary_cells['left'])
+    assert flags.sum() == left.size
+    assert (flags[left] == 1).all()
+    # Re-setting replaces rather than accumulates
+    d.set_bedload('grass', K=0.01, open_boundaries=('right',))
+    right = np.asarray(d.tag_boundary_cells['right'])
+    assert d.sediment_bedload_open.sum() == right.size
+    assert (d.sediment_bedload_open[right] == 1).all()
+
+
+def test_closed_inflow_digs_a_hole_and_open_inflow_does_not():
+    """With every boundary closed the first cells export bedload they never
+    receive; declaring the inflow and outflow open makes the uniform bed an
+    exact steady state of the divergence."""
+    results = {}
+    for tags in (None, ('left', 'right')):
+        d = _uniform_channel(open_boundaries=tags)
+        z0 = d.quantities['elevation'].centroid_values.copy()
+        d.evolve_to_end(finaltime=60.0)
+        dz = d.quantities['elevation'].centroid_values - z0
+        results[tags] = dz
+    x = _uniform_channel().centroid_coordinates[:, 0]
+    closed = results[None]
+    assert closed[x < 10.0].min() < -1e-4, 'the closed inflow should erode'
+    assert np.abs(results[('left', 'right')]).max() < 1e-6
+

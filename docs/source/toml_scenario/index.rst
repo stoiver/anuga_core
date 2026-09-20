@@ -812,10 +812,13 @@ default; an absent key leaves that default.
    # grain_size, and bed = sand | gravel | boulder).
    # friction_mode = "constant"
 
-   # Bedload: off (default), wong_parker_eq24, wong_parker_eq23 or
-   # engelund_hansen; bedload_K, bedload_m, bedload_tau_c_star override the
-   # formula's constants.
+   # Bedload: off (default), wong_parker_eq24, wong_parker_eq23,
+   # engelund_hansen or grass; bedload_K, bedload_m, bedload_tau_c_star
+   # override the formula's constants (grass needs bedload_K, its A_g).
+   # Boundary tags through which bedload passes (zero gradient); all other
+   # boundaries are closed to it.
    # bedload = "wong_parker_eq24"
+   # bedload_open_boundaries = ["inflow", "outflow"]
 
    # Relax bed slopes steeper than this [degrees]; absent = off.
    # angle_of_repose = 35.0

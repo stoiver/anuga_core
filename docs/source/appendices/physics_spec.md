@@ -1247,6 +1247,35 @@ so in the {speclit}`K-1` power-law form, `K = 0.05/f_c` and `m = 2.5`, with `τ_
 >    4.3.5 is stated in terms of **total** `θ`, which is what {speclit}`K-5` uses. Do not
 >    mix the two.
 
+**Grass** —
+
+The law the classic Exner test cases are written in (Hudson & Sweby 2003), and
+the one with a closed-form reference for a migrating bed hump:
+
+```{index} single: physics label; [K-6]
+```
+(spec-k-6)=
+```{math}
+:nowrap:
+
+\begin{align}
+\mathbf{q}_b = A_g\, |\mathbf{u}|^{m-1}\, \mathbf{u} \qquad \text{total load, no threshold} \tag{K-6}
+\end{align}
+```
+
+with `m = 3` and `A_g` (s²/m, 0 to 1) a calibration with no default. It is
+dimensional as written, so {speclit}`K-2` does not apply and no grain size
+enters; like {speclit}`K-5` it is total load and replaces the suspended
+operator.
+
+**Boundary edges.** A boundary edge carries no bedload unless its tag has been
+declared open (`set_bedload(..., open_boundaries=...)`), in which case the
+flux across it is the cell's own `q_b · n` (zero gradient): an outflow carries
+bedload away at the rate it arrives, an inflow supplies it at the rate the
+first cell carries it off. Walls stay closed, which is what keeps a closed
+domain exactly conservative; a reach's inflow must be opened or its first cell
+exports and never imports.
+
 **Vectorisation** `[FG21 §2.2.1]`: `q_b` is a scalar magnitude and must be
 partitioned into components. FG21 follow Parker (1998) Eqs 2.11–2.12: **the sediment
 transport vector is parallel to the boundary shear stress vector**. With {speclit}`T-1`

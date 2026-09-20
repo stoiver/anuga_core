@@ -847,9 +847,10 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
         double *sed_ar = GD->D.sediment_reference_height;
         double *sed_qx = GD->D.sediment_qbx;
         double *sed_qy = GD->D.sediment_qby;
+        double *sed_qa = GD->D.sediment_qba;
         #pragma omp target enter data map(to: sed_vs[0:ncl], sed_ds[0:ncl], \
             sed_dm[0:ncl], sed_rr[0:ncl], sed_tc[0:ncl], sed_ar[0:ncl]) \
-            map(alloc: sed_qx[0:n], sed_qy[0:n])
+            map(alloc: sed_qx[0:n], sed_qy[0:n], sed_qa[0:n])
 
         // [L-5]. The scratch and the exhaustion snapshot are pure device
         // workspace, so alloc; the base itself is input and must be copied.
@@ -866,6 +867,11 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
         if (GD->D.sediment_has_z_base) {
             double *sed_zb = GD->D.sediment_z_base;
             #pragma omp target enter data map(to: sed_zb[0:n])
+        }
+        // Which boundary edges pass bedload: input, set once from Python.
+        anuga_int *sed_bo = GD->D.sediment_bedload_open;
+        if (sed_bo != NULL && nb > 0) {
+            #pragma omp target enter data map(to: sed_bo[0:nb])
         }
     }
 
@@ -1296,9 +1302,10 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
         double *sed_ar = GD->D.sediment_reference_height;
         double *sed_qx = GD->D.sediment_qbx;
         double *sed_qy = GD->D.sediment_qby;
+        double *sed_qa = GD->D.sediment_qba;
         #pragma omp target exit data map(delete: sed_vs[0:ncl], sed_ds[0:ncl], \
             sed_dm[0:ncl], sed_rr[0:ncl], sed_tc[0:ncl], sed_ar[0:ncl], \
-            sed_qx[0:n], sed_qy[0:n])
+            sed_qx[0:n], sed_qy[0:n], sed_qa[0:n])
 
         // [L-5]. Mirrors the enter-data above, on the same guard.
         double *sed_sl = GD->D.sediment_source_limited;
@@ -1310,6 +1317,10 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
         if (GD->D.sediment_has_z_base) {
             double *sed_zb = GD->D.sediment_z_base;
             #pragma omp target exit data map(delete: sed_zb[0:n])
+        }
+        anuga_int *sed_bo = GD->D.sediment_bedload_open;
+        if (sed_bo != NULL && nb > 0) {
+            #pragma omp target exit data map(delete: sed_bo[0:nb])
         }
     }
 

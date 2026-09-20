@@ -2211,6 +2211,28 @@ class TestSediment(unittest.TestCase):
         for key in ('porosity', 'shear_closure', 'bed_material', 'bedload'):
             self.assertNotIn(key, d)
 
+    def test_grass_needs_its_coefficient(self):
+        with self.assertRaises(Exception) as cm:
+            self._make(self.ONE_FRACTION.replace(
+                '[sediment]', '[sediment]\nbedload = "grass"'))
+        self.assertIn('bedload_K', str(cm.exception))
+
+    def test_grass_and_open_boundaries_parse(self):
+        p = self._make(self.ONE_FRACTION.replace(
+            '[sediment]',
+            '[sediment]\nbedload = "grass"\nbedload_K = 0.001\n'
+            'bedload_open_boundaries = ["left", "right"]'))
+        d = p.sediment_data
+        self.assertEqual(d['bedload'], 'grass')
+        self.assertAlmostEqual(d['bedload_K'], 0.001)
+        self.assertEqual(d['bedload_open_boundaries'], ['left', 'right'])
+
+    def test_open_boundaries_must_be_tags(self):
+        with self.assertRaises(Exception) as cm:
+            self._make(self.ONE_FRACTION.replace(
+                '[sediment]', '[sediment]\nbedload_open_boundaries = 3'))
+        self.assertIn('bedload_open_boundaries', str(cm.exception))
+
     def test_full_table_parses(self):
         p = self._make("""
             [sediment]

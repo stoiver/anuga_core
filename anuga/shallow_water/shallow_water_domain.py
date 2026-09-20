@@ -778,6 +778,7 @@ class Domain(Generic_Domain):
         self.sediment_bedload_m = 1.5
         self.sediment_bedload_tau_c_star = 0.0495
         self.sediment_qbx = None
+        self.sediment_qba = None
         self.sediment_qby = None
         # [L-5] non-erodible base, spec 4.5. Off by default: with no base the
         # bed is bottomless, which is what every published test case in the
@@ -798,6 +799,11 @@ class Domain(Generic_Domain):
         self.sediment_repose_max_sweeps = 50
         self.sediment_repose_dz = None
         self.sediment_bed_exhausted = None
+        # Which boundary edges pass bedload (set_bedload open_boundaries):
+        # int64 per boundary edge, 1 = open. The tags are kept so the array
+        # can be rebuilt when it is first allocated or the mesh is reordered.
+        self.sediment_bedload_open = None
+        self._sediment_bedload_open_tags = ()
         # Scratch for the source kernel, (ncl, n). Allocated with the classes.
         self.sediment_source_limited = None
         # Scratch for the source kernel, (n): the per-cell slope of the
@@ -1266,12 +1272,15 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                                           dtype=num.float64)
             self.sediment_qby = num.zeros(self.number_of_elements,
                                           dtype=num.float64)
+            self.sediment_qba = num.zeros(self.number_of_elements,
+                                          dtype=num.float64)
             # [L-5] snapshot, int64 to match anuga_int.
             self.sediment_bed_exhausted = num.zeros(self.number_of_elements,
                                                     dtype=num.int64)
             # Spec 7 Jacobi scratch.
             self.sediment_repose_dz = num.zeros(self.number_of_elements,
                                                 dtype=num.float64)
+        self._build_bedload_open()
 
         # Scratch for the source kernel: every class's bed exchange is held
         # here until [L-5] has limited them together. Sized (ncl, n) and
@@ -2358,20 +2367,41 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
     }
 
     def set_bedload(self, formula='wong_parker_eq24', K=None, m=None,
-                    tau_c_star=None):
+                    tau_c_star=None, open_boundaries=None):
         """Enable bedload transport `[K-1]`-`[K-4]` and its bed evolution `[G-5]`.
 
         Parameters
         ----------
         formula : str
             `'wong_parker_eq24'` (default; `K`=3.97, `m`=1.5, `tau_c*`=0.0495),
-            `'wong_parker_eq23'` (4.93, 1.60, 0.0470), `'engelund_hansen'`, or
-            `'off'`.
+            `'wong_parker_eq23'` (4.93, 1.60, 0.0470), `'engelund_hansen'`,
+            `'grass'`, or `'off'`.
         K, m, tau_c_star : float, optional
-            Override the chosen set's values individually.
+            Override the chosen set's values individually. For `'grass'`, `K`
+            is the Grass coefficient `A_g` (s^2/m, no default: it is a
+            calibration) and `m` the velocity exponent (default 3).
+        open_boundaries : sequence of str, optional
+            Boundary tags through which bedload passes. Across an open edge
+            the flux is the cell's own `q_b . n` (zero gradient), so an
+            outflow carries bedload away at the rate it arrives and an inflow
+            supplies it at the rate the first cell carries it off: the
+            equilibrium-supply condition. Every other boundary edge is closed
+            (no bedload across it), which is right for walls and is what
+            keeps a closed domain exactly conservative. Give this for the
+            inflow and outflow of a reach, or the inflow cell exports and
+            never imports and digs a hole that travels downstream. On a
+            distributed sub-domain a tag this rank owns no part of is
+            ignored; in serial an unknown tag is an error.
 
         Notes
         -----
+        **Grass is a TOTAL LOAD relation** `[K-6]`, `q_b = A_g |u|^m`, with no
+        threshold and no grain size: the classic law of the Exner test cases
+        (Hudson & Sweby 2003), for which the migrating-hump validation has a
+        closed form. Like Engelund-Hansen it turns the suspended exchange
+        off. A fraction must still be registered for the bedload kernel to
+        run.
+
         **Engelund & Hansen is a TOTAL LOAD relation** `[K-5]`: suspension is
         already inside it, so running the suspended source alongside it double
         counts. Spec 6 calls this out as a critical usage rule, and this method
@@ -2390,6 +2420,16 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             # model. And it already contains suspension:
             self.sediment_bedload_tau_c_star = 0.0
             self._sediment_suspended_enabled = False
+        elif formula == 'grass':
+            if K is None:
+                raise ValueError(
+                    "set_bedload('grass') needs K, the Grass coefficient A_g "
+                    "(s^2/m): it is a calibration and has no default")
+            self.sediment_bedload_mode = 3
+            self.sediment_bedload_m = 3.0
+            # [K-6] has no threshold, and is total load:
+            self.sediment_bedload_tau_c_star = 0.0
+            self._sediment_suspended_enabled = False
         elif formula in self.BEDLOAD_PARAMETER_SETS:
             self.sediment_bedload_mode = 1
             (self.sediment_bedload_K, self.sediment_bedload_m,
@@ -2399,20 +2439,47 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             raise ValueError(
                 'unknown bedload formula %r; expected one of %r'
                 % (formula, sorted(self.BEDLOAD_PARAMETER_SETS) +
-                   ['engelund_hansen', 'off']))
+                   ['engelund_hansen', 'grass', 'off']))
 
         if formula != 'engelund_hansen':
             if K is not None:
                 self.sediment_bedload_K = float(K)
             if m is not None:
                 self.sediment_bedload_m = float(m)
-            if tau_c_star is not None:
+            if tau_c_star is not None and formula != 'grass':
                 self.sediment_bedload_tau_c_star = float(tau_c_star)
+
+        if open_boundaries is not None:
+            if isinstance(open_boundaries, str):
+                open_boundaries = (open_boundaries,)
+            self._sediment_bedload_open_tags = tuple(open_boundaries)
+        self._build_bedload_open()
 
         self._Domain_C_struct = None
         self.gpu_interface = None
         if hasattr(self, '_gpu_boundary_info_initialized'):
             del self._gpu_boundary_info_initialized
+
+    def _build_bedload_open(self):
+        """(Re)build the per-boundary-edge bedload flag from the open tags.
+
+        Allocated with the other bedload scratch so the C bindings always
+        find it once a class exists; rebuilt whenever set_bedload changes the
+        tags. Zero everywhere means every boundary edge is closed.
+        """
+        if self.sediment_bedload_open is None:
+            self.sediment_bedload_open = num.zeros(self.boundary_length,
+                                                   dtype=num.int64)
+        flags = self.sediment_bedload_open
+        flags[:] = 0
+        for tag in self._sediment_bedload_open_tags:
+            if tag not in self.tag_boundary_cells:
+                if self._is_subdomain():
+                    continue      # this rank owns no part of the tag
+                raise ValueError(
+                    'no boundary tagged %r on this domain; known tags: %s'
+                    % (tag, sorted(self.tag_boundary_cells)))
+            flags[num.asarray(self.tag_boundary_cells[tag], dtype=num.intp)] = 1
 
     def get_sediment_names(self):
         """Return the registered sediment class names, in index order."""
@@ -2683,6 +2750,12 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             else:
                 raise NotImplementedError(
                     'unknown tracer array kind %r for %r' % (kind, attr))
+
+        # The bedload boundary flag is per boundary edge too, but is rebuilt
+        # from its tags rather than permuted: tag_boundary_cells has already
+        # been renumbered by the time this runs.
+        if self.sediment_bedload_open is not None:
+            self._build_bedload_open()
 
     def _boundary_permutation(self, old_boundary_enumeration, inv_order):
         """Map each NEW boundary index to the old index of the same edge.
