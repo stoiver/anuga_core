@@ -45,6 +45,7 @@ python_sources = [
 'test_sediment_source_gpu_invalidation.py',
 'test_sediment_exner.py',
 'test_sediment_bedload.py',
+'test_vegetation_drag.py',
 'test_sediment_sww_storage.py',
 'test_sediment_sww_output.py',
 'test_sediment_cohesive.py',

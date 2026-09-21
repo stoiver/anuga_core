@@ -60,6 +60,15 @@
 
 ## Smaller improvements
 
+* Vegetation drag: `domain.set_vegetation_drag(density, diameter, height)`
+  adds the drag of a stem field to the friction, with the vegetated Chezy
+  coefficient of Baptist et al. (2007), emergent or submerged, applied
+  semi-implicitly alongside Manning friction. The three fields are the
+  quantities `veg_density`, `veg_diameter` and `veg_height`; cells with no
+  stems are untouched. It runs in the friction kernel of both compute modes,
+  so it offloads on a GPU build, which is what the Delta-X Wax Lake Delta
+  model (1.5 million cells, a week of tides) needs to run in mode 2. See the
+  vegetation page of the setup guide.
 * `set_shear_closure()` takes two bounds for the slope closures:
   `max_slope` caps the per-cell slope (a stated replacement for anugaSed's
   undocumented global clamp), and `freeze_slope=True` (depth-slope only)

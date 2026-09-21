@@ -875,6 +875,14 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
         }
     }
 
+    // Vegetation drag fields (spec 8): input, set once from Python.
+    if (GD->D.vegetation_mode > 0) {
+        double *veg_m = GD->D.veg_density_centroid_values;
+        double *veg_d = GD->D.veg_diameter_centroid_values;
+        double *veg_h = GD->D.veg_height_centroid_values;
+        #pragma omp target enter data map(to: veg_m[0:n], veg_d[0:n], veg_h[0:n])
+    }
+
     // Map halo exchange arrays if we have neighbors
     if (H->num_neighbors > 0) {
         int send_size = H->total_send_size;
@@ -1322,6 +1330,13 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
         if (sed_bo != NULL && nb > 0) {
             #pragma omp target exit data map(delete: sed_bo[0:nb])
         }
+    }
+
+    if (GD->D.vegetation_mode > 0) {
+        double *veg_m = GD->D.veg_density_centroid_values;
+        double *veg_d = GD->D.veg_diameter_centroid_values;
+        double *veg_h = GD->D.veg_height_centroid_values;
+        #pragma omp target exit data map(delete: veg_m[0:n], veg_d[0:n], veg_h[0:n])
     }
 
     // Unmap halo arrays
