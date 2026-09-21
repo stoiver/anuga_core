@@ -89,6 +89,15 @@
 
 ## Smaller improvements
 
+* The sediment kernel sees the vegetation: in a vegetated cell its bed shear
+  is the bed's share of the Baptist resistance by default,
+  `tau_b/rho = g u_v^2 / Cb^2` with the canopy velocity `u_v = U Cv_r / Cv`,
+  or the whole vegetated resistance with
+  `set_vegetation_drag(..., sediment_shear='total')`, as the Delta-X Wax Lake
+  sediment model has it (`'ignore'` keeps the cell's own closure). Before,
+  a vegetated class with Manning n = 0 gave the sediment no shear at all.
+  Entrainment, the Rouse profile and bedload all see it.
+
 * A second non-cohesive entrainment law: de Leeuw et al. (2020),
   `set_bed_material('noncohesive', entrainment='de_leeuw')`, spec [E-6].
   `E* = A X^beta / (1 + 3 A X^beta)` with

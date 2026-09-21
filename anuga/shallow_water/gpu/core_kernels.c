@@ -709,6 +709,30 @@ static inline double core_rouse_d_star(double Z, double a_h) {
  *
  * READS ITS NEIGHBOURS, so it must not run inside a loop that writes the
  * field: see sediment_slope_work in sw_domain.h. */
+// Friction factor the sediment kernels see in a VEGETATED cell (spec 8 with
+// spec 3.3). Baptist et al. (2007) split the resistance: the stems take the
+// drag, and the bed feels the flow inside the canopy on the bed roughness Cb,
+//
+//   u_v = U Cv_r / Cv,   tau_b / rho = g u_v^2 / Cb^2        (veg_shear 1, bed)
+//
+// with Cv_r = (Cb^-2 + Cd m D min(h, hv) / (2 g))^-1/2 the canopy part of the
+// vegetated Chezy coefficient Cv (Cv = Cv_r when the stems are emergent). The
+// alternative is the whole vegetated resistance, f_c = g / Cv^2 (veg_shear 2,
+// total), which is what the Delta-X Wax Lake sediment model uses. Returns -1
+// for a cell without vegetation, or with veg_shear 0, so the caller keeps
+// its own closure there. Expressed as f_c in tau_b / rho = f_c U^2.
+static inline double core_vegetation_sediment_fc(anuga_int veg_shear, double h,
+                                                 double m, double Dstem, double hv,
+                                                 double Cd, double Cb, double g) {
+    if (veg_shear == 0 || !(m > 0.0) || !(hv > 0.0) || !(h > 0.0)) return -1.0;
+    const double Cv_r = 1.0 / sqrt(1.0 / (Cb * Cb) + Dstem * m * Cd / (2.0 * g) * fmin(h, hv));
+    double Cv = Cv_r;
+    if (h > hv) Cv += sqrt(g) / 0.4 * log(h / hv);
+    if (veg_shear == 2) return g / (Cv * Cv);
+    const double r = Cv_r / Cv;
+    return g * r * r / (Cb * Cb);
+}
+
 static inline double core_centroid_slope(const double * restrict f,
                                          const anuga_int * restrict neighbours,
                                          const anuga_geom_t * restrict cc,
@@ -830,6 +854,13 @@ void core_apply_bedload(struct domain *D, double timestep) {
     const double n_ll = D->sediment_manning_ll;
     const anuga_int wbed = D->sediment_wilson_bed;
     const double wD = D->sediment_wilson_D;
+    // Vegetation seen by the sediment shear (core_vegetation_sediment_fc).
+    const anuga_int veg_shear = (D->vegetation_mode > 0) ? D->sediment_vegetation_shear : 0;
+    double * restrict veg_m = D->veg_density_centroid_values;
+    double * restrict veg_d = D->veg_diameter_centroid_values;
+    double * restrict veg_h = D->veg_height_centroid_values;
+    const double veg_Cd = D->vegetation_Cd;
+    const double veg_Cb = D->vegetation_bed_chezy;
     const anuga_int shear_closure = D->sediment_shear_closure;
     const double max_slope = D->sediment_max_slope;
     const anuga_int slope_frozen = D->sediment_slope_frozen;
@@ -902,6 +933,11 @@ void core_apply_bedload(struct domain *D, double timestep) {
         } else {
             const double nman = (fric_mode == 1) ? n_ll : friction_cv[k];
             f_c = grav * nman * nman / cbrt(h);
+        }
+        if (veg_shear) {
+            const double f_v = core_vegetation_sediment_fc(veg_shear, h, veg_m[k], veg_d[k],
+                                                           veg_h[k], veg_Cd, veg_Cb, grav);
+            if (f_v >= 0.0) f_c = f_v;
         }
 
         /* Same closure as the suspended source: [T-1], [T-7] or [T-7e].
@@ -1433,6 +1469,13 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     const double n_ll = D->sediment_manning_ll;
     const anuga_int wbed = D->sediment_wilson_bed;
     const double wD = D->sediment_wilson_D;
+    // Vegetation seen by the sediment shear (core_vegetation_sediment_fc).
+    const anuga_int veg_shear = (D->vegetation_mode > 0) ? D->sediment_vegetation_shear : 0;
+    double * restrict veg_m = D->veg_density_centroid_values;
+    double * restrict veg_d = D->veg_diameter_centroid_values;
+    double * restrict veg_h = D->veg_height_centroid_values;
+    const double veg_Cd = D->vegetation_Cd;
+    const double veg_Cb = D->vegetation_bed_chezy;
 
     // Hoisted for the same reason as in the update/backup/saxpy kernels: on a
     // GPU build the loop below is an 'omp target' region and D is NOT mapped to
@@ -1524,6 +1567,11 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             // Strickler value of [T-14] (larsen_lamb).
             const double nman = (fric_mode == 1) ? n_ll : friction_cv[k];
             f_c = grav * nman * nman / cbrt(h);
+        }
+        if (veg_shear) {
+            const double f_v = core_vegetation_sediment_fc(veg_shear, h, veg_m[k], veg_d[k],
+                                                           veg_h[k], veg_Cd, veg_Cb, grav);
+            if (f_v >= 0.0) f_c = f_v;
         }
 
         /* tau_b/rho under the selected closure: [T-1], [T-7] or [T-7e]. */
