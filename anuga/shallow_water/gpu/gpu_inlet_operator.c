@@ -580,22 +580,22 @@ void gpu_inlet_set_stages_evenly(struct gpu_domain *GD, int op_id, double volume
 static int inlet_tracer_scratch(struct gpu_domain *GD,
                                 struct inlet_operator_info *op, int len) {
     if (op->scratch_tracer_len >= len) return 0;
-    if (op->scratch_tracer_len > 0 && op->mapped) {
-        double *st = op->scratch_tracer;
-        int nt = op->scratch_tracer_len;
-        #pragma omp target exit data map(delete: st[0:nt])
-    }
-    free(op->scratch_tracer);
-    op->scratch_tracer = (double*)malloc((size_t)len * sizeof(double));
-    op->scratch_tracer_len = 0;
-    if (!op->scratch_tracer) {
+    // Allocate the new buffer first, so a failure leaves the old one intact.
+    double *buf = (double*)malloc((size_t)len * sizeof(double));
+    if (!buf) {
         gpu_set_error(GD, "inlet operator: could not allocate %d tracer values", len);
         return -1;
     }
-    if (op->mapped) {
-        double *st = op->scratch_tracer;
-        #pragma omp target enter data map(alloc: st[0:len])
+    double *old = op->scratch_tracer;
+    if (op->scratch_tracer_len > 0 && op->mapped) {
+        int nt = op->scratch_tracer_len;
+        #pragma omp target exit data map(delete: old[0:nt])
     }
+    free(old);
+    if (op->mapped) {
+        #pragma omp target enter data map(alloc: buf[0:len])
+    }
+    op->scratch_tracer = buf;
     op->scratch_tracer_len = len;
     return 0;
 }
