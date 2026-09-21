@@ -138,6 +138,14 @@ rather than the areal rate.
         Q=lambda t: max(0.0, 2.0 * math.sin(math.pi * t / 3600.0)),
     )
 
+Water the operator adds can carry tracers, and water it removes takes its
+tracer with it; see :ref:`tracers at inlets <tracers_at_inlets>`:
+
+.. code-block:: python
+
+    anuga.Inlet_operator(domain, river_line, Q=Q_river,
+                         tracer_concentrations={'mud': 4.8e-5})
+
 .. autosummary::
 
    Inlet_operator

@@ -71,6 +71,9 @@ int gpu_inlet_operator_init(struct gpu_domain *GD, int num_indices,
         op->scratch_xmom = NULL;
         op->scratch_ymom = NULL;
         op->scratch_depths = NULL;
+        op->scratch_hold = NULL;
+        op->scratch_tracer = NULL;
+        op->scratch_tracer_len = 0;
         IO->num_operators++;
         return op_id;
     }
@@ -101,6 +104,9 @@ int gpu_inlet_operator_init(struct gpu_domain *GD, int num_indices,
     op->scratch_xmom = NULL;
     op->scratch_ymom = NULL;
     op->scratch_depths = NULL;
+    op->scratch_hold = NULL;
+    op->scratch_tracer = NULL;
+    op->scratch_tracer_len = 0;
 
     if (!op->indices || !op->areas) {
         gpu_set_error(GD, "Failed to allocate inlet_operator arrays");
@@ -122,8 +128,9 @@ int gpu_inlet_operator_init(struct gpu_domain *GD, int num_indices,
     op->scratch_xmom = (double*)malloc(num_indices * sizeof(double));
     op->scratch_ymom = (double*)malloc(num_indices * sizeof(double));
     op->scratch_depths = (double*)malloc(num_indices * sizeof(double));
+    op->scratch_hold = (double*)malloc(num_indices * sizeof(double));
     if (!op->scratch_stages || !op->scratch_bed || !op->scratch_xmom ||
-        !op->scratch_ymom || !op->scratch_depths) {
+        !op->scratch_ymom || !op->scratch_depths || !op->scratch_hold) {
         gpu_set_error(GD, "Failed to allocate inlet_operator scratch buffers");
         goto fail;
     }
@@ -141,8 +148,9 @@ int gpu_inlet_operator_init(struct gpu_domain *GD, int num_indices,
         double *sx = op->scratch_xmom;
         double *sy = op->scratch_ymom;
         double *sd = op->scratch_depths;
+        double *sh = op->scratch_hold;
         #pragma omp target enter data map(to: idx[0:ni], ar[0:ni]) \
-            map(alloc: ss[0:ni], sb[0:ni], sx[0:ni], sy[0:ni], sd[0:ni])
+            map(alloc: ss[0:ni], sb[0:ni], sx[0:ni], sy[0:ni], sd[0:ni], sh[0:ni])
         op->mapped = 1;
 
         // Verify mapping succeeded (skip check in host fallback mode)
@@ -186,8 +194,9 @@ fail:
         double *sx = op->scratch_xmom;
         double *sy = op->scratch_ymom;
         double *sd = op->scratch_depths;
+        double *sh = op->scratch_hold;
         #pragma omp target exit data map(delete: idx[0:ni], ar[0:ni], \
-            ss[0:ni], sb[0:ni], sx[0:ni], sy[0:ni], sd[0:ni])
+            ss[0:ni], sb[0:ni], sx[0:ni], sy[0:ni], sd[0:ni], sh[0:ni])
         op->mapped = 0;
     }
     free(op->indices);        op->indices = NULL;
@@ -197,6 +206,7 @@ fail:
     free(op->scratch_xmom);   op->scratch_xmom = NULL;
     free(op->scratch_ymom);   op->scratch_ymom = NULL;
     free(op->scratch_depths); op->scratch_depths = NULL;
+    free(op->scratch_hold);   op->scratch_hold = NULL;
     op->num_indices = 0;
     op->active = 0;
     return -1;
@@ -217,8 +227,14 @@ void gpu_inlet_operator_finalize(struct gpu_domain *GD, int op_id) {
         double *sx = op->scratch_xmom;
         double *sy = op->scratch_ymom;
         double *sd = op->scratch_depths;
+        double *sh = op->scratch_hold;
         #pragma omp target exit data map(delete: idx[0:ni], ar[0:ni], \
-            ss[0:ni], sb[0:ni], sx[0:ni], sy[0:ni], sd[0:ni])
+            ss[0:ni], sb[0:ni], sx[0:ni], sy[0:ni], sd[0:ni], sh[0:ni])
+        if (op->scratch_tracer_len > 0) {
+            double *st = op->scratch_tracer;
+            int nt = op->scratch_tracer_len;
+            #pragma omp target exit data map(delete: st[0:nt])
+        }
     }
 
     if (op->indices) free(op->indices);
@@ -228,6 +244,8 @@ void gpu_inlet_operator_finalize(struct gpu_domain *GD, int op_id) {
     if (op->scratch_xmom) free(op->scratch_xmom);
     if (op->scratch_ymom) free(op->scratch_ymom);
     if (op->scratch_depths) free(op->scratch_depths);
+    if (op->scratch_hold) free(op->scratch_hold);
+    if (op->scratch_tracer) free(op->scratch_tracer);
 
     memset(op, 0, sizeof(struct inlet_operator_info));
     GD->inlet_ops.num_operators--;
@@ -549,6 +567,40 @@ void gpu_inlet_set_stages_evenly(struct gpu_domain *GD, int op_id, double volume
 }
 
 // ============================================================================
+// Tracers carried by the inlet (mirrors anuga/structures/inlet_tracers.py)
+// ============================================================================
+//
+// Inflow (volume >= 0): each cell gains c_in * dh of each tracer, dh >= 0 the
+// water it gained. Extraction (volume < 0): the inlet is one level pool, so the
+// water leaves at the pool's mean concentration C = sum(m A) / sum(h A) and the
+// cells left behind hold C * h_new; draining it dry takes all of its tracer.
+// Both exact, so tracer is conserved across the inlet to roundoff.
+
+// Make sure the tracer mass buffer holds len values on the host and device.
+static int inlet_tracer_scratch(struct gpu_domain *GD,
+                                struct inlet_operator_info *op, int len) {
+    if (op->scratch_tracer_len >= len) return 0;
+    if (op->scratch_tracer_len > 0 && op->mapped) {
+        double *st = op->scratch_tracer;
+        int nt = op->scratch_tracer_len;
+        #pragma omp target exit data map(delete: st[0:nt])
+    }
+    free(op->scratch_tracer);
+    op->scratch_tracer = (double*)malloc((size_t)len * sizeof(double));
+    op->scratch_tracer_len = 0;
+    if (!op->scratch_tracer) {
+        gpu_set_error(GD, "inlet operator: could not allocate %d tracer values", len);
+        return -1;
+    }
+    if (op->mapped) {
+        double *st = op->scratch_tracer;
+        #pragma omp target enter data map(alloc: st[0:len])
+    }
+    op->scratch_tracer_len = len;
+    return 0;
+}
+
+// ============================================================================
 // Main entry point: gpu_inlet_apply
 // Combines all 3 cases from Inlet_operator.__call__()
 // ============================================================================
@@ -557,7 +609,8 @@ double gpu_inlet_apply(struct gpu_domain *GD, int op_id, double volume,
                        double current_volume, double total_area,
                        double *vel_u, double *vel_v, int num_vel,
                        int has_velocity, double ext_vel_u, double ext_vel_v,
-                       int zero_velocity) {
+                       int zero_velocity,
+                       const double *c_in, int n_cin, double *dmass_out) {
     if (op_id < 0 || op_id >= GD->inlet_ops.capacity) return 0.0;
     struct inlet_operator_info *op = &GD->inlet_ops.ops[op_id];
     if (!op->active || op->num_indices == 0) return 0.0;
@@ -572,6 +625,28 @@ double gpu_inlet_apply(struct gpu_domain *GD, int op_id, double volume,
     double * restrict ymom_c = GD->D.ymom_centroid_values;
 
     double actual_volume = volume;
+
+    // Tracer state before the water moves: depth and mass in each inlet cell.
+    const anuga_int ns = GD->D.number_of_tracers;
+    const anuga_int N = GD->D.number_of_elements;
+    const int carry = (ns > 0 && GD->D.tracer_conserved_values != NULL
+                       && op->scratch_hold != NULL);
+    double *s_hold = op->scratch_hold;
+    double *s_tr = NULL;
+    if (carry) {
+        if (inlet_tracer_scratch(GD, op, (int)(ns * n)) != 0) return 0.0;
+        s_tr = op->scratch_tracer;
+        double * restrict t_cons = GD->D.tracer_conserved_values;
+        OMP_PARALLEL_LOOP
+        for (int k = 0; k < n; k++) {
+            int i = indices[k];
+            s_hold[k] = fmax(stage_c[i] - bed_c[i], 0.0);
+            for (anuga_int s = 0; s < ns; s++) {
+                s_tr[s * n + k] = t_cons[s * N + i];
+            }
+        }
+        #pragma omp target update from(s_hold[0:n], s_tr[0:ns*n])
+    }
 
     if (volume >= 0.0) {
         // Case 1: Positive volume - set stages evenly + set momentum
@@ -654,6 +729,57 @@ double gpu_inlet_apply(struct gpu_domain *GD, int op_id, double volume,
         gpu_inlet_set_xmoms(GD, op_id, 0.0);
         gpu_inlet_set_ymoms(GD, op_id, 0.0);
         actual_volume = -current_volume;
+    }
+
+    if (carry) {
+        // Depths after the water has moved, on the device and the host.
+        double *s_d = op->scratch_depths;
+        OMP_PARALLEL_LOOP
+        for (int k = 0; k < n; k++) {
+            int i = indices[k];
+            s_d[k] = fmax(stage_c[i] - bed_c[i], 0.0);
+        }
+        #pragma omp target update from(s_d[0:n])
+
+        const double *ar = op->areas;
+        double V = 0.0;
+        for (int k = 0; k < n; k++) V += s_hold[k] * ar[k];
+        for (anuga_int s = 0; s < ns; s++) {
+            double M_old = 0.0;
+            for (int k = 0; k < n; k++) M_old += s_tr[s * n + k] * ar[k];
+            if (volume >= 0.0) {
+                const double c = (c_in != NULL && s < n_cin) ? c_in[s] : 0.0;
+                for (int k = 0; k < n; k++) {
+                    const double dh = s_d[k] - s_hold[k];
+                    if (dh > 0.0) s_tr[s * n + k] += c * dh;
+                }
+            } else {
+                const double C = (V > 0.0) ? M_old / V : 0.0;
+                for (int k = 0; k < n; k++) s_tr[s * n + k] = C * s_d[k];
+            }
+            if (dmass_out != NULL) {
+                double M_new = 0.0;
+                for (int k = 0; k < n; k++) M_new += s_tr[s * n + k] * ar[k];
+                dmass_out[s] = M_new - M_old;
+            }
+        }
+        #pragma omp target update to(s_tr[0:ns*n])
+
+        // Write the mass back, and the concentration derived from it.
+        const double hmin = GD->D.minimum_allowed_height;
+        double * restrict t_cons = GD->D.tracer_conserved_values;
+        double * restrict t_cv = GD->D.tracer_centroid_values;
+        OMP_PARALLEL_LOOP
+        for (int k = 0; k < n; k++) {
+            int i = indices[k];
+            const double h = s_d[k];
+            const double inv_h = (h > hmin) ? 1.0 / h : 0.0;
+            for (anuga_int s = 0; s < ns; s++) {
+                const double m = s_tr[s * n + k];
+                t_cons[s * N + i] = m;
+                t_cv[s * N + i] = m * inv_h;
+            }
+        }
     }
 
     return actual_volume;
