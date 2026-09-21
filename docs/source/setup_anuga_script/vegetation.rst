@@ -43,6 +43,43 @@ before the first ``evolve``: the three fields are copied to the device once.
 On a distributed run call it after ``distribute()``, on every rank, as for
 any ``set_quantity``. ``set_vegetation_drag(formulation='off')`` removes it.
 
+Vegetation and sediment
+-----------------------
+
+With sediment transport on, the vegetation also decides what bed shear the
+sediment kernel sees in a vegetated cell -- for entrainment, the Rouse
+near-bed profile and bedload alike. The stems take most of the drag, so the
+bed feels far less than the total resistance. Three choices, through
+``sediment_shear``:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 14 46 40
+
+   * - ``sediment_shear``
+     - bed shear :math:`\tau_b/\rho`
+     - when
+   * - ``'bed'`` (default)
+     - :math:`g\,u_v^2 / C_b^2`, with the canopy velocity
+       :math:`u_v = U\,C_{v,r}/C_v` (:math:`u_v = U` for emergent stems)
+     - the bed's share of the resistance, as Baptist et al. (2007) split it
+   * - ``'total'``
+     - :math:`g\,U^2 / C_v^2`, the whole vegetated resistance
+     - to reproduce models that apply the total friction to the bed, such as
+       the Delta-X Wax Lake Delta sediment model
+   * - ``'ignore'``
+     - the cell's own sediment friction closure
+     - with :math:`n = 0` on the vegetated classes this is no shear at all
+
+:math:`C_{v,r} = (C_b^{-2} + C_D m D \min(h, h_v)/(2g))^{-1/2}` is the
+canopy part of the vegetated Chezy coefficient :math:`C_v`. Cells without
+stems keep their own closure whatever the setting.
+
+.. code-block:: python
+
+   domain.set_vegetation_drag(density=m, diameter=D, height=hv,
+                              sediment_shear='total')
+
 .. seealso::
 
    :ref:`sediment_physics` section 8 for the Kean and Smith formulation

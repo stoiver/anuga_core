@@ -122,6 +122,7 @@ cdef extern from "gpu_domain.h" nogil:
         double sediment_dl_threshold
         double sediment_dl_ks
         double sediment_dl_ks_factor
+        int64_t sediment_vegetation_shear
         int64_t sediment_deposition_mode
         double sediment_tau_d
         double sediment_tau_crit
@@ -915,6 +916,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     D.sediment_dl_threshold = getattr(domain_object, 'sediment_dl_threshold', 0.015)
     D.sediment_dl_ks = getattr(domain_object, 'sediment_dl_ks', 0.0)
     D.sediment_dl_ks_factor = getattr(domain_object, 'sediment_dl_ks_factor', 3.0)
+    D.sediment_vegetation_shear = getattr(domain_object, 'sediment_vegetation_shear', 1)
     D.sediment_deposition_mode = getattr(domain_object, 'sediment_deposition_mode', 0)
     D.sediment_tau_d = getattr(domain_object, 'sediment_tau_d', 0.0)
     D.sediment_tau_crit = getattr(domain_object, 'sediment_tau_crit', 0.088)

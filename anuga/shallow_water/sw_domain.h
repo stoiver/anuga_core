@@ -491,6 +491,13 @@ struct domain {
     double sediment_dl_ks;          /* skin roughness height [m]; <= 0: ks_factor * diameter */
     double sediment_dl_ks_factor;   /* k_s = 3 D84 in de Leeuw et al. */
 
+    /* Vegetation seen by the sediment shear, when vegetation_mode > 0:
+     *   0 ignore (the cell's own friction closure),
+     *   1 bed share of the Baptist resistance (default),
+     *   2 the whole vegetated resistance.
+     * See core_vegetation_sediment_fc. Appended at the end. */
+    anuga_int sediment_vegetation_shear;
+
 };
 
 

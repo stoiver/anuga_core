@@ -37,6 +37,7 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double sediment_dl_threshold
 		double sediment_dl_ks
 		double sediment_dl_ks_factor
+		anuga_int sediment_vegetation_shear
 		anuga_int sediment_deposition_mode
 		double sediment_tau_d
 		double sediment_tau_crit
@@ -243,6 +244,7 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.sediment_dl_threshold = getattr(domain_py_object, 'sediment_dl_threshold', 0.015)
 	D.sediment_dl_ks = getattr(domain_py_object, 'sediment_dl_ks', 0.0)
 	D.sediment_dl_ks_factor = getattr(domain_py_object, 'sediment_dl_ks_factor', 3.0)
+	D.sediment_vegetation_shear = getattr(domain_py_object, 'sediment_vegetation_shear', 1)
 	D.sediment_deposition_mode = getattr(domain_py_object, 'sediment_deposition_mode', 0)
 	D.sediment_tau_d = getattr(domain_py_object, 'sediment_tau_d', 0.0)
 	D.sediment_tau_crit = getattr(domain_py_object, 'sediment_tau_crit', 0.088)

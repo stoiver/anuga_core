@@ -858,6 +858,7 @@ class Domain(Generic_Domain):
         self.vegetation_mode = 0
         self.vegetation_Cd = 1.68
         self.vegetation_bed_chezy = 65.0
+        self.sediment_vegetation_shear = 1       # bed share; see set_vegetation_drag
 
 
         #-------------------------------
@@ -3884,8 +3885,11 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
     VEGETATION_FORMULATIONS = {'off': 0, 'baptist': 1}
 
+    VEGETATION_SEDIMENT_SHEAR = {'ignore': 0, 'bed': 1, 'total': 2}
+
     def set_vegetation_drag(self, density=None, diameter=None, height=None,
-                            formulation='baptist', Cd=1.68, bed_chezy=65.0):
+                            formulation='baptist', Cd=1.68, bed_chezy=65.0,
+                            sediment_shear='bed'):
         """Add the drag of a field of stems to the friction (spec 8).
 
         The vegetated cells get a friction slope from the Chezy coefficient
@@ -3914,6 +3918,17 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             Stem drag coefficient, 1.68 (Delta-X Wax Lake model).
         bed_chezy : float
             Bed Chezy coefficient `Cb` inside the stems, 65.
+        sediment_shear : {'bed', 'total', 'ignore'}
+            The bed shear the sediment kernel sees in vegetated cells
+            (entrainment, the Rouse near-bed profile and bedload alike).
+            `'bed'` (default): the bed's share of the resistance, as Baptist
+            et al. split it -- the stems take the drag and the bed feels the
+            canopy velocity `u_v = U Cv_r / Cv` on the bed roughness,
+            `tau_b / rho = g u_v^2 / Cb^2` (`u_v = U` for emergent stems).
+            `'total'`: the whole vegetated resistance, `tau_b / rho = g U^2 / Cv^2`,
+            which is what the Delta-X Wax Lake sediment model uses.
+            `'ignore'`: the cell's own sediment friction closure, which with
+            `n` = 0 in the vegetated classes means no shear at all.
 
         Notes
         -----
@@ -3925,6 +3940,10 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         if formulation not in self.VEGETATION_FORMULATIONS:
             raise ValueError('unknown vegetation drag formulation %r; expected one of %r'
                              % (formulation, sorted(self.VEGETATION_FORMULATIONS)))
+        if sediment_shear not in self.VEGETATION_SEDIMENT_SHEAR:
+            raise ValueError('sediment_shear must be one of %r, got %r'
+                             % (sorted(self.VEGETATION_SEDIMENT_SHEAR), sediment_shear))
+        self.sediment_vegetation_shear = self.VEGETATION_SEDIMENT_SHEAR[sediment_shear]
         mode = self.VEGETATION_FORMULATIONS[formulation]
         if mode:
             from anuga.abstract_2d_finite_volumes.quantity import Quantity
