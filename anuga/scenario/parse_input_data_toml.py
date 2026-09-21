@@ -709,6 +709,7 @@ class ProjectDataTOML:
     SEDIMENT_KEYS = (
         'porosity', 'c_max', 'c_pack', 'bed_evolution', 'rho_w',
         'shear_closure', 'max_slope', 'freeze_slope', 'bed_material', 'tau_crit', 'K_e',
+        'entrainment', 'de_leeuw_fit', 'skin_roughness',
         'deposition_law', 'tau_d', 'near_bed', 'reference_height_floor',
         'friction_mode', 'k_s', 'sigma_br', 'r_d', 'r_br', 'bed', 'grain_size',
         'bedload', 'bedload_K', 'bedload_m', 'bedload_tau_c_star',
@@ -781,6 +782,20 @@ class ProjectDataTOML:
                 f"[{sec}] 'tau_crit' / 'K_e' apply to bed_material 'cohesive' "
                 f"or 'partheniades'; the noncohesive route uses each "
                 f"fraction's 'tau_c_star'")
+
+        opt_choice('entrainment', ('smith_mclean', 'de_leeuw'))
+        opt_choice('de_leeuw_fit', ('de_leeuw_2020', 'nghiem_2022'))
+        opt_float('skin_roughness', _v.positive)
+        if sed.get('entrainment') == 'de_leeuw' and \
+                sed.get('bed_material', 'noncohesive') != 'noncohesive':
+            _v.errors.append(
+                f"[{sec}] entrainment 'de_leeuw' is a non-cohesive relation; "
+                f"use it with bed_material 'noncohesive'")
+        if ('de_leeuw_fit' in sed or 'skin_roughness' in sed) and \
+                sed.get('entrainment') != 'de_leeuw':
+            _v.errors.append(
+                f"[{sec}] 'de_leeuw_fit' / 'skin_roughness' apply to "
+                f"entrainment 'de_leeuw'")
 
         opt_choice('deposition_law', self.SEDIMENT_DEPOSITION_LAWS)
         opt_float('tau_d', _v.non_negative)

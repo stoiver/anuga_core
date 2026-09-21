@@ -738,6 +738,12 @@ class Domain(Generic_Domain):
         self.sediment_K_e = 0.2e-6 / 0.088**0.5  # [E-5]
         self.sediment_rho_w = 1000.0
         self.sediment_K_partheniades = 1.0e-4   # [E-4] kg m-2 s-1 (RDy26)
+        # [E-6] de Leeuw et al. (2020) entrainment, erosion mode 3; the
+        # constants of their Eq 26a until set_bed_material says otherwise.
+        (self.sediment_dl_A, self.sediment_dl_alpha, self.sediment_dl_beta,
+         self.sediment_dl_threshold) = self.DE_LEEUW_FITS['de_leeuw_2020']
+        self.sediment_dl_ks = 0.0               # <= 0: ks_factor * diameter
+        self.sediment_dl_ks_factor = 3.0        # k_s = 3 D84
         self.sediment_deposition_mode = 0       # 0 = [D-1], 1 = [D-2]
         self.sediment_tau_d = 0.0               # [D-2] critical depo stress [Pa]
         # Bed shear closure, spec 3.1/3.4 (divergence D1). 0 = [T-1] quadratic
@@ -2101,7 +2107,11 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
         ero = {0: "Shields / Smith-McLean, non-cohesive (sand, gravel)   [E-1]",
                1: "Hanson & Simon, cohesive (silt, clay)   [E-3]",
-               2: "Partheniades (RDycore)   [E-4]"}[self.sediment_erosion_mode]
+               2: "Partheniades (RDycore)   [E-4]",
+               3: "de Leeuw et al. 2020, non-cohesive bed material load "
+                  "(A=%.3g alpha=%.3g beta=%.3g)   [E-6]"
+                  % (self.sediment_dl_A, self.sediment_dl_alpha, self.sediment_dl_beta),
+               }[self.sediment_erosion_mode]
         dep = {0: "D = d* c v_s   [D-1]", 1: "D = v_s c (1 - tau_b/tau_d)   [D-2]"
                }[self.sediment_deposition_mode]
         dstar = {0: "constant, per fraction", 1: "Rouse profile   [S-4]"
@@ -2206,14 +2216,45 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                         self.sediment_R[i], self.sediment_tau_c_star[i]))
         return '\n'.join(L)
 
+    # [E-6] constant sets (A, alpha, beta, threshold).
+    DE_LEEUW_FITS = {
+        # de Leeuw et al. (2020), Eq 26a, fitted to sand and gravel with the
+        # skin-friction shear velocity.
+        'de_leeuw_2020': (4.74e-4, 1.5, 1.18, 0.015),
+        # As implemented in the Delta-X Wax Lake Delta sediment model (Wang,
+        # Salter & Lamb 2023, ORNL DAAC doi:10.3334/ORNLDAAC/2309), which
+        # attributes it to Nghiem et al. (2022) and uses it for flocculated
+        # mud (as bed material load) and sand alike.
+        'nghiem_2022': (7.04e-4, 0.94475138, 1.81, 0.015),
+    }
+
     def set_bed_material(self, material='noncohesive', tau_crit=0.088,
-                         K_e=None):
+                         K_e=None, entrainment='smith_mclean',
+                         de_leeuw_fit='de_leeuw_2020', A=None, alpha=None,
+                         beta=None, threshold=None, skin_roughness=None,
+                         skin_roughness_factor=3.0):
         """Select the erosion law by naming the BED MATERIAL (spec 4.1.1).
 
-        `'noncohesive'` (default) -- sand, gravel, boulders. Shields
-        entrainment via Smith & McLean / Parker, `[E-1]`/`[E-2]`, with a
-        critical Shields stress per fraction (`tau_c_star` on
-        `add_sediment_fraction`).
+        `'noncohesive'` (default) -- sand, gravel, boulders, and mud carried
+        as flocculated bed material load. The entrainment relation is chosen
+        by `entrainment`:
+
+        * `'smith_mclean'` (default) -- Shields entrainment via Smith & McLean
+          / Parker, `[E-1]`/`[E-2]`, with a critical Shields stress per
+          fraction (`tau_c_star` on `add_sediment_fraction`).
+        * `'de_leeuw'` -- de Leeuw et al. (2020), `[E-6]`:
+          ``E* = A X^beta / (1 + 3 A X^beta)`` with
+          ``X = (u*_skin / v_s)^alpha Fr - threshold``, the near-bed
+          concentration at 0.1 h (pair it with the Rouse near-bed profile
+          and a 0.1 reference-height floor to match). `u*_skin` comes from
+          Manning-Strickler on a skin roughness `k_s`; the per-fraction
+          `tau_c_star` is not used. `de_leeuw_fit` picks the constants:
+          `'de_leeuw_2020'` (their Eq 26a, sand and gravel) or
+          `'nghiem_2022'` (as the Delta-X Wax Lake model uses them, for
+          flocculated mud and sand); `A`, `alpha`, `beta` and `threshold`
+          override them one by one. `skin_roughness` fixes `k_s` in metres
+          for every fraction (de Leeuw use 3 D84 of the bed); by default it
+          is `skin_roughness_factor` (3) times each fraction's diameter.
 
         `'partheniades'` -- `[E-4]`, `E = K_p (tau_b - tau_c)/tau_c`, the form
         RDycore-sediment uses. `K_e` here is the Partheniades coefficient as a
@@ -2241,8 +2282,33 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                              % (material, sorted(materials)))
         if tau_crit <= 0.0:
             raise ValueError('tau_crit must be > 0 Pa, got %g' % tau_crit)
+        if entrainment not in ('smith_mclean', 'de_leeuw'):
+            raise ValueError("entrainment must be 'smith_mclean' or 'de_leeuw', got %r"
+                             % (entrainment,))
+        if entrainment == 'de_leeuw' and material != 'noncohesive':
+            raise ValueError("entrainment='de_leeuw' is a non-cohesive relation; "
+                             "use it with material='noncohesive'")
+        if entrainment == 'de_leeuw':
+            if de_leeuw_fit not in self.DE_LEEUW_FITS:
+                raise ValueError('unknown de_leeuw_fit %r; expected one of %r'
+                                 % (de_leeuw_fit, sorted(self.DE_LEEUW_FITS)))
+            fit = dict(zip(('A', 'alpha', 'beta', 'threshold'),
+                           self.DE_LEEUW_FITS[de_leeuw_fit]))
+            for key, value in (('A', A), ('alpha', alpha), ('beta', beta),
+                               ('threshold', threshold)):
+                if value is not None:
+                    fit[key] = float(value)
+            if fit['A'] <= 0.0 or fit['alpha'] <= 0.0 or fit['beta'] <= 0.0:
+                raise ValueError('de Leeuw A, alpha and beta must be > 0, got %r' % fit)
+            (self.sediment_dl_A, self.sediment_dl_alpha, self.sediment_dl_beta,
+             self.sediment_dl_threshold) = (fit['A'], fit['alpha'], fit['beta'],
+                                            fit['threshold'])
+            if skin_roughness is not None and skin_roughness <= 0.0:
+                raise ValueError('skin_roughness must be > 0 m, got %g' % skin_roughness)
+            self.sediment_dl_ks = float(skin_roughness) if skin_roughness else 0.0
+            self.sediment_dl_ks_factor = float(skin_roughness_factor)
 
-        self.sediment_erosion_mode = materials[material]
+        self.sediment_erosion_mode = 3 if entrainment == 'de_leeuw' else materials[material]
         self.sediment_tau_crit = float(tau_crit)
         if material == 'partheniades' and K_e is not None:
             # [E-4]'s coefficient is a MASS flux in kg m-2 s-1, not [E-5]'s

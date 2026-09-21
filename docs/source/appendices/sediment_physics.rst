@@ -392,6 +392,60 @@ flux by the settling velocity. The threshold is a Shields stress [Shi36]_:
 with :math:`\gamma_0 = 0.0024` empirical. The 0.65 is the maximum packing
 fraction, so :math:`E^{*}` saturates rather than growing without bound.
 
+A second non-cohesive relation, from [dL20]_, is driven by the
+*skin-friction* shear velocity over the settling velocity and by the Froude
+number, and carries no Shields threshold; it is the one the Delta-X Wax Lake
+Delta sediment model uses for sand and for mud transported as flocculated bed
+material load [Wan23]_:
+
+.. math::
+
+   E^{*} = \frac{A\, X^{\beta}}{1 + 3 A\, X^{\beta}},
+   \qquad X = \left(\frac{u_{*,\mathrm{sk}}}{v_s}\right)^{\alpha}
+               \mathrm{Fr} - 0.015,
+   \qquad \mathrm{Fr} = \frac{U}{\sqrt{g h}}
+   \qquad \text{[E-6]}
+
+with :math:`E = v_s E^{*}` as before and :math:`E^{*}` the near-bed
+concentration at :math:`0.1\,h`, capped at 1/3. The skin-friction shear
+velocity follows from Manning-Strickler on a roughness :math:`k_s`:
+:math:`U / u_{*,\mathrm{sk}} = 8.1\,(H_{sk}/k_s)^{1/6}`,
+:math:`u_{*,\mathrm{sk}} = \sqrt{g H_{sk} S}`, with the friction slope
+:math:`S = \tau_b / (\rho g h)` from the active shear closure and
+:math:`H_{sk} \le h`. Two constant sets are provided:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 22 14 14 14 36
+
+   * - ``de_leeuw_fit``
+     - :math:`A`
+     - :math:`\alpha`
+     - :math:`\beta`
+     - source
+   * - ``de_leeuw_2020``
+     - 4.74e-4
+     - 1.5
+     - 1.18
+     - [dL20]_ Eq 26a, sand and gravel (default)
+   * - ``nghiem_2022``
+     - 7.04e-4
+     - 0.945
+     - 1.81
+     - as the Delta-X Wax Lake model uses it [Wan23]_, after Nghiem et al.
+       (2022); mud as flocs and sand
+
+.. code-block:: python
+
+   domain.set_bed_material('noncohesive', entrainment='de_leeuw',
+                           de_leeuw_fit='nghiem_2022',
+                           skin_roughness=None)   # default k_s = 3 d per fraction
+
+``skin_roughness`` fixes :math:`k_s` in metres for every fraction ([dL20]_
+use :math:`3 D_{84}` of the bed); ``A``, ``alpha``, ``beta`` and ``threshold``
+override the chosen constants. Pair it with the Rouse near-bed profile and a
+reference height of :math:`0.1\,h`, which is where :math:`E^{*}` is defined.
+
 **Cohesive** -- silt, clay, cohesive bank material; the regime of the Rio
 Puerco field data [P13]_ that anugaSed was built for. An excess *dimensional*
 stress law, calibrated by jet test [HS01]_ and specified for ANUGA by
@@ -439,8 +493,10 @@ descriptions of the same sediment. Picking the wrong one is a physics error.
      - law
      - when
    * - ``noncohesive``
-     - :spec:`E-1`/:spec:`E-2` Shields, Smith & McLean
-     - sand, gravel, boulders
+     - :spec:`E-1`/:spec:`E-2` Shields, Smith & McLean (default), or
+       :spec:`E-6` de Leeuw (``entrainment='de_leeuw'``)
+     - sand, gravel, boulders; mud as flocculated bed material load with
+       :spec:`E-6`
    * - ``cohesive``
      - :spec:`E-3` Hanson & Simon
      - clay, silt, consolidated mud
@@ -729,6 +785,11 @@ own.
    landscape evolution models revisited. *Journal of Geophysical Research:
    Earth Surface*, 114, F03007. doi:10.1029/2008JF001146
 
+.. [dL20] de Leeuw, J., Lamb, M. P., Parker, G., Moodie, A. J., Haught, D.,
+   Venditti, J. G. and Nittrouer, J. A. (2020). Entrainment and suspension of
+   sand and gravel. *Earth Surface Dynamics*, 8, 485-504.
+   doi:10.5194/esurf-8-485-2020
+
 .. [Die82] Dietrich, W. E. (1982). Settling velocity of natural particles.
    *Water Resources Research*, 18(6), 1615-1626.
 
@@ -784,6 +845,10 @@ own.
 
 .. [P14] Perignon, M. C. (2014). *A Rolling Stone Gathers No Moss.* PhD thesis,
    University of Colorado Boulder.
+
+.. [Wan23] Wang, D., Salter, G. and Lamb, M. P. (2023). Delta-X: Matlab
+   Model for Wax Lake Delta Land Accretion. ORNL DAAC, Oak Ridge, Tennessee,
+   USA. doi:10.3334/ORNLDAAC/2309
 
 .. [Par65] Partheniades, E. (1965). Erosion and deposition of cohesive soils.
    *Journal of the Hydraulics Division, ASCE*, 91(1), 105-139.

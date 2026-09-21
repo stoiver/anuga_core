@@ -31,6 +31,12 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double sediment_gamma0
 		anuga_int sediment_erosion_mode
 		double sediment_K_partheniades
+		double sediment_dl_A
+		double sediment_dl_alpha
+		double sediment_dl_beta
+		double sediment_dl_threshold
+		double sediment_dl_ks
+		double sediment_dl_ks_factor
 		anuga_int sediment_deposition_mode
 		double sediment_tau_d
 		double sediment_tau_crit
@@ -231,6 +237,12 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.sediment_gamma0 = getattr(domain_py_object, 'sediment_gamma0', 0.0024)
 	D.sediment_erosion_mode = getattr(domain_py_object, 'sediment_erosion_mode', 0)
 	D.sediment_K_partheniades = getattr(domain_py_object, 'sediment_K_partheniades', 1.0e-4)
+	D.sediment_dl_A = getattr(domain_py_object, 'sediment_dl_A', 0.000474)
+	D.sediment_dl_alpha = getattr(domain_py_object, 'sediment_dl_alpha', 1.5)
+	D.sediment_dl_beta = getattr(domain_py_object, 'sediment_dl_beta', 1.18)
+	D.sediment_dl_threshold = getattr(domain_py_object, 'sediment_dl_threshold', 0.015)
+	D.sediment_dl_ks = getattr(domain_py_object, 'sediment_dl_ks', 0.0)
+	D.sediment_dl_ks_factor = getattr(domain_py_object, 'sediment_dl_ks_factor', 3.0)
 	D.sediment_deposition_mode = getattr(domain_py_object, 'sediment_deposition_mode', 0)
 	D.sediment_tau_d = getattr(domain_py_object, 'sediment_tau_d', 0.0)
 	D.sediment_tau_crit = getattr(domain_py_object, 'sediment_tau_crit', 0.088)

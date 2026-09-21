@@ -60,6 +60,17 @@
 
 ## Smaller improvements
 
+* A second non-cohesive entrainment law: de Leeuw et al. (2020),
+  `set_bed_material('noncohesive', entrainment='de_leeuw')`, spec [E-6].
+  `E* = A X^beta / (1 + 3 A X^beta)` with
+  `X = (u*_skin / v_s)^alpha Fr - 0.015`, the skin-friction shear velocity
+  from Manning-Strickler on a roughness `k_s`. Two constant sets:
+  `de_leeuw_fit='de_leeuw_2020'` (their Eq 26a, sand and gravel) and
+  `'nghiem_2022'`, as the Delta-X Wax Lake Delta sediment model uses it for
+  mud as flocculated bed material load and for sand. Smith-McLean stays the
+  default. Also in the TOML `[sediment]` table (`entrainment`,
+  `de_leeuw_fit`, `skin_roughness`).
+
 * Vegetation drag: `domain.set_vegetation_drag(density, diameter, height)`
   adds the drag of a stem field to the friction, with the vegetated Chezy
   coefficient of Baptist et al. (2007), emergent or submerged, applied

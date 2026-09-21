@@ -1398,6 +1398,12 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     const double K_e = D->sediment_K_e;
     const double rho_w = D->sediment_rho_w;
     const double K_p = D->sediment_K_partheniades;
+    const double dl_A = D->sediment_dl_A;
+    const double dl_alpha = D->sediment_dl_alpha;
+    const double dl_beta = D->sediment_dl_beta;
+    const double dl_b = D->sediment_dl_threshold;
+    const double dl_ks = D->sediment_dl_ks;
+    const double dl_ks_factor = D->sediment_dl_ks_factor;
     const anuga_int dep_mode = D->sediment_deposition_mode;
     const double tau_d = D->sediment_tau_d;
     const anuga_int shear_closure = D->sediment_shear_closure;
@@ -1629,6 +1635,40 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                 const double excess = tau_b - tau_crit;
                 if (excess > 0.0) {
                     erosion = K_e * excess;
+                }
+            } else if (erosion_mode == 3) {
+                /* [E-6] de Leeuw et al. (2020), Eq 26a, non-cohesive bed
+                 * material load (and, with the Nghiem et al. 2022 constants,
+                 * flocculated mud as the Delta-X Wax Lake model uses it):
+                 *
+                 *   E* = A X^beta / (1 + 3 A X^beta)
+                 *   X  = (u*_skin / v_s)^alpha Fr - threshold,  Fr = U / sqrt(g h)
+                 *
+                 * u*_skin from Manning-Strickler on a roughness k_s (Eq 7):
+                 *   U / u*_skin = 8.1 (H_sk / k_s)^(1/6),  u*_skin = sqrt(g H_sk S)
+                 * so H_sk = (U k_s^(1/6) / (8.1 sqrt(g S)))^(3/2), capped at h
+                 * (skin friction cannot exceed the total). The friction slope
+                 * is taken from the active shear closure, S = tau_b/(rho g h),
+                 * which under quadratic drag is f_c U^2 / (g h), the Delta-X
+                 * model's form. k_s is floored at the viscous sublayer,
+                 * nu / (8 u*), as there. E* is the near-bed concentration at
+                 * 0.1 h, capped at 1/3 by the denominator. */
+                const double U = sqrt(vel2);
+                if (U > 0.0 && tbr > 0.0 && v_s[s] > 0.0 && h > 0.0) {
+                    const double S_f = tbr / (grav * h);
+                    const double ustar = sqrt(tbr);
+                    double ks = (dl_ks > 0.0) ? dl_ks : dl_ks_factor * diam[s];
+                    const double ks_visc = 1.0e-6 / (8.0 * ustar);
+                    if (ks < ks_visc) ks = ks_visc;
+                    double H_sk = pow(U * pow(ks, 1.0 / 6.0) / (8.1 * sqrt(grav * S_f)), 1.5);
+                    if (H_sk > h) H_sk = h;
+                    const double ustar_sk = sqrt(grav * H_sk * S_f);
+                    const double Fr = U / sqrt(grav * h);
+                    const double X = pow(ustar_sk / v_s[s], dl_alpha) * Fr - dl_b;
+                    if (X > 0.0) {
+                        const double aX = dl_A * pow(X, dl_beta);
+                        erosion = v_s[s] * (aX / (1.0 + 3.0 * aX));
+                    }
                 }
             } else {
                 /* [E-1]/[E-2] non-cohesive, Shields route. */

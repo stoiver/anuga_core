@@ -799,6 +799,12 @@ default; an absent key leaves that default.
    bed_material = "noncohesive"
    # tau_crit = 0.088
    # K_e = 1.0e-6
+   # Non-cohesive entrainment: smith_mclean (default) or de_leeuw [E-6], with
+   # de_leeuw_fit = de_leeuw_2020 (default) or nghiem_2022 and an optional
+   # skin_roughness [m] (default 3 x each fraction's diameter).
+   # entrainment = "de_leeuw"
+   # de_leeuw_fit = "nghiem_2022"
+   # skin_roughness = 0.002
 
    # Deposition: d_star (default) or threshold (with tau_d [Pa]); the
    # near-bed profile factor constant (default) or rouse.

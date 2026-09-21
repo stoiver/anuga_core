@@ -34,10 +34,11 @@ def setup_sediment(domain, project):
             mode=sed['friction_mode'],
             **given('k_s', 'r_d', 'r_br', 'sigma_br', 'bed', 'grain_size'))
 
-    if 'bed_material' in sed or 'tau_crit' in sed or 'K_e' in sed:
+    if any(k in sed for k in ('bed_material', 'tau_crit', 'K_e', 'entrainment')):
         domain.set_bed_material(
             material=sed.get('bed_material', 'noncohesive'),
-            **given('tau_crit', 'K_e'))
+            **given('tau_crit', 'K_e', 'entrainment', 'de_leeuw_fit',
+                    'skin_roughness'))
 
     if any(k in sed for k in ('deposition_law', 'tau_d', 'near_bed',
                               'reference_height_floor')):

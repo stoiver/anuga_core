@@ -101,6 +101,18 @@ class TestSetupSediment(unittest.TestCase):
         right = d.tag_boundary_cells['right']
         self.assertTrue(np.allclose(d.tracer_boundary_values[0][right], 0.0))
 
+    def test_de_leeuw_entrainment_reaches_the_domain(self):
+        d = _make_domain()
+        project = SimpleNamespace(sediment_data={
+            'entrainment': 'de_leeuw', 'de_leeuw_fit': 'nghiem_2022',
+            'skin_roughness': 0.002,
+            'fractions': [{'name': 'mud', 'diameter': 2.0e-5}],
+            'erodible_regions': []})
+        setup_sediment(d, project)
+        self.assertEqual(d.sediment_erosion_mode, 3)
+        self.assertAlmostEqual(d.sediment_dl_A, 7.04e-4)
+        self.assertAlmostEqual(d.sediment_dl_ks, 0.002)
+
     def test_configured_domain_evolves(self):
         d = _make_domain()
         Br = Reflective_boundary(d)
