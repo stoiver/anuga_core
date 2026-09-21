@@ -49,6 +49,7 @@ def Inlet_operator(domain,
                    velocity = None,
                    zero_velocity = False,
                    default = 0.0,
+                   tracer_concentrations = None,
                    description = None,
                    label = None,
                    logging = False,
@@ -64,6 +65,8 @@ def Inlet_operator(domain,
     :param velocity: Optional [u,v] to set velocity of applied discharge
     :param zero_velocity: If set to True, velocity of inlet region set to 0
     :param default: If outside time domain of the Q function, use this default discharge
+    :param tracer_concentrations: dict of tracer name -> concentration (float or
+        function of t) of the water the inlet adds; see Inlet_operator
     :param description: Describe the Inlet_operator
     :param label: Give Inlet_operator a label (name)
     :param verbose: Provide verbose output
@@ -117,6 +120,7 @@ def Inlet_operator(domain,
                                        velocity = velocity,
                                        zero_velocity = zero_velocity,
                                        default = default,
+                                       tracer_concentrations = tracer_concentrations,
                                        description = description,
                                        label = label,
                                        logging = logging,

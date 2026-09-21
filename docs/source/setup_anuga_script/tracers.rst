@@ -188,6 +188,44 @@ same call works on every rank. In serial an unknown tag is an error, where it
 can only be a typo.
 
 
+.. _tracers_at_inlets:
+
+Tracers at inlets and outlets
+-----------------------------
+
+An :class:`~anuga.Inlet_operator` adds or removes water inside the domain, and
+the water it moves carries tracer:
+
+.. code-block:: python
+
+   # river inflow at a known sediment concentration (constant or f(t))
+   anuga.Inlet_operator(domain, river_line, Q=river_discharge,
+                        tracer_concentrations={'mud': 4.8e-5,
+                                               'sand': lambda t: sand_rating(t)})
+
+   # an outlet needs nothing: the water it pumps out takes its tracer with it
+   anuga.Inlet_operator(domain, outlet_line, Q=-500.0)
+
+* **Inflow.** The added water carries the concentration given for each tracer,
+  a constant or a function of time (averaged over each step, as ``Q`` is).
+  Tracers not named come in at :math:`c = 0`, the same modelling assumption as
+  an unset boundary.
+* **Extraction.** The operator treats its region as one level pool, so the
+  water leaves at the pool's mean concentration and the cells left behind keep
+  that concentration. Draining the region dry removes all of its tracer. In
+  parallel the pool spans every rank holding part of the region.
+
+Both are exact: the domain's tracer changes by precisely what the water carried
+across the inlet, in either compute mode and in parallel. Each operator keeps
+the running totals in ``op.tracers.total_in`` and ``op.tracers.total_out``,
+per tracer name. (Before 4.1 an outlet removed only water, so its tracer
+stayed behind and concentrated without bound as the cells drained.)
+
+The inlet exchange is not a boundary flux, so a domain with inlets does not
+satisfy the identity in the next section; add the inlets' net transfers to the
+boundary flux integral to close the budget.
+
+
 Checking conservation
 ---------------------
 

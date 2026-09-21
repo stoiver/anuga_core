@@ -399,7 +399,8 @@ cdef extern from "gpu_domain.h" nogil:
                            double current_volume, double total_area,
                            double *vel_u, double *vel_v, int num_vel,
                            int has_velocity, double ext_vel_u, double ext_vel_v,
-                           int zero_velocity)
+                           int zero_velocity,
+                           const double *c_in, int n_cin, double *dmass_out)
 
     # Culvert operators (Boyd box/pipe/weir_trapezoid - batched GPU gather/scatter)
     struct culvert_params:
@@ -2691,13 +2692,29 @@ def inlet_apply_gpu(GPUDomain gpu_dom, int op_id, double volume,
                     double current_volume, double total_area,
                     object vel_u_arr, object vel_v_arr,
                     int has_velocity, double ext_vel_u, double ext_vel_v,
-                    int zero_velocity):
+                    int zero_velocity, object c_in_arr=None, object dmass_arr=None):
     """
     Apply inlet operator on GPU - main entry point.
 
-    Handles all 3 cases (positive volume, negative sustainable, drain).
-    Returns actual applied volume.
+    Handles all 3 cases (positive volume, negative sustainable, drain), and
+    the tracers the water carries: `c_in_arr` is the inflow concentration of
+    each tracer (None: all zero); `dmass_arr`, if given, receives the change
+    in each tracer's volume in the inlet. Returns actual applied volume.
     """
+    cdef np.ndarray[double, ndim=1, mode="c"] cin_np
+    cdef np.ndarray[double, ndim=1, mode="c"] dm_np
+    cdef const double *cin_ptr = NULL
+    cdef double *dm_ptr = NULL
+    cdef int n_cin = 0
+    if c_in_arr is not None:
+        cin_np = np.ascontiguousarray(c_in_arr, dtype=np.float64)
+        if cin_np.shape[0] > 0:
+            cin_ptr = &cin_np[0]
+            n_cin = cin_np.shape[0]
+    if dmass_arr is not None:
+        dm_np = dmass_arr
+        if dm_np.shape[0] > 0:
+            dm_ptr = &dm_np[0]
     cdef np.ndarray[double, ndim=1, mode="c"] u_np
     cdef np.ndarray[double, ndim=1, mode="c"] v_np
     cdef double *u_ptr = NULL
@@ -2715,7 +2732,7 @@ def inlet_apply_gpu(GPUDomain gpu_dom, int op_id, double volume,
                            current_volume, total_area,
                            u_ptr, v_ptr, n_vel,
                            has_velocity, ext_vel_u, ext_vel_v,
-                           zero_velocity)
+                           zero_velocity, cin_ptr, n_cin, dm_ptr)
 
 
 # ============================================================================

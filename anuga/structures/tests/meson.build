@@ -3,6 +3,7 @@ python_sources = [
   'test_boyd_box_operator.py',
   'test_boyd_pipe_operator.py',
   'test_inlet_operator.py',
+  'test_inlet_tracers.py',
   'test_internal_boundary_functions.py',
   'test_internal_boundary_operator.py',
   'test_riverwall_structure.py',

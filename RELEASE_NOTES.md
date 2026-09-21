@@ -14,6 +14,16 @@
 
 ## Selected fixes
 
+* Inlet operators now carry tracers. `Inlet_operator` moved only water: an
+  outlet (negative `Q`) took the water out and left its tracer behind, so
+  the tracer concentrated without bound in the outlet cells as they drained,
+  and an inflow always came in clean. Water removed now leaves at the inlet
+  pool's mean concentration (the pool spans ranks in parallel), and water
+  added carries `tracer_concentrations={'name': c or f(t)}`, zero by default
+  as before. Both are exact, in both compute modes and in parallel; each
+  operator keeps its running totals in `op.tracers.total_in` / `total_out`.
+  Results change wherever tracers or sediment meet an extracting inlet.
+
 * Structure operators (`Boyd_box_operator`, `Boyd_pipe_operator`,
   `Weir_orifice_trapezoid_operator`, `Internal_boundary_operator`) built their
   inlets from different regions depending on whether mpi4py was installed:

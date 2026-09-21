@@ -232,6 +232,13 @@ struct inlet_operator_info {
     double *scratch_depths;      // Host scratch buffer [num_indices]
     int active;
     int mapped;
+    // Tracers carried by the inlet (see gpu_inlet_apply). Appended so no
+    // earlier member moves. scratch_hold is sized with the others; the tracer
+    // mass buffer is sized on first use, since tracers can be registered after
+    // the operator is created.
+    double *scratch_hold;        // depths before the water moves [num_indices]
+    double *scratch_tracer;      // tracer mass [ns * num_indices]
+    int scratch_tracer_len;      // allocated (and mapped) length of scratch_tracer
 };
 
 struct inlet_operators {
@@ -803,7 +810,8 @@ double gpu_inlet_apply(struct gpu_domain *GD, int op_id, double volume,
                        double current_volume, double total_area,
                        double *vel_u, double *vel_v, int num_vel,
                        int has_velocity, double ext_vel_u, double ext_vel_v,
-                       int zero_velocity);
+                       int zero_velocity,
+                       const double *c_in, int n_cin, double *dmass_out);
 
 // Culvert operators (Boyd box/pipe - batched GPU gather/scatter with MPI)
 int gpu_culvert_init(struct gpu_domain *GD,

@@ -1,0 +1,134 @@
+"""Tracer mass carried by the inlet operators.
+
+An inlet operator adds or removes water over a region of the mesh by changing
+the stage there. Without this module it never touched the tracers, so water
+added at an inlet came in clean (diluting whatever was there) and water taken
+out at an outlet left its tracer behind, which then concentrated without bound
+in the outlet cells as they drained.
+
+The rules, applied after the water has been moved:
+
+* **Inflow** (volume >= 0). The added water carries the inflow concentration
+  given for each tracer (0 when none is given, which is the old behaviour). The
+  inlet fills its lowest cells first to a level stage, so each cell gains water
+  ``dh_i >= 0`` and gains tracer ``c_in * dh_i``.
+
+* **Extraction** (volume < 0). The operator treats the inlet as one level pool
+  (it sets a uniform depth), so the water leaves at the pool's mean
+  concentration ``C = sum(m_i A_i) / sum(h_i A_i)`` and the cells left behind
+  hold ``C * h_new``. The tracer removed is exactly ``C`` times the water
+  removed, and draining the inlet dry removes all of it.
+
+Both rules conserve tracer: the change in the inlet's tracer mass is the
+tracer carried by the water that crossed it, no more and no less.
+"""
+
+import numpy as num
+
+
+class InletTracers:
+    """Tracer bookkeeping for one inlet operator.
+
+    Parameters
+    ----------
+    domain : Domain
+    concentrations : dict, optional
+        Tracer name -> inflow concentration, a float or a callable of time.
+        Tracers not named come in at zero concentration.
+    label : str
+        The operator's label, for messages.
+    """
+
+    def __init__(self, domain, concentrations=None, label=''):
+        self.domain = domain
+        self.concentrations = dict(concentrations or {})
+        self.label = label
+        # Tracer volume gained / lost by this operator's cells, per tracer name,
+        # summed step by step by sign. In parallel a rank can gain tracer from
+        # an extraction (water moves between ranks inside the pool), so across
+        # ranks it is the net, total_in - total_out, that is the transfer.
+        self.total_in = {}
+        self.total_out = {}
+        self._checked_ns = -1
+
+    def active(self):
+        return getattr(self.domain, 'number_of_tracers', 0) > 0
+
+    def _check_names(self):
+        ns = self.domain.number_of_tracers
+        if ns == self._checked_ns:
+            return
+        names = self.domain.get_tracer_names()
+        unknown = sorted(set(self.concentrations) - set(names))
+        if unknown:
+            raise ValueError(
+                'inlet operator %r: tracer_concentrations names %s, which the '
+                'domain does not have; its tracers are %s'
+                % (self.label, unknown, names))
+        self._checked_ns = ns
+
+    def inflow_concentrations(self, t, timestep):
+        """Inflow concentration of every tracer over the step, (ns,).
+
+        A callable is averaged over the step's two ends, as the discharge is.
+        """
+        self._check_names()
+        names = self.domain.get_tracer_names()
+        c = num.zeros(len(names))
+        for i, name in enumerate(names):
+            value = self.concentrations.get(name, 0.0)
+            if callable(value):
+                value = 0.5 * (float(num.ravel(value(t))[0])
+                               + float(num.ravel(value(t + timestep))[0]))
+            c[i] = float(value)
+        return c
+
+    def capture(self, indices):
+        """State before the water moves: depths (n,) and tracer mass (ns, n)."""
+        d = self.domain
+        h = num.maximum(d.quantities['stage'].centroid_values[indices]
+                        - d.quantities['elevation'].centroid_values[indices], 0.0)
+        m = d.tracer_conserved_values[:, indices].copy()
+        return h, m
+
+    def apply(self, indices, areas, h_old, m_old, volume, t, timestep,
+              global_sum=None):
+        """Update the tracer mass in the inlet cells after the water has moved.
+
+        `global_sum(x)` sums an array over every process holding part of the
+        inlet; given for the parallel inlet, where the pool spans ranks.
+        Returns the change in tracer volume, (ns,).
+        """
+        d = self.domain
+        self._check_names()
+        h_new = num.maximum(d.quantities['stage'].centroid_values[indices]
+                            - d.quantities['elevation'].centroid_values[indices], 0.0)
+        if volume >= 0.0:
+            c_in = self.inflow_concentrations(t, timestep)
+            dh = num.maximum(h_new - h_old, 0.0)
+            m_new = m_old + c_in[:, None] * dh[None, :]
+        else:
+            M = (m_old * areas[None, :]).sum(axis=1)
+            V = float((h_old * areas).sum())
+            if global_sum is not None:
+                M = num.asarray(global_sum(M), dtype=float)
+                V = float(global_sum(num.array([V]))[0])
+            C = M / V if V > 0.0 else num.zeros_like(M)
+            m_new = C[:, None] * h_new[None, :]
+
+        d.tracer_conserved_values[:, indices] = m_new
+        hmin = d.minimum_allowed_height
+        with num.errstate(divide='ignore', invalid='ignore'):
+            inv_h = num.where(h_new > hmin, 1.0 / h_new, 0.0)
+        d.tracer_centroid_values[:, indices] = m_new * inv_h[None, :]
+
+        dmass = ((m_new - m_old) * areas[None, :]).sum(axis=1)
+        self.record(dmass)
+        return dmass
+
+    def record(self, dmass):
+        for name, dm in zip(self.domain.get_tracer_names(), dmass):
+            if dm >= 0.0:
+                self.total_in[name] = self.total_in.get(name, 0.0) + float(dm)
+            else:
+                self.total_out[name] = self.total_out.get(name, 0.0) - float(dm)
