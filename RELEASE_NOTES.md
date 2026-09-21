@@ -23,6 +23,17 @@
   as before. Both are exact, in both compute modes and in parallel; each
   operator keeps its running totals in `op.tracers.total_in` / `total_out`.
   Results change wherever tracers or sediment meet an extracting inlet.
+* Structures carry tracers. Culverts, weirs, bridges and internal boundaries
+  (`Boyd_box_operator`, `Boyd_pipe_operator`,
+  `Weir_orifice_trapezoid_operator`, `Internal_boundary_operator`) moved
+  water only, so the tracer stayed at the upstream end and clean water
+  arrived downstream. Each cell that loses water now keeps its
+  concentration, and the tracer it gives up arrives with the water, spread
+  over the outflow cells in proportion to the water each gains: exact, and a
+  structure that moves no water changes nothing. In both compute modes (the
+  batched GPU culvert kernel included) and in parallel, where a culvert
+  whose ends are on different ranks takes the host MPI path when tracers are
+  present. Results change wherever a structure passes tracer or sediment.
 
 * Structure operators (`Boyd_box_operator`, `Boyd_pipe_operator`,
   `Weir_orifice_trapezoid_operator`, `Internal_boundary_operator`) built their

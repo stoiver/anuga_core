@@ -1,4 +1,8 @@
-"""Tracer mass carried by the inlet operators.
+"""Tracer mass carried by the inlet and structure operators.
+
+Inlet operators: see InletTracers below. Structures (culverts, weirs,
+bridges, internal boundaries): see StructureTracers at the end.
+
 
 An inlet operator adds or removes water over a region of the mesh by changing
 the stage there. Without this module it never touched the tracers, so water
@@ -132,3 +136,94 @@ class InletTracers:
                 self.total_in[name] = self.total_in.get(name, 0.0) + float(dm)
             else:
                 self.total_out[name] = self.total_out.get(name, 0.0) - float(dm)
+
+
+class StructureTracers:
+    """Tracer carried by a structure's water transfer (culvert, weir, bridge,
+    internal boundary).
+
+    A structure draws its inflow region down and fills its outflow region
+    (Inlet.set_average_depth levels the surface: on a transfer a drawn-down
+    cell only loses water and a filled cell only gains it). The rule, per
+    cell, after the water has moved:
+
+    * a cell that LOST water keeps its concentration, so it gives up
+      ``c_i * dh_i`` of tracer;
+    * a cell that GAINED water receives the total tracer given up, divided by
+      the total water gained, in proportion to its own gain.
+
+    The tracer lost and gained balance exactly. Being per cell, an idle
+    structure (no transfer) leaves the tracer untouched: nothing is mixed
+    across an inlet region that no water crossed.
+    """
+
+    def __init__(self, domain):
+        self.domain = domain
+        self.total_moved = {}   # tracer volume moved through, per tracer name
+
+    def active(self):
+        return getattr(self.domain, 'number_of_tracers', 0) > 0
+
+    def capture(self, inlets):
+        """State of each inlet region before the water moves (None if absent
+        on this rank)."""
+        d = self.domain
+        stage = d.quantities['stage'].centroid_values
+        bed = d.quantities['elevation'].centroid_values
+        state = []
+        for inlet in inlets:
+            if inlet is None or len(inlet.triangle_indices) == 0:
+                state.append(None)
+                continue
+            idx = num.asarray(inlet.triangle_indices, dtype=int)
+            h = num.maximum(stage[idx] - bed[idx], 0.0)
+            state.append((idx, d.areas[idx].copy(), h,
+                          d.tracer_conserved_values[:, idx].copy()))
+        return state
+
+    def apply(self, state, global_sum=None):
+        """Move the tracer with the water. `global_sum(x)` sums an array over
+        every rank of the structure (parallel); returns the tracer moved."""
+        d = self.domain
+        ns = d.number_of_tracers
+        stage = d.quantities['stage'].centroid_values
+        bed = d.quantities['elevation'].centroid_values
+        T = num.zeros(ns)
+        G = 0.0
+        work = []
+        for s in state:
+            if s is None:
+                work.append(None)
+                continue
+            idx, areas, h_old, m_old = s
+            h_new = num.maximum(stage[idx] - bed[idx], 0.0)
+            dh = h_new - h_old
+            lose = dh < 0.0
+            gain = dh > 0.0
+            m_new = m_old.copy()
+            with num.errstate(divide='ignore', invalid='ignore'):
+                keep = num.where(h_old > 0.0, h_new / h_old, 0.0)
+            m_new[:, lose] = m_old[:, lose] * keep[None, lose]
+            T += ((m_old - m_new) * areas[None, :]).sum(axis=1)
+            G += float((dh[gain] * areas[gain]).sum())
+            work.append((idx, h_new, dh, gain, m_new))
+        if global_sum is not None:
+            T = num.asarray(global_sum(T), dtype=float)
+            G = float(global_sum(num.array([G]))[0])
+        c_t = T / G if G > 0.0 else num.zeros(ns)
+
+        hmin = d.minimum_allowed_height
+        for w in work:
+            if w is None:
+                continue
+            idx, h_new, dh, gain, m_new = w
+            m_new[:, gain] += c_t[:, None] * dh[None, gain]
+            d.tracer_conserved_values[:, idx] = m_new
+            with num.errstate(divide='ignore', invalid='ignore'):
+                inv_h = num.where(h_new > hmin, 1.0 / h_new, 0.0)
+            d.tracer_centroid_values[:, idx] = m_new * inv_h[None, :]
+
+        moved = c_t * G if G > 0.0 else num.zeros(ns)
+        for name, v in zip(d.get_tracer_names(), moved):
+            self.total_moved[name] = self.total_moved.get(name, 0.0) + float(v)
+        return moved

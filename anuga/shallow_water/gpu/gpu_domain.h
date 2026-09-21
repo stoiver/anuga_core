@@ -392,6 +392,14 @@ struct culvert_operators {
     double *scratch_slot_ymom;      // [2*nc]
 
     int mapped;
+
+    // Tracers carried by the transfer (see gpu_culvert_scatter). Appended so
+    // no earlier member moves; sized on first use for the domain's tracers.
+    int tracer_scratch_ns;          // tracers the buffers are sized for (0 = none)
+    double *scratch_tr_hold;        // [nt] depth before the transfer
+    double *scratch_tr_T;           // [2*nc*ns] tracer given up, per inlet
+    double *scratch_tr_G;           // [2*nc] water gained, per inlet
+    double *scratch_tr_c;           // [nc*ns] concentration each culvert carries
 };
 
 // Max-quantities operator — device-resident running maxima of stage, depth,
