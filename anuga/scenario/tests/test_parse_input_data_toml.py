@@ -2233,6 +2233,22 @@ class TestSediment(unittest.TestCase):
                 '[sediment]', '[sediment]\nbedload_open_boundaries = 3'))
         self.assertIn('bedload_open_boundaries', str(cm.exception))
 
+    def test_de_leeuw_entrainment_parses(self):
+        p = self._make(self.ONE_FRACTION.replace(
+            '[sediment]',
+            '[sediment]\nentrainment = "de_leeuw"\nde_leeuw_fit = "nghiem_2022"\n'
+            'skin_roughness = 0.002'))
+        d = p.sediment_data
+        self.assertEqual(d['entrainment'], 'de_leeuw')
+        self.assertEqual(d['de_leeuw_fit'], 'nghiem_2022')
+        self.assertAlmostEqual(d['skin_roughness'], 0.002)
+
+    def test_de_leeuw_needs_a_noncohesive_bed(self):
+        with self.assertRaises(Exception) as cm:
+            self._make(self.ONE_FRACTION.replace(
+                '[sediment]', '[sediment]\nentrainment = "de_leeuw"\nbed_material = "cohesive"'))
+        self.assertIn('de_leeuw', str(cm.exception))
+
     def test_full_table_parses(self):
         p = self._make("""
             [sediment]

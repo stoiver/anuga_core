@@ -545,6 +545,32 @@ E_\ell^{\mathrm{pot}} = \begin{cases} K_{e,\ell}\, \dfrac{\tau_b - \tau_{c,\ell}
 
 Note {speclit}`E-4` and {speclit}`E-3` both use *dimensional* stress; {speclit}`E-1` uses Shields stress.
 
+**de Leeuw et al. (2020)** `[dL20 26a]` -- a non-cohesive alternative to {speclit}`E-1`,
+driven by the skin-friction shear velocity and the Froude number, with no
+Shields threshold:
+
+```{index} single: physics label; [E-6]
+```
+(spec-e-6)=
+```{math}
+:nowrap:
+
+\begin{align}
+E^{*} = \frac{A\,X^{\beta}}{1 + 3A\,X^{\beta}}, \qquad
+X = \left(\frac{u_{*,\mathrm{sk}}}{v_s}\right)^{\alpha}\mathrm{Fr} - 0.015 \tag{E-6}
+\end{align}
+```
+
+`E = v_s E*` as in {speclit}`E-2`; `E*` is the near-bed concentration at `0.1 h`, capped at
+1/3. `u*_sk` from Manning-Strickler on a skin roughness `k_s` (`[dL20 7]`:
+`U/u*_sk = 8.1 (H_sk/k_s)^{1/6}`, `u*_sk = sqrt(g H_sk S)`, `k_s = 3 D84`),
+with `S = tau_b/(rho g h)` from the active shear closure, `H_sk <= h`, and
+`k_s` floored at the viscous sublayer `nu/(8 u*)`. Constants: `A = 4.74e-4,
+alpha = 1.5, beta = 1.18` (`[dL20 26a]`, sand and gravel), or `A = 7.04e-4,
+alpha = 0.945, beta = 1.81` as the Delta-X Wax Lake model uses them for mud as
+flocculated bed material load and for sand (`[Wan23]`, after Nghiem et al.
+2022).
+
 > **On the dimensions of `K_e`.**
 > Reading P14 alone suggests a dimensional inconsistency in `K_e`. It is an
 > artefact of that reading. P14 Eq 3.6 applies

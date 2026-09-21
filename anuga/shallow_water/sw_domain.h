@@ -479,6 +479,18 @@ struct domain {
     anuga_int  num_owned_edges;
     anuga_int* owned_edges;
 
+    /* [E-6] de Leeuw et al. (2020) entrainment, sediment_erosion_mode 3:
+     *   E* = A X^beta / (1 + 3 A X^beta),  X = (u*_skin / v_s)^alpha Fr - threshold
+     * with the skin-friction shear velocity from Manning-Strickler on a
+     * roughness k_s (de Leeuw Eq 7). Appended at the end so no earlier member
+     * moves (see the note on the tracer block). */
+    double sediment_dl_A;
+    double sediment_dl_alpha;
+    double sediment_dl_beta;
+    double sediment_dl_threshold;
+    double sediment_dl_ks;          /* skin roughness height [m]; <= 0: ks_factor * diameter */
+    double sediment_dl_ks_factor;   /* k_s = 3 D84 in de Leeuw et al. */
+
 };
 
 
