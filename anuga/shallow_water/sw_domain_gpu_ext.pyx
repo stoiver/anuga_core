@@ -375,6 +375,9 @@ cdef extern from "gpu_domain.h" nogil:
                                double *areas, int *full_indices, int num_full)
     void gpu_rate_operator_finalize(gpu_domain *GD, int op_id)
     void gpu_rate_operators_finalize_all(gpu_domain *GD)
+    int gpu_rate_operator_tracers_capture(gpu_domain *GD, int op_id)
+    void gpu_rate_operator_tracers_apply(gpu_domain *GD, int op_id,
+                                         const double *c_in, const int *carry, int ns)
     double gpu_rate_operator_apply(gpu_domain *GD, int op_id,
                                    double rate, double factor, double timestep)
     double gpu_rate_operator_apply_array(gpu_domain *GD, int op_id,
@@ -2466,6 +2469,25 @@ def finalize_all_rate_operators(GPUDomain gpu_dom):
     Call this during domain cleanup.
     """
     gpu_rate_operators_finalize_all(&gpu_dom.GD)
+
+
+def rate_operator_tracers_capture_gpu(GPUDomain gpu_dom, int op_id):
+    """Record the depths a rate operator's cells have before it is applied."""
+    return gpu_rate_operator_tracers_capture(&gpu_dom.GD, op_id)
+
+
+def rate_operator_tracers_apply_gpu(GPUDomain gpu_dom, int op_id, object c_in, object carry):
+    """Move the tracers with the water the rate added or removed.
+
+    `c_in` (ns,) is each tracer's inflow concentration, `carry` (ns,) 1 where
+    the tracer leaves with removed water. See gpu_rate_operator.c.
+    """
+    cdef np.ndarray[double, ndim=1, mode="c"] c_np = np.ascontiguousarray(c_in, dtype=np.float64)
+    cdef np.ndarray[int, ndim=1, mode="c"] k_np = np.ascontiguousarray(carry, dtype=np.intc)
+    cdef int ns = c_np.shape[0]
+    if ns == 0:
+        return
+    gpu_rate_operator_tracers_apply(&gpu_dom.GD, op_id, &c_np[0], &k_np[0], ns)
 
 
 def apply_rate_operator_gpu(GPUDomain gpu_dom, int op_id,

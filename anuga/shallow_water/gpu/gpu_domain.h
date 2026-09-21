@@ -207,6 +207,10 @@ struct rate_operator_info {
     double *rate_array_cache;    // GPU-resident copy of rate array
     int rate_array_size;         // Size of cached rate array
     int rate_array_mapped;       // Whether rate array is mapped to GPU
+    // Tracers carried by the rate (gpu_rate_operator_tracers_*). Appended so
+    // no earlier member moves; allocated on first use.
+    double *scratch_hold;        // depth before the rate is applied [num_indices]
+    int hold_mapped;
 };
 
 struct rate_operators {
@@ -676,6 +680,13 @@ void gpu_rate_operators_finalize_all(struct gpu_domain *GD);
 // factor: conversion factor
 // timestep: current timestep
 // For negative rates, also scales momentum appropriately
+// Tracers carried by a rate operator: capture depths before the rate is
+// applied, then add c_in * dh where water was added and, for tracers flagged
+// carry, keep the concentration where water was removed.
+int gpu_rate_operator_tracers_capture(struct gpu_domain *GD, int op_id);
+void gpu_rate_operator_tracers_apply(struct gpu_domain *GD, int op_id,
+                                     const double *c_in, const int *carry, int ns);
+
 double gpu_rate_operator_apply(struct gpu_domain *GD, int op_id,
                                double rate, double factor, double timestep);
 
