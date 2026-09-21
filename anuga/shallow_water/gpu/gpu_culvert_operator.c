@@ -685,6 +685,17 @@ void gpu_culverts_finalize_all(struct gpu_domain *GD) {
             double *sa = CO->scratch_inlet_areas;
             #pragma omp target exit data map(delete: si[0:nt], sa[0:nt])
         }
+        if (CO->tracer_scratch_ns > 0) {
+            int ne_t = 2 * CO->num_culverts;
+            int nt_t = CO->total_inlet_triangles;
+            int nk = CO->tracer_scratch_ns;
+            double *th = CO->scratch_tr_hold;
+            double *tT = CO->scratch_tr_T;
+            double *tG = CO->scratch_tr_G;
+            double *tc = CO->scratch_tr_c;
+            #pragma omp target exit data map(delete: th[0:nt_t], tT[0:ne_t*nk], \
+                tG[0:ne_t], tc[0:CO->num_culverts*nk])
+        }
         CO->mapped = 0;
     }
 
@@ -704,6 +715,11 @@ void gpu_culverts_finalize_all(struct gpu_domain *GD) {
     if (CO->scratch_inlet_areas) { free(CO->scratch_inlet_areas); CO->scratch_inlet_areas = NULL; }
     if (CO->scratch_slot_start) { free(CO->scratch_slot_start); CO->scratch_slot_start = NULL; }
     if (CO->scratch_slot_count) { free(CO->scratch_slot_count); CO->scratch_slot_count = NULL; }
+    free(CO->scratch_tr_hold); CO->scratch_tr_hold = NULL;
+    free(CO->scratch_tr_T);    CO->scratch_tr_T = NULL;
+    free(CO->scratch_tr_G);    CO->scratch_tr_G = NULL;
+    free(CO->scratch_tr_c);    CO->scratch_tr_c = NULL;
+    CO->tracer_scratch_ns = 0;
 
     culvert_host_scratch_free(CO);
 
@@ -1110,6 +1126,39 @@ static void culvert_level_inlet_surface(const int * restrict idx,
 #pragma omp end declare target
 
 
+// Tracer scratch for the transfer, sized for ns tracers and mapped once.
+// Returns 0 on success; on failure the caller carries no tracers this step.
+static int culvert_tracer_scratch(struct gpu_domain *GD, int ns) {
+    struct culvert_operators *CO = &GD->culvert_ops;
+    if (CO->tracer_scratch_ns == ns) return 0;
+    int nc = CO->num_culverts, ne = 2 * nc, nt = CO->total_inlet_triangles;
+    if (CO->tracer_scratch_ns > 0) {
+        int nk = CO->tracer_scratch_ns;
+        double *th = CO->scratch_tr_hold, *tT = CO->scratch_tr_T;
+        double *tG = CO->scratch_tr_G, *tc = CO->scratch_tr_c;
+        #pragma omp target exit data map(delete: th[0:nt], tT[0:ne*nk], tG[0:ne], tc[0:nc*nk])
+        free(th); free(tT); free(tG); free(tc);
+        CO->tracer_scratch_ns = 0;
+    }
+    CO->scratch_tr_hold = (double*)calloc(nt > 0 ? nt : 1, sizeof(double));
+    CO->scratch_tr_T = (double*)calloc((size_t)ne * ns, sizeof(double));
+    CO->scratch_tr_G = (double*)calloc(ne, sizeof(double));
+    CO->scratch_tr_c = (double*)calloc((size_t)nc * ns, sizeof(double));
+    if (!CO->scratch_tr_hold || !CO->scratch_tr_T || !CO->scratch_tr_G || !CO->scratch_tr_c) {
+        gpu_set_error(GD, "culvert tracers: could not allocate scratch for %d tracers", ns);
+        free(CO->scratch_tr_hold); free(CO->scratch_tr_T);
+        free(CO->scratch_tr_G); free(CO->scratch_tr_c);
+        CO->scratch_tr_hold = CO->scratch_tr_T = CO->scratch_tr_G = CO->scratch_tr_c = NULL;
+        return -1;
+    }
+    double *th = CO->scratch_tr_hold, *tT = CO->scratch_tr_T;
+    double *tG = CO->scratch_tr_G, *tc = CO->scratch_tr_c;
+    int ntm = nt > 0 ? nt : 1;
+    #pragma omp target enter data map(alloc: th[0:ntm], tT[0:ne*ns], tG[0:ne], tc[0:nc*ns])
+    CO->tracer_scratch_ns = ns;
+    return 0;
+}
+
 static void gpu_culvert_scatter(struct gpu_domain *GD,
                                 struct culvert_transfer *transfers) {
     struct culvert_operators *CO = &GD->culvert_ops;
@@ -1165,11 +1214,97 @@ static void gpu_culvert_scatter(struct gpu_domain *GD,
 
     double *sa = CO->scratch_inlet_areas;
 
+    // Tracers ride with the water (anuga/structures/inlet_tracers.py,
+    // StructureTracers): record each inlet cell's depth before it is levelled.
+    // Only culverts local to this rank reach here with tracers present; the
+    // Python manager leaves cross-boundary ones to the host MPI path.
+    const anuga_int ns_tr = GD->D.number_of_tracers;
+    const anuga_int N_tr = GD->D.number_of_elements;
+    int carry = (ns_tr > 0 && GD->D.tracer_conserved_values != NULL);
+    if (carry && culvert_tracer_scratch(GD, (int)ns_tr) != 0) carry = 0;
+    double *hold = CO->scratch_tr_hold;
+    if (carry) {
+        #pragma omp target teams distribute parallel for
+        for (int j = 0; j < nt; j++) {
+            int i = si[j];
+            double dj = stage_c[i] - bed_c[i];
+            hold[j] = dj > 0.0 ? dj : 0.0;
+        }
+    }
+
     #pragma omp target teams distribute parallel for
     for (int s = 0; s < ne; s++) {
         culvert_level_inlet_surface(si + sst[s], sa + sst[s], scn[s],
                                     nd[s], nx[s], ny[s],
                                     stage_c, bed_c, xmom_c, ymom_c);
+    }
+
+    if (carry) {
+        // Cells that lost water keep their concentration; sum the tracer they
+        // gave up and the water gained, per inlet (one thread per inlet).
+        const anuga_int ns = ns_tr, N = N_tr;
+        const double hmin = GD->D.minimum_allowed_height;
+        double * restrict t_cons = GD->D.tracer_conserved_values;
+        double * restrict t_cv = GD->D.tracer_centroid_values;
+        double *tT = CO->scratch_tr_T;
+        double *tG = CO->scratch_tr_G;
+        double *tc = CO->scratch_tr_c;
+        #pragma omp target teams distribute parallel for
+        for (int s = 0; s < ne; s++) {
+            double g = 0.0;
+            for (anuga_int k = 0; k < ns; k++) tT[s * ns + k] = 0.0;
+            for (int j = sst[s]; j < sst[s] + scn[s]; j++) {
+                int i = si[j];
+                double hn = stage_c[i] - bed_c[i];
+                if (hn < 0.0) hn = 0.0;
+                double dh = hn - hold[j];
+                if (dh < 0.0) {
+                    double keep = hold[j] > 0.0 ? hn / hold[j] : 0.0;
+                    double inv_h = hn > hmin ? 1.0 / hn : 0.0;
+                    for (anuga_int k = 0; k < ns; k++) {
+                        double mo = t_cons[k * N + i];
+                        double mn = mo * keep;
+                        tT[s * ns + k] += (mo - mn) * sa[j];
+                        t_cons[k * N + i] = mn;
+                        t_cv[k * N + i] = mn * inv_h;
+                    }
+                } else if (dh > 0.0) {
+                    g += dh * sa[j];
+                }
+            }
+            tG[s] = g;
+        }
+        #pragma omp target update from(tT[0:ne*ns], tG[0:ne])
+
+        // Each culvert carries (tracer given up) / (water gained).
+        for (int c = 0; c < nc; c++) {
+            double G = tG[2 * c] + tG[2 * c + 1];
+            for (anuga_int k = 0; k < ns; k++) {
+                double T = tT[(2 * c) * ns + k] + tT[(2 * c + 1) * ns + k];
+                tc[c * ns + k] = (G > 0.0) ? T / G : 0.0;
+            }
+        }
+        #pragma omp target update to(tc[0:nc*ns])
+
+        // Cells that gained water receive it at that concentration.
+        #pragma omp target teams distribute parallel for
+        for (int s = 0; s < ne; s++) {
+            int c = s / 2;
+            for (int j = sst[s]; j < sst[s] + scn[s]; j++) {
+                int i = si[j];
+                double hn = stage_c[i] - bed_c[i];
+                if (hn < 0.0) hn = 0.0;
+                double dh = hn - hold[j];
+                if (dh > 0.0) {
+                    double inv_h = hn > hmin ? 1.0 / hn : 0.0;
+                    for (anuga_int k = 0; k < ns; k++) {
+                        double mn = t_cons[k * N + i] + tc[c * ns + k] * dh;
+                        t_cons[k * N + i] = mn;
+                        t_cv[k * N + i] = mn * inv_h;
+                    }
+                }
+            }
+        }
     }
 }
 

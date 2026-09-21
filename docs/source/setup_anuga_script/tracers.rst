@@ -225,6 +225,21 @@ The inlet exchange is not a boundary flux, so a domain with inlets does not
 satisfy the identity in the next section; add the inlets' net transfers to the
 boundary flux integral to close the budget.
 
+**Structures** -- culverts (:class:`~anuga.Boyd_box_operator`,
+:class:`~anuga.Boyd_pipe_operator`), weirs, bridges and internal boundaries --
+carry tracer through with the water they move, with nothing to set. Each cell
+of the inflow region that loses water keeps its concentration, and the tracer
+it gives up arrives in the outflow region with the water, spread over its
+cells in proportion to the water each gains. Tracer is conserved exactly, a
+structure that moves no water leaves the tracer untouched, and in parallel it
+is carried across sub-domains when the two ends are on different ranks. The
+running total is in ``op._structure_tracers.total_moved`` on the host paths.
+(Before 4.1 a culvert moved water only: the tracer stayed upstream and clean
+water arrived downstream.)
+
+Structures move water inside the domain, so unlike inlets they do not change
+the domain's tracer mass and the identity below still holds.
+
 
 Checking conservation
 ---------------------

@@ -298,6 +298,38 @@ class Parallel_Structure_operator(anuga.Operator):
         self.set_parallel_logging(logging)
 
     def __call__(self):
+        # Tracers ride with the water (anuga/structures/inlet_tracers.py). The
+        # tracer given up and the water gained are summed over the structure's
+        # ranks, so the tracer arrives on whichever ranks hold the outflow.
+        # COLLECTIVE over self.procs, like the rest of this method.
+        tracers = getattr(self, '_structure_tracers', None)
+        if tracers is None:
+            from anuga.structures.inlet_tracers import StructureTracers
+            tracers = self._structure_tracers = StructureTracers(self.domain)
+        state = tracers.capture(self.inlets) if tracers.active() else None
+        self._transfer_water()
+        if state is not None:
+            tracers.apply(state, global_sum=self._structure_sum)
+
+    def _structure_sum(self, x):
+        """Sum an array over self.procs (master gathers and broadcasts)."""
+        x = num.array(x, dtype=float, ndmin=1)
+        if len(self.procs) == 1:
+            return x
+        if self.myid == self.master_proc:
+            total = x.copy()
+            for i in self.procs:
+                if i != self.master_proc:
+                    total += num.asarray(pypar.receive(i), dtype=float)
+            for i in self.procs:
+                if i != self.master_proc:
+                    pypar.send(total, i)
+            return total
+        pypar.send(x, self.master_proc)
+        return num.asarray(pypar.receive(self.master_proc), dtype=float)
+
+    def _transfer_water(self):
+        """One step of the structure's water transfer (no tracers)."""
 
         from anuga.structures.structure_operator import (
             _can_use_c_culvert, _call_c_culvert)
