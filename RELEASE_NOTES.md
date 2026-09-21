@@ -34,6 +34,14 @@
   batched GPU culvert kernel included) and in parallel, where a culvert
   whose ends are on different ranks takes the host MPI path when tracers are
   present. Results change wherever a structure passes tracer or sediment.
+* `Rate_operator` (and its `rainfall` / `inflow` factories) takes
+  `tracer_concentrations={'name': c or f(t)}` for the water a positive rate
+  adds, and `tracer_extraction='retain' | 'carry'` (or a dict per tracer)
+  for what a negative rate does: `'retain'` leaves the tracer behind, the old
+  behaviour and right for salt under evaporation; `'carry'` removes it with
+  the water at the cell's concentration, as for a drain or pump. Exact per
+  cell, in both compute modes. An operator with neither set behaves exactly
+  as before and costs nothing extra.
 
 * Structure operators (`Boyd_box_operator`, `Boyd_pipe_operator`,
   `Weir_orifice_trapezoid_operator`, `Internal_boundary_operator`) built their

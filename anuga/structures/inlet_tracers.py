@@ -1,7 +1,8 @@
 """Tracer mass carried by the inlet and structure operators.
 
 Inlet operators: see InletTracers below. Structures (culverts, weirs,
-bridges, internal boundaries): see StructureTracers at the end.
+bridges, internal boundaries): see StructureTracers. Rate operators: see
+RateTracers at the end.
 
 
 An inlet operator adds or removes water over a region of the mesh by changing
@@ -227,3 +228,108 @@ class StructureTracers:
         for name, v in zip(d.get_tracer_names(), moved):
             self.total_moved[name] = self.total_moved.get(name, 0.0) + float(v)
         return moved
+
+
+class RateTracers:
+    """Tracer carried by a Rate_operator's water, cell by cell.
+
+    * Water ADDED (rain, a distributed inflow) carries the concentration given
+      in ``tracer_concentrations`` (0 when none is given: clean rain, the old
+      behaviour).
+    * Water REMOVED (a negative rate) either takes each tracer with it at the
+      cell's concentration (``'carry'``: pumping, drains, abstraction, or a
+      dissolved tracer lost to infiltration) or leaves it behind (``'retain'``:
+      salt under evaporation, or sediment the bed filters out). ``'retain'``
+      is the old behaviour and the default.
+
+    Exact per cell. Nothing is done when no concentration is given and every
+    tracer retains, so an ordinary rainfall operator costs nothing extra.
+    """
+
+    MODES = ('retain', 'carry')
+
+    def __init__(self, domain, concentrations=None, extraction='retain', label=''):
+        self.domain = domain
+        self.concentrations = dict(concentrations or {})
+        if isinstance(extraction, str):
+            if extraction not in self.MODES:
+                raise ValueError('tracer_extraction must be %r or a dict of them, got %r'
+                                 % (self.MODES, extraction))
+            self.default_mode = extraction
+            self.modes = {}
+        else:
+            self.default_mode = 'retain'
+            self.modes = dict(extraction or {})
+            bad = {k: v for k, v in self.modes.items() if v not in self.MODES}
+            if bad:
+                raise ValueError('tracer_extraction values must be %r, got %r'
+                                 % (self.MODES, bad))
+        self.label = label
+        self._checked_ns = -1
+
+    def _check_names(self):
+        ns = self.domain.number_of_tracers
+        if ns == self._checked_ns:
+            return
+        names = self.domain.get_tracer_names()
+        unknown = sorted((set(self.concentrations) | set(self.modes)) - set(names))
+        if unknown:
+            raise ValueError('rate operator %r: tracer names %s, which the domain '
+                             'does not have; its tracers are %s'
+                             % (self.label, unknown, names))
+        self._checked_ns = ns
+
+    def needed(self):
+        """True when this operator has anything to do with the tracers."""
+        if getattr(self.domain, 'number_of_tracers', 0) == 0:
+            return False
+        if any(callable(v) or v != 0.0 for v in self.concentrations.values()):
+            return True
+        return self.default_mode == 'carry' or 'carry' in self.modes.values()
+
+    def settings(self, t, timestep):
+        """(c_in, carry) arrays over the domain's tracers, c_in averaged over
+        the step as a callable Q is."""
+        self._check_names()
+        names = self.domain.get_tracer_names()
+        c_in = num.zeros(len(names))
+        carry = num.zeros(len(names), dtype=num.intc)
+        for i, name in enumerate(names):
+            v = self.concentrations.get(name, 0.0)
+            if callable(v):
+                v = 0.5 * (float(num.ravel(v(t))[0]) + float(num.ravel(v(t + timestep))[0]))
+            c_in[i] = float(v)
+            carry[i] = 1 if self.modes.get(name, self.default_mode) == 'carry' else 0
+        return c_in, carry
+
+    def capture(self, indices):
+        d = self.domain
+        stage = d.quantities['stage'].centroid_values
+        bed = d.quantities['elevation'].centroid_values
+        if indices is None:
+            return num.maximum(stage - bed, 0.0)
+        return num.maximum(stage[indices] - bed[indices], 0.0)
+
+    def apply(self, indices, h_old, t, timestep):
+        d = self.domain
+        c_in, carry = self.settings(t, timestep)
+        stage = d.quantities['stage'].centroid_values
+        bed = d.quantities['elevation'].centroid_values
+        sel = slice(None) if indices is None else indices
+        h_new = num.maximum(stage[sel] - bed[sel], 0.0)
+        dh = h_new - h_old
+        m = d.tracer_conserved_values[:, sel]
+        gain = dh > 0.0
+        if gain.any() and num.any(c_in != 0.0):
+            m[:, gain] += c_in[:, None] * dh[None, gain]
+        lose = dh < 0.0
+        if lose.any() and carry.any():
+            with num.errstate(divide='ignore', invalid='ignore'):
+                keep = num.where(h_old > 0.0, h_new / h_old, 0.0)
+            rows = num.nonzero(carry)[0]
+            m[num.ix_(rows, num.nonzero(lose)[0])] *= keep[None, lose]
+        d.tracer_conserved_values[:, sel] = m
+        hmin = d.minimum_allowed_height
+        with num.errstate(divide='ignore', invalid='ignore'):
+            inv_h = num.where(h_new > hmin, 1.0 / h_new, 0.0)
+        d.tracer_centroid_values[:, sel] = m * inv_h[None, :]

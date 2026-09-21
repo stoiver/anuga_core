@@ -190,8 +190,8 @@ can only be a typo.
 
 .. _tracers_at_inlets:
 
-Tracers at inlets and outlets
------------------------------
+Tracers at inlets, structures and rate operators
+------------------------------------------------
 
 An :class:`~anuga.Inlet_operator` adds or removes water inside the domain, and
 the water it moves carries tracer:
@@ -239,6 +239,33 @@ water arrived downstream.)
 
 Structures move water inside the domain, so unlike inlets they do not change
 the domain's tracer mass and the identity below still holds.
+
+**Rate operators** add water over a region (rain, a distributed inflow) or
+take it away (a negative rate). What the tracers do is yours to choose:
+
+.. code-block:: python
+
+   # rain carrying a pollutant; clean rain is the default
+   anuga.Rate_operator.rainfall(domain, rate=20.0,
+                                tracer_concentrations={'nitrate': 2.0e-6})
+
+   # a drain or pump: the tracer leaves with the water
+   anuga.Rate_operator(domain, rate=-1.0e-4, polygon=drain,
+                       tracer_extraction='carry')
+
+   # evaporation: water leaves, salt stays (the default, 'retain')
+   anuga.Rate_operator(domain, rate=-2.0e-8, tracer_extraction='retain')
+
+   # one choice per tracer: dissolved nitrate infiltrates, sediment is filtered
+   anuga.Rate_operator(domain, rate=-5.0e-6,
+                       tracer_extraction={'nitrate': 'carry', 'mud': 'retain'})
+
+With ``'carry'`` a cell keeps its concentration as it loses water, so draining
+it dry removes all of its tracer. With ``'retain'`` the tracer stays however
+much water leaves; a cell drained dry keeps its tracer, which reappears when
+the cell rewets. Both are exact per cell and work in both compute modes. A
+rate operator with no concentration given and every tracer retaining does
+exactly what it did before 4.1, at no extra cost.
 
 
 Checking conservation
