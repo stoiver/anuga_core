@@ -50,6 +50,8 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		anuga_int sediment_d_star_mode
 		double* sediment_reference_height
 		double sediment_a_h_floor
+		anuga_int sediment_adaptation_mode
+		double sediment_adaptation_alpha
 		double sediment_porosity
 		anuga_int sediment_bed_evolution
 		anuga_int sediment_bedload_mode
@@ -255,6 +257,8 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.sediment_slope_frozen = getattr(domain_py_object, 'sediment_slope_frozen', 0)
 	D.sediment_d_star_mode = getattr(domain_py_object, 'sediment_d_star_mode', 0)
 	D.sediment_a_h_floor = getattr(domain_py_object, 'sediment_a_h_floor', 0.01)
+	D.sediment_adaptation_mode = getattr(domain_py_object, 'sediment_adaptation_mode', 0)
+	D.sediment_adaptation_alpha = getattr(domain_py_object, 'sediment_adaptation_alpha', 1.0)
 	D.sediment_c_pack = getattr(domain_py_object, 'sediment_c_pack', 0.65)
 	D.sediment_porosity = getattr(domain_py_object, 'sediment_porosity', 0.3)
 	D.sediment_bed_evolution = 1 if getattr(domain_py_object, 'sediment_bed_evolution', True) else 0

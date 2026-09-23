@@ -758,6 +758,8 @@ class Domain(Generic_Domain):
         self.sediment_tau_c_star = None         # tau_c*     (ncl,)
         self.sediment_reference_height = None   # a     [m]  (ncl,)
         self.sediment_d_star_mode = 0           # 0 constant, 1 Rouse [S-4]
+        self.sediment_adaptation_mode = 0       # [D-3] 0 none, 1 Armanini, 2 constant
+        self.sediment_adaptation_alpha = 1.0    # [D-3] alpha for mode 2
         # van Rijn-style floor a >= sediment_a_h_floor * h, applied when
         # sediment_d_star_mode = 1. Standard practice, on by default. Set to 0
         # to reach anugaSed's regime (they use no floor); the d* fit covers
@@ -1666,7 +1668,8 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         return num.maximum(z - self.sediment_z_base, 0.0)
 
     def set_deposition(self, law='d_star', tau_d=0.0, near_bed='constant',
-                       reference_height_floor=0.01):
+                       reference_height_floor=0.01, adaptation='none',
+                       adaptation_alpha=None):
         """Select the deposition law and its near-bed treatment (spec 4.4).
 
         Parameters
@@ -1685,10 +1688,34 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             limit of P14/P13). `'rouse'` evaluates the fitted `[S-4]` profile
             per cell from the local Rouse number.
         reference_height_floor : float
-            The van Rijn-style floor `a >= floor * h`, used only by
-            `'rouse'`. Default 0.01. Set to 0 to reach anugaSed's regime,
-            which applies no floor -- see spec 12, D4b, where this is the
-            largest single divergence from them.
+            The van Rijn-style floor `a >= floor * h`, used by `'rouse'` and
+            by the adaptation lag. Default 0.01. Set to 0 to reach anugaSed's
+            regime, which applies no floor -- see spec 12, D4b, where this
+            is the largest single divergence from them.
+        adaptation : {'none', 'armanini', 'constant'}
+            `[D-3]`, the adaptation lag of the near-bed concentration.
+            `'none'` (default): the exchange `E - D = d* v_s (c_eq - c)`
+            responds at once to the local flow, as if the vertical profile
+            were always the equilibrium one. `'armanini'`: the exchange is
+            `alpha v_s (c_eq - c)` after Galappatti & Vreugdenhil (1985),
+            with `alpha(w_s/u*, a/h)` from Armanini & Di Silvio's (1988)
+            closed form, `1/alpha = a/h + (1 - a/h) exp[-1.5 (a/h)^(-1/6)
+            w_s/u*]`. Both erosion and deposition are scaled by `alpha/d*`,
+            so every equilibrium concentration is unchanged and only the
+            transient slows: the load adapts over `h/(alpha w_s)` instead of
+            `h/(d* w_s)`. `alpha` is 1 in the well-mixed limit and `h/a`
+            when fully stratified, so pair it with `near_bed='rouse'`.
+            `'constant'` uses `adaptation_alpha` everywhere.
+        adaptation_alpha : float, optional
+            `alpha` for `adaptation='constant'`; must be > 0.
+
+        Notes
+        -----
+        Without the lag, van Rijn's pick-up flume reaches its equilibrium
+        load within about 15 depths where the flume took more than 40, and
+        his trench fills about 25 % too fast (issue #389): the near-bed
+        concentration in a decelerating flow is not yet the equilibrium one
+        because the grains high in the column have not settled through it.
         """
         laws = {'d_star': 0, 'threshold': 1}
         if law not in laws:
@@ -1700,10 +1727,23 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                              % (near_bed, sorted(modes)))
         if tau_d < 0.0:
             raise ValueError('tau_d must be >= 0 Pa, got %g' % tau_d)
+        adapt = {'none': 0, 'armanini': 1, 'constant': 2}
+        if adaptation not in adapt:
+            raise ValueError('unknown adaptation %r; expected one of %r'
+                             % (adaptation, sorted(adapt)))
+        if adaptation == 'constant':
+            if adaptation_alpha is None or adaptation_alpha <= 0.0:
+                raise ValueError("adaptation='constant' needs adaptation_alpha > 0, got %r"
+                                 % (adaptation_alpha,))
+        elif adaptation_alpha is not None:
+            raise ValueError("adaptation_alpha is only used with adaptation='constant'")
         self.sediment_deposition_mode = laws[law]
         self.sediment_tau_d = float(tau_d)
         self.sediment_d_star_mode = modes[near_bed]
         self.sediment_a_h_floor = float(reference_height_floor)
+        self.sediment_adaptation_mode = adapt[adaptation]
+        self.sediment_adaptation_alpha = (float(adaptation_alpha)
+                                          if adaptation == 'constant' else 1.0)
         self._Domain_C_struct = None
         self.gpu_interface = None
         if hasattr(self, '_gpu_boundary_info_initialized'):
@@ -2173,6 +2213,12 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                      % self.sediment_K_partheniades)
         if self.sediment_deposition_mode == 1:
             L.append('  tau_d      [D-2]   : %.4g Pa' % self.sediment_tau_d)
+        if self.sediment_adaptation_mode == 1:
+            L.append('  adaptation [D-3]   : Armanini & Di Silvio alpha(w_s/u*, a/h); '
+                     'E - D = alpha v_s (c_eq - c)')
+        elif self.sediment_adaptation_mode == 2:
+            L.append('  adaptation [D-3]   : constant alpha = %.4g; E - D = alpha v_s (c_eq - c)'
+                     % self.sediment_adaptation_alpha)
         if self.sediment_d_star_mode == 1:
             L.append('  a/h floor          : %.4g' % self.sediment_a_h_floor)
         mask = self._sediment_erodible_mask

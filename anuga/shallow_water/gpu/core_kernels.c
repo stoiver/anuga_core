@@ -1464,6 +1464,8 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     double * restrict slope_w = D->sediment_slope_work;
     const anuga_int d_star_mode = D->sediment_d_star_mode;
     const double a_h_floor = D->sediment_a_h_floor;
+    const anuga_int adapt_mode = D->sediment_adaptation_mode;
+    const double adapt_alpha = D->sediment_adaptation_alpha;
     const double c_pack = D->sediment_c_pack;
     const anuga_int fric_mode = D->sediment_friction_mode;
     const double n_ll = D->sediment_manning_ll;
@@ -1600,26 +1602,64 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             const double m_pos = (m > 0.0) ? m : 0.0;
             const double c_pos = m_pos * inv_h;
 
+            // [T-2] u* = |v| sqrt(f_c);  [S-2] Z = v_s / (kappa u*)
+            const double ustar = sqrt(f_c * vel2);
+            const double Z = (ustar > 0.0)
+                           ? v_s[s] / (0.41 * ustar)
+                           : ANUGA_ROUSE_Z_HI;   /* no shear: fully settled */
+            // a/h with the van Rijn-style floor a >= floor*h. The floor is
+            // standard practice and stays on by default, but it is exposed:
+            // it is the single largest divergence from anugaSed, which uses
+            // no floor and so an ~10x smaller a at h = 1 m, giving roughly
+            // 8x more deposition (spec 12, D4b). Set it to 0 to reach that
+            // regime; the fit now covers a/h down to 1e-3.
+            double a_h = a_ref[s] * inv_h;
+            if (a_h < a_h_floor) a_h = a_h_floor;
+
             // [D-1] deposition. d* is either the constant (P14's d* = 1
             // limiting case) or the Rouse ratio evaluated per cell.
-            double ds;
-            if (d_star_mode == 0) {
-                ds = d_star[s];
-            } else {
-                // [T-2] u* = |v| sqrt(f_c);  [S-2] Z = v_s / (kappa u*)
-                const double ustar = sqrt(f_c * vel2);
-                const double Z = (ustar > 0.0)
-                               ? v_s[s] / (0.41 * ustar)
-                               : ANUGA_ROUSE_Z_HI;   /* no shear: fully settled */
-                // a/h with the van Rijn-style floor a >= floor*h. The floor is
-                // standard practice and stays on by default, but it is exposed:
-                // it is the single largest divergence from anugaSed, which uses
-                // no floor and so an ~10x smaller a at h = 1 m, giving roughly
-                // 8x more deposition (spec 12, D4b). Set it to 0 to reach that
-                // regime; the fit now covers a/h down to 1e-3.
-                double a_h = a_ref[s] * inv_h;
-                if (a_h < a_h_floor) a_h = a_h_floor;
-                ds = core_rouse_d_star(Z, a_h);
+            const double ds = (d_star_mode == 0) ? d_star[s]
+                                                 : core_rouse_d_star(Z, a_h);
+
+            // [D-3] ADAPTATION LAG of the near-bed concentration.
+            //
+            // With E = v_s E* and D = d* v_s c the exchange is
+            // d* v_s (c_eq - c), c_eq = E*/d*: the near-bed concentration is
+            // assumed to be the equilibrium one for the local flow at every
+            // instant. The vertical profile actually takes a time of order
+            // h/(alpha w_s) to adjust (Galappatti & Vreugdenhil 1985): grains
+            // entrained at the bed must diffuse up the column before the
+            // load is carried, and grains high in the column must settle
+            // through it before deposition is felt. Their depth-integrated
+            // model relaxes the load toward the same equilibrium,
+            //
+            //     E - D = alpha v_s (c_eq - c),
+            //
+            // so both terms are scaled by alpha/d*: every equilibrium is
+            // untouched, only the rate changes. alpha is Armanini & Di
+            // Silvio's (1988) closed form of Galappatti's coefficient,
+            //
+            //     1/alpha = a/h + (1 - a/h) exp[-1.5 (a/h)^(-1/6) w_s/u*],
+            //
+            // which is 1 in the well-mixed limit (w_s/u* -> 0: the exchange
+            // is the well-mixed one, no faster) and h/a when fully
+            // stratified. Van Rijn's pick-up flume reaches equilibrium in
+            // ~15 depths without it against >40 measured, and his trench
+            // fills ~25% too fast (issue #389). Mode 2 takes alpha as given.
+            double f_adapt = 1.0;
+            if (adapt_mode == 1) {
+                double alpha;
+                if (ustar > 0.0) {
+                    const double r = v_s[s] / ustar;
+                    const double inv = a_h + (1.0 - a_h)
+                                     * exp(-1.5 * pow(a_h, -1.0 / 6.0) * r);
+                    alpha = 1.0 / inv;
+                } else {
+                    alpha = 1.0 / a_h;          /* no shear: stratified limit */
+                }
+                f_adapt = alpha / ds;
+            } else if (adapt_mode == 2) {
+                f_adapt = adapt_alpha / ds;
             }
             // [L-4] NEAR-BED CONCENTRATION IS BOUNDED BY PACKING.
             //
@@ -1731,8 +1771,9 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                 }
             }
 
-            // Net exchange of [G-3]. Deposition removes, erosion adds.
-            double source = erosion - deposition;
+            // Net exchange of [G-3]. Deposition removes, erosion adds; [D-3]
+            // scales the rate of both toward the same equilibrium.
+            double source = f_adapt * (erosion - deposition);
 
             // [L-1] positivity. The most this term may remove over the step is
             // exactly the sediment PRESENT, so the state can reach zero but

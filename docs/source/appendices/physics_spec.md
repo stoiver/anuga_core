@@ -904,6 +904,34 @@ D_s = \begin{cases} w_s\, c_s\,\left(1 - \dfrac{\tau_b}{\tau_{d,s}}\right) & \ta
 Setting `τ_d,s = 0` disables deposition entirely — RDy26 uses this for their passive
 transport benchmarks, which is a useful test hook worth preserving.
 
+Both forms take the near-bed concentration to be the *equilibrium* one for the local
+flow at every instant. The vertical profile actually adjusts over a time of order
+`h/(α w_s)` (Galappatti & Vreugdenhil 1985): grains entrained at the bed must diffuse
+up the column before they are carried, and grains high in the column must settle
+through it before deposition is felt. Their depth-integrated model relaxes the load
+toward the same equilibrium at that rate:
+
+```{index} single: physics label; [D-3]
+```
+(spec-d-3)=
+```{math}
+:nowrap:
+
+\begin{align}
+E - D = \alpha\, v_s\, (c_{eq} - c), \qquad
+\frac{1}{\alpha} = \frac{a}{h} + \left(1 - \frac{a}{h}\right)
+\exp\!\left[-1.5\left(\frac{a}{h}\right)^{-1/6} \frac{w_s}{u_*}\right]
+\qquad \text{[Galappatti \& Vreugdenhil 1985; Armanini \& Di Silvio 1988]} \tag{D-3}
+\end{align}
+```
+
+with `c_eq = E*/d*` the concentration at which [E-1]/[E-6] balance [D-1]. In the
+implementation both `E` and `D` are scaled by `α/d*`, so every equilibrium of the
+instantaneous forms is unchanged and only the transient slows; `α → 1` in the
+well-mixed limit `w_s/u* → 0` and `α → h/a` when fully stratified. Off by default;
+the evidence for it is van Rijn's pick-up flume (equilibrium reached in ~15 depths
+without it, >40 measured) and his migrating trench (fill ~25 % too fast), issue #389.
+
 **Recommendation:** {speclit}`D-1` as default (consistent with the `d*` machinery of §4.3),
 {speclit}`D-2` available for the layered bed model and required to reproduce RDy26's
 passive-transport validation cases.

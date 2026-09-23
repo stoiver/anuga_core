@@ -323,6 +323,15 @@ struct domain {
      * on by default (0.01), but exposed: it is the largest single divergence
      * from anugaSed, which applies no floor. See PHYSICS_SPEC 12, D4b. */
     double sediment_a_h_floor;
+    /* [D-3] adaptation lag of the near-bed concentration (Galappatti &
+     * Vreugdenhil 1985). 0 = none: the exchange E - D = d* v_s (c_eq - c)
+     * responds at once to the local flow. 1 = Armanini & Di Silvio (1988)
+     * closed form for alpha(w_s/u*, a/h); 2 = a constant alpha. The
+     * exchange becomes alpha v_s (c_eq - c): both E and D are scaled by
+     * alpha/d*, so every equilibrium is unchanged and only the transient
+     * slows. alpha -> 1 in the well-mixed limit, alpha -> h/a when stratified. */
+    anuga_int sediment_adaptation_mode;
+    double sediment_adaptation_alpha;
     /* [L-4] maximum packing fraction bounding the near-bed concentration
      * c_b = d* c. Same constant that bounds E* in [E-1]. */
     double sediment_c_pack;

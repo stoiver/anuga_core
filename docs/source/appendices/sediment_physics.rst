@@ -538,6 +538,28 @@ keep grains suspended:
 Setting :math:`\tau_d = 0` disables deposition entirely, which is how the
 passive-transport benchmarks are run.
 
+Both forms take the near-bed concentration to be the equilibrium one for the
+local flow at every instant. The vertical profile actually adjusts over a time
+of order :math:`h/(\alpha w_s)` [GV85]_: grains entrained at the bed must
+diffuse up the column before they are carried, and grains high in the column
+must settle through it before deposition is felt. Their depth-integrated model
+relaxes the load toward the same equilibrium at that rate,
+
+.. math::
+
+   E - D = \alpha\, v_s\, (c_{eq} - c), \qquad
+   \frac{1}{\alpha} = \frac{a}{h} + \left(1 - \frac{a}{h}\right)
+   \exp\!\left[-1.5\left(\frac{a}{h}\right)^{-1/6} \frac{w_s}{u_*}\right]
+   \qquad \text{[D-3]}
+
+with :math:`\alpha` in the closed form of [ADS88]_ and
+:math:`c_{eq} = E^{*}/d^{*}`. Both :math:`E` and :math:`D` are scaled by
+:math:`\alpha/d^{*}`, so every equilibrium is unchanged and only the transient
+slows; :math:`\alpha \to 1` in the well-mixed limit and :math:`h/a` when fully
+stratified. It is off by default. The case for it is van Rijn's pick-up flume,
+which reaches equilibrium in about 15 depths without it against more than 40
+measured, and his migrating trench, which fills about 25 % too fast.
+
 The settling velocity itself is [FC04]_, smooth across the Stokes-to-turbulent
 transition and branch-free. [Die82]_ is the more accurate polynomial fit for
 natural irregular grains, at the cost of a branchy evaluation:
@@ -649,6 +671,57 @@ near-bed concentration; it is a numerical guard, not a physical parameter, and
 Near-bed concentration is bounded by ``c_pack`` :spec:`L-4` regardless. That bound
 exists because equilibrium Rouse ``d*`` at vanishing shear will otherwise
 deposit the entire water column in under a second.
+
+.. _adaptation_lag:
+
+``adaptation`` -- the lag of the near-bed concentration
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Both deposition laws take the near-bed concentration to be the *equilibrium*
+one for the local flow at every instant, so the exchange
+:math:`E - D = d^{*} v_s (c_{eq} - c)` responds at once to a change in the
+flow. The vertical profile actually adjusts over a time of order
+:math:`h/(\alpha w_s)`: grains entrained at the bed must diffuse up the column
+before they are carried, and grains high in the column must settle through it
+before deposition is felt. ``adaptation`` switches on the depth-integrated lag
+of [GV85]_, :spec:`D-3` above, with :math:`\alpha` in the closed form of
+[ADS88]_. Both erosion and deposition are scaled by :math:`\alpha/d^{*}`, so
+every equilibrium concentration is exactly what it was and only the transient
+slows: the load adapts over :math:`h/(\alpha w_s)` instead of
+:math:`h/(d^{*} w_s)`.
+
+.. code-block:: python
+
+   domain.set_deposition(law='d_star', near_bed='rouse',
+                         reference_height_floor=0.1, adaptation='armanini')
+
+.. list-table::
+   :header-rows: 1
+   :widths: 23 77
+
+   * - value
+     - meaning
+   * - ``'none'``
+     - no lag; the instantaneous exchange. Default.
+   * - ``'armanini'``
+     - :math:`\alpha(w_s/u_*, a/h)` per cell per fraction from the closed
+       form; 1 in the well-mixed limit, :math:`h/a` when fully stratified
+   * - ``'constant'``
+     - :math:`\alpha` = ``adaptation_alpha`` everywhere
+
+Pair ``'armanini'`` with ``near_bed='rouse'``: the lag is the difference
+between the equilibrium stratification :math:`d^{*}` and the effective
+exchange :math:`\alpha`, and with the well-mixed ``d* = 1`` the option
+*speeds up* a stratified suspension rather than slowing it. ``a`` is the
+fraction's reference height with the same floor as ``'rouse'``.
+
+**Why it exists.** Against van Rijn's flume measurements
+(``validation_tests/experimental_data/van_rijn_*``) the instantaneous
+exchange reaches its equilibrium load within about 15 depths of a clear-water
+inflow where the flume took more than 40, and fills a dredged trench about
+25 % too fast: in a decelerating flow the near-bed concentration is not yet
+the equilibrium one because the grains high in the column have not settled
+through it. The lag is off by default so that existing results are unchanged.
 
 --------------
 
@@ -781,6 +854,10 @@ the code to the paper it comes from. This is the one list for both pages: the
 specification cites the same labels and refers here rather than keeping its
 own.
 
+.. [ADS88] Armanini, A. and Di Silvio, G. (1988). A one-dimensional model for
+   the transport of a sediment mixture in non-equilibrium conditions.
+   *Journal of Hydraulic Research*, 26(3), 275-292.
+
 .. [DL09] Davy, P. and Lague, D. (2009). Fluvial erosion/transport equation of
    landscape evolution models revisited. *Journal of Geophysical Research:
    Earth Surface*, 114, F03007. doi:10.1029/2008JF001146
@@ -806,6 +883,10 @@ own.
 .. [FC04] Ferguson, R. I. and Church, M. (2004). A simple universal equation
    for grain settling velocity. *Journal of Sedimentary Research*, 74(6),
    933-937.
+
+.. [GV85] Galappatti, G. and Vreugdenhil, C. B. (1985). A depth-integrated
+   model for suspended sediment transport. *Journal of Hydraulic Research*,
+   23(4), 359-377.
 
 .. [FG21] Fassett, C. I. and Goudge, T. A. (2021). Modeling the hydrodynamics,
    sediment transport, and valley incision of outlet-forming floods from
