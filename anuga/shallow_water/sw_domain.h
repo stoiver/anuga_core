@@ -338,6 +338,15 @@ struct domain {
     /* Bed porosity lambda in [G-4]: dz/dt = (D-E)/(1-lambda). The sediment
      * VOLUME leaving suspension is (1-lambda) dz, the rest being pore space. */
     double sediment_porosity;
+    /* Morphological acceleration factor M (Delft3D's MORFAC): the bed change
+     * of every step, from the suspended exchange [G-4] and from bedload
+     * [G-5], is multiplied by M, and the erodible-base caps [L-5] are
+     * scaled to match. The water column is not touched: the suspension
+     * adapts in seconds, the bed in hours, so M steps of bed change per
+     * hydrodynamic step is the standard way to reach a morphological time
+     * at a hydrodynamic cost. 1 = off. Bed and water-column sediment
+     * budgets then differ by exactly M, by construction. */
+    double sediment_morphological_factor;
     /* Coupling stage of spec 2.4:
      *   0 = FIXED BED (Phase 3): exchange acts on m only, z never moves.
      *   1 = EVOLVING BED (Phase 4): [G-4] Exner update is applied.

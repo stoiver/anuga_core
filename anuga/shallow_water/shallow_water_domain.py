@@ -775,6 +775,7 @@ class Domain(Generic_Domain):
         # (1-lambda) dz, the remainder being pore space filled from the water
         # column. LM15 Example 2 uses 0.28.
         self.sediment_porosity = 0.30
+        self.sediment_morphological_factor = 1.0   # M, bed change per step x M
         # Coupling stage, spec 2.4. True = evolving bed via [G-4] (Phase 4);
         # False = FIXED bed (Phase 3), which is RDy26 v1.0's configuration and
         # what the analytic constant-depth deposition solutions assume. Both are
@@ -1893,7 +1894,8 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
     def initialize_sediment_operator(self, porosity=None, c_max=None,
                                      c_pack=None, bed_evolution=None,
-                                     rho_w=None, description=None, label=None,
+                                     rho_w=None, morphological_factor=None,
+                                     description=None, label=None,
                                      logging=False, verbose=False):
         """Switch sediment transport on, and return the operator.
 
@@ -1962,11 +1964,13 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             Sediment_transport_operator)
 
         if (porosity is not None or c_max is not None or c_pack is not None
-                or bed_evolution is not None or rho_w is not None):
+                or bed_evolution is not None or rho_w is not None
+                or morphological_factor is not None):
             self.set_sediment_parameters(porosity=porosity, c_max=c_max,
                                          c_pack=c_pack,
                                          bed_evolution=bed_evolution,
-                                         rho_w=rho_w)
+                                         rho_w=rho_w,
+                                         morphological_factor=morphological_factor)
 
         return Sediment_transport_operator(
             self, description=description, label=label, logging=logging,
@@ -2084,7 +2088,8 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                 **self._sediment_settling_kwargs[i])
 
     def set_sediment_parameters(self, porosity=None, c_max=None, c_pack=None,
-                                bed_evolution=None, rho_w=None):
+                                bed_evolution=None, rho_w=None,
+                                morphological_factor=None):
         """Set the scalar sediment parameters, with validation.
 
         Everything here is a physical property of the run, not a numerical
@@ -2110,7 +2115,25 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             constant-depth deposition solutions assume.
         rho_w : float
             Water density, used to form the dimensional bed shear stress.
+        morphological_factor : float
+            Morphological acceleration factor `M` (Delft3D's MORFAC).
+            Every step's bed change, from the suspended exchange `[G-4]`
+            and from bedload `[G-5]`, is multiplied by `M`; the erodible
+            base `[L-5]` is respected. The water column is untouched, so
+            the suspension still adapts on its own (fast) time scale while
+            the bed reaches a morphological time `M` times longer than the
+            hydrodynamic one simulated. Valid while the bed changes little
+            over one hydrodynamic adjustment time; a tidal case needs `M`
+            such that `M` tidal cycles average out, and a flume with a
+            steady flow tolerates `M` of 10 or more. Default 1 (off). The
+            bed and water-column sediment budgets then differ by exactly
+            `M`, by construction.
         """
+        if morphological_factor is not None:
+            if not morphological_factor > 0.0:
+                raise ValueError('morphological_factor must be > 0, got %g'
+                                 % morphological_factor)
+            self.sediment_morphological_factor = float(morphological_factor)
         if porosity is not None:
             if not 0.0 <= porosity < 1.0:
                 raise ValueError('porosity must be in [0, 1), got %g' % porosity)
@@ -2201,6 +2224,9 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                 'Phase 4, evolving' if self.sediment_bed_evolution
                 else 'Phase 3, FIXED bed'),
              '  porosity lambda    : %.4g' % self.sediment_porosity,
+             '  morphological M    : %.4g%s' % (self.sediment_morphological_factor,
+                                               '' if self.sediment_morphological_factor == 1.0
+                                               else '  (bed change per step x M)'),
              '  c_max      [L-2]   : %.4g' % self.sediment_c_max,
              '  c_pack     [L-4]   : %.4g' % self.sediment_c_pack,
              '  rho_w              : %.4g kg/m3' % self.sediment_rho_w]

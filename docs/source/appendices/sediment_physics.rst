@@ -133,6 +133,16 @@ with :math:`\lambda` the bed porosity, since a deposited volume
 :math:`(1-\lambda)\,dz` of grains fills a bed volume :math:`dz`. This is the
 Exner equation [Exn25]_, in the form used by [P14]_ and [FG21]_.
 
+A morphological acceleration factor :math:`M` (``morphological_factor``,
+Delft3D's MORFAC) multiplies the bed change of every step, here and in the
+bedload contribution [G-5], with the erodible-base limiter [L-5] scaled to
+match; the water column is left alone. The suspension adapts in seconds and
+the bed in hours, so :math:`M` steps of bed change per hydrodynamic step
+reaches a morphological time :math:`M` times the simulated one at the same
+cost, while the bed changes little over one hydrodynamic adjustment time.
+Default 1; the bed and water-column budgets then differ by exactly
+:math:`M`.
+
 The sum matters once there is more than one fraction: there is **one** bed,
 and every fraction exchanges with it. The kernel accumulates a single
 :math:`dz` per cell over :math:`s` and applies it once, so fractions can

@@ -168,6 +168,10 @@ washoff).
 
 Both act on the same `z`; when both operators are active the contributions sum.
 
+A morphological acceleration factor `M` (`morphological_factor`, default 1) multiplies
+both contributions per step, with the erodible-base cap [L-5] divided by `M`; the water
+column is not scaled. Bed and water-column sediment budgets then differ by exactly `M`.
+
 ### 2.4 Coupling stages
 
 | Stage | Bed elevation | Bed → flow | Sediment → momentum | Reference model |

@@ -847,6 +847,7 @@ void core_apply_bedload(struct domain *D, double timestep) {
     const double h_eps = D->epsilon;
     const double minimum_allowed_height = D->minimum_allowed_height;
     const double one_minus_lambda = 1.0 - D->sediment_porosity;
+    const double morfac = D->sediment_morphological_factor;
     const double K = D->sediment_bedload_K;
     const double mexp = D->sediment_bedload_m;
     const double tau_c_b = D->sediment_bedload_tau_c_star;
@@ -1030,8 +1031,10 @@ void core_apply_bedload(struct domain *D, double timestep) {
                     if (qn > 0.0) own_out += qn * edgelengths[ki];
                 }
                 if (own_out > 0.0) {
+                    /* over the step the bed moves morfac times the
+                     * physical change, so the cap shrinks by morfac */
                     const double cap = thickness * one_minus_lambda
-                                     * areas[k] / timestep;
+                                     * areas[k] / (timestep * morfac);
                     if (own_out > cap) {
                         q_b_total *= cap / own_out;
                     }
@@ -1170,8 +1173,9 @@ void core_apply_bedload(struct domain *D, double timestep) {
             outflux += qn * edgelengths[ki];
         }
 
-        /* [K-3]: dz/dt = -(1/(1-lambda)) div q_b, div q_b = outflux/area */
-        dzs[k] = -(timestep * outflux / areas[k]) / one_minus_lambda;
+        /* [K-3]: dz/dt = -(1/(1-lambda)) div q_b, div q_b = outflux/area;
+         * times the morphological factor */
+        dzs[k] = -(morfac * timestep * outflux / areas[k]) / one_minus_lambda;
     }
 
     /* ---- pass 3: the bed update ---- */
@@ -1488,6 +1492,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     double * restrict bed_cv_w = D->bed_centroid_values;
     double * restrict bed_ev_w = D->bed_edge_values;
     const double one_minus_lambda = 1.0 - D->sediment_porosity;
+    const double morfac = D->sediment_morphological_factor;
     const anuga_int bed_evolves = D->sediment_bed_evolution;
     /* [L-5]. Hoisted for the same device reason as the tracer pointers.
      *
@@ -1832,7 +1837,8 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             const double avail = bed_cv[k] - z_base[k];
             const double thickness = (avail > 0.0) ? avail : 0.0;
             // The largest net removal from the bed this step, as a source.
-            const double S_max = thickness * one_minus_lambda / timestep;
+            // per step the bed moves morfac times the physical change
+            const double S_max = thickness * one_minus_lambda / (timestep * morfac);
             if (total_E + total_D > S_max) {
                 scale = (S_max - total_D) / total_E;
                 if (scale < 0.0) scale = 0.0;
@@ -1853,7 +1859,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             // added: sediment introduced from outside the model does not
             // come out of the bed, so it must not move it.
             if (bed_evolves && one_minus_lambda > 0.0) {
-                dz_cell += -(timestep * source) / one_minus_lambda;
+                dz_cell += -(morfac * timestep * source) / one_minus_lambda;
             }
 
             // [G-3] S_ms: external supply, added AFTER the limiters. They

@@ -46,6 +46,7 @@ python_sources = [
 'test_sediment_exner.py',
 'test_sediment_bedload.py',
 'test_sediment_adaptation.py',
+'test_sediment_morfac.py',
 'test_sediment_de_leeuw.py',
 'test_sediment_vegetation_shear.py',
 'test_vegetation_drag.py',

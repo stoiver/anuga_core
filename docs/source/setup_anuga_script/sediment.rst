@@ -490,7 +490,8 @@ Scalar parameters
 .. code-block:: python
 
    domain.set_sediment_parameters(porosity=0.30, c_max=0.30, c_pack=0.65,
-                                  bed_evolution=True, rho_w=1000.0)
+                                  bed_evolution=True, rho_w=1000.0,
+                                  morphological_factor=1.0)
 
 All optional; only what you pass is changed. All are validated.
 
@@ -522,6 +523,10 @@ All optional; only what you pass is changed. All are validated.
      - kg/m3
      - 1000
      - fluid density used to form dimensional ``tau_b``
+   * - ``morphological_factor``
+     - --
+     - 1
+     - morphological acceleration ``M`` (Delft3D's MORFAC): every step's bed change from :spec:`G-4` and :spec:`G-5` is multiplied by ``M``, the erodible base :spec:`L-5` respected, the water column untouched. ``M`` hydrodynamic steps of bed change per step: a 15 h flume becomes 1.5 h with ``M = 10``. Valid while the bed changes little over one hydrodynamic adjustment time; a tidal case wants ``M`` such that the tidal cycles still average out. Bed and water-column sediment budgets then differ by exactly ``M``.
 
 .. _91-bed_evolution-is-the-coupling-stage:
 
