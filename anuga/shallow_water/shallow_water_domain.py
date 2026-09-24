@@ -771,6 +771,8 @@ class Domain(Generic_Domain):
         # a/h down to 1e-3. This is the largest single divergence from
         # anugaSed -- roughly 8x less deposition at h = 1 m. See spec 12, D4b.
         self.sediment_a_h_floor = 0.01
+        self.sediment_rouse_beta_mode = 0      # [S-2b] 1: Z / (1 + 2 (w_s/u*)^2)
+        self.sediment_rouse_scale = 1.0        # [S-2b] factor on Z
         # [L-4] maximum packing fraction bounding the near-bed concentration
         # c_b = d* c. Without it the equilibrium Rouse d* makes the deposition
         # rate diverge as shear vanishes. Same constant that bounds E* in
@@ -1682,7 +1684,8 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
     def set_deposition(self, law='d_star', tau_d=0.0, near_bed='constant',
                        reference_height_floor=0.01, adaptation='none',
                        adaptation_alpha=None, layer_fraction=None,
-                       exchange_factor=1.0, velocity_profile=False):
+                       exchange_factor=1.0, velocity_profile=False,
+                       rouse_beta='none', rouse_scale=1.0):
         """Select the deposition law and its near-bed treatment (spec 4.4).
 
         Parameters
@@ -1756,6 +1759,14 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             the depth, in (0, 0.5]. Default `None`: the reference height
             `a/h` with its floor. The exchange is re-derived so the
             equilibrium stays the Rouse ratio whatever the thickness.
+        rouse_beta : {'none', 'van_rijn'}, optional
+            Correction to the Rouse number of the `'rouse'` fit. `'van_rijn'`
+            divides `Z` by `1 + 2 (w_s/u*)^2` (at most 2), van Rijn's
+            (1984b) allowance for sediment mixing more strongly than
+            momentum, which flattens the profile and lowers `d*`.
+        rouse_scale : float, optional
+            Factor on the (corrected) Rouse number, default 1. Van Rijn's
+            trench profiles need about 0.65 on top of `'van_rijn'`.
         velocity_profile : bool, optional
             With `'two_layer'`: advect the near-bed layer and the upper
             layer at their log-law mean velocities instead of the
@@ -1813,6 +1824,13 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             raise ValueError("velocity_profile needs adaptation='two_layer'")
         self.sediment_velocity_profile = 1 if velocity_profile else 0
         self.tracer_speed_factor = None
+        betas = {'none': 0, 'van_rijn': 1}
+        if rouse_beta not in betas:
+            raise ValueError("rouse_beta must be 'none' or 'van_rijn', got %r" % (rouse_beta,))
+        if not rouse_scale > 0.0:
+            raise ValueError('rouse_scale must be > 0, got %r' % (rouse_scale,))
+        self.sediment_rouse_beta_mode = betas[rouse_beta]
+        self.sediment_rouse_scale = float(rouse_scale)
         self._Domain_C_struct = None
         self.gpu_interface = None
         if hasattr(self, '_gpu_boundary_info_initialized'):
@@ -2327,6 +2345,10 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                 L.append('  velocity profile   : layers advected at their log-law mean speeds')
         if self.sediment_d_star_mode == 1:
             L.append('  a/h floor          : %.4g' % self.sediment_a_h_floor)
+            if self.sediment_rouse_beta_mode or self.sediment_rouse_scale != 1.0:
+                L.append('  Rouse number       : %sx %.3g'
+                         % ('Z / (1 + 2 (w_s/u*)^2), ' if self.sediment_rouse_beta_mode else 'Z ',
+                            self.sediment_rouse_scale))
         mask = self._sediment_erodible_mask
         if self._sediment_user_base is not None:
             t = self.erodible_thickness()

@@ -402,3 +402,30 @@ def test_the_velocity_profile_needs_the_two_layer_model():
     with pytest.raises(ValueError):
         d.set_deposition(law='d_star', near_bed='rouse', adaptation='carried',
                          velocity_profile=True)
+
+
+@pytest.mark.parametrize('mode', ['legacy', 'unified'])
+def test_the_rouse_correction_flattens_the_profile(mode):
+    """[S-2b] van Rijn's beta divides Z by 1 + 2 (w_s/u*)^2 and the scale
+    multiplies it; both lower d* and with it the deposition rate, and the
+    kernel's d* must be the fitted one at the corrected Z."""
+    from anuga import Domain
+    plain = uniform_flow(mode, tau_c_star=0.0, near_bed='rouse', reference_height_floor=0.1)
+    beta = uniform_flow(mode, tau_c_star=0.0, near_bed='rouse', reference_height_floor=0.1,
+                        rouse_beta='van_rijn')
+    scaled = uniform_flow(mode, tau_c_star=0.0, near_bed='rouse', reference_height_floor=0.1,
+                          rouse_scale=0.5)
+    r0, r1, r2 = source_rate(plain), source_rate(beta), source_rate(scaled)
+    n = plain.sediment_manning_ll
+    ustar = np.sqrt(G * n * n / H0 ** (1.0 / 3.0)) * U0
+    v_s = float(plain.sediment_settling_velocity[0])
+    Z = v_s / (0.41 * ustar)
+    b = min(2.0, 1.0 + 2.0 * (v_s / ustar) ** 2)
+    assert r0 < 0.0 and r1 < 0.0 and r2 < 0.0
+    assert r1 / r0 == pytest.approx(Domain.rouse_d_star(Z / b, 0.1) / Domain.rouse_d_star(Z, 0.1), rel=1e-3)
+    assert r2 / r0 == pytest.approx(Domain.rouse_d_star(0.5 * Z, 0.1) / Domain.rouse_d_star(Z, 0.1), rel=1e-3)
+    assert 'Rouse number' in beta.sediment_summary()
+    with pytest.raises(ValueError):
+        plain.set_deposition(near_bed='rouse', rouse_beta='other')
+    with pytest.raises(ValueError):
+        plain.set_deposition(near_bed='rouse', rouse_scale=0.0)

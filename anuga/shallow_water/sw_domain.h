@@ -330,6 +330,11 @@ struct domain {
      * on by default (0.01), but exposed: it is the largest single divergence
      * from anugaSed, which applies no floor. See PHYSICS_SPEC 12, D4b. */
     double sediment_a_h_floor;
+    /* [S-2b] Rouse-number correction: mode 1 divides Z by van Rijn's
+     * beta = 1 + 2 (w_s/u*)^2 (capped at 2), and the scale multiplies Z
+     * afterwards (1 = none). Both flatten or steepen the fitted profile. */
+    anuga_int sediment_rouse_beta_mode;
+    double sediment_rouse_scale;
     /* [D-3] adaptation lag of the near-bed concentration (Galappatti &
      * Vreugdenhil 1985). 0 = none: the exchange E - D = d* v_s (c_eq - c)
      * responds at once to the local flow. 1 = Armanini & Di Silvio (1988)

@@ -970,6 +970,14 @@ The fraction's own tracer still carries the total mass `m = h c` with its advect
 and bed exchange unchanged; a second tracer carries the upper layer's mass `m_2 = h_2 c_2`,
 and the lower layer is the remainder, `m_1 = m - m_2`:
 
+```{index} single: physics label; [S-2b]
+```
+(spec-s-2b)=
+**[S-2b] Rouse-number correction.** `rouse_beta='van_rijn'` replaces `Z` by
+`Z / β`, `β = min(2, 1 + 2 (w_s/u_*)^2)` (van Rijn 1984b), and `rouse_scale` multiplies the
+result. Both enter only the `'rouse'` near-bed fit (`d*`, and the centroid of [D-4]); off by
+default.
+
 ```{index} single: physics label; [D-5]
 ```
 (spec-d-5)=

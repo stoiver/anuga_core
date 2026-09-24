@@ -779,6 +779,14 @@ slows: the load adapts over :math:`h/(\alpha w_s)` instead of
        rather than :math:`\bar u h c`; the equilibrium concentration is
        still unchanged
 
+``rouse_beta='van_rijn'`` divides the Rouse number of the ``'rouse'`` fit
+by van Rijn's (1984b) :math:`\beta = 1 + 2 (w_s/u_*)^2` (at most 2), his
+allowance for sediment being mixed more strongly than momentum, and
+``rouse_scale`` multiplies it; both flatten the profile and lower
+:math:`d^{*}`. Van Rijn's trench profiles (1986b, Fig. 17) sit at an
+effective Rouse number near 0.5 where the plain value is 0.79; on the bed
+profiles themselves the correction did not help, see the case's notes.
+
 Pair ``'armanini'`` with ``near_bed='rouse'``: the lag is the difference
 between the equilibrium stratification :math:`d^{*}` and the effective
 exchange :math:`\alpha`, and with the well-mixed ``d* = 1`` the option

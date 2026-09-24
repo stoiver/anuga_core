@@ -1512,6 +1512,8 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     double * restrict slope_w = D->sediment_slope_work;
     const anuga_int d_star_mode = D->sediment_d_star_mode;
     const double a_h_floor = D->sediment_a_h_floor;
+    const anuga_int rouse_beta_mode = D->sediment_rouse_beta_mode;
+    const double rouse_scale = D->sediment_rouse_scale;
     const anuga_int adapt_mode = D->sediment_adaptation_mode;
     const double adapt_alpha = D->sediment_adaptation_alpha;
     const anuga_int nb_base = D->sediment_nearbed_base;
@@ -1660,9 +1662,24 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
 
             // [T-2] u* = |v| sqrt(f_c);  [S-2] Z = v_s / (kappa u*)
             const double ustar = sqrt(f_c * vel2);
-            const double Z = (ustar > 0.0)
-                           ? v_s[s] / (0.41 * ustar)
-                           : ANUGA_ROUSE_Z_HI;   /* no shear: fully settled */
+            double Z = (ustar > 0.0)
+                     ? v_s[s] / (0.41 * ustar)
+                     : ANUGA_ROUSE_Z_HI;   /* no shear: fully settled */
+            // [S-2b] Rouse-number correction. Van Rijn (1984b) divides Z by
+            // beta = 1 + 2 (w_s/u*)^2 (at most 2): grains are mixed more
+            // strongly than momentum, so the measured profiles are flatter
+            // than the Rouse one. His trench profiles (1986b, Fig. 17) need
+            // Z about 0.5 where the plain value is 0.79 and beta gives
+            // 0.65; the scale is for that remainder and for testing.
+            if (ustar > 0.0) {
+                if (rouse_beta_mode == 1) {
+                    const double r = v_s[s] / ustar;
+                    double beta = 1.0 + 2.0 * r * r;
+                    if (beta > 2.0) beta = 2.0;
+                    Z /= beta;
+                }
+                Z *= rouse_scale;
+            }
             // a/h with the van Rijn-style floor a >= floor*h. The floor is
             // standard practice and stays on by default, but it is exposed:
             // it is the single largest divergence from anugaSed, which uses
