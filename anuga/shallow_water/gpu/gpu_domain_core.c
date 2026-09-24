@@ -873,6 +873,10 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
         if (sed_bo != NULL && nb > 0) {
             #pragma omp target enter data map(to: sed_bo[0:nb])
         }
+        double *sed_bs = GD->D.sediment_bedload_supply;
+        if (sed_bs != NULL && nb > 0) {
+            #pragma omp target enter data map(to: sed_bs[0:nb])
+        }
     }
 
     // Vegetation drag fields (spec 8): input, set once from Python.
@@ -1329,6 +1333,10 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
         anuga_int *sed_bo = GD->D.sediment_bedload_open;
         if (sed_bo != NULL && nb > 0) {
             #pragma omp target exit data map(delete: sed_bo[0:nb])
+        }
+        double *sed_bs = GD->D.sediment_bedload_supply;
+        if (sed_bs != NULL && nb > 0) {
+            #pragma omp target exit data map(delete: sed_bs[0:nb])
         }
     }
 

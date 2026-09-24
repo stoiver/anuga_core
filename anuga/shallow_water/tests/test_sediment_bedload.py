@@ -208,3 +208,69 @@ def test_closed_inflow_digs_a_hole_and_open_inflow_does_not():
     assert closed[x < 10.0].min() < -1e-4, 'the closed inflow should erode'
     assert np.abs(results[('left', 'right')]).max() < 1e-6
 
+
+
+# ---------------------------------------------------------------- supply
+
+def test_a_zero_supply_is_a_closed_boundary():
+    """supply = 0 across an open edge admits nothing: bit-identical to the
+    edge being closed."""
+    beds = []
+    for kw in (dict(), dict(open_boundaries=['left'], supply={'left': 0.0})):
+        d = channel()
+        d.initialize_sediment_operator(bed_evolution=True)
+        d.set_deposition(tau_d=0.0, law='threshold')
+        d.add_sediment_fraction('sand', diameter=1.0e-3, tau_c_star=0.0,
+                                initial_concentration=0.0)
+        d.set_bedload('wong_parker_eq24', **kw)
+        for _ in d.evolve(yieldstep=2.0, finaltime=2.0):
+            pass
+        beds.append(d.quantities['elevation'].centroid_values.copy())
+    assert np.array_equal(beds[0], beds[1])
+
+
+def test_a_prescribed_supply_enters_at_exactly_that_rate():
+    """Still water, so the bed carries no bedload of its own: the cells on
+    the supplied boundary must rise by S * edge length * dt / (area (1-lambda))
+    per step and nothing else may move."""
+    d = rectangular_cross_domain(6, 4, len1=LEN, len2=LEN / 2)
+    d.set_flow_algorithm('DE0')
+    d.store = False
+    d.set_quantity('elevation', 0.0)
+    d.set_quantity('stage', 1.0)
+    d.set_boundary({t: Reflective_boundary(d) for t in d.get_boundary_tags()})
+    lam = 0.3
+    d.initialize_sediment_operator(porosity=lam, bed_evolution=True)
+    d.set_deposition(tau_d=0.0, law='threshold')
+    d.add_sediment_fraction('sand', diameter=1.0e-3, initial_concentration=0.0)
+    S = 2.0e-6                                  # m2/s per unit width
+    d.set_bedload('wong_parker_eq24', supply={'left': S})
+    assert d.sediment_bedload_open[d.tag_boundary_cells['left']].all()
+    dt = 0.25
+    d.evolve_max_timestep = dt
+    z0 = d.quantities['elevation'].centroid_values.copy()
+    for _ in d.evolve(yieldstep=dt, finaltime=dt):
+        pass
+    dz = d.quantities['elevation'].centroid_values - z0
+    expected = np.zeros_like(dz)
+    for b in d.tag_boundary_cells['left']:
+        k, i = int(d.boundary_cells[b]), int(d.boundary_edges[b])
+        expected[k] += S * d.edgelengths[k, i] * dt / (d.areas[k] * (1.0 - lam))
+    assert expected.max() > 0.0
+    assert np.allclose(dz, expected, rtol=1e-12, atol=1e-18)
+
+
+def test_supply_is_validated_and_opens_its_tag():
+    d = channel()
+    d.initialize_sediment_operator(bed_evolution=True)
+    d.add_sediment_fraction('sand', diameter=1.0e-3)
+    with pytest.raises(ValueError):
+        d.set_bedload('wong_parker_eq24', supply={'left': -1.0e-6})
+    with pytest.raises(ValueError):
+        d.set_bedload('wong_parker_eq24', supply={'nowhere': 1.0e-6})
+    d.set_bedload('wong_parker_eq24', supply={'left': 1.0e-6})
+    assert 'left' in d._sediment_bedload_open_tags
+    left = d.tag_boundary_cells['left']
+    assert (d.sediment_bedload_supply[left] == 1.0e-6).all()
+    others = np.ones(d.boundary_length, bool); others[left] = False
+    assert (d.sediment_bedload_supply[others] < 0.0).all()

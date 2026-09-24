@@ -896,6 +896,8 @@ void core_apply_bedload(struct domain *D, double timestep) {
                                   && z_base != NULL && exhausted != NULL);
     /* Per boundary edge, indexed by -neighbour - 1: 1 where bedload passes. */
     anuga_int * restrict bopen = D->sediment_bedload_open;
+    /* Per boundary edge: a prescribed bedload inflow (m^2/s), or < 0. */
+    double * restrict bsup = D->sediment_bedload_supply;
 
     if (one_minus_lambda <= 0.0) {
         return;
@@ -1023,8 +1025,10 @@ void core_apply_bedload(struct domain *D, double timestep) {
                               + ey * normals[6 * k + 2 * i + 1];
                     if (nbk < 0) {
                         /* An open boundary edge carries the whole of the
-                         * cell's own flux; a closed one carries none. */
+                         * cell's own flux; a closed one carries none; one
+                         * with a prescribed supply is an inflow. */
                         if (bopen == NULL || !bopen[-nbk - 1]) continue;
+                        if (bsup != NULL && bsup[-nbk - 1] >= 0.0) continue;
                     } else {
                         qn *= 0.5;
                     }
@@ -1112,8 +1116,16 @@ void core_apply_bedload(struct domain *D, double timestep) {
                  * which case the flux is the cell's own q_b.n (zero
                  * gradient). Only k's own exhaustion can close it. */
                 if (bopen == NULL || !bopen[-nb - 1]) continue;
-                double qn = qx_k * nx + qy_k * ny;
-                if (has_z_base && qn > 0.0 && exhausted[k]) qn = 0.0;
+                double qn;
+                if (bsup != NULL && bsup[-nb - 1] >= 0.0) {
+                    /* Prescribed supply: bedload enters at this rate
+                     * whatever the cell's own transport, so the import
+                     * cannot feed back on the cell's state. */
+                    qn = -bsup[-nb - 1];
+                } else {
+                    qn = qx_k * nx + qy_k * ny;
+                    if (has_z_base && qn > 0.0 && exhausted[k]) qn = 0.0;
+                }
                 outflux += qn * edgelengths[ki];
                 continue;
             }

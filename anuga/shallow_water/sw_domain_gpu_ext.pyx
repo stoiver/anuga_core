@@ -154,6 +154,7 @@ cdef extern from "gpu_domain.h" nogil:
         double* sediment_slope_work
         int64_t* sediment_bed_exhausted
         int64_t* sediment_bedload_open
+        double* sediment_bedload_supply
         double* sediment_qbx
         double* sediment_qba
         double* sediment_qby
@@ -1006,6 +1007,12 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
             D.sediment_bedload_open = &sedi[0]
         else:
             D.sediment_bedload_open = NULL
+            D.sediment_bedload_supply = NULL
+        sed1 = domain_object.sediment_bedload_supply
+        if sed1.shape[0] > 0:
+            D.sediment_bedload_supply = &sed1[0]
+        else:
+            D.sediment_bedload_supply = NULL
         if domain_object.sediment_has_z_base:
             sed1 = domain_object.sediment_z_base
             D.sediment_z_base = &sed1[0]
@@ -1027,6 +1034,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.sediment_bed_exhausted = NULL
         D.sediment_repose_dz = NULL
         D.sediment_bedload_open = NULL
+        D.sediment_bedload_supply = NULL
     # Phase 2: wire the tracer arrays for the device. The pointers must be set
     # whenever number_of_tracers > 0 -- the shared kernels guard on that count
     # and dereference all six, so a NULL here is CUDA_ERROR_ILLEGAL_ADDRESS on

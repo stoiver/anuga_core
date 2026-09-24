@@ -852,6 +852,21 @@ inflow cell exports and never imports and digs a hole that travels
 downstream at the bed-wave speed. Walls stay closed, which is what keeps a
 closed domain exactly conservative.
 
+A boundary can instead carry a **prescribed** bedload inflow,
+``supply={tag: q_b}`` in m\ :sup:`2`/s volumetric per unit width (the mass
+rate divided by the grain density); the tag is opened if it is not already.
+Use it where the supply is known, as in a flume fed at a set rate. The
+zero-gradient import equals the inflow cell's own export, so a cell that
+aggrades under a fixed inflow stage sees its transport and hence its import
+rise, a feedback that runs away within hours in the van Rijn trench case; a
+prescribed supply does not depend on the cell at all. Give it only to inflow
+tags: an outflow edge with a supply set still carries the supply in.
+
+.. code-block:: python
+
+   domain.set_bedload('wong_parker_eq24', open_boundaries=['outflow'],
+                      supply={'inflow': 0.01 / 2650.0})   # 0.01 kg/s/m of quartz
+
 
 .. _sediment_references:
 

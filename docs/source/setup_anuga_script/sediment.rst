@@ -345,8 +345,8 @@ the bed itself, is shared.
      - ``set_deposition``
    * - shear closure; friction mode and its parameters
      - ``set_shear_closure``, ``set_sediment_friction``
-   * - bedload mode, ``K``, ``m``, bedload's own ``tau_c_star``, and the
-       boundaries open to it
+   * - bedload mode, ``K``, ``m``, bedload's own ``tau_c_star``, the
+       boundaries open to it and any prescribed ``supply`` across them
      - ``set_bedload``
    * - ``beta``
      - one ``beta_tracer`` for every tracer on the domain

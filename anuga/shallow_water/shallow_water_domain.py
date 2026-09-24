@@ -812,6 +812,8 @@ class Domain(Generic_Domain):
         # int64 per boundary edge, 1 = open. The tags are kept so the array
         # can be rebuilt when it is first allocated or the mesh is reordered.
         self.sediment_bedload_open = None
+        self.sediment_bedload_supply = None    # per boundary edge, m2/s, <0 = none
+        self._sediment_bedload_supply = {}     # tag -> m2/s
         self._sediment_bedload_open_tags = ()
         # Scratch for the source kernel, (ncl, n). Allocated with the classes.
         self.sediment_source_limited = None
@@ -2511,7 +2513,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
     }
 
     def set_bedload(self, formula='wong_parker_eq24', K=None, m=None,
-                    tau_c_star=None, open_boundaries=None):
+                    tau_c_star=None, open_boundaries=None, supply=None):
         """Enable bedload transport `[K-1]`-`[K-4]` and its bed evolution `[G-5]`.
 
         Parameters
@@ -2536,6 +2538,17 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             never imports and digs a hole that travels downstream. On a
             distributed sub-domain a tag this rank owns no part of is
             ignored; in serial an unknown tag is an error.
+        supply : dict, optional
+            `{tag: q_b}`: a PRESCRIBED bedload inflow across the edges of
+            `tag`, in m2/s volumetric per unit width (mass rate / rho_s),
+            in place of the zero-gradient import. The tag is opened if it
+            is not already. Use it where the supply is known, as in a flume
+            fed at a set rate: the zero-gradient import equals the inflow
+            cell's own export, so a cell that aggrades under a fixed inflow
+            stage sees its transport and hence its import rise, a feedback
+            that runs away in a few hours; a prescribed supply does not
+            depend on the cell at all. An outflow edge with a supply set
+            still carries the supply in, so give it only to inflow tags.
 
         Notes
         -----
@@ -2597,6 +2610,18 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             if isinstance(open_boundaries, str):
                 open_boundaries = (open_boundaries,)
             self._sediment_bedload_open_tags = tuple(open_boundaries)
+        if supply is not None:
+            for tag, q in supply.items():
+                if q < 0.0:
+                    raise ValueError('bedload supply for %r must be >= 0 m2/s, got %g' % (tag, q))
+                if tag not in self.tag_boundary_cells and not self._is_subdomain():
+                    raise ValueError(
+                        'no boundary tagged %r on this domain; known tags: %s'
+                        % (tag, sorted(self.tag_boundary_cells)))
+            self._sediment_bedload_supply = {tag: float(q) for tag, q in supply.items()}
+            extra = tuple(t for t in self._sediment_bedload_supply
+                          if t not in self._sediment_bedload_open_tags)
+            self._sediment_bedload_open_tags = tuple(self._sediment_bedload_open_tags) + extra
         self._build_bedload_open()
 
         self._Domain_C_struct = None
@@ -2614,8 +2639,11 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         if self.sediment_bedload_open is None:
             self.sediment_bedload_open = num.zeros(self.boundary_length,
                                                    dtype=num.int64)
+            self.sediment_bedload_supply = num.full(self.boundary_length, -1.0)
         flags = self.sediment_bedload_open
         flags[:] = 0
+        supply = self.sediment_bedload_supply
+        supply[:] = -1.0
         for tag in self._sediment_bedload_open_tags:
             if tag not in self.tag_boundary_cells:
                 if self._is_subdomain():
@@ -2623,7 +2651,10 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                 raise ValueError(
                     'no boundary tagged %r on this domain; known tags: %s'
                     % (tag, sorted(self.tag_boundary_cells)))
-            flags[num.asarray(self.tag_boundary_cells[tag], dtype=num.intp)] = 1
+            edges = num.asarray(self.tag_boundary_cells[tag], dtype=num.intp)
+            flags[edges] = 1
+            if tag in self._sediment_bedload_supply:
+                supply[edges] = self._sediment_bedload_supply[tag]
 
     def get_sediment_names(self):
         """Return the registered sediment class names, in index order."""

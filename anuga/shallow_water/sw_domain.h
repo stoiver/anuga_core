@@ -448,6 +448,15 @@ struct domain {
      * outflow declared open in set_bedload), 0 where it is closed. NULL means
      * every boundary edge is closed. */
     anuga_int* sediment_bedload_open;
+    /* Per boundary edge, indexed like sediment_bedload_open: a PRESCRIBED
+     * bedload inflow across that edge, m^2/s volumetric per unit width,
+     * or < 0 where none is prescribed (the open edge then carries the
+     * cell's own q_b . n, zero gradient). A prescribed supply does not
+     * depend on the inflow cell's state, which is what removes the
+     * feedback of the zero-gradient import: a cell that aggrades under a
+     * fixed inflow stage sees its transport and hence its import rise
+     * without bound. */
+    double* sediment_bedload_supply;
 
     /* ---- spec 7, angle-of-repose relaxation ------------------------------
      *
