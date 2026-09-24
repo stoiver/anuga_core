@@ -570,6 +570,24 @@ stratified. It is off by default. The case for it is van Rijn's pick-up flume,
 which reaches equilibrium in about 15 depths without it against more than 40
 measured, and his migrating trench, which fills about 25 % too fast.
 
+The rate scaling has no memory and is symmetric, and in the trench it
+over-corrects. The alternative [D-4] keeps the stratification of the
+suspension as a state, the ratio :math:`r_b = c_b/c` carried with the flow
+and relaxed toward :math:`d^{*}` over the settling time
+:math:`T_D = (z_c - a)/w_s` from the centroid :math:`z_c` of the equilibrium
+profile, only when :math:`d^{*}` has risen above it:
+
+.. math::
+
+   \frac{\partial (h r_b)}{\partial t} + \nabla\cdot(h r_b \mathbf{u})
+   = h\,\frac{d^{*} - r_b}{T_D}, \qquad D = v_s\, r_b\, c
+   \qquad \text{[D-4]}
+
+so a parcel entering slower water deposits first at the stratification it
+brought with it. It never acts in uniform or quickening flow, and it does not
+represent the slow filling of the upper column over a bed loading clear
+water, which needs a layered suspension.
+
 The settling velocity itself is [FC04]_, smooth across the Stokes-to-turbulent
 transition and branch-free. [Die82]_ is the more accurate polynomial fit for
 natural irregular grains, at the cost of a branchy evaluation:
@@ -718,6 +736,13 @@ slows: the load adapts over :math:`h/(\alpha w_s)` instead of
        form; 1 in the well-mixed limit, :math:`h/a` when fully stratified
    * - ``'constant'``
      - :math:`\alpha` = ``adaptation_alpha`` everywhere
+   * - ``'carried'``
+     - :spec:`D-4`: the near-bed ratio :math:`r_b = c_b/c` is carried per
+       fraction (tracer ``<name>_nearbed_ratio``, registered at the first
+       ``evolve``) and relaxed toward :math:`d^{*}` over the settling time
+       :math:`(z_c - a)/w_s` when the flow has slowed; deposition uses
+       :math:`r_b c`. One-sided, with memory; changes nothing in uniform or
+       quickening flow
 
 Pair ``'armanini'`` with ``near_bed='rouse'``: the lag is the difference
 between the equilibrium stratification :math:`d^{*}` and the effective

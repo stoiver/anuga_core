@@ -690,6 +690,38 @@ static inline double core_rouse_d_star(double Z, double a_h) {
     return (d < 1.0) ? 1.0 : d;
 }
 
+// Centroid height of the Rouse profile, for the settling time of [D-4].
+//
+// (z_c - a)/h with z_c = int z c dz / int c dz over [a, h] of the corrected
+// Rouse-Vanoni profile above. A collapsing profile deposits its sediment
+// from about its centroid, so the settling time is (z_c - a)/w_s: h/2 over
+// w_s when well mixed (Z -> 0, z_c -> h/2), vanishing when the load already
+// hugs the bed. Same fitted form and clamps as d*: ln((z_c - a)/h) =
+// P(Z, ln(a/h)), 28 terms, 1.0 percent max / 0.27 percent mean error over
+// Z in [0.01, 2.5], a/h in [1e-3, 0.15] (least squares to quadrature,
+// 2026-09-24).
+static inline double core_rouse_z_c(double Z, double a_h) {
+    const double C[7][4] = {
+    {-1.236620662919e+00, -2.966806356338e-01, -5.451826597743e-02, -3.340785646720e-03},
+    {-4.934470965259e-01, +1.986068502121e-01, +2.681666552524e-02, +1.430964808434e-03},
+    {+5.693206124955e-01, +4.438916973539e-01, +7.169076944620e-02, +3.074161648449e-03},
+    {-8.317934945723e-01, -8.674254433522e-01, -2.464308678880e-01, -1.711508840976e-02},
+    {+5.466837296437e-01, +6.103587559357e-01, +2.038814693879e-01, +1.776942243679e-02},
+    {-1.671607038599e-01, -1.948379068715e-01, -7.092485415218e-02, -7.151638532153e-03},
+    {+1.963501463003e-02, +2.364362131184e-02, +9.087924042213e-03, +1.006461512046e-03},
+    };
+    if (Z < ANUGA_ROUSE_Z_LO) Z = ANUGA_ROUSE_Z_LO;
+    else if (Z > ANUGA_ROUSE_Z_HI) Z = ANUGA_ROUSE_Z_HI;
+    if (a_h < ANUGA_ROUSE_AH_LO) a_h = ANUGA_ROUSE_AH_LO;
+    else if (a_h > ANUGA_ROUSE_AH_HI) a_h = ANUGA_ROUSE_AH_HI;
+    const double L = log(a_h), L2 = L * L, L3 = L2 * L;
+    double P = 0.0;
+    for (int i = 6; i >= 0; i--) {
+        P = P * Z + (C[i][0] + C[i][1] * L + C[i][2] * L2 + C[i][3] * L3);
+    }
+    return exp(P);
+}
+
 /* Slope magnitude of a centroid field at cell k for [T-7]/[T-7e]: the
  * least-squares gradient over the cell and its neighbours, one-sided at
  * boundaries (the gradient along the line when the neighbours are
@@ -1482,6 +1514,9 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     const double a_h_floor = D->sediment_a_h_floor;
     const anuga_int adapt_mode = D->sediment_adaptation_mode;
     const double adapt_alpha = D->sediment_adaptation_alpha;
+    const anuga_int nb_base = D->sediment_nearbed_base;
+    double * restrict t_bv = D->tracer_boundary_values;
+    const anuga_int t_bl = D->boundary_length;
     const double c_pack = D->sediment_c_pack;
     const anuga_int fric_mode = D->sediment_friction_mode;
     const double n_ll = D->sediment_manning_ll;
@@ -1664,6 +1699,47 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             // ~15 depths without it against >40 measured, and his trench
             // fills ~25% too fast (issue #389). Mode 2 takes alpha as given.
             double f_adapt = 1.0;
+            // [D-4] CARRIED NEAR-BED RATIO (mode 3). Instead of scaling the
+            // rate, keep the stratification of the suspension as a state:
+            // tracer (nb_base + s) carries h r_b, with r_b = c_b / c the
+            // ratio of near-bed to depth-averaged concentration the column
+            // actually has, advected with the flow by the flux kernel. Its
+            // equilibrium is d*. The lag is one-sided. When the flow slows,
+            // d* rises above r_b: the profile is collapsing, the grains high
+            // in the column settle from about the profile centroid, and r_b
+            // approaches d* over T = (z_c - a)/w_s. Deposition uses the
+            // carried ratio, so a parcel entering a trench starts depositing
+            // at the stratification it brought and works up to the trench's
+            // over that time. When d* is at or below r_b (the flow has
+            // quickened, or nothing changed) the near-bed concentration is
+            // at the bed and responds at once: r_b = d*. A ratio of zero is
+            // "not set yet" (initial state, inflow) and takes d*. The slow
+            // filling of the UPPER column that delays the depth-integrated
+            // load when a bed loads clear water is not a near-bed lag and is
+            // not represented here; that needs a layered suspension. Exact
+            // exponential relaxation over the step; T -> 0 recovers [D-1].
+            double c_b_used = -1.0;
+            if (adapt_mode == 3 && nb_base >= 0) {
+                const anuga_int nidx = (nb_base + s) * n + k;
+                double r_b = t_cons[nidx] * inv_h;
+                double r_n = ds;
+                if (r_b > 0.0 && ds > r_b && v_s[s] > 0.0) {
+                    const double T = core_rouse_z_c(Z, a_h) * h / v_s[s];
+                    if (T > 0.0) r_n = ds + (r_b - ds) * exp(-timestep / T);
+                }
+                t_cons[nidx] = r_n * h;
+                c_b_used = r_n * c_pos;
+                /* The ratio tracer's inflow value is the local equilibrium
+                 * d*: written here on the cell's boundary edges every step
+                 * (the array is device-resident in mode 2, as this kernel
+                 * is), so inflowing water carries no spurious lag in. */
+                for (anuga_int i = 0; i < 3; i++) {
+                    const anuga_int nbk = neighbours_r[3 * k + i];
+                    if (nbk < 0 && t_bv != NULL) {
+                        t_bv[(nb_base + s) * t_bl + (-nbk - 1)] = ds;
+                    }
+                }
+            }
             if (adapt_mode == 1) {
                 double alpha;
                 if (ustar > 0.0) {
@@ -1705,7 +1781,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                            ? v_s[s] * c_pos * (1.0 - tau_b_d / tau_d)
                            : 0.0;
             } else {
-                double c_bed = ds * c_pos;
+                double c_bed = (c_b_used >= 0.0) ? c_b_used : ds * c_pos;
                 if (c_bed > c_pack) c_bed = c_pack;
                 deposition = c_bed * v_s[s];
             }

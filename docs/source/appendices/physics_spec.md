@@ -936,6 +936,33 @@ well-mixed limit `w_s/u* → 0` and `α → h/a` when fully stratified. Off by d
 the evidence for it is van Rijn's pick-up flume (equilibrium reached in ~15 depths
 without it, >40 measured) and his migrating trench (fill ~25 % too fast), issue #389.
 
+A second form keeps the *stratification* of the suspension as a state instead of
+scaling the rate. Each fraction carries the ratio `r_b = c_b/c` of near-bed to
+depth-averaged concentration, advected with the flow and relaxed toward `d*` only when
+`d*` has risen above it, which is when the flow has slowed and the profile is collapsing:
+
+```{index} single: physics label; [D-4]
+```
+(spec-d-4)=
+```{math}
+:nowrap:
+
+\begin{align}
+\frac{\partial (h r_b)}{\partial t} + \nabla\cdot(h r_b \mathbf{u}) = h\,\frac{d^{*} - r_b}{T_D}
+\ \text{ for } d^{*} > r_b, \qquad r_b = d^{*} \text{ otherwise}, \qquad
+T_D = \frac{z_c(Z, a/h) - a}{w_s}, \qquad D = v_s\, r_b\, c \tag{D-4}
+\end{align}
+```
+
+with `z_c` the centroid height of the equilibrium Rouse profile (a fitted companion of the
+`d*` fit). The grains high in the column settle to the bed from about the centroid, so a
+parcel entering slower water deposits first at the stratification it brought and works up to
+the local one over `T_D`. The lag is one-sided by construction: it never acts in uniform or
+quickening flow, where the near-bed concentration is at the bed and responds at once, and it
+does not represent the slow filling of the upper column when a bed loads clear water, which
+needs a layered suspension. A ratio of zero means "not set" and takes the local `d*`; the
+kernel writes the local `d*` on the ratio's boundary edges every step, so inflows carry no
+lag in. `T_D → 0` recovers [D-1]. Off by default.
 **Recommendation:** {speclit}`D-1` as default (consistent with the `d*` machinery of §4.3),
 {speclit}`D-2` available for the layered bed model and required to reproduce RDy26's
 passive-transport validation cases.

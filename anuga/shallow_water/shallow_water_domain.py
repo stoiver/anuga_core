@@ -760,6 +760,7 @@ class Domain(Generic_Domain):
         self.sediment_d_star_mode = 0           # 0 constant, 1 Rouse [S-4]
         self.sediment_adaptation_mode = 0       # [D-3] 0 none, 1 Armanini, 2 constant
         self.sediment_adaptation_alpha = 1.0    # [D-3] alpha for mode 2
+        self.sediment_nearbed_base = -1        # [D-4] first near-bed tracer, or -1
         # van Rijn-style floor a >= sediment_a_h_floor * h, applied when
         # sediment_d_star_mode = 1. Standard practice, on by default. Set to 0
         # to reach anugaSed's regime (they use no floor); the d* fit covers
@@ -1252,6 +1253,10 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         preference -- see spec 4.1.1. The cohesive Hanson & Simon route
         `[E-3]` is for silt and clay and is not implemented here.
         """
+        if self.sediment_nearbed_base >= 0:
+            raise ValueError(
+                "with adaptation='carried' every fraction must be added before "
+                'the first evolve: the near-bed tracers are registered then')
         if self.number_of_tracers != self.n_sediment_classes:
             raise ValueError(
                 'add_sediment_fraction requires fraction s to occupy tracer '
@@ -1708,7 +1713,22 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             transient slows: the load adapts over `h/(alpha w_s)` instead of
             `h/(d* w_s)`. `alpha` is 1 in the well-mixed limit and `h/a`
             when fully stratified, so pair it with `near_bed='rouse'`.
-            `'constant'` uses `adaptation_alpha` everywhere.
+            `'constant'` uses `adaptation_alpha` everywhere. `'carried'`
+            (`[D-4]`) keeps the stratification of the suspension as a state:
+            each fraction gets a tracer `<name>_nearbed_ratio` holding
+            `r_b = c_b / c`, registered at the first `evolve` (so all
+            fractions must be added before it), advected with the flow and
+            relaxed toward `d*` over the settling time `(z_c - a)/w_s` (from
+            the profile centroid) when the flow has slowed and `d*` has
+            risen above it; in the other direction it responds at once.
+            Deposition uses `r_b c`, so a parcel entering slower water
+            deposits first at the stratification it brought with it. Unlike
+            `'armanini'` this has memory and is one-sided; its equilibrium
+            is unchanged, and it does not act where the flow is uniform or
+            quickening. It does not slow the loading of clear water from the
+            bed, which needs a layered suspension. A ratio of 0 means not
+            set and takes the local `d*`, which is what the initial state
+            and the inflow boundaries carry by default.
         adaptation_alpha : float, optional
             `alpha` for `adaptation='constant'`; must be > 0.
 
@@ -1730,7 +1750,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                              % (near_bed, sorted(modes)))
         if tau_d < 0.0:
             raise ValueError('tau_d must be >= 0 Pa, got %g' % tau_d)
-        adapt = {'none': 0, 'armanini': 1, 'constant': 2}
+        adapt = {'none': 0, 'armanini': 1, 'constant': 2, 'carried': 3}
         if adaptation not in adapt:
             raise ValueError('unknown adaptation %r; expected one of %r'
                              % (adaptation, sorted(adapt)))
@@ -2247,6 +2267,10 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         elif self.sediment_adaptation_mode == 2:
             L.append('  adaptation [D-3]   : constant alpha = %.4g; E - D = alpha v_s (c_eq - c)'
                      % self.sediment_adaptation_alpha)
+        elif self.sediment_adaptation_mode == 3:
+            L.append('  adaptation [D-4]   : carried near-bed ratio r_b per fraction, settling lag '
+                     'T = (z_c - a)/w_s when d* rises%s'
+                     % ('' if self.sediment_nearbed_base >= 0 else ' (tracers registered at evolve)'))
         if self.sediment_d_star_mode == 1:
             L.append('  a/h floor          : %.4g' % self.sediment_a_h_floor)
         mask = self._sediment_erodible_mask
@@ -2624,6 +2648,81 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             self._sediment_bedload_open_tags = tuple(self._sediment_bedload_open_tags) + extra
         self._build_bedload_open()
 
+        self._Domain_C_struct = None
+        self.gpu_interface = None
+        if hasattr(self, '_gpu_boundary_info_initialized'):
+            del self._gpu_boundary_info_initialized
+
+    # ---- [D-4] carried near-bed concentration -----------------------------
+    ROUSE_DSTAR_COEFFS = (
+        (+1.097192252266e-03, +9.816426876103e-04, +2.816550608693e-04, +2.216981593577e-05),
+        (+8.152552738643e-01, +2.984288438662e-01, +4.717126357513e-02, +2.488390592718e-03),
+        (-3.858022145865e-02, +7.497943739332e-01, +1.494530687071e-01, +1.016829763599e-02),
+        (-1.416163484237e-01, -6.145585548869e-01, -2.181478641118e-01, -1.989085090511e-02),
+        (+2.441798567588e-02, +2.477861105262e-01, +1.172562489413e-01, +1.380260943049e-02),
+        (+1.714535144604e-02, -4.453006825886e-02, -2.922351673152e-02, -4.300807416335e-03),
+        (-4.557991043496e-03, +2.511784955218e-03, +2.810236330103e-03, +5.048472261972e-04))
+    ROUSE_ZC_COEFFS = (
+        (-1.236620662919e+00, -2.966806356338e-01, -5.451826597743e-02, -3.340785646720e-03),
+        (-4.934470965259e-01, +1.986068502121e-01, +2.681666552524e-02, +1.430964808434e-03),
+        (+5.693206124955e-01, +4.438916973539e-01, +7.169076944620e-02, +3.074161648449e-03),
+        (-8.317934945723e-01, -8.674254433522e-01, -2.464308678880e-01, -1.711508840976e-02),
+        (+5.466837296437e-01, +6.103587559357e-01, +2.038814693879e-01, +1.776942243679e-02),
+        (-1.671607038599e-01, -1.948379068715e-01, -7.092485415218e-02, -7.151638532153e-03),
+        (+1.963501463003e-02, +2.364362131184e-02, +9.087924042213e-03, +1.006461512046e-03))
+    ROUSE_LIMITS = (0.01, 2.5, 1.0e-3, 0.15)
+
+    @classmethod
+    def _rouse_poly(cls, coeffs, Z, a_h):
+        import math
+        zlo, zhi, alo, ahi = cls.ROUSE_LIMITS
+        Z = min(max(float(Z), zlo), zhi)
+        a_h = min(max(float(a_h), alo), ahi)
+        L = math.log(a_h)
+        P = 0.0
+        for row in reversed(coeffs):
+            P = P * Z + (row[0] + row[1] * L + row[2] * L * L + row[3] * L ** 3)
+        return P, L
+
+    @classmethod
+    def rouse_d_star(cls, Z, a_h):
+        """The kernel's fitted near-bed ratio `d*(Z, a/h)` of `[S-4]`, for
+        scripts that need it on the host (an inflow near-bed concentration,
+        say). Clamped to the fitted range like the kernel."""
+        import math
+        P, L = cls._rouse_poly(cls.ROUSE_DSTAR_COEFFS, Z, a_h)
+        return max(math.exp(-Z * L + P), 1.0)
+
+    @classmethod
+    def rouse_centroid(cls, Z, a_h):
+        """`(z_c - a)/h`, the height of the Rouse profile's centroid above the
+        reference level, from the kernel's fit; the settling time of `[D-4]`
+        is this times `h / w_s`."""
+        import math
+        P, _ = cls._rouse_poly(cls.ROUSE_ZC_COEFFS, Z, a_h)
+        return math.exp(P)
+
+    def _ensure_nearbed_tracers(self):
+        """Register the `[D-4]` near-bed tracers, one per fraction, once every
+        fraction exists. Called at the top of evolve; a no-op unless
+        `adaptation='carried'` and they are not there yet."""
+        if (self.sediment_adaptation_mode != 3 or self.sediment_nearbed_base >= 0
+                or self.n_sediment_classes == 0):
+            return
+        ncl = self.n_sediment_classes
+        if self.number_of_tracers != ncl:
+            raise ValueError(
+                "adaptation='carried' needs the sediment fractions to be the "
+                'only tracers when the near-bed tracers are registered; this '
+                'domain has %d tracers and %d fractions'
+                % (self.number_of_tracers, ncl))
+        base = self.number_of_tracers
+        names = list(self.get_sediment_names())
+        for s in range(ncl):
+            # 0 = not set: the kernel takes the local d*, so the initial
+            # state and every inflow start at the equilibrium stratification
+            self.add_tracer(names[s] + '_nearbed_ratio', initial_value=0.0)
+        self.sediment_nearbed_base = base
         self._Domain_C_struct = None
         self.gpu_interface = None
         if hasattr(self, '_gpu_boundary_info_initialized'):
@@ -5769,6 +5868,10 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
         msg = 'Attribute self.beta_w must be in the interval [0, 2]'
         assert 0 <= self.beta_w <= 2.0, msg
+
+        # [D-4]: the near-bed tracers are registered once every fraction
+        # exists and before the C struct and the device mapping are built.
+        self._ensure_nearbed_tracers()
 
         # Build the mode-2 device interface lazily if it was deferred (a
         # default-'unified' domain constructed before boundaries were set). Must

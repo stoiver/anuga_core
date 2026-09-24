@@ -172,3 +172,101 @@ def test_bad_settings():
     assert 'adaptation [D-3]' in d.sediment_summary()
     d.set_deposition()
     assert 'adaptation' not in d.sediment_summary()
+
+
+# ------------------------------------------------ [D-4] carried near-bed ratio
+
+def _channel(adapt, nx=60, length=300.0, bed=None, mode='legacy', c0=0.0, U=1.0):
+    d = rectangular_cross_domain(nx, 2, len1=length, len2=10.0)
+    d.set_flow_algorithm('DE1')
+    d.set_compute_mode(mode)
+    d.store = False
+    d.set_quantity('elevation', 0.0 if bed is None else bed)
+    d.set_quantity('friction', 0.0)
+    d.set_quantity('stage', H0)
+    d.set_quantity('xmomentum', U * H0)
+    Bd_in = Dirichlet_boundary([H0, U * H0, 0.0])
+    Bd_out = Dirichlet_boundary([H0, U * H0, 0.0])
+    Br = Reflective_boundary(d)
+    d.set_boundary({'left': Bd_in, 'right': Bd_out, 'top': Br, 'bottom': Br})
+    d.initialize_sediment_operator(bed_evolution=False)
+    d.set_sediment_friction('larsen_lamb', k_s=K_S)
+    d.set_deposition(law='d_star', near_bed='rouse', adaptation=adapt)
+    d.add_sediment_fraction('sand', diameter=2.0e-4, initial_concentration=c0)
+    d.set_tracer_boundary('sand', 'left', c0)
+    return d
+
+
+def test_the_centroid_fit_reproduces_the_quadrature():
+    """(z_c - a)/h of the Rouse profile from the kernel's coefficients, via
+    the Python port, against direct integration."""
+    from scipy.integrate import quad
+    from anuga import Domain
+    worst = 0.0
+    for Z in (0.02, 0.1, 0.5, 1.0, 1.5, 2.4):
+        for a_h in (0.002, 0.01, 0.05, 0.12):
+            f = lambda z: (((1.0 - z) / (1.0 - a_h)) * (a_h / z)) ** Z
+            zc = quad(lambda z: z * f(z), a_h, 1.0, limit=400)[0] / quad(f, a_h, 1.0, limit=400)[0]
+            fit = Domain.rouse_centroid(Z, a_h)
+            worst = max(worst, abs(fit - (zc - a_h)) / (zc - a_h))
+    assert worst < 0.015, worst
+    assert abs(Domain.rouse_centroid(0.01, 0.01) - 0.49) < 0.01     # well mixed: h/2
+
+
+def test_the_python_d_star_port_matches_the_kernel_fit():
+    """The port evaluates the same polynomial the kernel does; check it
+    against the values the rouse test reads out of the kernel source."""
+    from anuga import Domain
+    from anuga.shallow_water.tests import test_sediment_rouse as R
+    for Z, a_h in ((0.05, 0.01), (0.5, 0.02), (1.0, 0.01), (2.0, 0.1)):
+        assert Domain.rouse_d_star(Z, a_h) == pytest.approx(R.dstar_fit(Z, a_h), rel=1e-12)
+
+
+@pytest.mark.parametrize('mode', ['legacy', 'unified'])
+def test_in_uniform_flow_the_carried_ratio_changes_nothing(mode):
+    """Clear water loaded from the bed in uniform flow: d* never rises, so
+    the one-sided lag never fires and the result is bit-identical."""
+    plain = _channel('none', mode=mode)
+    carried = _channel('carried', mode=mode)
+    for d in (plain, carried):
+        for _ in d.evolve(yieldstep=100.0, finaltime=400.0):
+            pass
+    assert carried.number_of_tracers == 2
+    assert 'sand_nearbed_ratio' in carried.get_tracer_names() if hasattr(carried, 'get_tracer_names') else True
+    assert np.array_equal(plain.get_tracer('sand'), carried.get_tracer('sand'))
+    r = carried.get_tracer('sand_nearbed_ratio')
+    assert r.min() > 1.0 and np.ptp(r) / r.mean() < 1e-6
+
+
+def test_over_a_deepening_the_carried_ratio_lags_and_deposition_is_delayed():
+    """A step down in the bed slows the flow; d* rises there. Without the
+    lag the near-bed ratio is the new d* at once and deposition is largest
+    in the first cells past the step; with the carried ratio it starts from
+    the upstream value and rises over the settling time, so the bed
+    exchange just past the step is smaller and the load persists further."""
+    bed = lambda x, y: np.where(x > 150.0, -1.0, 0.0)   # depth doubles past x = 150
+    results = {}
+    for adapt in ('none', 'carried'):
+        d = _channel(adapt, bed=bed, c0=2.0e-3)
+        for _ in d.evolve(yieldstep=100.0, finaltime=500.0):
+            pass
+        x = d.centroid_coordinates[:, 0]
+        c = d.get_tracer('sand')
+        results[adapt] = (float(c[(x > 152) & (x < 162)].mean()),
+                          float(c[(x > 250) & (x < 280)].mean()), d)
+    near_p, far_p, _ = results['none']
+    near_c, far_c, d = results['carried']
+    # more load survives just past the step with the lag
+    assert near_c > near_p * 1.02, (near_c, near_p)
+    # and the ratio there is below its downstream equilibrium, rising toward it
+    r = d.get_tracer('sand_nearbed_ratio'); x = d.centroid_coordinates[:, 0]
+    assert r[(x > 152) & (x < 158)].mean() < r[(x > 280)].mean()
+
+
+def test_fractions_must_be_added_before_the_first_evolve():
+    d = _channel('carried')
+    for _ in d.evolve(yieldstep=1.0, finaltime=1.0):
+        pass
+    with pytest.raises(ValueError):
+        d.add_sediment_fraction('silt', diameter=5.0e-5)
+    assert 'adaptation [D-4]' in d.sediment_summary()

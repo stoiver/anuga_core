@@ -332,6 +332,12 @@ struct domain {
      * slows. alpha -> 1 in the well-mixed limit, alpha -> h/a when stratified. */
     anuga_int sediment_adaptation_mode;
     double sediment_adaptation_alpha;
+    /* [D-4] carried near-bed concentration (adaptation mode 3): fraction s
+     * keeps its near-bed concentration c_b as tracer (nearbed_base + s),
+     * advected with the flow and relaxed toward d* c over a settling time
+     * (z_c - a)/w_s when the profile is collapsing; instantaneous in the
+     * other direction. -1 = not registered. */
+    anuga_int sediment_nearbed_base;
     /* [L-4] maximum packing fraction bounding the near-bed concentration
      * c_b = d* c. Same constant that bounds E* in [E-1]. */
     double sediment_c_pack;
