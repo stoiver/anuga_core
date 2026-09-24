@@ -963,6 +963,39 @@ does not represent the slow filling of the upper column when a bed loads clear w
 needs a layered suspension. A ratio of zero means "not set" and takes the local `d*`; the
 kernel writes the local `d*` on the ratio's boundary edges every step, so inflows carry no
 lag in. `T_D → 0` recovers [D-1]. Off by default.
+
+A third form gives the suspension a vertical structure: a near-bed layer of thickness
+`h_1 = a` (the reference height, floor included) and the rest of the column, `h_2 = h - a`.
+The fraction's own tracer still carries the total mass `m = h c` with its advection, limiters
+and bed exchange unchanged; a second tracer carries the upper layer's mass `m_2 = h_2 c_2`,
+and the lower layer is the remainder, `m_1 = m - m_2`:
+
+```{index} single: physics label; [D-5]
+```
+(spec-d-5)=
+```{math}
+:nowrap:
+
+\begin{align}
+\frac{\partial m_2}{\partial t} + \nabla\cdot(m_2 \mathbf{u}) &= K\,(c_1 - c_2) - v_s\, c_2, \qquad
+D = v_s\, c_1, \qquad E \text{ into layer 1} \\
+\rho &= \frac{c_2}{c_1}\Big|_{eq} = \frac{1/d^{*} - a/h}{1 - a/h}, \qquad
+K = v_s\,\frac{\rho}{1 - \rho} \tag{D-5}
+\end{align}
+```
+
+Settling moves sediment down and the exchange `K` up; `K` is set so that the two-layer
+equilibrium reproduces the fitted Rouse ratio `c_1/c = d*`, so every equilibrium of [D-1] is
+unchanged and only the transient differs. The partition relaxes toward its equilibrium at the
+rate `K/h_1 + (K + v_s)/h_2`, integrated exactly per step. Both directions lag: a parcel
+entering slower water keeps its upper-layer load and settles it out over about `h_2/v_s`, and
+a bed loading clear water fills the lower layer first, so the near-bed concentration and the
+deposition lead the depth-averaged load, which grows only as sediment is exchanged up. Both
+layers are advected with the depth-averaged velocity (no velocity profile yet). A negative
+upper-layer mass means "not set" and takes the equilibrium partition; the kernel writes the
+upper-layer tracer's boundary value as the equilibrium partition of the fraction's own
+boundary concentration every step. Where `d* > h/a` the lower layer cannot hold the
+stratification and the ratio is capped at `h/a`. Off by default.
 **Recommendation:** {speclit}`D-1` as default (consistent with the `d*` machinery of §4.3),
 {speclit}`D-2` available for the layered bed model and required to reproduce RDy26's
 passive-transport validation cases.

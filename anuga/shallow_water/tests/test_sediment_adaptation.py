@@ -270,3 +270,53 @@ def test_fractions_must_be_added_before_the_first_evolve():
     with pytest.raises(ValueError):
         d.add_sediment_fraction('silt', diameter=5.0e-5)
     assert 'adaptation [D-4]' in d.sediment_summary()
+
+
+# --------------------------------------------- [D-5] two-layer suspension
+
+@pytest.mark.parametrize('mode', ['legacy', 'unified'])
+def test_two_layer_keeps_the_equilibrium_and_lengthens_the_adaptation(mode):
+    """Clear water loaded from the bed: the far-downstream equilibrium of
+    the two-layer model must be the single-layer one (the exchange is set
+    to reproduce d*), while the load near the inflow is lower because the
+    upper layer fills only by exchange."""
+    plain = _channel('none', mode=mode)
+    two = _channel('two_layer', mode=mode)
+    for d in (plain, two):
+        d.set_deposition(law='d_star', near_bed='rouse', reference_height_floor=0.1,
+                         adaptation='two_layer' if d is two else 'none')
+        for _ in d.evolve(yieldstep=100.0, finaltime=900.0):
+            pass
+    x = plain.centroid_coordinates[:, 0]
+    c_p, c_t = plain.get_tracer('sand'), two.get_tracer('sand')
+    far = x > 270.0
+    near = (x > 25.0) & (x < 35.0)
+    assert two.number_of_tracers == 2
+    assert c_t[far].mean() == pytest.approx(c_p[far].mean(), rel=2e-3)
+    assert c_t[near].mean() < 0.85 * c_p[near].mean()
+    m2 = two.get_tracer('sand_upper')
+    share = (m2 / np.maximum(c_t, 1e-30))[far].mean()
+    assert 0.0 < share < 1.0
+    assert 'adaptation [D-5]' in two.sediment_summary()
+
+
+def test_two_layer_partition_matches_the_rouse_ratio_at_equilibrium():
+    """At equilibrium the lower-layer concentration over the depth-averaged
+    one must be the fitted d* of the local flow, by construction of K."""
+    from anuga import Domain
+    d = _channel('two_layer')
+    d.set_deposition(law='d_star', near_bed='rouse', reference_height_floor=0.1,
+                     adaptation='two_layer')
+    for _ in d.evolve(yieldstep=100.0, finaltime=900.0):
+        pass
+    x = d.centroid_coordinates[:, 0]
+    far = x > 270.0
+    c = d.get_tracer('sand')[far].mean()
+    m2 = d.get_tracer('sand_upper')[far].mean()          # m2 / h as a tracer value
+    a_h = 0.1                                            # the floor, since a = 2 d << 0.1 h
+    c1 = (c - m2) / a_h                                  # (m - m2) / h1, per unit h
+    n = d.sediment_manning_ll
+    f_c = G * n * n / H0 ** (1.0 / 3.0)
+    ustar = np.sqrt(f_c) * U0
+    Z = float(d.sediment_settling_velocity[0]) / (0.41 * ustar)
+    assert c1 / c == pytest.approx(Domain.rouse_d_star(Z, a_h), rel=2e-2)

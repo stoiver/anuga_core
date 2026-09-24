@@ -1740,6 +1740,65 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                     }
                 }
             }
+            // [D-5] TWO-LAYER SUSPENSION (mode 4). The column is split into
+            // a near-bed layer of thickness h1 = a (the reference height,
+            // floor included) and the rest, h2 = h - h1. The fraction's own
+            // tracer still carries the TOTAL mass m = h c, with its
+            // advection, limiters and bed exchange unchanged; tracer
+            // (nb_base + s) carries the upper layer's mass m2 = h2 c2, and
+            // the lower layer is what remains, m1 = m - m2. Between the
+            // layers: settling v_s c2 down, exchange K (c1 - c2) up. K is
+            // set so that the two-layer equilibrium c2/c1 = rho reproduces
+            // the fitted Rouse ratio, c1/c = d*: rho = (1/d* - f1)/(1 - f1),
+            // K = v_s rho/(1 - rho), so every equilibrium is unchanged and
+            // only the transient differs. Deposition is v_s c1, entrainment
+            // enters layer 1 (through the total). The partition relaxes
+            // toward its equilibrium at the rate lam = K/h1 + (K + v_s)/h2,
+            // integrated exactly. So: a parcel entering slower water keeps
+            // its upper-layer load and deposits at the near-bed value it
+            // brought while the upper layer settles out over ~h2/v_s; and a
+            // bed loading clear water fills the lower layer first, so the
+            // near-bed concentration and hence deposition lead the depth-
+            // averaged load, which grows only as sediment is exchanged up.
+            // Both layers are advected with the depth-averaged velocity
+            // (no velocity profile yet). m2 < 0 means "not set" and takes
+            // the equilibrium partition; the kernel writes the boundary
+            // value of the upper-layer tracer as the equilibrium partition
+            // of the fraction's own boundary concentration every step.
+            if (adapt_mode == 4 && nb_base >= 0) {
+                const anuga_int nidx = (nb_base + s) * n + k;
+                const double f1 = a_h;
+                const double h1 = f1 * h;
+                const double h2 = h - h1;
+                double rho = (1.0 / ds - f1) / (1.0 - f1);
+                if (rho < 1.0e-6) rho = 1.0e-6;
+                if (rho > 1.0) rho = 1.0;
+                const double K = v_s[s] * rho / (1.0 - rho + 1.0e-12);
+                const double m2_eq = h2 * rho * m_pos / (h1 + h2 * rho);
+                double m2 = t_cons[nidx];
+                double m2n;
+                if (m2 < 0.0) {
+                    m2n = m2_eq;
+                } else {
+                    if (m2 > m_pos) m2 = m_pos;
+                    const double lam = K / h1 + (K + v_s[s]) / h2;
+                    m2n = m2_eq + (m2 - m2_eq) * exp(-lam * timestep);
+                }
+                t_cons[nidx] = m2n;
+                double c1 = (m_pos - m2n) / h1;
+                if (c1 < 0.0) c1 = 0.0;
+                c_b_used = c1;
+                for (anuga_int i = 0; i < 3; i++) {
+                    const anuga_int nbk = neighbours_r[3 * k + i];
+                    if (nbk < 0 && t_bv != NULL) {
+                        const double cbd = t_bv[s * t_bl + (-nbk - 1)];
+                        /* the tracer's boundary value is m2/h at the
+                         * equilibrium partition of the boundary c */
+                        t_bv[(nb_base + s) * t_bl + (-nbk - 1)] =
+                            (cbd > 0.0) ? h2 * rho * cbd / (h1 + h2 * rho) : 0.0;
+                    }
+                }
+            }
             if (adapt_mode == 1) {
                 double alpha;
                 if (ustar > 0.0) {

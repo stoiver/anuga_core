@@ -588,6 +588,25 @@ brought with it. It never acts in uniform or quickening flow, and it does not
 represent the slow filling of the upper column over a bed loading clear
 water, which needs a layered suspension.
 
+The layered suspension is [D-5]: a near-bed layer :math:`h_1 = a` and the
+rest :math:`h_2 = h - a`, the fraction's tracer still carrying the total
+:math:`m = hc` and a second tracer the upper layer's :math:`m_2 = h_2 c_2`,
+
+.. math::
+
+   \frac{\partial m_2}{\partial t} + \nabla\cdot(m_2 \mathbf{u})
+   = K\,(c_1 - c_2) - v_s\, c_2, \qquad D = v_s\, c_1, \qquad
+   K = v_s \frac{\rho}{1-\rho}, \quad \rho = \frac{1/d^{*} - a/h}{1 - a/h}
+   \qquad \text{[D-5]}
+
+with the exchange :math:`K` chosen so that the two-layer equilibrium
+reproduces the Rouse ratio :math:`d^{*}` exactly. Settling moves sediment
+down and the exchange up, so a parcel entering slower water settles its
+upper-layer load out over about :math:`h_2/w_s`, and a bed loading clear
+water fills the near-bed layer first and the depth-averaged load only as
+sediment is exchanged up. This is the form that lengthens the adaptation
+in both flume cases.
+
 The settling velocity itself is [FC04]_, smooth across the Stokes-to-turbulent
 transition and branch-free. [Die82]_ is the more accurate polynomial fit for
 natural irregular grains, at the cost of a branchy evaluation:
@@ -743,6 +762,13 @@ slows: the load adapts over :math:`h/(\alpha w_s)` instead of
        :math:`(z_c - a)/w_s` when the flow has slowed; deposition uses
        :math:`r_b c`. One-sided, with memory; changes nothing in uniform or
        quickening flow
+   * - ``'two_layer'``
+     - :spec:`D-5`: a near-bed layer :math:`a` thick and the rest of the
+       column, each fraction carrying its upper-layer mass (tracer
+       ``<name>_upper``, registered at the first ``evolve``); settling
+       down, an exchange up set to reproduce :math:`d^{*}` at equilibrium;
+       deposition :math:`v_s c_1`. Lags in both directions; the equilibrium
+       is unchanged
 
 Pair ``'armanini'`` with ``near_bed='rouse'``: the lag is the difference
 between the equilibrium stratification :math:`d^{*}` and the effective

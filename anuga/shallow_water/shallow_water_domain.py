@@ -1255,8 +1255,8 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         """
         if self.sediment_nearbed_base >= 0:
             raise ValueError(
-                "with adaptation='carried' every fraction must be added before "
-                'the first evolve: the near-bed tracers are registered then')
+                "with a layered adaptation every fraction must be added before "
+                'the first evolve: its tracers are registered then')
         if self.number_of_tracers != self.n_sediment_classes:
             raise ValueError(
                 'add_sediment_fraction requires fraction s to occupy tracer '
@@ -1728,7 +1728,22 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             quickening. It does not slow the loading of clear water from the
             bed, which needs a layered suspension. A ratio of 0 means not
             set and takes the local `d*`, which is what the initial state
-            and the inflow boundaries carry by default.
+            and the inflow boundaries carry by default. `'two_layer'`
+            (`[D-5]`) is that layered suspension: a near-bed layer of
+            thickness `a` (the reference height, floor included) and the
+            rest of the column, each fraction carrying its upper-layer mass
+            in a tracer `<name>_upper` (registered at the first `evolve`)
+            with the lower layer as the remainder of its total. Settling
+            moves sediment down and an exchange coefficient up, set so that
+            the two-layer equilibrium reproduces the Rouse ratio `d*`
+            exactly; deposition is `v_s` times the lower-layer
+            concentration. Both directions lag: a parcel entering slower
+            water keeps its upper-layer load and settles it out over about
+            `h/w_s`, and a bed loading clear water fills the lower layer
+            first, so the depth-averaged load grows only as sediment is
+            exchanged up. Both layers are advected with the depth-averaged
+            velocity. Nothing to set at inflows; the partition there is the
+            equilibrium one.
         adaptation_alpha : float, optional
             `alpha` for `adaptation='constant'`; must be > 0.
 
@@ -1750,7 +1765,8 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                              % (near_bed, sorted(modes)))
         if tau_d < 0.0:
             raise ValueError('tau_d must be >= 0 Pa, got %g' % tau_d)
-        adapt = {'none': 0, 'armanini': 1, 'constant': 2, 'carried': 3}
+        adapt = {'none': 0, 'armanini': 1, 'constant': 2, 'carried': 3,
+                 'two_layer': 4}
         if adaptation not in adapt:
             raise ValueError('unknown adaptation %r; expected one of %r'
                              % (adaptation, sorted(adapt)))
@@ -2271,6 +2287,10 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             L.append('  adaptation [D-4]   : carried near-bed ratio r_b per fraction, settling lag '
                      'T = (z_c - a)/w_s when d* rises%s'
                      % ('' if self.sediment_nearbed_base >= 0 else ' (tracers registered at evolve)'))
+        elif self.sediment_adaptation_mode == 4:
+            L.append('  adaptation [D-5]   : two-layer suspension, near-bed layer a thick, exchange '
+                     'set to the Rouse equilibrium%s'
+                     % ('' if self.sediment_nearbed_base >= 0 else ' (tracers registered at evolve)'))
         if self.sediment_d_star_mode == 1:
             L.append('  a/h floor          : %.4g' % self.sediment_a_h_floor)
         mask = self._sediment_erodible_mask
@@ -2706,7 +2726,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         """Register the `[D-4]` near-bed tracers, one per fraction, once every
         fraction exists. Called at the top of evolve; a no-op unless
         `adaptation='carried'` and they are not there yet."""
-        if (self.sediment_adaptation_mode != 3 or self.sediment_nearbed_base >= 0
+        if (self.sediment_adaptation_mode not in (3, 4) or self.sediment_nearbed_base >= 0
                 or self.n_sediment_classes == 0):
             return
         ncl = self.n_sediment_classes
@@ -2718,10 +2738,16 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                 % (self.number_of_tracers, ncl))
         base = self.number_of_tracers
         names = list(self.get_sediment_names())
+        two_layer = self.sediment_adaptation_mode == 4
         for s in range(ncl):
-            # 0 = not set: the kernel takes the local d*, so the initial
-            # state and every inflow start at the equilibrium stratification
-            self.add_tracer(names[s] + '_nearbed_ratio', initial_value=0.0)
+            # [D-4]: 0 = not set, the kernel takes the local d*; [D-5]: a
+            # negative upper-layer mass = not set, the kernel takes the
+            # equilibrium partition. Either way the initial state and every
+            # inflow start at equilibrium with nothing to set.
+            if two_layer:
+                self.add_tracer(names[s] + '_upper', initial_value=-1.0)
+            else:
+                self.add_tracer(names[s] + '_nearbed_ratio', initial_value=0.0)
         self.sediment_nearbed_base = base
         self._Domain_C_struct = None
         self.gpu_interface = None
