@@ -138,6 +138,8 @@ cdef extern from "gpu_domain.h" nogil:
         int64_t sediment_adaptation_mode
         double sediment_adaptation_alpha
         int64_t sediment_nearbed_base
+        double sediment_layer_fraction
+        double sediment_exchange_factor
         double sediment_porosity
         double sediment_morphological_factor
         int64_t sediment_bed_evolution
@@ -935,6 +937,8 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     D.sediment_adaptation_mode = getattr(domain_object, 'sediment_adaptation_mode', 0)
     D.sediment_adaptation_alpha = getattr(domain_object, 'sediment_adaptation_alpha', 1.0)
     D.sediment_nearbed_base = getattr(domain_object, 'sediment_nearbed_base', -1)
+    D.sediment_layer_fraction = getattr(domain_object, 'sediment_layer_fraction', 0.0)
+    D.sediment_exchange_factor = getattr(domain_object, 'sediment_exchange_factor', 1.0)
     D.sediment_c_pack = getattr(domain_object, 'sediment_c_pack', 0.65)
     D.sediment_porosity = getattr(domain_object, 'sediment_porosity', 0.3)
     D.sediment_morphological_factor = getattr(domain_object, 'sediment_morphological_factor', 1.0)

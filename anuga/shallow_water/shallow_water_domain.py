@@ -761,6 +761,8 @@ class Domain(Generic_Domain):
         self.sediment_adaptation_mode = 0       # [D-3] 0 none, 1 Armanini, 2 constant
         self.sediment_adaptation_alpha = 1.0    # [D-3] alpha for mode 2
         self.sediment_nearbed_base = -1        # [D-4] first near-bed tracer, or -1
+        self.sediment_layer_fraction = 0.0     # [D-5] near-bed layer h1/h; <= 0: a/h
+        self.sediment_exchange_factor = 1.0    # [D-5] factor on the partition's relaxation rate
         # van Rijn-style floor a >= sediment_a_h_floor * h, applied when
         # sediment_d_star_mode = 1. Standard practice, on by default. Set to 0
         # to reach anugaSed's regime (they use no floor); the d* fit covers
@@ -1677,7 +1679,8 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
     def set_deposition(self, law='d_star', tau_d=0.0, near_bed='constant',
                        reference_height_floor=0.01, adaptation='none',
-                       adaptation_alpha=None):
+                       adaptation_alpha=None, layer_fraction=None,
+                       exchange_factor=1.0):
         """Select the deposition law and its near-bed treatment (spec 4.4).
 
         Parameters
@@ -1746,6 +1749,15 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             equilibrium one.
         adaptation_alpha : float, optional
             `alpha` for `adaptation='constant'`; must be > 0.
+        layer_fraction : float, optional
+            `'two_layer'` only: the near-bed layer thickness as a fraction of
+            the depth, in (0, 0.5]. Default `None`: the reference height
+            `a/h` with its floor. The exchange is re-derived so the
+            equilibrium stays the Rouse ratio whatever the thickness.
+        exchange_factor : float, optional
+            `'two_layer'` only: a factor on the rate at which the partition
+            relaxes toward its equilibrium, default 1 (the two-box
+            estimate). Changes the transient only.
 
         Notes
         -----
@@ -1780,9 +1792,15 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         self.sediment_tau_d = float(tau_d)
         self.sediment_d_star_mode = modes[near_bed]
         self.sediment_a_h_floor = float(reference_height_floor)
+        if layer_fraction is not None and not 0.0 < layer_fraction <= 0.5:
+            raise ValueError('layer_fraction must be in (0, 0.5], got %r' % (layer_fraction,))
+        if not exchange_factor > 0.0:
+            raise ValueError('exchange_factor must be > 0, got %r' % (exchange_factor,))
         self.sediment_adaptation_mode = adapt[adaptation]
         self.sediment_adaptation_alpha = (float(adaptation_alpha)
                                           if adaptation == 'constant' else 1.0)
+        self.sediment_layer_fraction = float(layer_fraction) if layer_fraction else 0.0
+        self.sediment_exchange_factor = float(exchange_factor)
         self._Domain_C_struct = None
         self.gpu_interface = None
         if hasattr(self, '_gpu_boundary_info_initialized'):
@@ -2288,9 +2306,11 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                      'T = (z_c - a)/w_s when d* rises%s'
                      % ('' if self.sediment_nearbed_base >= 0 else ' (tracers registered at evolve)'))
         elif self.sediment_adaptation_mode == 4:
-            L.append('  adaptation [D-5]   : two-layer suspension, near-bed layer a thick, exchange '
-                     'set to the Rouse equilibrium%s'
-                     % ('' if self.sediment_nearbed_base >= 0 else ' (tracers registered at evolve)'))
+            L.append('  adaptation [D-5]   : two-layer suspension, near-bed layer %s, exchange '
+                     'set to the Rouse equilibrium, rate x %.3g%s'
+                     % ('%.3g h' % self.sediment_layer_fraction if self.sediment_layer_fraction > 0
+                        else 'a thick', self.sediment_exchange_factor,
+                        '' if self.sediment_nearbed_base >= 0 else ' (tracers registered at evolve)'))
         if self.sediment_d_star_mode == 1:
             L.append('  a/h floor          : %.4g' % self.sediment_a_h_floor)
         mask = self._sediment_erodible_mask

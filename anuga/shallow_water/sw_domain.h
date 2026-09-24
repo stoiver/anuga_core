@@ -338,6 +338,12 @@ struct domain {
      * (z_c - a)/w_s when the profile is collapsing; instantaneous in the
      * other direction. -1 = not registered. */
     anuga_int sediment_nearbed_base;
+    /* [D-5] two-layer tuning, both equilibrium-preserving: the near-bed
+     * layer thickness as a fraction of depth (<= 0: the reference height
+     * a/h, floor included) and a factor on the rate at which the partition
+     * relaxes (1 = the two-box estimate). */
+    double sediment_layer_fraction;
+    double sediment_exchange_factor;
     /* [L-4] maximum packing fraction bounding the near-bed concentration
      * c_b = d* c. Same constant that bounds E* in [E-1]. */
     double sediment_c_pack;

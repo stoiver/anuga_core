@@ -53,6 +53,8 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		anuga_int sediment_adaptation_mode
 		double sediment_adaptation_alpha
 		anuga_int sediment_nearbed_base
+		double sediment_layer_fraction
+		double sediment_exchange_factor
 		double sediment_porosity
 		double sediment_morphological_factor
 		anuga_int sediment_bed_evolution
@@ -263,6 +265,8 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.sediment_adaptation_mode = getattr(domain_py_object, 'sediment_adaptation_mode', 0)
 	D.sediment_adaptation_alpha = getattr(domain_py_object, 'sediment_adaptation_alpha', 1.0)
 	D.sediment_nearbed_base = getattr(domain_py_object, 'sediment_nearbed_base', -1)
+	D.sediment_layer_fraction = getattr(domain_py_object, 'sediment_layer_fraction', 0.0)
+	D.sediment_exchange_factor = getattr(domain_py_object, 'sediment_exchange_factor', 1.0)
 	D.sediment_c_pack = getattr(domain_py_object, 'sediment_c_pack', 0.65)
 	D.sediment_porosity = getattr(domain_py_object, 'sediment_porosity', 0.3)
 	D.sediment_morphological_factor = getattr(domain_py_object, 'sediment_morphological_factor', 1.0)

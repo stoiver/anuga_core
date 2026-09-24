@@ -768,7 +768,9 @@ slows: the load adapts over :math:`h/(\alpha w_s)` instead of
        ``<name>_upper``, registered at the first ``evolve``); settling
        down, an exchange up set to reproduce :math:`d^{*}` at equilibrium;
        deposition :math:`v_s c_1`. Lags in both directions; the equilibrium
-       is unchanged
+       is unchanged. ``layer_fraction`` sets the near-bed layer thickness
+       (default the reference height) and ``exchange_factor`` scales the
+       rate of the partition's relaxation; neither moves the equilibrium
 
 Pair ``'armanini'`` with ``near_bed='rouse'``: the lag is the difference
 between the equilibrium stratification :math:`d^{*}` and the effective

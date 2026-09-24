@@ -1515,6 +1515,8 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     const anuga_int adapt_mode = D->sediment_adaptation_mode;
     const double adapt_alpha = D->sediment_adaptation_alpha;
     const anuga_int nb_base = D->sediment_nearbed_base;
+    const double layer_frac = D->sediment_layer_fraction;
+    const double exch_fac = D->sediment_exchange_factor;
     double * restrict t_bv = D->tracer_boundary_values;
     const anuga_int t_bl = D->boundary_length;
     const double c_pack = D->sediment_c_pack;
@@ -1767,7 +1769,8 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             // of the fraction's own boundary concentration every step.
             if (adapt_mode == 4 && nb_base >= 0) {
                 const anuga_int nidx = (nb_base + s) * n + k;
-                const double f1 = a_h;
+                double f1 = (layer_frac > 0.0) ? layer_frac : a_h;
+                if (f1 > 0.5) f1 = 0.5;
                 const double h1 = f1 * h;
                 const double h2 = h - h1;
                 double rho = (1.0 / ds - f1) / (1.0 - f1);
@@ -1781,7 +1784,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                     m2n = m2_eq;
                 } else {
                     if (m2 > m_pos) m2 = m_pos;
-                    const double lam = K / h1 + (K + v_s[s]) / h2;
+                    const double lam = exch_fac * (K / h1 + (K + v_s[s]) / h2);
                     m2n = m2_eq + (m2 - m2_eq) * exp(-lam * timestep);
                 }
                 t_cons[nidx] = m2n;
