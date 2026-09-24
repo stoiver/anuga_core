@@ -55,6 +55,7 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		anuga_int sediment_nearbed_base
 		double sediment_layer_fraction
 		double sediment_exchange_factor
+		anuga_int sediment_velocity_profile
 		double sediment_porosity
 		double sediment_morphological_factor
 		anuga_int sediment_bed_evolution
@@ -94,6 +95,7 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double* tracer_conserved_values
 		double* tracer_backup_values
 		double* tracer_boundary_flux
+		double* tracer_speed_factor
 		double* tracer_boundary_flux_sum
 		anuga_int optimise_dry_cells
 		anuga_int extrapolate_velocity_second_order
@@ -267,6 +269,7 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.sediment_nearbed_base = getattr(domain_py_object, 'sediment_nearbed_base', -1)
 	D.sediment_layer_fraction = getattr(domain_py_object, 'sediment_layer_fraction', 0.0)
 	D.sediment_exchange_factor = getattr(domain_py_object, 'sediment_exchange_factor', 1.0)
+	D.sediment_velocity_profile = getattr(domain_py_object, 'sediment_velocity_profile', 0)
 	D.sediment_c_pack = getattr(domain_py_object, 'sediment_c_pack', 0.65)
 	D.sediment_porosity = getattr(domain_py_object, 'sediment_porosity', 0.3)
 	D.sediment_morphological_factor = getattr(domain_py_object, 'sediment_morphological_factor', 1.0)
@@ -610,6 +613,12 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 			D.sediment_bedload_supply = NULL
 		tr2 = domain_py_object.tracer_boundary_flux
 		D.tracer_boundary_flux = &tr2[0, 0]
+		tsf = getattr(domain_py_object, 'tracer_speed_factor', None)
+		if tsf is not None:
+			tr2 = tsf
+			D.tracer_speed_factor = &tr2[0, 0]
+		else:
+			D.tracer_speed_factor = NULL
 		tr1 = domain_py_object.tracer_boundary_flux_sum
 		D.tracer_boundary_flux_sum = &tr1[0]
 	else:
@@ -637,6 +646,7 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 		D.tracer_backup_values = NULL
 		D.tracer_external_source = NULL
 		D.tracer_boundary_flux = NULL
+		D.tracer_speed_factor = NULL
 		D.tracer_boundary_flux_sum = NULL
 
 	quantities = domain_py_object.quantities

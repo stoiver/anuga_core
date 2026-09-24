@@ -808,6 +808,11 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
             tr_cv[0:ns*n], tr_ev[0:ns*3*n], \
             tr_eu[0:ns*n], tr_qv[0:ns*n], tr_bk[0:ns*n], \
             tr_bf[0:ns*n])
+        // [D-5v] the per-tracer speed factor, only when a profile is on.
+        double *tr_sf = GD->D.tracer_speed_factor;
+        if (tr_sf != NULL) {
+            #pragma omp target enter data map(to: tr_sf[0:ns*n])
+        }
 
         // The external source [G-3]. Allocated with the rest of the block by
         // add_tracer, so it is always present when n_tracers > 0 and is mapped
@@ -1293,6 +1298,10 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
             tr_cv[0:ns*n], tr_ev[0:ns*3*n], \
             tr_eu[0:ns*n], tr_qv[0:ns*n], tr_bk[0:ns*n], \
             tr_bf[0:ns*n])
+        double *tr_sf = GD->D.tracer_speed_factor;
+        if (tr_sf != NULL) {
+            #pragma omp target exit data map(delete: tr_sf[0:ns*n])
+        }
         double *tr_es = GD->D.tracer_external_source;
         if (tr_es != NULL) {
             #pragma omp target exit data map(delete: tr_es[0:ns*n])

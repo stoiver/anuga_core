@@ -1517,6 +1517,8 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     const anuga_int nb_base = D->sediment_nearbed_base;
     const double layer_frac = D->sediment_layer_fraction;
     const double exch_fac = D->sediment_exchange_factor;
+    const anuga_int vprof = D->sediment_velocity_profile;
+    double * restrict t_sf = D->tracer_speed_factor;
     double * restrict t_bv = D->tracer_boundary_values;
     const anuga_int t_bl = D->boundary_length;
     const double c_pack = D->sediment_c_pack;
@@ -1791,6 +1793,33 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                 double c1 = (m_pos - m2n) / h1;
                 if (c1 < 0.0) c1 = 0.0;
                 c_b_used = c1;
+                // [D-5v] VELOCITY PROFILE. With a log law u(z) = (u*/kappa)
+                // ln(z/z0) the depth mean is (u*/kappa) L, L = ln(h/z0) - 1
+                // = kappa/sqrt(f_c), and the means over the lower layer
+                // (0, f1 h) and the rest are
+                //     u1/u = 1 + ln(f1)/L,
+                //     u2/u = 1 - f1 ln(f1)/((1 - f1) L),
+                // so the near-bed layer, which holds most of the sediment,
+                // lags the flow (0.55 u for f1 = 0.1 at k_s = 0.025 m,
+                // h = 0.39 m) and the upper layer leads it slightly. The
+                // fraction's own tracer (the total) is advected at the
+                // mass-weighted mean of the two and the upper-layer tracer
+                // at u2; the factors are per cell and go through the flux
+                // kernel next step. The total sediment flux is then the
+                // integral of u c over the profile, less than u h c.
+                if (vprof && t_sf != NULL) {
+                    double b1 = 1.0, b2 = 1.0;
+                    if (f_c > 0.0) {
+                        const double Lp = 0.41 / sqrt(f_c);
+                        const double lf1 = log(f1);
+                        b1 = 1.0 + lf1 / Lp;
+                        if (b1 < 0.05) b1 = 0.05;
+                        b2 = 1.0 - f1 * lf1 / ((1.0 - f1) * Lp);
+                    }
+                    const double m1n = m_pos - m2n;
+                    t_sf[nidx] = b2;
+                    t_sf[idx] = (m_pos > 0.0) ? (m1n * b1 + m2n * b2) / m_pos : 1.0;
+                }
                 for (anuga_int i = 0; i < 3; i++) {
                     const anuga_int nbk = neighbours_r[3 * k + i];
                     if (nbk < 0 && t_bv != NULL) {
@@ -3147,6 +3176,7 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
     double * restrict t_ev = D->tracer_edge_values;
     double * restrict t_bv = D->tracer_boundary_values;
     double * restrict t_bf = D->tracer_boundary_flux;
+    double * restrict t_sf = D->tracer_speed_factor;
 #endif
     // Scalar, so it is hoisted on BOTH builds: a D->member load inside the
     // element loop is a host dereference on the device (CUDA_ERROR_ILLEGAL_ADDRESS
@@ -3340,9 +3370,13 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
                 double * restrict t_bv = D->tracer_boundary_values;
                 double * restrict t_eu = D->tracer_explicit_update;
                 double * restrict t_bf = D->tracer_boundary_flux;
+                double * restrict t_sf = D->tracer_speed_factor;
 #endif
                 const double wflux = edgeflux[0];
                 const int    inflow = (wflux > 0.0);
+                /* [D-5v] the donor cell whose speed factor scales the flux;
+                 * a boundary donor takes the receiving cell's. */
+                const anuga_int donor = (inflow && !is_boundary) ? neighbour : k;
                 /* Conservation accounting: record what crosses a DOMAIN boundary edge,
                  * on the same terms the water balance uses -- a real boundary, and this
                  * cell owned rather than a ghost. A ghost cell's copy of the edge
@@ -3358,10 +3392,12 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
                     } else {
                         c_up = t_ev[s * 3 * n + ki];
                     }
-                    t_eu[s * n + k] += wflux * c_up;
+                    double tflux = wflux * c_up;
+                    if (t_sf != NULL) tflux *= t_sf[s * n + donor];
+                    t_eu[s * n + k] += tflux;
                     if (count_bdry) {
                         /* Same sign as edgeflux[0]: positive is inflow. */
-                        t_bf[s * n + k] += wflux * c_up;
+                        t_bf[s * n + k] += tflux;
                     }
                 }
             }

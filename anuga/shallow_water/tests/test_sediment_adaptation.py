@@ -320,3 +320,85 @@ def test_two_layer_partition_matches_the_rouse_ratio_at_equilibrium():
     ustar = np.sqrt(f_c) * U0
     Z = float(d.sediment_settling_velocity[0]) / (0.41 * ustar)
     assert c1 / c == pytest.approx(Domain.rouse_d_star(Z, a_h), rel=2e-2)
+
+
+def _profile_channel(mode, vp, nx=40, length=40.0):
+    """Sloping channel with a log-law-consistent Manning n, held by a
+    Dirichlet inflow at an equilibrium-ish concentration."""
+    d = rectangular_cross_domain(nx, 2, len1=length, len2=2.0)
+    d.set_flow_algorithm('DE1')
+    d.set_compute_mode(mode)
+    d.store = False
+    d.set_quantity('elevation', lambda x, y: 0.002 * (length - x))
+    d.set_quantity('stage', lambda x, y: 0.002 * (length - x) + 0.4)
+    d.set_quantity('friction', 0.02)
+    d.set_quantity('xmomentum', 0.2)
+    Bi = Dirichlet_boundary([0.48, 0.2, 0.0])
+    Bo = Dirichlet_boundary([0.4, 0.2, 0.0])
+    Br = Reflective_boundary(d)
+    d.set_boundary({'left': Bi, 'right': Bo, 'top': Br, 'bottom': Br})
+    d.initialize_sediment_operator(porosity=0.4, bed_evolution=False)
+    d.set_sediment_friction('larsen_lamb', k_s=0.025)
+    d.set_deposition(law='d_star', near_bed='rouse', reference_height_floor=0.1,
+                     adaptation='two_layer', velocity_profile=vp)
+    d.add_sediment_fraction('sand', diameter=1.4e-4, initial_concentration=1e-4)
+    d.set_tracer_boundary('sand', 'left', 1e-4)
+    for _ in d.evolve(yieldstep=30.0, finaltime=60.0):
+        pass
+    return d
+
+
+def test_the_velocity_profile_slows_the_near_bed_layer_and_leads_the_upper():
+    """[D-5v] the speed factors are the log-law layer means: the total (most
+    of it in the near-bed layer) below the depth mean, the upper layer just
+    above it, and the two-mode results identical."""
+    d = _profile_channel('legacy', True)
+    sf = d.tracer_speed_factor
+    assert sf.shape == (2, d.number_of_elements)
+    assert 0.3 < sf[0].min() and sf[0].max() < 1.0            # total lags the flow
+    assert 1.0 < sf[1].min() and sf[1].max() < 1.2            # upper layer leads
+    # log law at f1 = 0.1 (the floor), L = kappa / sqrt(f_c) with the
+    # sediment friction's Manning n: u2/u = 1 - f1 ln f1 / ((1 - f1) L)
+    k = d.number_of_elements // 2
+    h = d.quantities['stage'].centroid_values[k] - d.quantities['elevation'].centroid_values[k]
+    n = d.sediment_manning_ll
+    L = 0.41 / np.sqrt(G * n * n / h ** (1.0 / 3.0))
+    assert sf[1][k] == pytest.approx(1.0 - 0.1 * np.log(0.1) / (0.9 * L), rel=1e-6)
+    assert 'velocity profile' in d.sediment_summary()
+    u = _profile_channel('unified', True)
+    assert np.abs(u.get_tracer('sand') - d.get_tracer('sand')).max() < 1e-9
+    # and it is a real change against the depth-averaged advection
+    p = _profile_channel('legacy', False)
+    assert p.tracer_speed_factor is None
+    assert np.abs(p.get_tracer('sand') - d.get_tracer('sand')).max() > 1e-6
+
+
+def test_the_velocity_profile_conserves_tracer_mass():
+    """A closed basin: the factors move mass between cells but never create
+    it, whatever the donor cell's factor."""
+    d = rectangular_cross_domain(10, 4, len1=50.0, len2=20.0)
+    d.set_flow_algorithm('DE1')
+    d.store = False
+    d.set_quantity('elevation', 0.0)
+    d.set_quantity('friction', 0.02)
+    d.set_quantity('stage', lambda x, y: 1.0 + 0.2 * (x > 25.0))    # sloshes
+    d.set_boundary({t: Reflective_boundary(d) for t in d.get_boundary_tags()})
+    d.initialize_sediment_operator(bed_evolution=False)
+    d.set_sediment_friction('larsen_lamb', k_s=0.05)
+    d.set_deposition(law='threshold', tau_d=0.0, adaptation='two_layer',
+                     velocity_profile=True)                          # no bed exchange
+    d.add_sediment_fraction('sand', diameter=2.0e-4, tau_c_star=1.0e9,
+                            initial_concentration=1e-3)
+    areas = d.areas
+    m0 = float((d.tracer_conserved_values[0] * areas).sum())
+    for _ in d.evolve(yieldstep=5.0, finaltime=20.0):
+        pass
+    m1 = float((d.tracer_conserved_values[0] * areas).sum())
+    assert m1 == pytest.approx(m0, rel=1e-12)
+
+
+def test_the_velocity_profile_needs_the_two_layer_model():
+    d = uniform_flow()
+    with pytest.raises(ValueError):
+        d.set_deposition(law='d_star', near_bed='rouse', adaptation='carried',
+                         velocity_profile=True)

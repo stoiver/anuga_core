@@ -194,6 +194,13 @@ struct domain {
      *
      * Sign follows edgeflux[0]: positive is INTO the domain. */
     double* tracer_boundary_flux;
+    /* [D-5v] Per-tracer, per-cell factor on the advection speed, (n_tracers,
+     * N), or NULL (every tracer moves with the depth-averaged flow). Filled
+     * by the sediment source kernel from the log-law velocity of each layer
+     * when a velocity profile is on; the flux kernel multiplies the donor
+     * cell's factor into the tracer flux, which stays conservative because
+     * both cells of an edge see the same product. */
+    double* tracer_speed_factor;
     /* Per-substep, per-tracer totals of the above; (timestep_fluxcalls,
      * n_tracers), mirroring boundary_flux_sum for water. Filled by ns SCALAR
      * reductions after the flux loop -- one per tracer, which every target
@@ -344,6 +351,9 @@ struct domain {
      * relaxes (1 = the two-box estimate). */
     double sediment_layer_fraction;
     double sediment_exchange_factor;
+    /* [D-5v] 1: the two layers are advected at their log-law mean velocities
+     * (through tracer_speed_factor), 0: both at the depth-averaged one. */
+    anuga_int sediment_velocity_profile;
     /* [L-4] maximum packing fraction bounding the near-bed concentration
      * c_b = d* c. Same constant that bounds E* in [E-1]. */
     double sediment_c_pack;

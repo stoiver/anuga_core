@@ -770,7 +770,14 @@ slows: the load adapts over :math:`h/(\alpha w_s)` instead of
        deposition :math:`v_s c_1`. Lags in both directions; the equilibrium
        is unchanged. ``layer_fraction`` sets the near-bed layer thickness
        (default the reference height) and ``exchange_factor`` scales the
-       rate of the partition's relaxation; neither moves the equilibrium
+       rate of the partition's relaxation; neither moves the equilibrium.
+       ``velocity_profile=True`` advects each layer at its log-law mean
+       velocity (:math:`u_1/\bar u = 1 + \ln f_1/L`,
+       :math:`u_2/\bar u = 1 - f_1 \ln f_1/((1-f_1)L)`,
+       :math:`L = \kappa/\sqrt{f_c}`), so the sediment-rich near-bed
+       layer lags the flow and the transport is :math:`\int u c\,dz`
+       rather than :math:`\bar u h c`; the equilibrium concentration is
+       still unchanged
 
 Pair ``'armanini'`` with ``near_bed='rouse'``: the lag is the difference
 between the equilibrium stratification :math:`d^{*}` and the effective

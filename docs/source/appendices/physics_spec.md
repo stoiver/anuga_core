@@ -990,8 +990,15 @@ unchanged and only the transient differs. The partition relaxes toward its equil
 rate `K/h_1 + (K + v_s)/h_2`, integrated exactly per step. Both directions lag: a parcel
 entering slower water keeps its upper-layer load and settles it out over about `h_2/v_s`, and
 a bed loading clear water fills the lower layer first, so the near-bed concentration and the
-deposition lead the depth-averaged load, which grows only as sediment is exchanged up. Both
-layers are advected with the depth-averaged velocity (no velocity profile yet). A negative
+deposition lead the depth-averaged load, which grows only as sediment is exchanged up. By
+default both layers are advected with the depth-averaged velocity. With `velocity_profile=True`
+each layer moves at its log-law mean, `u_1/ū = 1 + ln f_1 / L` and
+`u_2/ū = 1 − f_1 ln f_1 / ((1 − f_1) L)` with `L = ln(h/z_0) − 1 = κ/√f_c` and `f_1 = h_1/h`:
+the fraction's own tracer (the total) takes the mass-weighted mean of the two and the
+upper-layer tracer `u_2`, through a per-cell, per-tracer factor on the advective flux that the
+flux kernel applies with the donor cell's value (conservative, since both cells of an edge see
+the same product). The sediment transport is then `∫ u c dz < ū h c`, and an inflow that must
+carry a given load needs the correspondingly higher concentration. A negative
 upper-layer mass means "not set" and takes the equilibrium partition; the kernel writes the
 upper-layer tracer's boundary value as the equilibrium partition of the fraction's own
 boundary concentration every step. Where `d* > h/a` the lower layer cannot hold the

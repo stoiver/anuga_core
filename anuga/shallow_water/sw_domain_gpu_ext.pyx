@@ -140,6 +140,7 @@ cdef extern from "gpu_domain.h" nogil:
         int64_t sediment_nearbed_base
         double sediment_layer_fraction
         double sediment_exchange_factor
+        int64_t sediment_velocity_profile
         double sediment_porosity
         double sediment_morphological_factor
         int64_t sediment_bed_evolution
@@ -179,6 +180,7 @@ cdef extern from "gpu_domain.h" nogil:
         double* tracer_conserved_values
         double* tracer_backup_values
         double* tracer_boundary_flux
+        double* tracer_speed_factor
         double* tracer_boundary_flux_sum
         int64_t ncol_riverwall_hydraulic_properties
         int64_t nrow_riverwall_hydraulic_properties
@@ -939,6 +941,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     D.sediment_nearbed_base = getattr(domain_object, 'sediment_nearbed_base', -1)
     D.sediment_layer_fraction = getattr(domain_object, 'sediment_layer_fraction', 0.0)
     D.sediment_exchange_factor = getattr(domain_object, 'sediment_exchange_factor', 1.0)
+    D.sediment_velocity_profile = getattr(domain_object, 'sediment_velocity_profile', 0)
     D.sediment_c_pack = getattr(domain_object, 'sediment_c_pack', 0.65)
     D.sediment_porosity = getattr(domain_object, 'sediment_porosity', 0.3)
     D.sediment_morphological_factor = getattr(domain_object, 'sediment_morphological_factor', 1.0)
@@ -1067,6 +1070,12 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
             D.tracer_external_source = NULL
         tr2 = domain_object.tracer_boundary_flux
         D.tracer_boundary_flux = &tr2[0, 0]
+        tsf = getattr(domain_object, 'tracer_speed_factor', None)
+        if tsf is not None:
+            tr2 = tsf
+            D.tracer_speed_factor = &tr2[0, 0]
+        else:
+            D.tracer_speed_factor = NULL
         tr1 = domain_object.tracer_boundary_flux_sum
         D.tracer_boundary_flux_sum = &tr1[0]
     else:
@@ -1078,6 +1087,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.tracer_backup_values = NULL
         D.tracer_external_source = NULL
         D.tracer_boundary_flux = NULL
+        D.tracer_speed_factor = NULL
         D.tracer_boundary_flux_sum = NULL
 
     # Extract riverwall arrays (may be empty if no riverwalls)

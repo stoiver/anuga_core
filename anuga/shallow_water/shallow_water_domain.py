@@ -763,6 +763,8 @@ class Domain(Generic_Domain):
         self.sediment_nearbed_base = -1        # [D-4] first near-bed tracer, or -1
         self.sediment_layer_fraction = 0.0     # [D-5] near-bed layer h1/h; <= 0: a/h
         self.sediment_exchange_factor = 1.0    # [D-5] factor on the partition's relaxation rate
+        self.sediment_velocity_profile = 0     # [D-5v] advect the layers at their log-law speeds
+        self.tracer_speed_factor = None        # [D-5v] (n_tracers, n) speed factors, or None
         # van Rijn-style floor a >= sediment_a_h_floor * h, applied when
         # sediment_d_star_mode = 1. Standard practice, on by default. Set to 0
         # to reach anugaSed's regime (they use no floor); the d* fit covers
@@ -1680,7 +1682,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
     def set_deposition(self, law='d_star', tau_d=0.0, near_bed='constant',
                        reference_height_floor=0.01, adaptation='none',
                        adaptation_alpha=None, layer_fraction=None,
-                       exchange_factor=1.0):
+                       exchange_factor=1.0, velocity_profile=False):
         """Select the deposition law and its near-bed treatment (spec 4.4).
 
         Parameters
@@ -1754,6 +1756,12 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             the depth, in (0, 0.5]. Default `None`: the reference height
             `a/h` with its floor. The exchange is re-derived so the
             equilibrium stays the Rouse ratio whatever the thickness.
+        velocity_profile : bool, optional
+            With `'two_layer'`: advect the near-bed layer and the upper
+            layer at their log-law mean velocities instead of the
+            depth-averaged one. The near-bed layer, which holds most of
+            the sediment, then lags the flow, and the transport is the
+            profile integral of u c rather than u h c.
         exchange_factor : float, optional
             `'two_layer'` only: a factor on the rate at which the partition
             relaxes toward its equilibrium, default 1 (the two-box
@@ -1801,6 +1809,10 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                                           if adaptation == 'constant' else 1.0)
         self.sediment_layer_fraction = float(layer_fraction) if layer_fraction else 0.0
         self.sediment_exchange_factor = float(exchange_factor)
+        if velocity_profile and adaptation != 'two_layer':
+            raise ValueError("velocity_profile needs adaptation='two_layer'")
+        self.sediment_velocity_profile = 1 if velocity_profile else 0
+        self.tracer_speed_factor = None
         self._Domain_C_struct = None
         self.gpu_interface = None
         if hasattr(self, '_gpu_boundary_info_initialized'):
@@ -2311,6 +2323,8 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                      % ('%.3g h' % self.sediment_layer_fraction if self.sediment_layer_fraction > 0
                         else 'a thick', self.sediment_exchange_factor,
                         '' if self.sediment_nearbed_base >= 0 else ' (tracers registered at evolve)'))
+            if self.sediment_velocity_profile:
+                L.append('  velocity profile   : layers advected at their log-law mean speeds')
         if self.sediment_d_star_mode == 1:
             L.append('  a/h floor          : %.4g' % self.sediment_a_h_floor)
         mask = self._sediment_erodible_mask
@@ -2748,6 +2762,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         `adaptation='carried'` and they are not there yet."""
         if (self.sediment_adaptation_mode not in (3, 4) or self.sediment_nearbed_base >= 0
                 or self.n_sediment_classes == 0):
+            self._ensure_tracer_speed_factor()
             return
         ncl = self.n_sediment_classes
         if self.number_of_tracers != ncl:
@@ -2769,6 +2784,21 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             else:
                 self.add_tracer(names[s] + '_nearbed_ratio', initial_value=0.0)
         self.sediment_nearbed_base = base
+        self._Domain_C_struct = None
+        self.gpu_interface = None
+        if hasattr(self, '_gpu_boundary_info_initialized'):
+            del self._gpu_boundary_info_initialized
+        self._ensure_tracer_speed_factor()
+
+    def _ensure_tracer_speed_factor(self):
+        """Allocate the `[D-5v]` per-tracer speed factors (all 1: the kernel
+        fills them from the first step) once the tracers are final."""
+        if not self.sediment_velocity_profile or self.sediment_adaptation_mode != 4:
+            return
+        shape = (self.number_of_tracers, self.number_of_elements)
+        if self.tracer_speed_factor is not None and self.tracer_speed_factor.shape == shape:
+            return
+        self.tracer_speed_factor = num.ones(shape, dtype=num.float64)
         self._Domain_C_struct = None
         self.gpu_interface = None
         if hasattr(self, '_gpu_boundary_info_initialized'):
