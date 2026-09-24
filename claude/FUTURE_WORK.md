@@ -243,6 +243,20 @@ criterion mapping triangle velocity+size → activity level, (2) grouped sub-cyc
 with large dry/slow areas. The 3.1.9 source in `/home/steve/anuga_core_3.1.9` is the
 algorithmic reference.
 
+**P3.0 Debris-flow mode from the Iverson & George (2014) dilatancy model (issue #391, added 2026-09-24)**
+The D-Claw physics: five unknowns (h, hu, hv, hm, basal pore pressure p_b), dilatancy
+`tan(psi) = m - m_crit/sqrt(1+N)`, Darcy dilation, pore-pressure relaxation on
+`alpha mu h^2/(3k)`, and Coulomb-Terzaghi friction `(rho g_z h - p_b) tan(phi + psi)` with a
+static threshold. With kappa = 1 the hyperbolic part is the SWE plus two contact fields, so
+the flux solver is reused as is; hm and h p_b go on the tracer machinery, the closures in a
+fractional-step operator like the sediment one. **The risk is static friction**: holding a
+pile at rest on a 30 degree slope until the driving force exceeds the cap, which the
+semi-implicit Manning factor cannot do (D-Claw needed a purpose-built Riemann treatment).
+Stage 1 (Coulomb friction + static pile + Savage-Hutter dam break) is the go/no-go; stages 2
+(m, p_b, consolidation solution, USGS gate-release flume) and 3 (mobilisation, loose/dense
+bifurcation) follow. Papers in `~/Projects/Sediment_Transport/References/`; design document
+linked from the issue. Does not bear on the suspended-sediment trench discrepancy (#389).
+
 **P3.2 Higher-order spatial reconstruction**
 Current extrapolation is linear (second-order smooth, first-order near gradients). Limited
 third-order reconstruction (MUSCL-Hancock or ADER) would improve accuracy for long-distance
