@@ -33,8 +33,8 @@ for the two sizes. Each dam-break runs for 5~s of flow, after which the
 water has left the pier reach; between events the reservoir is refilled and
 the flume dried with the bed kept, as in the flume.
 
-Bedload has a minimum-depth ramp of two grain diameters, the
-\texttt{min\_depth} argument of \texttt{set\_bedload}. Without it the film cells of the
+Bedload is ramped off below a depth of two grain diameters, the
+argument \texttt{min\_depth} of \texttt{set\_bedload}. Without it the film cells of the
 wetting front, which carry the front's momentum and a large nominal shear,
 dig steps into the sand as the front arrives and the time step collapses at
 0.94~s, with or without the angle of repose and under DE0 or DE1.
