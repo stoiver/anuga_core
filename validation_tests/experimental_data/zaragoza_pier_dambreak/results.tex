@@ -59,11 +59,22 @@ ring scour by more than a millimetre, so the shortfall is in the transport
 around the pier, not the discretisation: the horseshoe vortex that does
 most of the digging at a pier is a three-dimensional structure a
 depth-averaged model does not have, and the model's shear at the pier is
-the uniform-flow one. The water surface upstream of the pier is also too
-high in the model (about 55~mm against 30--45 measured from 2.7~s), which
-points at the blockage of the supercritical flow by the pier in the mesh;
-that is the first thing to look at. P1 runs routinely and P2 joins it
-under the long option.
+the uniform-flow one. The water surface in the window is not the pier's doing: with the pier
+removed it is the same to 0.1~mm at 1.2 and 1.4~m, so the depth there is
+set by the reservoir release and the flume, and the pier only adds a bow
+wave (a 55~mm crest 20~cm upstream on a fixed bed at 4.7~s, absent once
+the bed can scour). Against the Kinect the model's front is earlier and
+blunter (21~mm at 1.2~m at 1.5~s against 9) and the later flow shallower
+(37~mm at 1.2~m from 3.7~s against 44) and laterally flat, where the flume
+shows cross-waves of $\pm 5$~mm from the contraction at the gate, a crest
+on the centreline at 1.2~m and a trough at 1.4~m. Meshing the whole flume
+at 1~cm does not produce them. The model's reservoir drops from 80 to
+57~mm over the 5~s at a unit discharge of 0.027~m$^2$/s, between the
+Ritter value for the depth (0.021) and the critical-contraction value
+(0.038). The gate, which the paper shows opening over about 0.1~s from
+the bottom, and the contraction from the 81~cm reservoir into the 24~cm
+flume are the parts of the hydrodynamics to look at before the transport.
+P1 runs routinely and P2 joins it under the long option.
 
 \IfFileExists{bed_change_P1_event1.png}{
 \begin{figure}
