@@ -32,6 +32,16 @@ verbose = args.verbose
 CASE = os.environ.get('ZARAGOZA_CASE', 'P1')
 EVENTS = int(os.environ.get('ZARAGOZA_EVENTS', '1'))
 T_EVENT = float(os.environ.get('ZARAGOZA_T_EVENT', '5.0'))     # s per dam-break
+# Gate: 0 = instantaneous removal; otherwise the time (s) at which the gate
+# is fully open. The paper's gate lifts from the bottom, under 1 cm in the
+# first 50 ms and the rest in under 100 ms; here the opening a(t) is 1 cm
+# at GATE_TIME/3 and the full depth at GATE_TIME, and the gate is a sill
+# across the flume mouth whose crest is set each step so that the weir
+# flow over it equals the orifice flow under the real gate.
+GATE_TIME = float(os.environ.get('ZARAGOZA_GATE_TIME', '0.0'))
+GATE_DT = 0.005
+# Extra refinement of the contraction at the gate (m^2 per triangle), 0 = none
+A_GATE = float(os.environ.get('ZARAGOZA_A_GATE', '0.0'))
 output_file = 'pier_%s' % CASE
 
 # --- geometry (m); x from the gate along the flume, y from the right wall ---
@@ -74,11 +84,15 @@ sand_box = [(X_SAND0 - 0.05, 0.005), (X_SAND1 + 0.05, 0.005),
             (X_SAND1 + 0.05, W - 0.005), (X_SAND0 - 0.05, W - 0.005)]
 pier_box = [(X_PIER - 0.12, 0.03), (X_PIER + 0.15, 0.03),
             (X_PIER + 0.15, W - 0.03), (X_PIER - 0.12, W - 0.03)]
+regions = [(sand_box, A_SAND), (pier_box, A_PIER)]
+if A_GATE > 0.0:
+    regions += [([(-0.2, -0.06), (-0.005, -0.06), (-0.005, W + 0.06), (-0.2, W + 0.06)], A_GATE),
+                ([(0.005, 0.005), (0.4, 0.005), (0.4, W - 0.005), (0.005, W - 0.005)], A_GATE)]
 
 if myid == 0:
     domain = anuga.create_domain_from_regions(
         bounding, boundary_tags=boundary_tags, maximum_triangle_area=A_COARSE,
-        interior_regions=[(sand_box, A_SAND), (pier_box, A_PIER)],
+        interior_regions=regions,
         interior_holes=[hole], hole_tags=[{'wall': list(range(len(hole)))}],
         mesh_geo_reference=anuga.Geo_reference(xllcorner=0.0, yllcorner=0.0),
         use_cache=False, verbose=verbose)
@@ -135,9 +149,43 @@ if myid == 0:
     save_parameters_tex(domain)
 
 z0 = domain.quantities['elevation'].centroid_values.copy()
+xc_all = domain.centroid_coordinates[:, 0]
+gate_cells = (xc_all > -0.03) & (xc_all <= 0.0) & (domain.centroid_coordinates[:, 1] > 0.0) \
+             & (domain.centroid_coordinates[:, 1] < W)
+
+
+def gate_crest(tau):
+    """Sill crest (m) at time tau after the release: the weir head that
+    passes the orifice flow under a gate open by a(tau)."""
+    if tau >= GATE_TIME:
+        return 0.0
+    t1 = GATE_TIME / 3.0
+    a = 0.01 * tau / t1 if tau < t1 else 0.01 + (H0 - 0.01) * (tau - t1) / (GATE_TIME - t1)
+    q = 0.6 * a * np.sqrt(2.0 * 9.8 * H0)                    # orifice
+    head = (q / (0.385 * np.sqrt(2.0 * 9.8))) ** (2.0 / 3.0)  # broad-crested weir
+    return max(H0 - head, 0.0)
+
+
+def set_gate(crest):
+    z = domain.quantities['elevation'].centroid_values.copy()
+    z[gate_cells] = crest
+    domain.set_quantity('elevation', z, location='centroids')
+    base = domain.sediment_z_base.copy()
+    base[gate_cells] = crest
+    domain.set_erodible_base(elevation=base)
+
+
 beds = []
 for event in range(EVENTS):
+    t_start = event * T_EVENT
     release_reservoir()
+    if GATE_TIME > 0.0:
+        set_gate(gate_crest(0.0))
+        n_gate = int(round(GATE_TIME / GATE_DT))
+        for k in range(1, n_gate + 1):
+            for t in domain.evolve(yieldstep=GATE_DT, finaltime=t_start + k * GATE_DT):
+                pass
+            set_gate(gate_crest(k * GATE_DT))
     for t in domain.evolve(yieldstep=0.1, finaltime=(event + 1) * T_EVENT):
         if myid == 0 and verbose:
             print(domain.timestepping_statistics())
@@ -154,5 +202,6 @@ if myid == 0:
     with open('pier_%s_parameters.json' % CASE, 'w') as f:
         json.dump({'case': CASE, 'events': EVENTS, 't_event': T_EVENT, 'alg': alg,
                    'porosity': POROSITY, 'd_sand': D_SAND, 'n_pvc': N_PVC, 'n_sand': N_SAND,
-                   'repose': REPOSE, 'triangles': int(domain.number_of_elements)}, f, indent=1)
+                   'repose': REPOSE, 'triangles': int(domain.number_of_elements),
+                   'gate_time': GATE_TIME, 'a_gate': A_GATE}, f, indent=1)
 finalize()
