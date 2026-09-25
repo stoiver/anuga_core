@@ -883,6 +883,7 @@ void core_apply_bedload(struct domain *D, double timestep) {
     const double K = D->sediment_bedload_K;
     const double mexp = D->sediment_bedload_m;
     const double tau_c_b = D->sediment_bedload_tau_c_star;
+    const double bl_h_min = D->sediment_bedload_h_min;
     const anuga_int fric_mode = D->sediment_friction_mode;
     const double n_ll = D->sediment_manning_ll;
     const anuga_int wbed = D->sediment_wilson_bed;
@@ -945,6 +946,13 @@ void core_apply_bedload(struct domain *D, double timestep) {
         const double h = fmax(stage_cv[k] - bed_cv[k], 0.0);
         if (h <= minimum_allowed_height) {
             continue;
+        }
+        /* [K-7] shallow-film ramp: none below h_min, full above 2 h_min. */
+        double h_ramp = 1.0;
+        if (bl_h_min > 0.0) {
+            h_ramp = (h - bl_h_min) / bl_h_min;
+            if (h_ramp <= 0.0) continue;
+            if (h_ramp > 1.0) h_ramp = 1.0;
         }
 
         const double denom = h * h + h_eps * h_eps;
@@ -1028,6 +1036,8 @@ void core_apply_bedload(struct domain *D, double timestep) {
             dq_total += dfac * q_bs;
         }
 
+        q_b_total *= h_ramp;                     /* [K-7]; dq scales with it */
+        dq_total *= h_ramp;
         if (q_b_total > 0.0) {
             /* The Rusanov coefficient, gamma / h. Formed before the [L-5]
              * cap below, which scales q_b and dq alike and can take both to

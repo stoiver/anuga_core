@@ -398,6 +398,13 @@ struct domain {
     double sediment_bedload_K;
     double sediment_bedload_m;
     double sediment_bedload_tau_c_star;
+    /* [K-7] depth below which bedload is ramped to zero: q_b is scaled by
+     * clamp((h - h_min)/h_min, 0, 1), so it is off below h_min and full
+     * above 2 h_min. 0 (default) = no ramp. Bedload relations assume a flow
+     * many grains deep; at a wetting front over an erodible bed the film
+     * cells carry the momentum of the front and a large nominal shear, and
+     * without the ramp they dig steps that collapse the time step. */
+    double sediment_bedload_h_min;
     /* Per-cell bedload transport vector, [K-4]. Scratch: filled and consumed
      * within one call, but device-resident so the divergence pass can read a
      * neighbour's value. */

@@ -970,6 +970,16 @@ The fraction's own tracer still carries the total mass `m = h c` with its advect
 and bed exchange unchanged; a second tracer carries the upper layer's mass `m_2 = h_2 c_2`,
 and the lower layer is the remainder, `m_1 = m - m_2`:
 
+```{index} single: physics label; [K-7]
+```
+(spec-k-7)=
+**[K-7] Bedload depth ramp.** `set_bedload(..., min_depth=h_min)` scales the bedload transport
+vector by `clamp((h − h_min)/h_min, 0, 1)`: none below `h_min`, full above `2 h_min`. Off by
+default. Bedload relations assume a flow many grains deep; at a wetting front over an erodible
+bed the film cells carry the front's momentum and a large nominal shear, and unramped they dig
+steps that collapse the time step (the Zaragoza pier dam-break case). A few grain diameters is
+the physical choice.
+
 ```{index} single: physics label; [S-2b]
 ```
 (spec-s-2b)=

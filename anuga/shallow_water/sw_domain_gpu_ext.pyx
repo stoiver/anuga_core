@@ -150,6 +150,7 @@ cdef extern from "gpu_domain.h" nogil:
         double sediment_bedload_K
         double sediment_bedload_m
         double sediment_bedload_tau_c_star
+        double sediment_bedload_h_min
         double* sediment_z_base
         int64_t sediment_has_z_base
         double* sediment_repose_dz
@@ -964,6 +965,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     D.sediment_bedload_K = getattr(domain_object, 'sediment_bedload_K', 3.97)
     D.sediment_bedload_m = getattr(domain_object, 'sediment_bedload_m', 1.5)
     D.sediment_bedload_tau_c_star = getattr(domain_object, 'sediment_bedload_tau_c_star', 0.0495)
+    D.sediment_bedload_h_min = getattr(domain_object, 'sediment_bedload_h_min', 0.0)
     cdef double[::1] veg1
     D.vegetation_mode = getattr(domain_object, 'vegetation_mode', 0)
     D.vegetation_Cd = getattr(domain_object, 'vegetation_Cd', 1.68)

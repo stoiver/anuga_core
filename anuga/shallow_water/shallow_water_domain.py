@@ -793,6 +793,7 @@ class Domain(Generic_Domain):
         self.sediment_bedload_K = 3.97
         self.sediment_bedload_m = 1.5
         self.sediment_bedload_tau_c_star = 0.0495
+        self.sediment_bedload_h_min = 0.0          # [K-7] bedload depth ramp, 0 = off
         self.sediment_qbx = None
         self.sediment_qba = None
         self.sediment_qby = None
@@ -2613,7 +2614,8 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
     }
 
     def set_bedload(self, formula='wong_parker_eq24', K=None, m=None,
-                    tau_c_star=None, open_boundaries=None, supply=None):
+                    tau_c_star=None, open_boundaries=None, supply=None,
+                    min_depth=0.0):
         """Enable bedload transport `[K-1]`-`[K-4]` and its bed evolution `[G-5]`.
 
         Parameters
@@ -2638,6 +2640,13 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             never imports and digs a hole that travels downstream. On a
             distributed sub-domain a tag this rank owns no part of is
             ignored; in serial an unknown tag is an error.
+        min_depth : float, optional
+            `[K-7]` depth (m) below which bedload is ramped to zero: none
+            below `min_depth`, full above twice it. Default 0, no ramp.
+            Bedload relations assume a flow many grains deep; at a wetting
+            front over an erodible bed the thin film cells carry a large
+            nominal shear and, unramped, dig steps that collapse the time
+            step. A few grain diameters is a physical choice.
         supply : dict, optional
             `{tag: q_b}`: a PRESCRIBED bedload inflow across the edges of
             `tag`, in m2/s volumetric per unit width (mass rate / rho_s),
@@ -2669,6 +2678,9 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         item. The two differ enough to matter, so the parameters are exposed:
         resolving it is a change of default, not an edit.
         """
+        if min_depth < 0.0:
+            raise ValueError('min_depth must be >= 0, got %r' % (min_depth,))
+        self.sediment_bedload_h_min = float(min_depth)
         if formula == 'off':
             self.sediment_bedload_mode = 0
         elif formula == 'engelund_hansen':

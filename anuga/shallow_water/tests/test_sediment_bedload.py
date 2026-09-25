@@ -274,3 +274,45 @@ def test_supply_is_validated_and_opens_its_tag():
     assert (d.sediment_bedload_supply[left] == 1.0e-6).all()
     others = np.ones(d.boundary_length, bool); others[left] = False
     assert (d.sediment_bedload_supply[others] < 0.0).all()
+
+
+def test_min_depth_ramps_the_bedload_off_in_thin_flow():
+    """[K-7] no bedload below min_depth, full above 2 min_depth, linear in
+    between. A closed-inflow channel digs a hole at its first cells whose
+    depth after one step scales with the transport, so the ratio of the
+    ramped to the plain bed change is the ramp factor for the channel's
+    (uniform) depth."""
+    def hole(depth, min_depth):
+        from anuga import Dirichlet_boundary
+        d = rectangular_cross_domain(20, 2, len1=100.0, len2=10.0)
+        d.set_flow_algorithm('DE1')
+        d.store = False
+        d.set_quantity('elevation', 0.0)
+        d.set_quantity('friction', 0.0)
+        d.set_quantity('stage', depth)
+        d.set_quantity('xmomentum', depth)          # 1 m/s
+        Bd = Dirichlet_boundary([depth, depth, 0.0])
+        Br = Reflective_boundary(d)
+        d.set_boundary({'left': Bd, 'right': Bd, 'top': Br, 'bottom': Br})
+        d.initialize_sediment_operator(porosity=0.4, bed_evolution=True)
+        d.add_sediment_fraction(name='sand', diameter=1e-3, initial_concentration=0.0)
+        d.set_deposition(law='threshold', tau_d=0.0)
+        d.set_bedload('grass', K=0.01, min_depth=min_depth)
+        # one step: the bed change is then linear in q_b (rk2's second
+        # stage sees a state moved by O(dt), so the ratio holds to ~1e-3)
+        d.evolve_max_timestep = 0.05
+        for _ in d.evolve(yieldstep=0.05, finaltime=0.05):
+            pass
+        return d.quantities['elevation'].centroid_values
+    h_min = 4.0
+    for depth, factor in [(3.0, 0.0), (6.0, 0.5), (10.0, 1.0)]:
+        plain = hole(depth, 0.0)
+        ramped = hole(depth, h_min)
+        assert plain.min() < -1e-6
+        if factor == 0.0:
+            assert np.abs(ramped).max() == 0.0
+        else:
+            assert np.allclose(ramped, factor * plain, rtol=1e-2, atol=1e-10)
+    d = channel()
+    with pytest.raises(ValueError):
+        d.set_bedload('wong_parker_eq24', min_depth=-1.0)
