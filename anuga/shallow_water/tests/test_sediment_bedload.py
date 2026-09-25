@@ -316,3 +316,51 @@ def test_min_depth_ramps_the_bedload_off_in_thin_flow():
     d = channel()
     with pytest.raises(ValueError):
         d.set_bedload('wong_parker_eq24', min_depth=-1.0)
+
+
+@pytest.mark.parametrize('mode', ['legacy', 'unified'])
+def test_shear_amplification_scales_f_c_like_the_square_of_manning_n(mode):
+    """[T-12] a factor F on the bed shear is f_c -> F f_c, which under Manning
+    is n -> sqrt(F) n: the bedload bed change of one step must match."""
+    def hole(n_manning, factor):
+        from anuga import Dirichlet_boundary
+        d = rectangular_cross_domain(20, 2, len1=100.0, len2=10.0)
+        d.set_flow_algorithm('DE1')
+        d.set_compute_mode(mode)
+        d.store = False
+        d.set_quantity('elevation', 0.0)
+        d.set_quantity('friction', 0.0)
+        d.set_quantity('stage', 5.0)
+        d.set_quantity('xmomentum', 5.0)
+        Bd = Dirichlet_boundary([5.0, 5.0, 0.0])
+        Br = Reflective_boundary(d)
+        d.set_boundary({'left': Bd, 'right': Bd, 'top': Br, 'bottom': Br})
+        d.initialize_sediment_operator(porosity=0.4, bed_evolution=True)
+        d.set_sediment_friction('larsen_lamb', k_s=0.05)
+        d.sediment_manning_ll = n_manning
+        d.set_deposition(law='threshold', tau_d=0.0)
+        d.add_sediment_fraction(name='sand', diameter=1e-3, tau_c_star=1e9,
+                                initial_concentration=0.0)
+        d.set_bedload('wong_parker_eq24', tau_c_star=0.0)
+        if factor is not None:
+            d.set_shear_amplification(factor)
+        d.evolve_max_timestep = 0.05
+        for _ in d.evolve(yieldstep=0.05, finaltime=0.05):
+            pass
+        return d.quantities['elevation'].centroid_values
+    n0 = 0.02
+    plain = hole(n0, None)
+    amplified = hole(n0, 4.0)
+    equivalent = hole(2.0 * n0, None)
+    assert plain.min() < -1e-9
+    assert np.allclose(amplified, equivalent, rtol=1e-9, atol=1e-14)
+    assert not np.allclose(amplified, plain, rtol=1e-3, atol=1e-14)
+    # a field, and off again
+    d = channel()
+    d.add_sediment_fraction(name='gravel', diameter=5e-3, initial_concentration=0.0)
+    d.set_shear_amplification(lambda x, y: 1.0 + (x > 50.0))
+    assert d.sediment_shear_factor.max() == 2.0 and d.sediment_shear_factor.min() == 1.0
+    d.set_shear_amplification(None)
+    assert d.sediment_shear_factor is None
+    with pytest.raises(ValueError):
+        d.set_shear_amplification(-1.0)

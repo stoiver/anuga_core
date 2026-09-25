@@ -802,6 +802,7 @@ class Domain(Generic_Domain):
         # spec assumes. See set_erodible_base().
         self.sediment_z_base = None
         self.sediment_has_z_base = 0
+        self.sediment_shear_factor = None      # [T-12] per-centroid factor on the sediment's bed shear
         # The two user intents behind sediment_z_base, kept apart so they
         # compose: a base is a DEPTH limit, a region is a WHERE limit, and
         # setting one must not silently discard the other. Both are folded
@@ -1443,6 +1444,45 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             self.sediment_repose_dz = num.zeros(self.number_of_elements,
                                                 dtype=num.float64)
 
+        self._Domain_C_struct = None
+        self.gpu_interface = None
+        if hasattr(self, '_gpu_boundary_info_initialized'):
+            del self._gpu_boundary_info_initialized
+
+    def set_shear_amplification(self, factor=None):
+        """Multiply the bed shear the sediment sees by a per-cell factor `[T-12]`.
+
+        The depth-averaged shear is the uniform-flow one and misses the
+        local amplification at obstacles: at a bridge pier the horseshoe
+        vortex raises the bed shear to two to four times the approach value
+        within about a diameter, and that is what digs the scour hole. This
+        method takes the factor as a field so that a case or a structure
+        operator can put it where the physics is missing::
+
+            domain.set_shear_amplification(lambda x, y: 1 + 3 * np.exp(-(r(x, y) - R) / R))
+            domain.set_shear_amplification(None)     # off again (the default)
+
+        Parameters
+        ----------
+        factor : None, float, array (n,) or callable(x, y)
+            Per-centroid factor >= 0, applied to `f_c` in both the suspended
+            exchange and the bedload kernel (so to `u_*`, the Shields stress,
+            the Rouse number and every closure built on them). `None` or 1
+            removes it.
+        """
+        if factor is None:
+            self.sediment_shear_factor = None
+        else:
+            x = self.centroid_coordinates[:, 0]
+            y = self.centroid_coordinates[:, 1]
+            if callable(factor):
+                f = num.asarray(factor(x, y), dtype=num.float64)
+            else:
+                f = num.asarray(factor, dtype=num.float64)
+            f = num.broadcast_to(f, (self.number_of_elements,)).astype(num.float64).copy()
+            if f.min() < 0.0:
+                raise ValueError('the shear amplification must be >= 0')
+            self.sediment_shear_factor = num.ascontiguousarray(f)
         self._Domain_C_struct = None
         self.gpu_interface = None
         if hasattr(self, '_gpu_boundary_info_initialized'):

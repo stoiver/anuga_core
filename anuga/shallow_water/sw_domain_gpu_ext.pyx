@@ -152,6 +152,7 @@ cdef extern from "gpu_domain.h" nogil:
         double sediment_bedload_tau_c_star
         double sediment_bedload_h_min
         double* sediment_z_base
+        double* sediment_shear_factor
         int64_t sediment_has_z_base
         double* sediment_repose_dz
         double sediment_repose_tan
@@ -1033,6 +1034,12 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
             D.sediment_z_base = &sed1[0]
         else:
             D.sediment_z_base = NULL
+        sfa = getattr(domain_object, 'sediment_shear_factor', None)
+        if sfa is not None:
+            sed1 = sfa
+            D.sediment_shear_factor = &sed1[0]
+        else:
+            D.sediment_shear_factor = NULL
     else:
         D.sediment_settling_velocity = NULL
         D.sediment_d_star = NULL
@@ -1044,6 +1051,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.sediment_qby = NULL
         D.sediment_qba = NULL
         D.sediment_z_base = NULL
+        D.sediment_shear_factor = NULL
         D.sediment_source_limited = NULL
         D.sediment_slope_work = NULL
         D.sediment_bed_exhausted = NULL

@@ -873,6 +873,11 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
             double *sed_zb = GD->D.sediment_z_base;
             #pragma omp target enter data map(to: sed_zb[0:n])
         }
+        // [T-12] the shear factor, input, only when set.
+        double *sed_sf = GD->D.sediment_shear_factor;
+        if (sed_sf != NULL) {
+            #pragma omp target enter data map(to: sed_sf[0:n])
+        }
         // Which boundary edges pass bedload: input, set once from Python.
         anuga_int *sed_bo = GD->D.sediment_bedload_open;
         if (sed_bo != NULL && nb > 0) {
@@ -1338,6 +1343,10 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
         if (GD->D.sediment_has_z_base) {
             double *sed_zb = GD->D.sediment_z_base;
             #pragma omp target exit data map(delete: sed_zb[0:n])
+        }
+        double *sed_sf = GD->D.sediment_shear_factor;
+        if (sed_sf != NULL) {
+            #pragma omp target exit data map(delete: sed_sf[0:n])
         }
         anuga_int *sed_bo = GD->D.sediment_bedload_open;
         if (sed_bo != NULL && nb > 0) {

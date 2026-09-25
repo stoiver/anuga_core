@@ -447,6 +447,13 @@ struct domain {
      * default costs nothing and cannot change an existing answer.
      */
     double* sediment_z_base;           /* (n) bedrock centroid elevation [m] */
+    /* [T-12] Per-centroid factor on the bed shear seen by the sediment
+     * (f_c is multiplied by it in both the suspended source and the bedload
+     * kernel), or NULL for 1 everywhere. The depth-averaged shear misses
+     * the local amplification at obstacles (the horseshoe vortex at a pier,
+     * two to four times the approach shear within a diameter of it); this
+     * is where a user or a structure operator puts it. Input, set once. */
+    double* sediment_shear_factor;
     anuga_int sediment_has_z_base;     /* 0 = unlimited depth (default) */
 
     /* Scratch, (ncl x n), tracer-major like the tracer arrays.

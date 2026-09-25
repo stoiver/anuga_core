@@ -970,6 +970,17 @@ The fraction's own tracer still carries the total mass `m = h c` with its advect
 and bed exchange unchanged; a second tracer carries the upper layer's mass `m_2 = h_2 c_2`,
 and the lower layer is the remainder, `m_1 = m - m_2`:
 
+```{index} single: physics label; [T-12]
+```
+(spec-t-12)=
+**[T-12] Bed-shear amplification field.** `set_shear_amplification(factor)` multiplies `f_c`
+by a per-centroid factor in both the suspended exchange and the bedload kernel, so `u_*`, the
+Shields stress, the Rouse number and every closure built on them see it. Off by default. The
+depth-averaged shear is the uniform-flow one and misses the local amplification at obstacles:
+at a bridge pier the horseshoe vortex raises the bed shear to two to four times the approach
+value within about a diameter (Melville and Raudkivi), and that is what digs the scour hole;
+the field is where a case or a structure operator puts it.
+
 ```{index} single: physics label; [K-7]
 ```
 (spec-k-7)=
