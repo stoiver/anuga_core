@@ -1064,6 +1064,11 @@ class Domain(Generic_Domain):
         reference held to one of them beforehand becomes stale.  Add every
         tracer before seeding values, or re-fetch via `get_tracer`.
         """
+        if getattr(self, 'sediment_nearbed_base', -1) >= 0:
+            raise ValueError(
+                'no tracer can be added once the layered-adaptation near-bed '
+                'tracers are registered (at the first evolve): they must stay '
+                'the last tracers. Add every tracer before evolving.')
         if not isinstance(name, str) or not name:
             raise ValueError('tracer name must be a non-empty string')
         if name in self._tracer_names:
@@ -2839,12 +2844,11 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             self._ensure_tracer_speed_factor()
             return
         ncl = self.n_sediment_classes
-        if self.number_of_tracers != ncl:
-            raise ValueError(
-                "adaptation='carried' needs the sediment fractions to be the "
-                'only tracers when the near-bed tracers are registered; this '
-                'domain has %d tracers and %d fractions'
-                % (self.number_of_tracers, ncl))
+        # The near-bed tracers go at the END of the tracer list, contiguously,
+        # and the kernel reads them as nb_base + s. Any OTHER tracers (a
+        # passive salt, say) sit between the fractions and them and are
+        # untouched by the sediment kernels, so they are allowed; what is not
+        # allowed is adding a tracer after these, which add_tracer refuses.
         base = self.number_of_tracers
         names = list(self.get_sediment_names())
         two_layer = self.sediment_adaptation_mode == 4

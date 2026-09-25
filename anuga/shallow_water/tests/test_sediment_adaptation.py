@@ -429,3 +429,40 @@ def test_the_rouse_correction_flattens_the_profile(mode):
         plain.set_deposition(near_bed='rouse', rouse_beta='other')
     with pytest.raises(ValueError):
         plain.set_deposition(near_bed='rouse', rouse_scale=0.0)
+
+
+@pytest.mark.parametrize('mode', ['legacy', 'unified'])
+def test_a_layered_adaptation_coexists_with_a_passive_tracer(mode):
+    """The near-bed tracers go at the END of the tracer list, so an ordinary
+    passive tracer added after the fractions is untouched by the sediment
+    kernels and carries on being advected. Nothing may be added after the
+    first evolve, when they are registered."""
+    def build(adapt):
+        d = rectangular_cross_domain(6, 6, len1=50.0, len2=50.0)
+        d.set_flow_algorithm('DE0')
+        d.set_compute_mode(mode)
+        d.store = False
+        d.set_quantity('elevation', 0.0)
+        d.set_quantity('stage', 1.0)
+        d.set_quantity('xmomentum', 0.3)
+        d.set_boundary({t: Reflective_boundary(d) for t in d.get_boundary_tags()})
+        d.initialize_sediment_operator(porosity=0.3, bed_evolution=False)
+        d.set_deposition(law='d_star', near_bed='rouse', reference_height_floor=0.1,
+                         adaptation=adapt)
+        d.add_sediment_fraction('sand', diameter=2.0e-4, tau_c_star=1.0e9,
+                                initial_concentration=0.01)
+        d.add_tracer('salt', initial_value=0.5)
+        for _ in d.evolve(yieldstep=1.0, finaltime=2.0):
+            pass
+        return d
+    plain = build('none')
+    two = build('two_layer')
+    assert plain.number_of_tracers == 2              # sand, salt
+    assert two.number_of_tracers == 3                # sand, salt, sand_upper
+    assert two.sediment_nearbed_base == 2            # the near-bed tracer is last
+    # the passive tracer is untouched by the near-bed machinery
+    assert np.allclose(two.get_tracer('salt'), plain.get_tracer('salt'), rtol=1e-12)
+    # and the sediment did something different, as the closure intends
+    assert not np.allclose(two.get_tracer('sand'), plain.get_tracer('sand'), rtol=1e-6)
+    with pytest.raises(ValueError):
+        two.add_tracer('late')
