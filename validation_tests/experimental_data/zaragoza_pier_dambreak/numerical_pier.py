@@ -42,6 +42,16 @@ GATE_TIME = float(os.environ.get('ZARAGOZA_GATE_TIME', '0.0'))
 GATE_DT = 0.005
 # Extra refinement of the contraction at the gate (m^2 per triangle), 0 = none
 A_GATE = float(os.environ.get('ZARAGOZA_A_GATE', '0.0'))
+# [T-12] pier-scour correction: the bed shear the sediment sees is amplified
+# by 1 + PIER_AMP exp(-(r - R)/(PIER_LEN R)) around the pier, r the distance
+# from its centreline (the P2 pier's, from its axis), R its half-width and
+# PIER_LEN the decay length in half-widths, standing in for the horseshoe
+# vortex. PIER_AMP = 0 is off.
+PIER_AMP = float(os.environ.get('ZARAGOZA_PIER_AMP', '4.0'))
+PIER_LEN = float(os.environ.get('ZARAGOZA_PIER_LEN', '2.0'))
+# 1: the amplification acts on the front and flanks only (the horseshoe
+# vortex), fading to none in the wake; 0: all round.
+PIER_FRONT = int(os.environ.get('ZARAGOZA_PIER_FRONT', '0'))
 output_file = 'pier_%s' % CASE
 
 # --- geometry (m); x from the gate along the flume, y from the right wall ---
@@ -122,6 +132,21 @@ if myid == 0:
     base = np.where((xc >= X_SAND0) & (xc <= X_SAND1), z - SAND_DEPTH, z)
     domain.set_erodible_base(elevation=base)
     domain.set_angle_of_repose(REPOSE)
+    if PIER_AMP > 0.0:
+        R = 0.015
+        half = 0.0 if CASE == 'P1' else 0.5 * (0.065 - 0.03)
+
+        def amplification(x, y):
+            dx = np.maximum(np.abs(x - X_PIER) - half, 0.0)
+            r = np.hypot(dx, y - Y_PIER)
+            amp = PIER_AMP * np.exp(-np.maximum(r - R, 0.0) / (PIER_LEN * R))
+            if PIER_FRONT:
+                # weight 1 upstream of the pier's axis, falling to 0 over the
+                # downstream quadrant: cos of the angle from upstream, clipped
+                ang = np.arctan2(np.abs(y - Y_PIER), -(x - X_PIER))
+                amp = amp * np.clip(1.5 - ang / (0.5 * np.pi), 0.0, 1.0)
+            return 1.0 + amp
+        domain.set_shear_amplification(amplification)
     if verbose:
         print(domain.sediment_summary())
         print('mesh: %d triangles' % domain.number_of_elements)
@@ -203,5 +228,5 @@ if myid == 0:
         json.dump({'case': CASE, 'events': EVENTS, 't_event': T_EVENT, 'alg': alg,
                    'porosity': POROSITY, 'd_sand': D_SAND, 'n_pvc': N_PVC, 'n_sand': N_SAND,
                    'repose': REPOSE, 'triangles': int(domain.number_of_elements),
-                   'gate_time': GATE_TIME, 'a_gate': A_GATE}, f, indent=1)
+                   'gate_time': GATE_TIME, 'a_gate': A_GATE, 'pier_amp': PIER_AMP, 'pier_len': PIER_LEN, 'pier_front': PIER_FRONT}, f, indent=1)
 finalize()
