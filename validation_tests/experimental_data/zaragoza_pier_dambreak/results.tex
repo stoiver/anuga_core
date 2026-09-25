@@ -1,0 +1,104 @@
+
+\section{Dam-break over a sand bed around a pier: the Zaragoza Kinect experiments}
+
+Segovia-Burillo et al. \cite{SegoviaBurillo2026} released an 8~cm dam-break
+from an $81 \times 157$~cm reservoir down a dry 6~m $\times$ 24~cm PVC flume
+(Manning $n = 0.010$) whose bed, from 1.0 to 2.5~m past the gate, is a 5~cm
+layer of sand (0.7 and 1.3~mm in equal parts, $\rho_s = 2650$~kg/m$^3$,
+porosity 0.34) levelled with the PVC. A pier stands on the centreline 1.6~m
+from the gate: a 3~cm cylinder (case P1) or a $3 \times 6.5$~cm rounded
+rectangle (P2). The dam-break is repeated three times over the evolving
+bed. A Kinect sensor over the pier reach ($x = 1.12$--2.07~m) records the
+bed after each event and the water surface during each at 30~frames/s, on
+a 1.4~mm grid; the data are open (Zenodo, DOI 10.5281/zenodo.17777387).
+The flow over the sand is supercritical (Froude about 2), a few
+centimetres deep, and lasts a few seconds; the transport is bedload. The
+bed feature, the pier, is a few depths across and the scour hole many, so
+the case sits inside the depth-averaged assumption in a way van Rijn's
+trench does not, and it exercises the parts of the sediment model the
+trench did not: the Exner coupling under a transient, a rigid base under a
+finite layer, the angle of repose around a hole, and a wetting front over
+an erodible bed.
+
+\anuga{} meshes the reservoir and flume with the pier as a hole (reflective),
+about 1~cm triangles over the sand and 5~mm around the pier, releases the
+reservoir instantaneously (the gate opens in under 0.1~s, within the
+Lauber--Hager criterion the authors check), and lets the flow out through
+a transmissive boundary on the 4\,\% slope that follows the flat reach.
+One bedload fraction of 1.0~mm (the geometric mean of the mix) moves under
+Wong--Parker over a 5~cm erodible base with a 32$^\circ$ angle of repose;
+the suspended exchange is off, as the paper treats the transport as
+bedload. Manning $n$ on the sand is 0.015, the mean of the paper's values
+for the two sizes. Each dam-break runs for 5~s of flow, after which the
+water has left the pier reach; between events the reservoir is refilled and
+the flume dried with the bed kept, as in the flume.
+
+Bedload has a minimum-depth ramp of two grain diameters
+(\texttt{set\_bedload(min\_depth=)}): without it the film cells of the
+wetting front, which carry the front's momentum and a large nominal shear,
+dig steps into the sand as the front arrives and the time step collapses at
+0.94~s, with or without the angle of repose and under DE0 or DE1.
+
+The comparison is the bed change after each dam-break over the Kinect
+window, block-averaged to 5~mm (\texttt{kinect\_P1\_bed.csv} and
+\texttt{kinect\_P2\_bed.csv} are that reduction of the Zenodo data, made by
+\texttt{extract\_kinect.py}), plus the water surface along the centreline
+during the first event. The Kinect bed change has an RMS of 3.6 (P1) and
+4.0~mm (P2) about zero, most of it a ripple-scale texture the model does
+not represent, so the provisional pass criterion is a bed-change RMS below
+6~mm over the window after the first dam-break: \anuga{} gives 3.4 and
+3.6~mm. What the case actually tests is the scour at the pier, and there
+\anuga{} is short: over a ring 2--4~cm from the pier centre the flume
+lowered the bed by 10.4~mm (P1) and 12.6~mm (P2) in the first event, the
+model by 2.9 and 6.0; the deepest points are 32 and 53~mm against 16 and
+12 (the 53 exceeds the sand thickness and is a Kinect artefact at the
+pier's edge). The wake deposit is right in P1 (+2.3 against +3.0~mm) and
+P2 (+2.2 against +2.4). Neither a 40$^\circ$ angle of repose, nor a mesh
+twice as fine at the pier, nor turning the repose relaxation off moves the
+ring scour by more than a millimetre, so the shortfall is in the transport
+around the pier, not the discretisation: the horseshoe vortex that does
+most of the digging at a pier is a three-dimensional structure a
+depth-averaged model does not have, and the model's shear at the pier is
+the uniform-flow one. The water surface upstream of the pier is also too
+high in the model (about 55~mm against 30--45 measured from 2.7~s), which
+points at the blockage of the supercritical flow by the pier in the mesh;
+that is the first thing to look at. P1 runs routinely and P2 joins it
+under the long option.
+
+\IfFileExists{bed_change_P1_event1.png}{
+\begin{figure}
+\begin{center}
+\includegraphics[width=0.95\textwidth]{bed_change_P1_event1.png}
+\end{center}
+\caption{P1: bed change after the first dam-break, Kinect (top) and \anuga{} (bottom).}
+\end{figure}
+}{}
+
+\IfFileExists{centreline_P1.png}{
+\begin{figure}
+\begin{center}
+\includegraphics[width=0.95\textwidth]{centreline_P1.png}
+\end{center}
+\caption{P1: bed change along the flume centreline after each dam-break.}
+\end{figure}
+}{}
+
+\IfFileExists{wse_P1.png}{
+\begin{figure}
+\begin{center}
+\includegraphics[width=0.95\textwidth]{wse_P1.png}
+\end{center}
+\caption{P1: water surface above the initial bed along the centreline during the first dam-break.}
+\end{figure}
+}{}
+
+\IfFileExists{bed_change_P2_event1.png}{
+\begin{figure}
+\begin{center}
+\includegraphics[width=0.95\textwidth]{bed_change_P2_event1.png}
+\end{center}
+\caption{P2: bed change after the first dam-break, Kinect (top) and \anuga{} (bottom) (long run).}
+\end{figure}
+}{}
+
+\endinput

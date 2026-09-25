@@ -1,0 +1,12 @@
+# outputs of a run; the sources are the *.py, *.csv, report.tex and results.tex
+*.png
+*.npz
+*.pdf
+*.log
+*.aux
+*.bbl
+*.blg
+*.stdout
+*.msh
+*.sww
+parameters.tex
