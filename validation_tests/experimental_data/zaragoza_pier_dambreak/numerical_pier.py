@@ -130,6 +130,10 @@ def release_reservoir():
     domain.set_quantity('ymomentum', 0.0)
 
 
+if myid == 0:
+    from anuga.validation_utilities import save_parameters_tex
+    save_parameters_tex(domain)
+
 z0 = domain.quantities['elevation'].centroid_values.copy()
 beds = []
 for event in range(EVENTS):
