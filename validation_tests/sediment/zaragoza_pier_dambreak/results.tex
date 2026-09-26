@@ -40,6 +40,18 @@ the flume dried with the bed kept, as in the flume.
 \caption{The Zaragoza flume: an 8~cm dam-break runs over a 5~cm sand layer past a pier, in side view above and in plan below.}
 \end{figure}
 
+\IfFileExists{mesh.png}{
+\begin{figure}[h]
+\begin{center}
+\includegraphics[width=0.95\textwidth]{mesh.png}
+\end{center}
+\caption{The mesh: about 1~cm triangles over the erodible sand and 5~mm
+around the pier, which is cut out as a hole with reflective edges, on a
+coarse reservoir and approach. The reservoir and the flume are one
+continuous mesh, and the step at the gate line is a pair of wall segments.}
+\end{figure}
+}{}
+
 
 Bedload is ramped off below a depth of two grain diameters, the
 argument \texttt{min\_depth} of \texttt{set\_bedload}. Without it the film cells of the

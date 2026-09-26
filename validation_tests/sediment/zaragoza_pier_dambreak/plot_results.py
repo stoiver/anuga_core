@@ -6,6 +6,26 @@ import setup_diagrams          # noqa: E402  the shared flume schematics
 
 setup_diagrams.pier_dambreak('setup.png', 'P1')
 
+if os.path.exists('pier_P1.sww'):
+    import numpy as _np
+    from netCDF4 import Dataset as _nc
+    with _nc('pier_P1.sww') as _f:
+        _v = _f.variables['volumes'][:]
+        _vx = _f.variables['x'][:].astype(float)
+        _vy = _f.variables['y'][:].astype(float)
+    _cx = _vx[_v].mean(1)
+    _cy = _vy[_v].mean(1)
+    _side = _np.hypot(_vx[_v][:, 1] - _vx[_v][:, 0], _vy[_v][:, 1] - _vy[_v][:, 0])
+    _zones = [('reservoir', _cx < 0.0),
+              ('sand reach', (_cx > 1.0) & (_cx < 2.5)),
+              ('at the pier', _np.hypot(_cx - 1.6, _cy - 0.12) < 0.06)]
+    _counts = [(n, int(m.sum()), int(round(1000 * _side[m].mean()))) for n, m in _zones]
+    setup_diagrams.mesh_figure(
+        'pier_P1.sww', 'mesh.png', zoom=(1.4, 1.85, 0.0, 0.24),
+        title='Case P1: the mesh, %d triangles' % len(_v),
+        zoom_title='detail at the pier, which is meshed as a hole',
+        counts=_counts)
+
 """Figures for the pier dam-break case: bed change maps (Kinect and ANUGA),
 centreline bed profiles and the water surface along the centreline."""
 import glob

@@ -185,3 +185,51 @@ def pier_dambreak(path='setup.png', case='P1'):
     fig.tight_layout()
     fig.savefig(path, dpi=140)
     plt.close(fig)
+
+
+def mesh_figure(sww, path='mesh.png', zoom=None, title=None, zoom_title='detail',
+                counts=None):
+    """Draw the mesh an sww file carries, optionally with a zoom panel.
+
+    `zoom` is (x0, x1, y0, y1) in the sww's coordinates; `counts` is a list of
+    (label, n_cells, side_mm) printed under the whole-domain panel.
+    """
+    import numpy as np
+    from netCDF4 import Dataset
+    with Dataset(sww) as f:
+        x = f.variables['x'][:].astype(float)
+        y = f.variables['y'][:].astype(float)
+        vols = f.variables['volumes'][:]
+    n = len(vols)
+    if zoom is None:
+        fig, axes = plt.subplots(1, 1, figsize=(11, 3.4))
+        axes = [axes]
+    else:
+        fig, axes = plt.subplots(2, 1, figsize=(11, 6.6),
+                                 gridspec_kw=dict(height_ratios=[1.0, 1.25]))
+    ax = axes[0]
+    ax.triplot(x, y, vols, lw=0.15, color='0.35')
+    ax.set_aspect('equal')
+    ax.set_title(title or ('mesh, %d triangles' % n), fontsize=10)
+    ax.set_ylabel('y (m)')
+    if counts:
+        ax.text(0.01, -0.34, '   '.join('%s: %d cells, ~%d mm' % c for c in counts),
+                transform=ax.transAxes, fontsize=8, color='0.3')
+    if zoom is not None:
+        bx = axes[1]
+        bx.triplot(x, y, vols, lw=0.4, color='0.35')
+        bx.set_xlim(zoom[0], zoom[1])
+        bx.set_ylim(zoom[2], zoom[3])
+        bx.set_aspect('equal')
+        bx.set_title(zoom_title, fontsize=10)
+        bx.set_ylabel('y (m)')
+        ax.add_patch(Rectangle((zoom[0], zoom[2]), zoom[1] - zoom[0], zoom[3] - zoom[2],
+                               fill=False, ec='#c1462f', lw=1.0))
+        axes[-1].set_xlabel('x from the gate (m)')
+    else:
+        ax.set_xlabel('x (m)')
+    for a in axes:
+        a.spines[['top', 'right']].set_visible(False)
+    fig.tight_layout()
+    fig.savefig(path, dpi=140)
+    plt.close(fig)
