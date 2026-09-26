@@ -1031,7 +1031,16 @@ carry a given load needs the correspondingly higher concentration. A negative
 upper-layer mass means "not set" and takes the equilibrium partition; the kernel writes the
 upper-layer tracer's boundary value as the equilibrium partition of the fraction's own
 boundary concentration every step. Where `d* > h/a` the lower layer cannot hold the
-stratification and the ratio is capped at `h/a`. Off by default.
+stratification and the ratio is capped at `h/a`.
+
+**This is the DEFAULT closure**, with `layer_fraction = 0.2` and the velocity split on;
+`adaptation='none'` restores the instantaneous exchange {speclit}`D-1`, which was the default
+up to ANUGA 4.0. Three flume datasets put the measured adaptation rate at about half the
+equilibrium stratification `d*` that {speclit}`D-1` deposits at: Wang & Ribberink's (1986)
+settling flume gives 1.44 and 1.55 against `d*` = 2.99, and van Rijn's (1986b) trench and
+pick-up flume improve from 3.9, 3.2 and 2.85 cm to 2.45, 2.19 and 1.74 cm, and from a
+discrepancy ratio of 0.60 to 0.86.
+
 **Recommendation:** {speclit}`D-1` as default (consistent with the `d*` machinery of §4.3),
 {speclit}`D-2` available for the layered bed model and required to reproduce RDy26's
 passive-transport validation cases.

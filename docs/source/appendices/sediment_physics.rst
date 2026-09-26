@@ -793,6 +793,13 @@ exchange :math:`\alpha`, and with the well-mixed ``d* = 1`` the option
 *speeds up* a stratified suspension rather than slowing it. ``a`` is the
 fraction's reference height with the same floor as ``'rouse'``.
 
+**The default.** ``'two_layer'`` with ``layer_fraction=0.2`` and
+``velocity_profile=True`` is what ``set_deposition`` selects if you say
+nothing; ``adaptation='none'`` restores the instantaneous exchange that
+was the default up to ANUGA 4.0. The near-bed tracers it registers at the
+first ``evolve`` are the only change to a script's tracer list, and they
+sit after any tracer of your own.
+
 **Why it exists.** Against van Rijn's flume measurements
 (``validation_tests/experimental_data/van_rijn_*``) the instantaneous
 exchange reaches its equilibrium load within about 15 depths of a clear-water
