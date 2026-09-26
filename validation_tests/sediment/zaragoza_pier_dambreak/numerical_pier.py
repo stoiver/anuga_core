@@ -95,6 +95,12 @@ sand_box = [(X_SAND0 - 0.05, 0.005), (X_SAND1 + 0.05, 0.005),
 pier_box = [(X_PIER - 0.12, 0.03), (X_PIER + 0.15, 0.03),
             (X_PIER + 0.15, W - 0.03), (X_PIER - 0.12, W - 0.03)]
 regions = [(sand_box, A_SAND), (pier_box, A_PIER)]
+# The gate line across the mouth of the flume. It is interior to the mesh --
+# the reservoir and the flume are one domain -- so without a breakline the
+# triangles straddle it, the contraction is resolved raggedly and the sill
+# that ZARAGOZA_GATE_TIME raises has a ragged crest. As a breakline the mesh
+# generator puts cell edges along it.
+gate_line = [(0.0, 0.0), (0.0, W)]
 if A_GATE > 0.0:
     regions += [([(-0.2, -0.06), (-0.005, -0.06), (-0.005, W + 0.06), (-0.2, W + 0.06)], A_GATE),
                 ([(0.005, 0.005), (0.4, 0.005), (0.4, W - 0.005), (0.005, W - 0.005)], A_GATE)]
@@ -104,6 +110,7 @@ if myid == 0:
         bounding, boundary_tags=boundary_tags, maximum_triangle_area=A_COARSE,
         interior_regions=regions,
         interior_holes=[hole], hole_tags=[{'wall': list(range(len(hole)))}],
+        breaklines=[gate_line],
         mesh_geo_reference=anuga.Geo_reference(xllcorner=0.0, yllcorner=0.0),
         use_cache=False, verbose=verbose)
     domain.set_name(output_file)

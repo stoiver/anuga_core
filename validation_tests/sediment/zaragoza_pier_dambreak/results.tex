@@ -48,7 +48,10 @@ the flume dried with the bed kept, as in the flume.
 \caption{The mesh: about 1~cm triangles over the erodible sand and 5~mm
 around the pier, which is cut out as a hole with reflective edges, on a
 coarse reservoir and approach. The reservoir and the flume are one
-continuous mesh, and the step at the gate line is a pair of wall segments.}
+continuous mesh, so the mouth of the flume is interior: a breakline along
+it puts cell edges on the gate line, which keeps the contraction and the
+crest of the sill that \texttt{ZARAGOZA\_GATE\_TIME} raises from being
+ragged. The step either side of the mouth is a pair of wall segments.}
 \end{figure}
 }{}
 
@@ -66,14 +69,15 @@ are that reduction of the Zenodo data, made by the script
 during the first event. The Kinect bed change has an RMS of 3.6 (P1) and
 4.0~mm (P2) about zero, most of it a ripple-scale texture the model does
 not represent, so the provisional pass criterion is a bed-change RMS below
-6~mm over the window after the first dam-break: \anuga{} gives 3.4 and
-3.6~mm. What the case actually tests is the scour at the pier, and there
-\anuga{} is short: over a ring 2--4~cm from the pier centre the flume
-lowered the bed by 10.4~mm (P1) and 12.6~mm (P2) in the first event, the
-model by 2.9 and 6.0; the deepest points are 32 and 53~mm against 16 and
-12 (the 53 exceeds the sand thickness and is a Kinect artefact at the
-pier's edge). The wake deposit is right in P1 (+2.3 against +3.0~mm) and
-P2 (+2.2 against +2.4). Neither a 40$^\circ$ angle of repose, nor a mesh
+6~mm over the window after the first dam-break: \anuga{} gives 3.5 and
+3.8~mm. What the case actually tests is the scour at the pier. Over a ring
+2--4~cm from the pier centre the flume lowered the bed by 10.4~mm (P1) and
+12.6~mm (P2) in the first event; with the pier-scour correction described
+below the model gives 5.0 and 9.8, and without it 2.9 and 6.0. The deepest
+points are 32 and 53~mm measured against 21 and 21 (the 53 exceeds the
+sand thickness and is a Kinect artefact at the pier's edge), and the wake
+deposit overshoots, +5.9 and +7.2 against +3.0 and +2.4, which is the cost
+of the correction. Neither a 40$^\circ$ angle of repose, nor a mesh
 twice as fine at the pier, nor turning the repose relaxation off moves the
 ring scour by more than a millimetre, so the shortfall is in the transport
 around the pier, not the discretisation: the horseshoe vortex that does
