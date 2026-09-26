@@ -94,19 +94,29 @@ bounding = [(X_RES, Y_RES0), (0.0, Y_RES0), (0.0, 0.0), (X_END, 0.0),
             (X_END, W), (0.0, W), (0.0, Y_RES0 + W_RES), (X_RES, Y_RES0 + W_RES)]
 boundary_tags = {'wall': [0, 1, 2, 4, 5, 6, 7], 'outflow': [3]}
 hole = pier_polygon(CASE)
-flume_box = [(0.005, 0.002), (X_END - 0.005, 0.002),
-             (X_END - 0.005, W - 0.002), (0.005, W - 0.002)]
-sand_box = [(X_SAND0 - 0.05, 0.005), (X_SAND1 + 0.05, 0.005),
-            (X_SAND1 + 0.05, W - 0.005), (X_SAND0 - 0.05, W - 0.005)]
+# The reaches that span the full width of the flume are delimited by
+# breaklines across it and their resolution set by a point inside each,
+# NOT by an interior-region polygon: a polygon inset from the walls leaves
+# a sliver between itself and the wall that the mesher fills with a band of
+# tiny triangles. The pier box is a genuine interior polygon, well clear of
+# both walls.
+X_IN, X_OUT = X_SAND0 - 0.05, X_SAND1 + 0.05      # ends of the sand reach
 pier_box = [(X_PIER - 0.12, 0.03), (X_PIER + 0.15, 0.03),
             (X_PIER + 0.15, W - 0.03), (X_PIER - 0.12, W - 0.03)]
-regions = [(flume_box, A_FLUME), (sand_box, A_SAND), (pier_box, A_PIER)]
+regions = [(pier_box, A_PIER)]
+region_points = [[0.5 * X_IN, 0.5 * W, A_FLUME],                 # gate to sand
+                 [0.5 * (X_IN + X_PIER) - 0.1, 0.06, A_SAND],   # the sand reach
+                 [0.5 * (X_OUT + X_END), 0.5 * W, A_FLUME]]      # sand to exit
 # The gate line across the mouth of the flume. It is interior to the mesh --
 # the reservoir and the flume are one domain -- so without a breakline the
 # triangles straddle it, the contraction is resolved raggedly and the sill
 # that ZARAGOZA_GATE_TIME raises has a ragged crest. As a breakline the mesh
 # generator puts cell edges along it.
 gate_line = [(0.0, 0.0), (0.0, W)]
+# and one across each end of the sand reach, so the three flume compartments
+# are closed and each takes the resolution of its own marker point
+sand_in_line = [(X_IN, 0.0), (X_IN, W)]
+sand_out_line = [(X_OUT, 0.0), (X_OUT, W)]
 if A_GATE > 0.0:
     regions += [([(-0.2, -0.06), (-0.005, -0.06), (-0.005, W + 0.06), (-0.2, W + 0.06)], A_GATE),
                 ([(0.005, 0.005), (0.4, 0.005), (0.4, W - 0.005), (0.005, W - 0.005)], A_GATE)]
@@ -116,7 +126,8 @@ if myid == 0:
         bounding, boundary_tags=boundary_tags, maximum_triangle_area=A_COARSE,
         interior_regions=regions,
         interior_holes=[hole], hole_tags=[{'wall': list(range(len(hole)))}],
-        breaklines=[gate_line],
+        breaklines=[gate_line, sand_in_line, sand_out_line],
+        regionPtArea=region_points,
         mesh_geo_reference=anuga.Geo_reference(xllcorner=0.0, yllcorner=0.0),
         use_cache=False, verbose=verbose)
     domain.set_name(output_file)
