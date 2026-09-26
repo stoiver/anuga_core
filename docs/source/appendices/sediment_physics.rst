@@ -133,6 +133,16 @@ with :math:`\lambda` the bed porosity, since a deposited volume
 :math:`(1-\lambda)\,dz` of grains fills a bed volume :math:`dz`. This is the
 Exner equation [Exn25]_, in the form used by [P14]_ and [FG21]_.
 
+A morphological acceleration factor :math:`M` (``morphological_factor``,
+Delft3D's MORFAC) multiplies the bed change of every step, here and in the
+bedload contribution [G-5], with the erodible-base limiter [L-5] scaled to
+match; the water column is left alone. The suspension adapts in seconds and
+the bed in hours, so :math:`M` steps of bed change per hydrodynamic step
+reaches a morphological time :math:`M` times the simulated one at the same
+cost, while the bed changes little over one hydrodynamic adjustment time.
+Default 1; the bed and water-column budgets then differ by exactly
+:math:`M`.
+
 The sum matters once there is more than one fraction: there is **one** bed,
 and every fraction exchanges with it. The kernel accumulates a single
 :math:`dz` per cell over :math:`s` and applies it once, so fractions can
@@ -538,6 +548,65 @@ keep grains suspended:
 Setting :math:`\tau_d = 0` disables deposition entirely, which is how the
 passive-transport benchmarks are run.
 
+Both forms take the near-bed concentration to be the equilibrium one for the
+local flow at every instant. The vertical profile actually adjusts over a time
+of order :math:`h/(\alpha w_s)` [GV85]_: grains entrained at the bed must
+diffuse up the column before they are carried, and grains high in the column
+must settle through it before deposition is felt. Their depth-integrated model
+relaxes the load toward the same equilibrium at that rate,
+
+.. math::
+
+   E - D = \alpha\, v_s\, (c_{eq} - c), \qquad
+   \frac{1}{\alpha} = \frac{a}{h} + \left(1 - \frac{a}{h}\right)
+   \exp\!\left[-1.5\left(\frac{a}{h}\right)^{-1/6} \frac{w_s}{u_*}\right]
+   \qquad \text{[D-3]}
+
+with :math:`\alpha` in the closed form of [ADS88]_ and
+:math:`c_{eq} = E^{*}/d^{*}`. Both :math:`E` and :math:`D` are scaled by
+:math:`\alpha/d^{*}`, so every equilibrium is unchanged and only the transient
+slows; :math:`\alpha \to 1` in the well-mixed limit and :math:`h/a` when fully
+stratified. It is off by default. The case for it is van Rijn's pick-up flume,
+which reaches equilibrium in about 15 depths without it against more than 40
+measured, and his migrating trench, which fills about 25 % too fast.
+
+The rate scaling has no memory and is symmetric, and in the trench it
+over-corrects. The alternative [D-4] keeps the stratification of the
+suspension as a state, the ratio :math:`r_b = c_b/c` carried with the flow
+and relaxed toward :math:`d^{*}` over the settling time
+:math:`T_D = (z_c - a)/w_s` from the centroid :math:`z_c` of the equilibrium
+profile, only when :math:`d^{*}` has risen above it:
+
+.. math::
+
+   \frac{\partial (h r_b)}{\partial t} + \nabla\cdot(h r_b \mathbf{u})
+   = h\,\frac{d^{*} - r_b}{T_D}, \qquad D = v_s\, r_b\, c
+   \qquad \text{[D-4]}
+
+so a parcel entering slower water deposits first at the stratification it
+brought with it. It never acts in uniform or quickening flow, and it does not
+represent the slow filling of the upper column over a bed loading clear
+water, which needs a layered suspension.
+
+The layered suspension is [D-5]: a near-bed layer :math:`h_1 = a` and the
+rest :math:`h_2 = h - a`, the fraction's tracer still carrying the total
+:math:`m = hc` and a second tracer the upper layer's :math:`m_2 = h_2 c_2`,
+
+.. math::
+
+   \frac{\partial m_2}{\partial t} + \nabla\cdot(m_2 \mathbf{u})
+   = K\,(c_1 - c_2) - v_s\, c_2, \qquad D = v_s\, c_1, \qquad
+   K = v_s \frac{\rho}{1-\rho}, \quad \rho = \frac{1/d^{*} - a/h}{1 - a/h}
+   \qquad \text{[D-5]}
+
+with the exchange :math:`K` chosen so that the two-layer equilibrium
+reproduces the Rouse ratio :math:`d^{*}` exactly. Settling moves sediment
+down and the exchange up, so a parcel entering slower water settles its
+upper-layer load out over about :math:`h_2/w_s`, and a bed loading clear
+water fills the near-bed layer first and the depth-averaged load only as
+sediment is exchanged up. This is the form that lengthens the adaptation
+in both flume cases.
+
 The settling velocity itself is [FC04]_, smooth across the Stokes-to-turbulent
 transition and branch-free. [Die82]_ is the more accurate polynomial fit for
 natural irregular grains, at the cost of a branchy evaluation:
@@ -649,6 +718,95 @@ near-bed concentration; it is a numerical guard, not a physical parameter, and
 Near-bed concentration is bounded by ``c_pack`` :spec:`L-4` regardless. That bound
 exists because equilibrium Rouse ``d*`` at vanishing shear will otherwise
 deposit the entire water column in under a second.
+
+.. _adaptation_lag:
+
+``adaptation`` -- the lag of the near-bed concentration
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Both deposition laws take the near-bed concentration to be the *equilibrium*
+one for the local flow at every instant, so the exchange
+:math:`E - D = d^{*} v_s (c_{eq} - c)` responds at once to a change in the
+flow. The vertical profile actually adjusts over a time of order
+:math:`h/(\alpha w_s)`: grains entrained at the bed must diffuse up the column
+before they are carried, and grains high in the column must settle through it
+before deposition is felt. ``adaptation`` switches on the depth-integrated lag
+of [GV85]_, :spec:`D-3` above, with :math:`\alpha` in the closed form of
+[ADS88]_. Both erosion and deposition are scaled by :math:`\alpha/d^{*}`, so
+every equilibrium concentration is exactly what it was and only the transient
+slows: the load adapts over :math:`h/(\alpha w_s)` instead of
+:math:`h/(d^{*} w_s)`.
+
+.. code-block:: python
+
+   domain.set_deposition(law='d_star', near_bed='rouse',
+                         reference_height_floor=0.1, adaptation='armanini')
+
+.. list-table::
+   :header-rows: 1
+   :widths: 23 77
+
+   * - value
+     - meaning
+   * - ``'none'``
+     - no lag; the instantaneous exchange. Default.
+   * - ``'armanini'``
+     - :math:`\alpha(w_s/u_*, a/h)` per cell per fraction from the closed
+       form; 1 in the well-mixed limit, :math:`h/a` when fully stratified
+   * - ``'constant'``
+     - :math:`\alpha` = ``adaptation_alpha`` everywhere
+   * - ``'carried'``
+     - :spec:`D-4`: the near-bed ratio :math:`r_b = c_b/c` is carried per
+       fraction (tracer ``<name>_nearbed_ratio``, registered at the first
+       ``evolve``) and relaxed toward :math:`d^{*}` over the settling time
+       :math:`(z_c - a)/w_s` when the flow has slowed; deposition uses
+       :math:`r_b c`. One-sided, with memory; changes nothing in uniform or
+       quickening flow
+   * - ``'two_layer'``
+     - :spec:`D-5`: a near-bed layer :math:`a` thick and the rest of the
+       column, each fraction carrying its upper-layer mass (tracer
+       ``<name>_upper``, registered at the first ``evolve``); settling
+       down, an exchange up set to reproduce :math:`d^{*}` at equilibrium;
+       deposition :math:`v_s c_1`. Lags in both directions; the equilibrium
+       is unchanged. ``layer_fraction`` sets the near-bed layer thickness
+       (default the reference height) and ``exchange_factor`` scales the
+       rate of the partition's relaxation; neither moves the equilibrium.
+       ``velocity_profile=True`` advects each layer at its log-law mean
+       velocity (:math:`u_1/\bar u = 1 + \ln f_1/L`,
+       :math:`u_2/\bar u = 1 - f_1 \ln f_1/((1-f_1)L)`,
+       :math:`L = \kappa/\sqrt{f_c}`), so the sediment-rich near-bed
+       layer lags the flow and the transport is :math:`\int u c\,dz`
+       rather than :math:`\bar u h c`; the equilibrium concentration is
+       still unchanged
+
+``rouse_beta='van_rijn'`` divides the Rouse number of the ``'rouse'`` fit
+by van Rijn's (1984b) :math:`\beta = 1 + 2 (w_s/u_*)^2` (at most 2), his
+allowance for sediment being mixed more strongly than momentum, and
+``rouse_scale`` multiplies it; both flatten the profile and lower
+:math:`d^{*}`. Van Rijn's trench profiles (1986b, Fig. 17) sit at an
+effective Rouse number near 0.5 where the plain value is 0.79; on the bed
+profiles themselves the correction did not help, see the case's notes.
+
+Pair ``'armanini'`` with ``near_bed='rouse'``: the lag is the difference
+between the equilibrium stratification :math:`d^{*}` and the effective
+exchange :math:`\alpha`, and with the well-mixed ``d* = 1`` the option
+*speeds up* a stratified suspension rather than slowing it. ``a`` is the
+fraction's reference height with the same floor as ``'rouse'``.
+
+**The default.** ``'two_layer'`` with ``layer_fraction=0.2`` and
+``velocity_profile=True`` is what ``set_deposition`` selects if you say
+nothing; ``adaptation='none'`` restores the instantaneous exchange that
+was the default up to ANUGA 4.0. The near-bed tracers it registers at the
+first ``evolve`` are the only change to a script's tracer list, and they
+sit after any tracer of your own.
+
+**Why it exists.** Against van Rijn's flume measurements
+(``validation_tests/sediment/van_rijn_*``) the instantaneous
+exchange reaches its equilibrium load within about 15 depths of a clear-water
+inflow where the flume took more than 40, and fills a dredged trench about
+25 % too fast: in a decelerating flow the near-bed concentration is not yet
+the equilibrium one because the grains high in the column have not settled
+through it. The lag is off by default so that existing results are unchanged.
 
 --------------
 
@@ -769,6 +927,21 @@ inflow cell exports and never imports and digs a hole that travels
 downstream at the bed-wave speed. Walls stay closed, which is what keeps a
 closed domain exactly conservative.
 
+A boundary can instead carry a **prescribed** bedload inflow,
+``supply={tag: q_b}`` in m\ :sup:`2`/s volumetric per unit width (the mass
+rate divided by the grain density); the tag is opened if it is not already.
+Use it where the supply is known, as in a flume fed at a set rate. The
+zero-gradient import equals the inflow cell's own export, so a cell that
+aggrades under a fixed inflow stage sees its transport and hence its import
+rise, a feedback that runs away within hours in the van Rijn trench case; a
+prescribed supply does not depend on the cell at all. Give it only to inflow
+tags: an outflow edge with a supply set still carries the supply in.
+
+.. code-block:: python
+
+   domain.set_bedload('wong_parker_eq24', open_boundaries=['outflow'],
+                      supply={'inflow': 0.01 / 2650.0})   # 0.01 kg/s/m of quartz
+
 
 .. _sediment_references:
 
@@ -780,6 +953,10 @@ the source comments and in :doc:`physics_spec`, so a term can be traced from
 the code to the paper it comes from. This is the one list for both pages: the
 specification cites the same labels and refers here rather than keeping its
 own.
+
+.. [ADS88] Armanini, A. and Di Silvio, G. (1988). A one-dimensional model for
+   the transport of a sediment mixture in non-equilibrium conditions.
+   *Journal of Hydraulic Research*, 26(3), 275-292.
 
 .. [DL09] Davy, P. and Lague, D. (2009). Fluvial erosion/transport equation of
    landscape evolution models revisited. *Journal of Geophysical Research:
@@ -806,6 +983,10 @@ own.
 .. [FC04] Ferguson, R. I. and Church, M. (2004). A simple universal equation
    for grain settling velocity. *Journal of Sedimentary Research*, 74(6),
    933-937.
+
+.. [GV85] Galappatti, G. and Vreugdenhil, C. B. (1985). A depth-integrated
+   model for suspended sediment transport. *Journal of Hydraulic Research*,
+   23(4), 359-377.
 
 .. [FG21] Fassett, C. I. and Goudge, T. A. (2021). Modeling the hydrodynamics,
    sediment transport, and valley incision of outlet-forming floods from

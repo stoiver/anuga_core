@@ -690,6 +690,38 @@ static inline double core_rouse_d_star(double Z, double a_h) {
     return (d < 1.0) ? 1.0 : d;
 }
 
+// Centroid height of the Rouse profile, for the settling time of [D-4].
+//
+// (z_c - a)/h with z_c = int z c dz / int c dz over [a, h] of the corrected
+// Rouse-Vanoni profile above. A collapsing profile deposits its sediment
+// from about its centroid, so the settling time is (z_c - a)/w_s: h/2 over
+// w_s when well mixed (Z -> 0, z_c -> h/2), vanishing when the load already
+// hugs the bed. Same fitted form and clamps as d*: ln((z_c - a)/h) =
+// P(Z, ln(a/h)), 28 terms, 1.0 percent max / 0.27 percent mean error over
+// Z in [0.01, 2.5], a/h in [1e-3, 0.15] (least squares to quadrature,
+// 2026-09-24).
+static inline double core_rouse_z_c(double Z, double a_h) {
+    const double C[7][4] = {
+    {-1.236620662919e+00, -2.966806356338e-01, -5.451826597743e-02, -3.340785646720e-03},
+    {-4.934470965259e-01, +1.986068502121e-01, +2.681666552524e-02, +1.430964808434e-03},
+    {+5.693206124955e-01, +4.438916973539e-01, +7.169076944620e-02, +3.074161648449e-03},
+    {-8.317934945723e-01, -8.674254433522e-01, -2.464308678880e-01, -1.711508840976e-02},
+    {+5.466837296437e-01, +6.103587559357e-01, +2.038814693879e-01, +1.776942243679e-02},
+    {-1.671607038599e-01, -1.948379068715e-01, -7.092485415218e-02, -7.151638532153e-03},
+    {+1.963501463003e-02, +2.364362131184e-02, +9.087924042213e-03, +1.006461512046e-03},
+    };
+    if (Z < ANUGA_ROUSE_Z_LO) Z = ANUGA_ROUSE_Z_LO;
+    else if (Z > ANUGA_ROUSE_Z_HI) Z = ANUGA_ROUSE_Z_HI;
+    if (a_h < ANUGA_ROUSE_AH_LO) a_h = ANUGA_ROUSE_AH_LO;
+    else if (a_h > ANUGA_ROUSE_AH_HI) a_h = ANUGA_ROUSE_AH_HI;
+    const double L = log(a_h), L2 = L * L, L3 = L2 * L;
+    double P = 0.0;
+    for (int i = 6; i >= 0; i--) {
+        P = P * Z + (C[i][0] + C[i][1] * L + C[i][2] * L2 + C[i][3] * L3);
+    }
+    return exp(P);
+}
+
 /* Slope magnitude of a centroid field at cell k for [T-7]/[T-7e]: the
  * least-squares gradient over the cell and its neighbours, one-sided at
  * boundaries (the gradient along the line when the neighbours are
@@ -847,9 +879,11 @@ void core_apply_bedload(struct domain *D, double timestep) {
     const double h_eps = D->epsilon;
     const double minimum_allowed_height = D->minimum_allowed_height;
     const double one_minus_lambda = 1.0 - D->sediment_porosity;
+    const double morfac = D->sediment_morphological_factor;
     const double K = D->sediment_bedload_K;
     const double mexp = D->sediment_bedload_m;
     const double tau_c_b = D->sediment_bedload_tau_c_star;
+    const double bl_h_min = D->sediment_bedload_h_min;
     const anuga_int fric_mode = D->sediment_friction_mode;
     const double n_ll = D->sediment_manning_ll;
     const anuga_int wbed = D->sediment_wilson_bed;
@@ -857,6 +891,7 @@ void core_apply_bedload(struct domain *D, double timestep) {
     // Vegetation seen by the sediment shear (core_vegetation_sediment_fc).
     const anuga_int veg_shear = (D->vegetation_mode > 0) ? D->sediment_vegetation_shear : 0;
     double * restrict veg_m = D->veg_density_centroid_values;
+    double * restrict shear_fac = D->sediment_shear_factor;   /* [T-12], or NULL */
     double * restrict veg_d = D->veg_diameter_centroid_values;
     double * restrict veg_h = D->veg_height_centroid_values;
     const double veg_Cd = D->vegetation_Cd;
@@ -895,6 +930,8 @@ void core_apply_bedload(struct domain *D, double timestep) {
                                   && z_base != NULL && exhausted != NULL);
     /* Per boundary edge, indexed by -neighbour - 1: 1 where bedload passes. */
     anuga_int * restrict bopen = D->sediment_bedload_open;
+    /* Per boundary edge: a prescribed bedload inflow (m^2/s), or < 0. */
+    double * restrict bsup = D->sediment_bedload_supply;
 
     if (one_minus_lambda <= 0.0) {
         return;
@@ -910,6 +947,13 @@ void core_apply_bedload(struct domain *D, double timestep) {
         const double h = fmax(stage_cv[k] - bed_cv[k], 0.0);
         if (h <= minimum_allowed_height) {
             continue;
+        }
+        /* [K-7] shallow-film ramp: none below h_min, full above 2 h_min. */
+        double h_ramp = 1.0;
+        if (bl_h_min > 0.0) {
+            h_ramp = (h - bl_h_min) / bl_h_min;
+            if (h_ramp <= 0.0) continue;
+            if (h_ramp > 1.0) h_ramp = 1.0;
         }
 
         const double denom = h * h + h_eps * h_eps;
@@ -939,6 +983,7 @@ void core_apply_bedload(struct domain *D, double timestep) {
                                                            veg_h[k], veg_Cd, veg_Cb, grav);
             if (f_v >= 0.0) f_c = f_v;
         }
+        if (shear_fac != NULL) f_c *= shear_fac[k];           /* [T-12] */
 
         /* Same closure as the suspended source: [T-1], [T-7] or [T-7e].
          * This pass only reads the bed, so the slope can be taken here. */
@@ -993,6 +1038,8 @@ void core_apply_bedload(struct domain *D, double timestep) {
             dq_total += dfac * q_bs;
         }
 
+        q_b_total *= h_ramp;                     /* [K-7]; dq scales with it */
+        dq_total *= h_ramp;
         if (q_b_total > 0.0) {
             /* The Rusanov coefficient, gamma / h. Formed before the [L-5]
              * cap below, which scales q_b and dq alike and can take both to
@@ -1022,16 +1069,20 @@ void core_apply_bedload(struct domain *D, double timestep) {
                               + ey * normals[6 * k + 2 * i + 1];
                     if (nbk < 0) {
                         /* An open boundary edge carries the whole of the
-                         * cell's own flux; a closed one carries none. */
+                         * cell's own flux; a closed one carries none; one
+                         * with a prescribed supply is an inflow. */
                         if (bopen == NULL || !bopen[-nbk - 1]) continue;
+                        if (bsup != NULL && bsup[-nbk - 1] >= 0.0) continue;
                     } else {
                         qn *= 0.5;
                     }
                     if (qn > 0.0) own_out += qn * edgelengths[ki];
                 }
                 if (own_out > 0.0) {
+                    /* over the step the bed moves morfac times the
+                     * physical change, so the cap shrinks by morfac */
                     const double cap = thickness * one_minus_lambda
-                                     * areas[k] / timestep;
+                                     * areas[k] / (timestep * morfac);
                     if (own_out > cap) {
                         q_b_total *= cap / own_out;
                     }
@@ -1109,8 +1160,16 @@ void core_apply_bedload(struct domain *D, double timestep) {
                  * which case the flux is the cell's own q_b.n (zero
                  * gradient). Only k's own exhaustion can close it. */
                 if (bopen == NULL || !bopen[-nb - 1]) continue;
-                double qn = qx_k * nx + qy_k * ny;
-                if (has_z_base && qn > 0.0 && exhausted[k]) qn = 0.0;
+                double qn;
+                if (bsup != NULL && bsup[-nb - 1] >= 0.0) {
+                    /* Prescribed supply: bedload enters at this rate
+                     * whatever the cell's own transport, so the import
+                     * cannot feed back on the cell's state. */
+                    qn = -bsup[-nb - 1];
+                } else {
+                    qn = qx_k * nx + qy_k * ny;
+                    if (has_z_base && qn > 0.0 && exhausted[k]) qn = 0.0;
+                }
                 outflux += qn * edgelengths[ki];
                 continue;
             }
@@ -1170,8 +1229,9 @@ void core_apply_bedload(struct domain *D, double timestep) {
             outflux += qn * edgelengths[ki];
         }
 
-        /* [K-3]: dz/dt = -(1/(1-lambda)) div q_b, div q_b = outflux/area */
-        dzs[k] = -(timestep * outflux / areas[k]) / one_minus_lambda;
+        /* [K-3]: dz/dt = -(1/(1-lambda)) div q_b, div q_b = outflux/area;
+         * times the morphological factor */
+        dzs[k] = -(morfac * timestep * outflux / areas[k]) / one_minus_lambda;
     }
 
     /* ---- pass 3: the bed update ---- */
@@ -1464,6 +1524,17 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     double * restrict slope_w = D->sediment_slope_work;
     const anuga_int d_star_mode = D->sediment_d_star_mode;
     const double a_h_floor = D->sediment_a_h_floor;
+    const anuga_int rouse_beta_mode = D->sediment_rouse_beta_mode;
+    const double rouse_scale = D->sediment_rouse_scale;
+    const anuga_int adapt_mode = D->sediment_adaptation_mode;
+    const double adapt_alpha = D->sediment_adaptation_alpha;
+    const anuga_int nb_base = D->sediment_nearbed_base;
+    const double layer_frac = D->sediment_layer_fraction;
+    const double exch_fac = D->sediment_exchange_factor;
+    const anuga_int vprof = D->sediment_velocity_profile;
+    double * restrict t_sf = D->tracer_speed_factor;
+    double * restrict t_bv = D->tracer_boundary_values;
+    const anuga_int t_bl = D->boundary_length;
     const double c_pack = D->sediment_c_pack;
     const anuga_int fric_mode = D->sediment_friction_mode;
     const double n_ll = D->sediment_manning_ll;
@@ -1472,6 +1543,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     // Vegetation seen by the sediment shear (core_vegetation_sediment_fc).
     const anuga_int veg_shear = (D->vegetation_mode > 0) ? D->sediment_vegetation_shear : 0;
     double * restrict veg_m = D->veg_density_centroid_values;
+    double * restrict shear_fac = D->sediment_shear_factor;   /* [T-12], or NULL */
     double * restrict veg_d = D->veg_diameter_centroid_values;
     double * restrict veg_h = D->veg_height_centroid_values;
     const double veg_Cd = D->vegetation_Cd;
@@ -1486,6 +1558,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     double * restrict bed_cv_w = D->bed_centroid_values;
     double * restrict bed_ev_w = D->bed_edge_values;
     const double one_minus_lambda = 1.0 - D->sediment_porosity;
+    const double morfac = D->sediment_morphological_factor;
     const anuga_int bed_evolves = D->sediment_bed_evolution;
     /* [L-5]. Hoisted for the same device reason as the tracer pointers.
      *
@@ -1573,6 +1646,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                                                            veg_h[k], veg_Cd, veg_Cb, grav);
             if (f_v >= 0.0) f_c = f_v;
         }
+        if (shear_fac != NULL) f_c *= shear_fac[k];           /* [T-12] */
 
         /* tau_b/rho under the selected closure: [T-1], [T-7] or [T-7e]. */
         double S = (shear_closure == 1 || shear_closure == 2)
@@ -1600,26 +1674,218 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             const double m_pos = (m > 0.0) ? m : 0.0;
             const double c_pos = m_pos * inv_h;
 
+            // [T-2] u* = |v| sqrt(f_c);  [S-2] Z = v_s / (kappa u*)
+            const double ustar = sqrt(f_c * vel2);
+            double Z = (ustar > 0.0)
+                     ? v_s[s] / (0.41 * ustar)
+                     : ANUGA_ROUSE_Z_HI;   /* no shear: fully settled */
+            // [S-2b] Rouse-number correction. Van Rijn (1984b) divides Z by
+            // beta = 1 + 2 (w_s/u*)^2 (at most 2): grains are mixed more
+            // strongly than momentum, so the measured profiles are flatter
+            // than the Rouse one. His trench profiles (1986b, Fig. 17) need
+            // Z about 0.5 where the plain value is 0.79 and beta gives
+            // 0.65; the scale is for that remainder and for testing.
+            if (ustar > 0.0) {
+                if (rouse_beta_mode == 1) {
+                    const double r = v_s[s] / ustar;
+                    double beta = 1.0 + 2.0 * r * r;
+                    if (beta > 2.0) beta = 2.0;
+                    Z /= beta;
+                }
+                Z *= rouse_scale;
+            }
+            // a/h with the van Rijn-style floor a >= floor*h. The floor is
+            // standard practice and stays on by default, but it is exposed:
+            // it is the single largest divergence from anugaSed, which uses
+            // no floor and so an ~10x smaller a at h = 1 m, giving roughly
+            // 8x more deposition (spec 12, D4b). Set it to 0 to reach that
+            // regime; the fit now covers a/h down to 1e-3.
+            double a_h = a_ref[s] * inv_h;
+            if (a_h < a_h_floor) a_h = a_h_floor;
+
             // [D-1] deposition. d* is either the constant (P14's d* = 1
             // limiting case) or the Rouse ratio evaluated per cell.
-            double ds;
-            if (d_star_mode == 0) {
-                ds = d_star[s];
-            } else {
-                // [T-2] u* = |v| sqrt(f_c);  [S-2] Z = v_s / (kappa u*)
-                const double ustar = sqrt(f_c * vel2);
-                const double Z = (ustar > 0.0)
-                               ? v_s[s] / (0.41 * ustar)
-                               : ANUGA_ROUSE_Z_HI;   /* no shear: fully settled */
-                // a/h with the van Rijn-style floor a >= floor*h. The floor is
-                // standard practice and stays on by default, but it is exposed:
-                // it is the single largest divergence from anugaSed, which uses
-                // no floor and so an ~10x smaller a at h = 1 m, giving roughly
-                // 8x more deposition (spec 12, D4b). Set it to 0 to reach that
-                // regime; the fit now covers a/h down to 1e-3.
-                double a_h = a_ref[s] * inv_h;
-                if (a_h < a_h_floor) a_h = a_h_floor;
-                ds = core_rouse_d_star(Z, a_h);
+            const double ds = (d_star_mode == 0) ? d_star[s]
+                                                 : core_rouse_d_star(Z, a_h);
+
+            // [D-3] ADAPTATION LAG of the near-bed concentration.
+            //
+            // With E = v_s E* and D = d* v_s c the exchange is
+            // d* v_s (c_eq - c), c_eq = E*/d*: the near-bed concentration is
+            // assumed to be the equilibrium one for the local flow at every
+            // instant. The vertical profile actually takes a time of order
+            // h/(alpha w_s) to adjust (Galappatti & Vreugdenhil 1985): grains
+            // entrained at the bed must diffuse up the column before the
+            // load is carried, and grains high in the column must settle
+            // through it before deposition is felt. Their depth-integrated
+            // model relaxes the load toward the same equilibrium,
+            //
+            //     E - D = alpha v_s (c_eq - c),
+            //
+            // so both terms are scaled by alpha/d*: every equilibrium is
+            // untouched, only the rate changes. alpha is Armanini & Di
+            // Silvio's (1988) closed form of Galappatti's coefficient,
+            //
+            //     1/alpha = a/h + (1 - a/h) exp[-1.5 (a/h)^(-1/6) w_s/u*],
+            //
+            // which is 1 in the well-mixed limit (w_s/u* -> 0: the exchange
+            // is the well-mixed one, no faster) and h/a when fully
+            // stratified. Van Rijn's pick-up flume reaches equilibrium in
+            // ~15 depths without it against >40 measured, and his trench
+            // fills ~25% too fast (issue #389). Mode 2 takes alpha as given.
+            double f_adapt = 1.0;
+            // [D-4] CARRIED NEAR-BED RATIO (mode 3). Instead of scaling the
+            // rate, keep the stratification of the suspension as a state:
+            // tracer (nb_base + s) carries h r_b, with r_b = c_b / c the
+            // ratio of near-bed to depth-averaged concentration the column
+            // actually has, advected with the flow by the flux kernel. Its
+            // equilibrium is d*. The lag is one-sided. When the flow slows,
+            // d* rises above r_b: the profile is collapsing, the grains high
+            // in the column settle from about the profile centroid, and r_b
+            // approaches d* over T = (z_c - a)/w_s. Deposition uses the
+            // carried ratio, so a parcel entering a trench starts depositing
+            // at the stratification it brought and works up to the trench's
+            // over that time. When d* is at or below r_b (the flow has
+            // quickened, or nothing changed) the near-bed concentration is
+            // at the bed and responds at once: r_b = d*. A ratio of zero is
+            // "not set yet" (initial state, inflow) and takes d*. The slow
+            // filling of the UPPER column that delays the depth-integrated
+            // load when a bed loads clear water is not a near-bed lag and is
+            // not represented here; that needs a layered suspension. Exact
+            // exponential relaxation over the step; T -> 0 recovers [D-1].
+            double c_b_used = -1.0;
+            if (adapt_mode == 3 && nb_base >= 0) {
+                const anuga_int nidx = (nb_base + s) * n + k;
+                double r_b = t_cons[nidx] * inv_h;
+                double r_n = ds;
+                if (r_b > 0.0 && ds > r_b && v_s[s] > 0.0) {
+                    const double T = core_rouse_z_c(Z, a_h) * h / v_s[s];
+                    if (T > 0.0) r_n = ds + (r_b - ds) * exp(-timestep / T);
+                }
+                t_cons[nidx] = r_n * h;
+                c_b_used = r_n * c_pos;
+                /* The ratio tracer's inflow value is the local equilibrium
+                 * d*: written here on the cell's boundary edges every step
+                 * (the array is device-resident in mode 2, as this kernel
+                 * is), so inflowing water carries no spurious lag in. */
+                for (anuga_int i = 0; i < 3; i++) {
+                    const anuga_int nbk = neighbours_r[3 * k + i];
+                    if (nbk < 0 && t_bv != NULL) {
+                        t_bv[(nb_base + s) * t_bl + (-nbk - 1)] = ds;
+                    }
+                }
+            }
+            // [D-5] TWO-LAYER SUSPENSION (mode 4). The column is split into
+            // a near-bed layer of thickness h1 = a (the reference height,
+            // floor included) and the rest, h2 = h - h1. The fraction's own
+            // tracer still carries the TOTAL mass m = h c, with its
+            // advection, limiters and bed exchange unchanged; tracer
+            // (nb_base + s) carries the upper layer's mass m2 = h2 c2, and
+            // the lower layer is what remains, m1 = m - m2. Between the
+            // layers: settling v_s c2 down, exchange K (c1 - c2) up. K is
+            // set so that the two-layer equilibrium c2/c1 = rho reproduces
+            // the fitted Rouse ratio, c1/c = d*: rho = (1/d* - f1)/(1 - f1),
+            // K = v_s rho/(1 - rho), so every equilibrium is unchanged and
+            // only the transient differs. Deposition is v_s c1, entrainment
+            // enters layer 1 (through the total). The partition relaxes
+            // toward its equilibrium at the rate lam = K/h1 + (K + v_s)/h2,
+            // integrated exactly. So: a parcel entering slower water keeps
+            // its upper-layer load and deposits at the near-bed value it
+            // brought while the upper layer settles out over ~h2/v_s; and a
+            // bed loading clear water fills the lower layer first, so the
+            // near-bed concentration and hence deposition lead the depth-
+            // averaged load, which grows only as sediment is exchanged up.
+            // Both layers are advected with the depth-averaged velocity
+            // (no velocity profile yet). m2 < 0 means "not set" and takes
+            // the equilibrium partition; the kernel writes the boundary
+            // value of the upper-layer tracer as the equilibrium partition
+            // of the fraction's own boundary concentration every step.
+            if (adapt_mode == 4 && nb_base >= 0 && ds > 0.0) {
+                /* ds > 0 is required: the partition is built from 1/d*, and
+                 * d* = 0 (deposition switched off through the per-fraction
+                 * d_star) has no stratification to carry. */
+                const anuga_int nidx = (nb_base + s) * n + k;
+                double f1 = (layer_frac > 0.0) ? layer_frac : a_h;
+                if (f1 > 0.5) f1 = 0.5;
+                const double h1 = f1 * h;
+                const double h2 = h - h1;
+                double rho = (1.0 / ds - f1) / (1.0 - f1);
+                if (rho < 1.0e-6) rho = 1.0e-6;
+                if (rho > 1.0) rho = 1.0;
+                const double K = v_s[s] * rho / (1.0 - rho + 1.0e-12);
+                const double m2_eq = h2 * rho * m_pos / (h1 + h2 * rho);
+                double m2 = t_cons[nidx];
+                double m2n;
+                if (m2 < 0.0) {
+                    m2n = m2_eq;
+                } else {
+                    if (m2 > m_pos) m2 = m_pos;
+                    const double lam = exch_fac * (K / h1 + (K + v_s[s]) / h2);
+                    m2n = m2_eq + (m2 - m2_eq) * exp(-lam * timestep);
+                }
+                t_cons[nidx] = m2n;
+                double c1 = (m_pos - m2n) / h1;
+                if (c1 < 0.0) c1 = 0.0;
+                c_b_used = c1;
+                // [D-5v] VELOCITY PROFILE. With a log law u(z) = (u*/kappa)
+                // ln(z/z0) the depth mean is (u*/kappa) L, L = ln(h/z0) - 1
+                // = kappa/sqrt(f_c), and the means over the lower layer
+                // (0, f1 h) and the rest are
+                //     u1/u = 1 + ln(f1)/L,
+                //     u2/u = 1 - f1 ln(f1)/((1 - f1) L),
+                // so the near-bed layer, which holds most of the sediment,
+                // lags the flow (0.55 u for f1 = 0.1 at k_s = 0.025 m,
+                // h = 0.39 m) and the upper layer leads it slightly. The
+                // fraction's own tracer (the total) is advected at the
+                // mass-weighted mean of the two and the upper-layer tracer
+                // at u2; the factors are per cell and go through the flux
+                // kernel next step. The total sediment flux is then the
+                // integral of u c over the profile, less than u h c.
+                if (vprof && t_sf != NULL) {
+                    double b1 = 1.0, b2 = 1.0;
+                    /* L = ln(h/z0) - 1 = kappa/sqrt(f_c). The log law is only
+                     * a profile at all once L exceeds |ln f1|, which is where
+                     * the near-bed mean is still forward-going; below that
+                     * (a thin or very rough cell, f_c large) the split is
+                     * meaningless and BOTH factors are left at 1. Without
+                     * this the upper factor runs away as h -> 0 at a wetting
+                     * front and the tracer flux collapses the time step. */
+                    const double Lp = (f_c > 0.0) ? 0.41 / sqrt(f_c) : 0.0;
+                    const double lf1 = log(f1);
+                    if (Lp > -lf1) {
+                        b1 = 1.0 + lf1 / Lp;
+                        if (b1 < 0.05) b1 = 0.05;
+                        b2 = 1.0 - f1 * lf1 / ((1.0 - f1) * Lp);
+                        if (b2 > 2.0) b2 = 2.0;
+                    }
+                    const double m1n = m_pos - m2n;
+                    t_sf[nidx] = b2;
+                    t_sf[idx] = (m_pos > 0.0) ? (m1n * b1 + m2n * b2) / m_pos : 1.0;
+                }
+                for (anuga_int i = 0; i < 3; i++) {
+                    const anuga_int nbk = neighbours_r[3 * k + i];
+                    if (nbk < 0 && t_bv != NULL) {
+                        const double cbd = t_bv[s * t_bl + (-nbk - 1)];
+                        /* the tracer's boundary value is m2/h at the
+                         * equilibrium partition of the boundary c */
+                        t_bv[(nb_base + s) * t_bl + (-nbk - 1)] =
+                            (cbd > 0.0) ? h2 * rho * cbd / (h1 + h2 * rho) : 0.0;
+                    }
+                }
+            }
+            if (adapt_mode == 1) {
+                double alpha;
+                if (ustar > 0.0) {
+                    const double r = v_s[s] / ustar;
+                    const double inv = a_h + (1.0 - a_h)
+                                     * exp(-1.5 * pow(a_h, -1.0 / 6.0) * r);
+                    alpha = 1.0 / inv;
+                } else {
+                    alpha = 1.0 / a_h;          /* no shear: stratified limit */
+                }
+                f_adapt = alpha / ds;
+            } else if (adapt_mode == 2) {
+                f_adapt = adapt_alpha / ds;
             }
             // [L-4] NEAR-BED CONCENTRATION IS BOUNDED BY PACKING.
             //
@@ -1648,7 +1914,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                            ? v_s[s] * c_pos * (1.0 - tau_b_d / tau_d)
                            : 0.0;
             } else {
-                double c_bed = ds * c_pos;
+                double c_bed = (c_b_used >= 0.0) ? c_b_used : ds * c_pos;
                 if (c_bed > c_pack) c_bed = c_pack;
                 deposition = c_bed * v_s[s];
             }
@@ -1731,8 +1997,9 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                 }
             }
 
-            // Net exchange of [G-3]. Deposition removes, erosion adds.
-            double source = erosion - deposition;
+            // Net exchange of [G-3]. Deposition removes, erosion adds; [D-3]
+            // scales the rate of both toward the same equilibrium.
+            double source = f_adapt * (erosion - deposition);
 
             // [L-1] positivity. The most this term may remove over the step is
             // exactly the sediment PRESENT, so the state can reach zero but
@@ -1791,7 +2058,8 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             const double avail = bed_cv[k] - z_base[k];
             const double thickness = (avail > 0.0) ? avail : 0.0;
             // The largest net removal from the bed this step, as a source.
-            const double S_max = thickness * one_minus_lambda / timestep;
+            // per step the bed moves morfac times the physical change
+            const double S_max = thickness * one_minus_lambda / (timestep * morfac);
             if (total_E + total_D > S_max) {
                 scale = (S_max - total_D) / total_E;
                 if (scale < 0.0) scale = 0.0;
@@ -1812,7 +2080,7 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             // added: sediment introduced from outside the model does not
             // come out of the bed, so it must not move it.
             if (bed_evolves && one_minus_lambda > 0.0) {
-                dz_cell += -(timestep * source) / one_minus_lambda;
+                dz_cell += -(morfac * timestep * source) / one_minus_lambda;
             }
 
             // [G-3] S_ms: external supply, added AFTER the limiters. They
@@ -2950,6 +3218,7 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
     double * restrict t_ev = D->tracer_edge_values;
     double * restrict t_bv = D->tracer_boundary_values;
     double * restrict t_bf = D->tracer_boundary_flux;
+    double * restrict t_sf = D->tracer_speed_factor;
 #endif
     // Scalar, so it is hoisted on BOTH builds: a D->member load inside the
     // element loop is a host dereference on the device (CUDA_ERROR_ILLEGAL_ADDRESS
@@ -3143,9 +3412,13 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
                 double * restrict t_bv = D->tracer_boundary_values;
                 double * restrict t_eu = D->tracer_explicit_update;
                 double * restrict t_bf = D->tracer_boundary_flux;
+                double * restrict t_sf = D->tracer_speed_factor;
 #endif
                 const double wflux = edgeflux[0];
                 const int    inflow = (wflux > 0.0);
+                /* [D-5v] the donor cell whose speed factor scales the flux;
+                 * a boundary donor takes the receiving cell's. */
+                const anuga_int donor = (inflow && !is_boundary) ? neighbour : k;
                 /* Conservation accounting: record what crosses a DOMAIN boundary edge,
                  * on the same terms the water balance uses -- a real boundary, and this
                  * cell owned rather than a ghost. A ghost cell's copy of the edge
@@ -3161,10 +3434,12 @@ double core_compute_fluxes_central(struct domain *D, int substep_count, int time
                     } else {
                         c_up = t_ev[s * 3 * n + ki];
                     }
-                    t_eu[s * n + k] += wflux * c_up;
+                    double tflux = wflux * c_up;
+                    if (t_sf != NULL) tflux *= t_sf[s * n + donor];
+                    t_eu[s * n + k] += tflux;
                     if (count_bdry) {
                         /* Same sign as edgeflux[0]: positive is inflow. */
-                        t_bf[s * n + k] += wflux * c_up;
+                        t_bf[s * n + k] += tflux;
                     }
                 }
             }

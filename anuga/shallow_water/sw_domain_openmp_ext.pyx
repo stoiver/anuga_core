@@ -50,13 +50,24 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		anuga_int sediment_d_star_mode
 		double* sediment_reference_height
 		double sediment_a_h_floor
+		anuga_int sediment_rouse_beta_mode
+		double sediment_rouse_scale
+		anuga_int sediment_adaptation_mode
+		double sediment_adaptation_alpha
+		anuga_int sediment_nearbed_base
+		double sediment_layer_fraction
+		double sediment_exchange_factor
+		anuga_int sediment_velocity_profile
 		double sediment_porosity
+		double sediment_morphological_factor
 		anuga_int sediment_bed_evolution
 		anuga_int sediment_bedload_mode
 		double sediment_bedload_K
 		double sediment_bedload_m
 		double sediment_bedload_tau_c_star
+		double sediment_bedload_h_min
 		double* sediment_z_base
+		double* sediment_shear_factor
 		anuga_int sediment_has_z_base
 		double* sediment_repose_dz
 		double sediment_repose_tan
@@ -66,6 +77,7 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double* sediment_slope_work
 		anuga_int* sediment_bed_exhausted
 		anuga_int* sediment_bedload_open
+		double* sediment_bedload_supply
 		double* sediment_qbx
 		double* sediment_qby
 		double* sediment_qba
@@ -87,6 +99,7 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double* tracer_conserved_values
 		double* tracer_backup_values
 		double* tracer_boundary_flux
+		double* tracer_speed_factor
 		double* tracer_boundary_flux_sum
 		anuga_int optimise_dry_cells
 		anuga_int extrapolate_velocity_second_order
@@ -255,8 +268,17 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.sediment_slope_frozen = getattr(domain_py_object, 'sediment_slope_frozen', 0)
 	D.sediment_d_star_mode = getattr(domain_py_object, 'sediment_d_star_mode', 0)
 	D.sediment_a_h_floor = getattr(domain_py_object, 'sediment_a_h_floor', 0.01)
+	D.sediment_adaptation_mode = getattr(domain_py_object, 'sediment_adaptation_mode', 0)
+	D.sediment_rouse_beta_mode = getattr(domain_py_object, 'sediment_rouse_beta_mode', 0)
+	D.sediment_rouse_scale = getattr(domain_py_object, 'sediment_rouse_scale', 1.0)
+	D.sediment_adaptation_alpha = getattr(domain_py_object, 'sediment_adaptation_alpha', 1.0)
+	D.sediment_nearbed_base = getattr(domain_py_object, 'sediment_nearbed_base', -1)
+	D.sediment_layer_fraction = getattr(domain_py_object, 'sediment_layer_fraction', 0.0)
+	D.sediment_exchange_factor = getattr(domain_py_object, 'sediment_exchange_factor', 1.0)
+	D.sediment_velocity_profile = getattr(domain_py_object, 'sediment_velocity_profile', 0)
 	D.sediment_c_pack = getattr(domain_py_object, 'sediment_c_pack', 0.65)
 	D.sediment_porosity = getattr(domain_py_object, 'sediment_porosity', 0.3)
+	D.sediment_morphological_factor = getattr(domain_py_object, 'sediment_morphological_factor', 1.0)
 	D.sediment_bed_evolution = 1 if getattr(domain_py_object, 'sediment_bed_evolution', True) else 0
 	D.sediment_bedload_mode = getattr(domain_py_object, 'sediment_bedload_mode', 0)
 	# [L-5]. Set UNCONDITIONALLY, outside the n_sediment_classes guard
@@ -272,6 +294,7 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.sediment_bedload_K = getattr(domain_py_object, 'sediment_bedload_K', 3.97)
 	D.sediment_bedload_m = getattr(domain_py_object, 'sediment_bedload_m', 1.5)
 	D.sediment_bedload_tau_c_star = getattr(domain_py_object, 'sediment_bedload_tau_c_star', 0.0495)
+	D.sediment_bedload_h_min = getattr(domain_py_object, 'sediment_bedload_h_min', 0.0)
 	cdef double[::1] veg1
 	D.vegetation_mode = getattr(domain_py_object, 'vegetation_mode', 0)
 	D.vegetation_Cd = getattr(domain_py_object, 'vegetation_Cd', 1.68)
@@ -567,11 +590,23 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 				D.sediment_bedload_open = &sedi[0]
 			else:
 				D.sediment_bedload_open = NULL
+				D.sediment_bedload_supply = NULL
+			sed1 = domain_py_object.sediment_bedload_supply
+			if sed1.shape[0] > 0:
+				D.sediment_bedload_supply = &sed1[0]
+			else:
+				D.sediment_bedload_supply = NULL
 			if domain_py_object.sediment_has_z_base:
 				sed1 = domain_py_object.sediment_z_base
 				D.sediment_z_base = &sed1[0]
 			else:
 				D.sediment_z_base = NULL
+			sfa = getattr(domain_py_object, 'sediment_shear_factor', None)
+			if sfa is not None:
+				sed1 = sfa
+				D.sediment_shear_factor = &sed1[0]
+			else:
+				D.sediment_shear_factor = NULL
 		else:
 			D.sediment_settling_velocity = NULL
 			D.sediment_d_star = NULL
@@ -583,13 +618,21 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 			D.sediment_qby = NULL
 			D.sediment_qba = NULL
 			D.sediment_z_base = NULL
+			D.sediment_shear_factor = NULL
 			D.sediment_source_limited = NULL
 			D.sediment_slope_work = NULL
 			D.sediment_bed_exhausted = NULL
 			D.sediment_repose_dz = NULL
 			D.sediment_bedload_open = NULL
+			D.sediment_bedload_supply = NULL
 		tr2 = domain_py_object.tracer_boundary_flux
 		D.tracer_boundary_flux = &tr2[0, 0]
+		tsf = getattr(domain_py_object, 'tracer_speed_factor', None)
+		if tsf is not None:
+			tr2 = tsf
+			D.tracer_speed_factor = &tr2[0, 0]
+		else:
+			D.tracer_speed_factor = NULL
 		tr1 = domain_py_object.tracer_boundary_flux_sum
 		D.tracer_boundary_flux_sum = &tr1[0]
 	else:
@@ -608,6 +651,7 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 		D.sediment_bed_exhausted = NULL
 		D.sediment_repose_dz = NULL
 		D.sediment_bedload_open = NULL
+		D.sediment_bedload_supply = NULL
 		D.tracer_centroid_values = NULL
 		D.tracer_edge_values = NULL
 		D.tracer_boundary_values = NULL
@@ -616,6 +660,7 @@ cdef inline get_python_domain_pointers(domain *D, object domain_py_object):
 		D.tracer_backup_values = NULL
 		D.tracer_external_source = NULL
 		D.tracer_boundary_flux = NULL
+		D.tracer_speed_factor = NULL
 		D.tracer_boundary_flux_sum = NULL
 
 	quantities = domain_py_object.quantities

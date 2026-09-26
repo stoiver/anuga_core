@@ -1,3 +1,11 @@
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import setup_diagrams          # noqa: E402  the shared flume schematics
+
+setup_diagrams.pickup_flume('setup.png')
+
 """
     Plot the pick-up flume outputs against van Rijn's measurements
 """

@@ -149,18 +149,12 @@ new tests in the Appendix.
 \inputresults{../analytical_exact/transcritical_without_shock}
 \inputresults{../analytical_exact/supercritical_over_bump}
 \inputresults{../analytical_exact/trapezoidal_channel}
-\inputresults{../analytical_exact/sediment_settling}
-\inputresults{../analytical_exact/sediment_erosion}
-\inputresults{../analytical_exact/sediment_settling_basin}
-\inputresults{../analytical_exact/sediment_equilibrium_flow}
-\inputresults{../analytical_exact/sediment_bed_hump}
 
 %%======================
 \chapter{Tests against reference data or solutions} \label{ch:ref}
 %%======================
 \inputresults{../experimental_data/dam_break_yeh_petroff}
 \inputresults{../experimental_data/okushiri}
-\inputresults{../experimental_data/van_rijn_pickup_flume}
 
 \inputresults{../behaviour_only/lid_driven_cavity}
 \inputresults{../behaviour_only/weir_1}
@@ -173,6 +167,25 @@ new tests in the Appendix.
 \inputresults{../other_references/radial_dam_break_wet}
 
 %%======================
+\chapter{Sediment transport and erosion} \label{ch:sediment}
+
+The sediment cases are gathered here, analytical and experimental together,
+because they exercise one set of closures: entrainment, deposition and its
+adaptation, bedload, and the Exner coupling that moves the bed. The first
+five have exact or reference solutions; the last four are laboratory
+experiments, each with a diagram of the flume it reproduces.
+
+\inputresults{../sediment/sediment_settling}
+\inputresults{../sediment/sediment_erosion}
+\inputresults{../sediment/sediment_settling_basin}
+\inputresults{../sediment/sediment_equilibrium_flow}
+\inputresults{../sediment/sediment_bed_hump}
+
+\inputresults{../sediment/van_rijn_pickup_flume}
+\inputresults{../sediment/van_rijn_trench}
+\inputresults{../sediment/wang_ribberink_settling}
+\inputresults{../sediment/zaragoza_pier_dambreak}
+
 \chapter{Realistic large-scale cases} \label{ch:casestudy}
 %%======================
 Code for a number of realistic applications is in the case\_studies directory,

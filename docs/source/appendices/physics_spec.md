@@ -168,6 +168,10 @@ washoff).
 
 Both act on the same `z`; when both operators are active the contributions sum.
 
+A morphological acceleration factor `M` (`morphological_factor`, default 1) multiplies
+both contributions per step, with the erodible-base cap [L-5] divided by `M`; the water
+column is not scaled. Bed and water-column sediment budgets then differ by exactly `M`.
+
 ### 2.4 Coupling stages
 
 | Stage | Bed elevation | Bed → flow | Sediment → momentum | Reference model |
@@ -903,6 +907,139 @@ D_s = \begin{cases} w_s\, c_s\,\left(1 - \dfrac{\tau_b}{\tau_{d,s}}\right) & \ta
 
 Setting `τ_d,s = 0` disables deposition entirely — RDy26 uses this for their passive
 transport benchmarks, which is a useful test hook worth preserving.
+
+Both forms take the near-bed concentration to be the *equilibrium* one for the local
+flow at every instant. The vertical profile actually adjusts over a time of order
+`h/(α w_s)` (Galappatti & Vreugdenhil 1985): grains entrained at the bed must diffuse
+up the column before they are carried, and grains high in the column must settle
+through it before deposition is felt. Their depth-integrated model relaxes the load
+toward the same equilibrium at that rate:
+
+```{index} single: physics label; [D-3]
+```
+(spec-d-3)=
+```{math}
+:nowrap:
+
+\begin{align}
+E - D = \alpha\, v_s\, (c_{eq} - c), \qquad
+\frac{1}{\alpha} = \frac{a}{h} + \left(1 - \frac{a}{h}\right)
+\exp\!\left[-1.5\left(\frac{a}{h}\right)^{-1/6} \frac{w_s}{u_*}\right]
+\qquad \text{[Galappatti \& Vreugdenhil 1985; Armanini \& Di Silvio 1988]} \tag{D-3}
+\end{align}
+```
+
+with `c_eq = E*/d*` the concentration at which [E-1]/[E-6] balance [D-1]. In the
+implementation both `E` and `D` are scaled by `α/d*`, so every equilibrium of the
+instantaneous forms is unchanged and only the transient slows; `α → 1` in the
+well-mixed limit `w_s/u* → 0` and `α → h/a` when fully stratified. Off by default;
+the evidence for it is van Rijn's pick-up flume (equilibrium reached in ~15 depths
+without it, >40 measured) and his migrating trench (fill ~25 % too fast), issue #389.
+
+A second form keeps the *stratification* of the suspension as a state instead of
+scaling the rate. Each fraction carries the ratio `r_b = c_b/c` of near-bed to
+depth-averaged concentration, advected with the flow and relaxed toward `d*` only when
+`d*` has risen above it, which is when the flow has slowed and the profile is collapsing:
+
+```{index} single: physics label; [D-4]
+```
+(spec-d-4)=
+```{math}
+:nowrap:
+
+\begin{align}
+\frac{\partial (h r_b)}{\partial t} + \nabla\cdot(h r_b \mathbf{u}) = h\,\frac{d^{*} - r_b}{T_D}
+\ \text{ for } d^{*} > r_b, \qquad r_b = d^{*} \text{ otherwise}, \qquad
+T_D = \frac{z_c(Z, a/h) - a}{w_s}, \qquad D = v_s\, r_b\, c \tag{D-4}
+\end{align}
+```
+
+with `z_c` the centroid height of the equilibrium Rouse profile (a fitted companion of the
+`d*` fit). The grains high in the column settle to the bed from about the centroid, so a
+parcel entering slower water deposits first at the stratification it brought and works up to
+the local one over `T_D`. The lag is one-sided by construction: it never acts in uniform or
+quickening flow, where the near-bed concentration is at the bed and responds at once, and it
+does not represent the slow filling of the upper column when a bed loads clear water, which
+needs a layered suspension. A ratio of zero means "not set" and takes the local `d*`; the
+kernel writes the local `d*` on the ratio's boundary edges every step, so inflows carry no
+lag in. `T_D → 0` recovers [D-1]. Off by default.
+
+A third form gives the suspension a vertical structure: a near-bed layer of thickness
+`h_1 = a` (the reference height, floor included) and the rest of the column, `h_2 = h - a`.
+The fraction's own tracer still carries the total mass `m = h c` with its advection, limiters
+and bed exchange unchanged; a second tracer carries the upper layer's mass `m_2 = h_2 c_2`,
+and the lower layer is the remainder, `m_1 = m - m_2`:
+
+```{index} single: physics label; [T-12]
+```
+(spec-t-12)=
+**[T-12] Bed-shear amplification field.** `set_shear_amplification(factor)` multiplies `f_c`
+by a per-centroid factor in both the suspended exchange and the bedload kernel, so `u_*`, the
+Shields stress, the Rouse number and every closure built on them see it. Off by default. The
+depth-averaged shear is the uniform-flow one and misses the local amplification at obstacles:
+at a bridge pier the horseshoe vortex raises the bed shear to two to four times the approach
+value within about a diameter (Melville and Raudkivi), and that is what digs the scour hole;
+the field is where a case or a structure operator puts it.
+
+```{index} single: physics label; [K-7]
+```
+(spec-k-7)=
+**[K-7] Bedload depth ramp.** `set_bedload(..., min_depth=h_min)` scales the bedload transport
+vector by `clamp((h − h_min)/h_min, 0, 1)`: none below `h_min`, full above `2 h_min`. Off by
+default. Bedload relations assume a flow many grains deep; at a wetting front over an erodible
+bed the film cells carry the front's momentum and a large nominal shear, and unramped they dig
+steps that collapse the time step (the Zaragoza pier dam-break case). A few grain diameters is
+the physical choice.
+
+```{index} single: physics label; [S-2b]
+```
+(spec-s-2b)=
+**[S-2b] Rouse-number correction.** `rouse_beta='van_rijn'` replaces `Z` by
+`Z / β`, `β = min(2, 1 + 2 (w_s/u_*)^2)` (van Rijn 1984b), and `rouse_scale` multiplies the
+result. Both enter only the `'rouse'` near-bed fit (`d*`, and the centroid of [D-4]); off by
+default.
+
+```{index} single: physics label; [D-5]
+```
+(spec-d-5)=
+```{math}
+:nowrap:
+
+\begin{align}
+\frac{\partial m_2}{\partial t} + \nabla\cdot(m_2 \mathbf{u}) &= K\,(c_1 - c_2) - v_s\, c_2, \qquad
+D = v_s\, c_1, \qquad E \text{ into layer 1} \\
+\rho &= \frac{c_2}{c_1}\Big|_{eq} = \frac{1/d^{*} - a/h}{1 - a/h}, \qquad
+K = v_s\,\frac{\rho}{1 - \rho} \tag{D-5}
+\end{align}
+```
+
+Settling moves sediment down and the exchange `K` up; `K` is set so that the two-layer
+equilibrium reproduces the fitted Rouse ratio `c_1/c = d*`, so every equilibrium of [D-1] is
+unchanged and only the transient differs. The partition relaxes toward its equilibrium at the
+rate `K/h_1 + (K + v_s)/h_2`, integrated exactly per step. Both directions lag: a parcel
+entering slower water keeps its upper-layer load and settles it out over about `h_2/v_s`, and
+a bed loading clear water fills the lower layer first, so the near-bed concentration and the
+deposition lead the depth-averaged load, which grows only as sediment is exchanged up. By
+default both layers are advected with the depth-averaged velocity. With `velocity_profile=True`
+each layer moves at its log-law mean, `u_1/ū = 1 + ln f_1 / L` and
+`u_2/ū = 1 − f_1 ln f_1 / ((1 − f_1) L)` with `L = ln(h/z_0) − 1 = κ/√f_c` and `f_1 = h_1/h`:
+the fraction's own tracer (the total) takes the mass-weighted mean of the two and the
+upper-layer tracer `u_2`, through a per-cell, per-tracer factor on the advective flux that the
+flux kernel applies with the donor cell's value (conservative, since both cells of an edge see
+the same product). The sediment transport is then `∫ u c dz < ū h c`, and an inflow that must
+carry a given load needs the correspondingly higher concentration. A negative
+upper-layer mass means "not set" and takes the equilibrium partition; the kernel writes the
+upper-layer tracer's boundary value as the equilibrium partition of the fraction's own
+boundary concentration every step. Where `d* > h/a` the lower layer cannot hold the
+stratification and the ratio is capped at `h/a`.
+
+**This is the DEFAULT closure**, with `layer_fraction = 0.2` and the velocity split on;
+`adaptation='none'` restores the instantaneous exchange {speclit}`D-1`, which was the default
+up to ANUGA 4.0. Three flume datasets put the measured adaptation rate at about half the
+equilibrium stratification `d*` that {speclit}`D-1` deposits at: Wang & Ribberink's (1986)
+settling flume gives 1.44 and 1.55 against `d*` = 2.99, and van Rijn's (1986b) trench and
+pick-up flume improve from 3.9, 3.2 and 2.85 cm to 2.45, 2.19 and 1.74 cm, and from a
+discrepancy ratio of 0.60 to 0.86.
 
 **Recommendation:** {speclit}`D-1` as default (consistent with the `d*` machinery of §4.3),
 {speclit}`D-2` available for the layered bed model and required to reproduce RDy26's

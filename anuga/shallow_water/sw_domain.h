@@ -194,6 +194,13 @@ struct domain {
      *
      * Sign follows edgeflux[0]: positive is INTO the domain. */
     double* tracer_boundary_flux;
+    /* [D-5v] Per-tracer, per-cell factor on the advection speed, (n_tracers,
+     * N), or NULL (every tracer moves with the depth-averaged flow). Filled
+     * by the sediment source kernel from the log-law velocity of each layer
+     * when a velocity profile is on; the flux kernel multiplies the donor
+     * cell's factor into the tracer flux, which stays conservative because
+     * both cells of an edge see the same product. */
+    double* tracer_speed_factor;
     /* Per-substep, per-tracer totals of the above; (timestep_fluxcalls,
      * n_tracers), mirroring boundary_flux_sum for water. Filled by ns SCALAR
      * reductions after the flux loop -- one per tracer, which every target
@@ -323,12 +330,50 @@ struct domain {
      * on by default (0.01), but exposed: it is the largest single divergence
      * from anugaSed, which applies no floor. See PHYSICS_SPEC 12, D4b. */
     double sediment_a_h_floor;
+    /* [S-2b] Rouse-number correction: mode 1 divides Z by van Rijn's
+     * beta = 1 + 2 (w_s/u*)^2 (capped at 2), and the scale multiplies Z
+     * afterwards (1 = none). Both flatten or steepen the fitted profile. */
+    anuga_int sediment_rouse_beta_mode;
+    double sediment_rouse_scale;
+    /* [D-3] adaptation lag of the near-bed concentration (Galappatti &
+     * Vreugdenhil 1985). 0 = none: the exchange E - D = d* v_s (c_eq - c)
+     * responds at once to the local flow. 1 = Armanini & Di Silvio (1988)
+     * closed form for alpha(w_s/u*, a/h); 2 = a constant alpha. The
+     * exchange becomes alpha v_s (c_eq - c): both E and D are scaled by
+     * alpha/d*, so every equilibrium is unchanged and only the transient
+     * slows. alpha -> 1 in the well-mixed limit, alpha -> h/a when stratified. */
+    anuga_int sediment_adaptation_mode;
+    double sediment_adaptation_alpha;
+    /* [D-4] carried near-bed concentration (adaptation mode 3): fraction s
+     * keeps its near-bed concentration c_b as tracer (nearbed_base + s),
+     * advected with the flow and relaxed toward d* c over a settling time
+     * (z_c - a)/w_s when the profile is collapsing; instantaneous in the
+     * other direction. -1 = not registered. */
+    anuga_int sediment_nearbed_base;
+    /* [D-5] two-layer tuning, both equilibrium-preserving: the near-bed
+     * layer thickness as a fraction of depth (<= 0: the reference height
+     * a/h, floor included) and a factor on the rate at which the partition
+     * relaxes (1 = the two-box estimate). */
+    double sediment_layer_fraction;
+    double sediment_exchange_factor;
+    /* [D-5v] 1: the two layers are advected at their log-law mean velocities
+     * (through tracer_speed_factor), 0: both at the depth-averaged one. */
+    anuga_int sediment_velocity_profile;
     /* [L-4] maximum packing fraction bounding the near-bed concentration
      * c_b = d* c. Same constant that bounds E* in [E-1]. */
     double sediment_c_pack;
     /* Bed porosity lambda in [G-4]: dz/dt = (D-E)/(1-lambda). The sediment
      * VOLUME leaving suspension is (1-lambda) dz, the rest being pore space. */
     double sediment_porosity;
+    /* Morphological acceleration factor M (Delft3D's MORFAC): the bed change
+     * of every step, from the suspended exchange [G-4] and from bedload
+     * [G-5], is multiplied by M, and the erodible-base caps [L-5] are
+     * scaled to match. The water column is not touched: the suspension
+     * adapts in seconds, the bed in hours, so M steps of bed change per
+     * hydrodynamic step is the standard way to reach a morphological time
+     * at a hydrodynamic cost. 1 = off. Bed and water-column sediment
+     * budgets then differ by exactly M, by construction. */
+    double sediment_morphological_factor;
     /* Coupling stage of spec 2.4:
      *   0 = FIXED BED (Phase 3): exchange acts on m only, z never moves.
      *   1 = EVOLVING BED (Phase 4): [G-4] Exner update is applied.
@@ -353,6 +398,13 @@ struct domain {
     double sediment_bedload_K;
     double sediment_bedload_m;
     double sediment_bedload_tau_c_star;
+    /* [K-7] depth below which bedload is ramped to zero: q_b is scaled by
+     * clamp((h - h_min)/h_min, 0, 1), so it is off below h_min and full
+     * above 2 h_min. 0 (default) = no ramp. Bedload relations assume a flow
+     * many grains deep; at a wetting front over an erodible bed the film
+     * cells carry the momentum of the front and a large nominal shear, and
+     * without the ramp they dig steps that collapse the time step. */
+    double sediment_bedload_h_min;
     /* Per-cell bedload transport vector, [K-4]. Scratch: filled and consumed
      * within one call, but device-resident so the divergence pass can read a
      * neighbour's value. */
@@ -395,6 +447,13 @@ struct domain {
      * default costs nothing and cannot change an existing answer.
      */
     double* sediment_z_base;           /* (n) bedrock centroid elevation [m] */
+    /* [T-12] Per-centroid factor on the bed shear seen by the sediment
+     * (f_c is multiplied by it in both the suspended source and the bedload
+     * kernel), or NULL for 1 everywhere. The depth-averaged shear misses
+     * the local amplification at obstacles (the horseshoe vortex at a pier,
+     * two to four times the approach shear within a diameter of it); this
+     * is where a user or a structure operator puts it. Input, set once. */
+    double* sediment_shear_factor;
     anuga_int sediment_has_z_base;     /* 0 = unlimited depth (default) */
 
     /* Scratch, (ncl x n), tracer-major like the tracer arrays.
@@ -430,6 +489,15 @@ struct domain {
      * outflow declared open in set_bedload), 0 where it is closed. NULL means
      * every boundary edge is closed. */
     anuga_int* sediment_bedload_open;
+    /* Per boundary edge, indexed like sediment_bedload_open: a PRESCRIBED
+     * bedload inflow across that edge, m^2/s volumetric per unit width,
+     * or < 0 where none is prescribed (the open edge then carries the
+     * cell's own q_b . n, zero gradient). A prescribed supply does not
+     * depend on the inflow cell's state, which is what removes the
+     * feedback of the zero-gradient import: a cell that aggrades under a
+     * fixed inflow stage sees its transport and hence its import rise
+     * without bound. */
+    double* sediment_bedload_supply;
 
     /* ---- spec 7, angle-of-repose relaxation ------------------------------
      *
