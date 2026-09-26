@@ -12,6 +12,35 @@
   rainfall units change from mm/s to mm/hr. See `UPGRADING_TO_4.0.md` §2.
   `Cross_section` stays in `anuga.shallow_water.forcing`.
 
+* **The suspended-sediment deposition closure has a new default.**
+  `set_deposition()` now selects the two-layer suspension with the log-law
+  velocity split (`adaptation='two_layer'`, spec [D-5]/[D-5v]), where before
+  it deposited instantaneously at the equilibrium near-bed ratio `d*`
+  ([D-1]). `set_deposition(adaptation='none')` restores the old behaviour
+  exactly.
+
+  The old default used `d*`, the *equilibrium* stratification of the
+  suspension, as the *rate* at which it adapts. Those are different numbers,
+  and the ratio between them grows with the settling velocity relative to the
+  shear: 1.2 at `w_s/u* = 0.05`, 2.0 at 0.2, 4.1 at 1.0. Three flume datasets
+  agree. Wang and Ribberink's (1986) settling flume, which has deposition and
+  nothing else, measures a decay coefficient of 1.44 and 1.55 where their own
+  theory gives 1.47 and ANUGA gave 2.99.
+
+  | validation case | old default | new default | measured |
+  |---|---|---|---|
+  | Wang & Ribberink, decay coefficient | 2.99 | 1.50 | 1.44, 1.55 |
+  | van Rijn trench, bed RMS at 15 h (cm) | 3.9, 3.2, 2.85 | 2.45, 2.19, 1.74 | |
+  | van Rijn pick-up flume, discrepancy ratio | 0.60 | 0.86 | 1.0 |
+
+  **Results change** for any model whose near-bed ratio differs from 1, which
+  means any run using `near_bed='rouse'`. They are unchanged where `d* = 1`,
+  the well-mixed limit that `near_bed='constant'` gives by default, because
+  the two-layer partition reduces to the old closure exactly there; the five
+  analytical sediment validation cases all sit in that limit and are
+  untouched. Each fraction gains one tracer, `<name>_upper`, registered at
+  the first `evolve` and appearing in the SWW output.
+
 ## Selected fixes
 
 * Inlet operators now carry tracers. `Inlet_operator` moved only water: an
@@ -97,6 +126,59 @@
   sediment model has it (`'ignore'` keeps the cell's own closure). Before,
   a vegetated class with Manning n = 0 gave the sediment no shear at all.
   Entrainment, the Rouse profile and bedload all see it.
+
+* Closures for the adaptation of a suspension, all off by default except the
+  two-layer one above. `set_deposition(adaptation=...)` takes:
+  `'armanini'` ([D-3]), Galappatti and Vreugdenhil's depth-integrated lag in
+  Armanini and Di Silvio's closed form, which scales the exchange rate
+  without moving its equilibrium; `'carried'` ([D-4]), which carries the
+  near-bed ratio as a tracer and relaxes it one-sidedly over a settling time
+  when the flow decelerates; and `'two_layer'` ([D-5]), a near-bed layer and
+  the rest of the column exchanging at a rate chosen so the equilibrium
+  reproduces `d*` exactly, tuned by `layer_fraction` and `exchange_factor`.
+  `velocity_profile=True` ([D-5v]) advects the two layers at their log-law
+  mean velocities, so the transport is the profile integral of `u c` rather
+  than `u h c`; a case that sets an inflow concentration to carry a known
+  load must divide it by that factor.
+
+* `set_deposition(rouse_beta='van_rijn', rouse_scale=...)` corrects the Rouse
+  number of the `'rouse'` fit ([S-2b]), dividing it by van Rijn's
+  `1 + 2 (w_s/u*)^2` and then by a scale. Van Rijn's measured concentration
+  profiles sit at an effective Rouse number about two thirds of the plain
+  one.
+
+* `set_bedload(min_depth=h)` ramps bedload off below a depth ([K-7]), none
+  below `h` and full above `2h`. At a wetting front over an erodible bed the
+  film cells carry the front's momentum and a large nominal shear, and
+  without the ramp they dig steps that collapse the time step. A few grain
+  diameters is the physical choice.
+
+* `set_shear_amplification(factor)` multiplies the bed shear the sediment
+  sees by a per-cell factor ([T-12]), taken as a scalar, an array or a
+  function of `x, y`. It exists for the structures a depth-averaged model
+  cannot resolve: at a bridge pier the horseshoe vortex raises the bed shear
+  to several times the approach value within about a diameter, and that is
+  what digs the scour hole.
+
+* `set_sediment_parameters(morphological_factor=M)` multiplies every step's
+  bed change, from the suspended exchange and from bedload alike, leaving the
+  water column untouched: the usual way to reach morphological timescales.
+  `set_bedload(supply={tag: q_b})` prescribes a bedload inflow across a
+  boundary in m²/s per unit width, for a flume fed at a set rate, in place of
+  the zero-gradient import, which equals the inflow cell's own export and can
+  run away.
+
+* Two new experimental sediment validation cases, both from open data. Wang
+  and Ribberink's (1986) settling flume, a suspension crossing onto
+  perforated plate through which everything that reaches the bed is lost, so
+  it tests deposition alone; and the Zaragoza pier dam-break
+  (Segovia-Burillo et al. 2026, data doi:10.5281/zenodo.17777387), a
+  dam-break over a sand bed around a bridge pier, bedload-dominated and
+  transient, with the bed scanned after each of three events. The nine
+  sediment cases, analytical and experimental, are now gathered in
+  `validation_tests/sediment/` with their own chapter in the validation
+  report, and each experimental case's report opens with a scale diagram of
+  the flume it reproduces.
 
 * A second non-cohesive entrainment law: de Leeuw et al. (2020),
   `set_bed_material('noncohesive', entrainment='de_leeuw')`, spec [E-6].
