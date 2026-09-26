@@ -84,17 +84,20 @@ but the first is a default:
 
    sediment configuration
      fractions          : 1  --  sand (d=0.0002 m)
-     erosion            : Shields / Smith-McLean, non-cohesive (sand, gravel)   [E-1]
-     deposition         : D = d* c v_s   [D-1]
+     erosion            : Shields / Smith-McLean, non-cohesive (sand, gravel), gamma0=0.0024   [E-1]
+     deposition         : D = c_b v_s with c_b carried   [D-1] under [D-5]
      near-bed d*        : constant, per fraction
      shear closure      : quadratic drag, tau_b = rho f_c |v|^2   [T-1]
      friction closure   : constant n, from the domain friction quantity
      bedload            : off
      bed evolution      : True  (Phase 4, evolving)
      porosity lambda    : 0.3
+     morphological M    : 1
      c_max      [L-2]   : 0.3
      c_pack     [L-4]   : 0.65
      rho_w              : 1000 kg/m3
+     adaptation [D-5]   : two-layer suspension, near-bed layer 0.2 h, exchange set to the Rouse equilibrium, rate x 1 (tracers registered at evolve)
+     velocity profile   : layers advected at their log-law mean speeds
      erodible base [L-5]: none (unlimited depth)
      angle of repose    : off
      erodible region    : whole domain
@@ -107,6 +110,14 @@ but the first is a default:
 Settling velocity in particular is *derived*, not set: if ``v_s`` is not what
 you expected, the diameter or the fluid properties are not what you thought.
 Print this at the top of every run.
+
+Two of those lines are the default suspension closure rather than anything
+the program asked for: the two-layer suspension with the log-law velocity
+split (:spec:`D-5`), which is also why the deposition line says the near-bed
+concentration is *carried* instead of the plain :math:`d^{*} c` of
+:spec:`D-1`. :meth:`set_deposition(adaptation='none')
+<anuga.Domain.set_deposition>` returns to the instantaneous exchange that was
+the default before ANUGA 4.1.
 
 Lines appear only when they apply -- configure the Rouse near-bed profile, for
 instance, and an ``a/h floor`` line joins the list. Everything below this point

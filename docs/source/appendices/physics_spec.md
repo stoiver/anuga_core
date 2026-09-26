@@ -519,7 +519,6 @@ specified by `[aSM16 3–5]` and implemented in `aS16`:
 ```
 (spec-e-3)=
 (spec-e-5)=
-(spec-e-6)=
 ```{math}
 :nowrap:
 
