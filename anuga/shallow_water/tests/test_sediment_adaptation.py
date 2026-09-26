@@ -476,3 +476,22 @@ def test_a_layered_adaptation_coexists_with_a_passive_tracer(mode):
     assert not np.allclose(two.get_tracer('sand'), plain.get_tracer('sand'), rtol=1e-6)
     with pytest.raises(ValueError):
         two.add_tracer('late')
+
+
+@pytest.mark.parametrize('mode', ['legacy', 'unified'])
+def test_the_two_layer_default_reduces_to_the_instantaneous_exchange_at_d_star_one(mode):
+    """[D-5] with the well-mixed near-bed ratio d* = 1 the partition has
+    rho = 1, so the lower-layer concentration IS the depth-averaged one and
+    the closure is exactly [D-1]. That is why the analytical sediment
+    validation cases, which all run near_bed='constant' with d* = 1, are
+    unaffected by [D-5] becoming the default."""
+    def run(adapt):
+        d = uniform_flow(mode, tau_c_star=0.0, near_bed='constant',
+                         adaptation=adapt)
+        for _ in d.evolve(yieldstep=1.0, finaltime=5.0):
+            pass
+        return d.get_tracer('sand').copy()
+    plain = run('none')
+    two = run('two_layer')
+    assert plain.mean() > 0.0
+    assert np.allclose(two, plain, rtol=1e-9, atol=1e-14)

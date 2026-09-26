@@ -163,6 +163,8 @@
       ~Domain.reorder
       ~Domain.report_cells_with_small_local_timestep
       ~Domain.report_water_volume_statistics
+      ~Domain.rouse_centroid
+      ~Domain.rouse_d_star
       ~Domain.save_mesh_to_file
       ~Domain.save_mesh_to_tsh
       ~Domain.saxpy_conserved_quantities
@@ -214,6 +216,7 @@
       ~Domain.set_relative_time
       ~Domain.set_sediment_friction
       ~Domain.set_sediment_parameters
+      ~Domain.set_shear_amplification
       ~Domain.set_shear_closure
       ~Domain.set_sloped_mannings_function
       ~Domain.set_starttime

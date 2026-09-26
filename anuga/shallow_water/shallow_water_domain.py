@@ -2886,8 +2886,15 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
     def _ensure_tracer_speed_factor(self):
         """Allocate the `[D-5v]` per-tracer speed factors (all 1: the kernel
-        fills them from the first step) once the tracers are final."""
-        if not self.sediment_velocity_profile or self.sediment_adaptation_mode != 4:
+        fills them from the first step) once the tracers are final.
+
+        Only where there is something to split. [D-5] is the default closure,
+        so a domain with no sediment at all reaches here; allocating for it
+        would put a factor on the advection of its passive tracers, which
+        mode 2 then reads from a pointer it never mapped."""
+        if (not self.sediment_velocity_profile
+                or self.sediment_adaptation_mode != 4
+                or self.sediment_nearbed_base < 0):
             return
         shape = (self.number_of_tracers, self.number_of_elements)
         if self.tracer_speed_factor is not None and self.tracer_speed_factor.shape == shape:
