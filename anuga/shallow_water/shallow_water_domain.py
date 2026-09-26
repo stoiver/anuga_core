@@ -813,7 +813,7 @@ class Domain(Generic_Domain):
         # spec assumes. See set_erodible_base().
         self.sediment_z_base = None
         self.sediment_has_z_base = 0
-        self.sediment_shear_factor = None      # [T-12] per-centroid factor on the sediment's bed shear
+        self.sediment_shear_factor = None      # [T-16] per-centroid factor on the sediment's bed shear
         # The two user intents behind sediment_z_base, kept apart so they
         # compose: a base is a DEPTH limit, a region is a WHERE limit, and
         # setting one must not silently discard the other. Both are folded
@@ -1466,7 +1466,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             del self._gpu_boundary_info_initialized
 
     def set_shear_amplification(self, factor=None):
-        """Multiply the bed shear the sediment sees by a per-cell factor `[T-12]`.
+        """Multiply the bed shear the sediment sees by a per-cell factor `[T-16]`.
 
         The depth-averaged shear is the uniform-flow one and misses the
         local amplification at obstacles: at a bridge pier the horseshoe
