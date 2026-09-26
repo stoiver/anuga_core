@@ -67,8 +67,12 @@ N_PVC, N_SAND = 0.010, 0.015          # Manning; sand from the paper's Table 1
 POROSITY, D_SAND = 0.34, 1.0e-3       # one fraction at the mix's geometric mean
 REPOSE = 32.0                         # degrees
 
-# mesh resolution (m^2 per triangle)
-A_COARSE, A_SAND, A_PIER = 1.0e-3, 1.0e-4, 2.0e-5
+# Mesh resolution, m^2 per triangle. A_COARSE is the overall cap and applies
+# to the reservoir, where the flow is a slow drawdown; the whole 24 cm flume
+# is held at A_FLUME so the channel is resolved across its width from the
+# gate to the exit and not only over the sand, which is finer again, and the
+# pier finer still.
+A_COARSE, A_FLUME, A_SAND, A_PIER = 4.0e-4, 1.5e-4, 1.0e-4, 2.0e-5
 
 
 def pier_polygon(case, n=16):
@@ -90,11 +94,13 @@ bounding = [(X_RES, Y_RES0), (0.0, Y_RES0), (0.0, 0.0), (X_END, 0.0),
             (X_END, W), (0.0, W), (0.0, Y_RES0 + W_RES), (X_RES, Y_RES0 + W_RES)]
 boundary_tags = {'wall': [0, 1, 2, 4, 5, 6, 7], 'outflow': [3]}
 hole = pier_polygon(CASE)
+flume_box = [(0.005, 0.002), (X_END - 0.005, 0.002),
+             (X_END - 0.005, W - 0.002), (0.005, W - 0.002)]
 sand_box = [(X_SAND0 - 0.05, 0.005), (X_SAND1 + 0.05, 0.005),
             (X_SAND1 + 0.05, W - 0.005), (X_SAND0 - 0.05, W - 0.005)]
 pier_box = [(X_PIER - 0.12, 0.03), (X_PIER + 0.15, 0.03),
             (X_PIER + 0.15, W - 0.03), (X_PIER - 0.12, W - 0.03)]
-regions = [(sand_box, A_SAND), (pier_box, A_PIER)]
+regions = [(flume_box, A_FLUME), (sand_box, A_SAND), (pier_box, A_PIER)]
 # The gate line across the mouth of the flume. It is interior to the mesh --
 # the reservoir and the flume are one domain -- so without a breakline the
 # triangles straddle it, the contraction is resolved raggedly and the sill
