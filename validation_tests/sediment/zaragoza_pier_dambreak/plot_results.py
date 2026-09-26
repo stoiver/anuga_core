@@ -1,3 +1,11 @@
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import setup_diagrams          # noqa: E402  the shared flume schematics
+
+setup_diagrams.pier_dambreak('setup.png', 'P1')
+
 """Figures for the pier dam-break case: bed change maps (Kinect and ANUGA),
 centreline bed profiles and the water surface along the centreline."""
 import glob

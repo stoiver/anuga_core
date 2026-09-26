@@ -214,7 +214,7 @@ benchmark problem 2).
 Sediment settling in still water — analytical solution
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Directory:** ``analytical_exact/sediment_settling/``
+**Directory:** ``sediment/sediment_settling/``
 
 **Physical scenario:** A tank of still water 1 m deep carries a uniform
 volumetric concentration of 0.01 of 100 micron sediment. There is no flow, so
@@ -242,7 +242,7 @@ time-varying bed back from the SWW file.
 Sediment entrainment into still water — analytical solution
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Directory:** ``analytical_exact/sediment_erosion/``
+**Directory:** ``sediment/sediment_erosion/``
 
 **Physical scenario:** A tank of still water 1 m deep over a plane bed of
 slope :math:`10^{-3}`, with 0.5 mm sand and no initial load. There is no
@@ -279,7 +279,7 @@ time-varying bed back from the SWW file.
 Settling basin with flow — analytical solution
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Directory:** ``analytical_exact/sediment_settling_basin/``
+**Directory:** ``sediment/sediment_settling_basin/``
 
 **Physical scenario:** A straight channel 300 m long carrying a uniform
 steady flow (flat frictionless bed, 1 m deep, 0.5 m/s, held exact by
@@ -312,7 +312,7 @@ ends of a frictionless channel for an exact uniform flow.
 Equilibrium suspended load in normal flow — analytical solution
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Directory:** ``analytical_exact/sediment_equilibrium_flow/``
+**Directory:** ``sediment/sediment_equilibrium_flow/``
 
 **Physical scenario:** A plane channel 300 m long of slope 2e-4 with
 Manning roughness 0.03 carries uniform flow at its normal depth of 1 m,
@@ -344,7 +344,7 @@ at both ends of a Manning channel for exact normal flow.
 Migrating bed hump under bedload — analytical solution
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-**Directory:** ``analytical_exact/sediment_bed_hump/``
+**Directory:** ``sediment/sediment_bed_hump/``
 
 **Physical scenario:** The classic Exner test of Hudson and Sweby (2003).
 A frictionless channel 1000 m long carries uniform subcritical flow, 10 m

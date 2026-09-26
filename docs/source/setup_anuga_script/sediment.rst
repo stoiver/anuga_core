@@ -972,20 +972,20 @@ in ``anuga/shallow_water/tests/test_sediment_*.py`` is verification (the
 equations are solved correctly), which is a different claim from validation
 (they are the right equations for the field case). One step towards the
 latter is in the validation suite, which runs nightly with the other
-analytical cases: ``validation_tests/analytical_exact/sediment_settling``
+analytical cases: ``validation_tests/sediment/sediment_settling``
 compares the deposition term, the sediment mass balance and the bed update
 against the reference solution for sediment settling out of still water, and
-``validation_tests/analytical_exact/sediment_erosion`` compares the
+``validation_tests/sediment/sediment_erosion`` compares the
 Smith--McLean entrainment law, its threshold, the depth-slope closure (slope
 frozen) and the bed lowering against the per-cell reference for a bed that
-erodes under still water. ``validation_tests/analytical_exact/sediment_settling_basin``
+erodes under still water. ``validation_tests/sediment/sediment_settling_basin``
 compares the steady concentration profile and bed-rise rate of a settling
 basin with flow against the closed-form exponential, and closes the
-sediment budget between boundaries, water column and bed. ``validation_tests/analytical_exact/sediment_equilibrium_flow``
+sediment budget between boundaries, water column and bed. ``validation_tests/sediment/sediment_equilibrium_flow``
 compares the suspended load that clear water picks up in normal flow on a
 Manning slope, under the quadratic-drag closure, against the closed-form
 approach to the equilibrium concentration.
-``validation_tests/analytical_exact/sediment_bed_hump`` runs the classic
+``validation_tests/sediment/sediment_bed_hump`` runs the classic
 Exner test, a bed hump migrating under Grass bedload, against its
 characteristic solution. The notebook :doc:`/examples/notebook_sediment_transport` walks
 through the settling case.

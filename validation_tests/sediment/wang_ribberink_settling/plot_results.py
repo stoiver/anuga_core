@@ -1,3 +1,11 @@
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import setup_diagrams          # noqa: E402  the shared flume schematics
+
+setup_diagrams.settling_flume('setup.png')
+
 """Depth-averaged concentration along the test section: measured against
 every adaptation closure that has been run."""
 import glob

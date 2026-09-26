@@ -801,7 +801,7 @@ first ``evolve`` are the only change to a script's tracer list, and they
 sit after any tracer of your own.
 
 **Why it exists.** Against van Rijn's flume measurements
-(``validation_tests/experimental_data/van_rijn_*``) the instantaneous
+(``validation_tests/sediment/van_rijn_*``) the instantaneous
 exchange reaches its equilibrium load within about 15 depths of a clear-water
 inflow where the flume took more than 40, and fills a dredged trench about
 25 % too fast: in a decelerating flow the near-bed concentration is not yet
