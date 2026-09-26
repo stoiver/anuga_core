@@ -495,3 +495,23 @@ def test_the_two_layer_default_reduces_to_the_instantaneous_exchange_at_d_star_o
     two = run('two_layer')
     assert plain.mean() > 0.0
     assert np.allclose(two, plain, rtol=1e-9, atol=1e-14)
+
+
+def test_the_summary_reports_the_whole_configuration():
+    """Every switch a run can set should be visible in sediment_summary(),
+    so a log says what was actually computed."""
+    d = uniform_flow(near_bed='rouse', reference_height_floor=0.1)
+    d.set_deposition(law='d_star', near_bed='rouse', reference_height_floor=0.1)
+    d.set_bedload('wong_parker_eq24', min_depth=4.0e-4)
+    d.set_shear_amplification(lambda x, y: 1.0 + 3.0 * (x > 25.0))
+    s = d.sediment_summary()
+    assert 'adaptation [D-5]' in s                 # the default closure
+    assert 'near-bed layer 0.2 h' in s
+    assert 'velocity profile' in s
+    assert 'c_b carried' in s and '[D-5]' in s     # not the bare [D-1] form
+    assert 'bedload h_min [K-7]' in s and '0.0004' in s
+    assert 'amplified by 1 to 4 per cell' in s and '[T-16]' in s
+    # and the plain closure still reads as itself
+    plain = uniform_flow(near_bed='rouse', adaptation='none')
+    assert 'D = d* c v_s   [D-1]' in plain.sediment_summary()
+    assert 'adaptation' not in plain.sediment_summary()
