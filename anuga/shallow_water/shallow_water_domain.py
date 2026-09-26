@@ -2317,12 +2317,16 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         if self.n_sediment_classes == 0:
             return 'sediment: no sediment fractions registered'
 
-        ero = {0: "Shields / Smith-McLean, non-cohesive (sand, gravel)   [E-1]",
+        ero = {0: "Shields / Smith-McLean, non-cohesive (sand, gravel), "
+                  "gamma0=%.4g   [E-1]" % self.sediment_gamma0,
                1: "Hanson & Simon, cohesive (silt, clay)   [E-3]",
                2: "Partheniades (RDycore)   [E-4]",
                3: "de Leeuw et al. 2020, non-cohesive bed material load "
-                  "(A=%.3g alpha=%.3g beta=%.3g)   [E-6]"
-                  % (self.sediment_dl_A, self.sediment_dl_alpha, self.sediment_dl_beta),
+                  "(A=%.3g alpha=%.3g beta=%.3g, X0=%.3g, k_s=%s)   [E-6]"
+                  % (self.sediment_dl_A, self.sediment_dl_alpha,
+                     self.sediment_dl_beta, self.sediment_dl_threshold,
+                     ('%.4g m' % self.sediment_dl_ks) if self.sediment_dl_ks > 0.0
+                     else '%.3g d' % self.sediment_dl_ks_factor),
                }[self.sediment_erosion_mode]
         dep = {0: "D = d* c v_s   [D-1]", 1: "D = v_s c (1 - tau_b/tau_d)   [D-2]"
                }[self.sediment_deposition_mode]
