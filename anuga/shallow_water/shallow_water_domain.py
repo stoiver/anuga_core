@@ -1765,57 +1765,34 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             by the adaptation lag. Default 0.01. Set to 0 to reach anugaSed's
             regime, which applies no floor -- see spec 12, D4b, where this
             is the largest single divergence from them.
-        adaptation : {'none', 'armanini', 'constant'}
-            `[D-3]`, the adaptation lag of the near-bed concentration.
-            `'none'` (default): the exchange `E - D = d* v_s (c_eq - c)`
-            responds at once to the local flow, as if the vertical profile
-            were always the equilibrium one. `'armanini'`: the exchange is
-            `alpha v_s (c_eq - c)` after Galappatti & Vreugdenhil (1985),
-            with `alpha(w_s/u*, a/h)` from Armanini & Di Silvio's (1988)
-            closed form, `1/alpha = a/h + (1 - a/h) exp[-1.5 (a/h)^(-1/6)
-            w_s/u*]`. Both erosion and deposition are scaled by `alpha/d*`,
-            so every equilibrium concentration is unchanged and only the
-            transient slows: the load adapts over `h/(alpha w_s)` instead of
-            `h/(d* w_s)`. `alpha` is 1 in the well-mixed limit and `h/a`
-            when fully stratified, so pair it with `near_bed='rouse'`.
-            `'constant'` uses `adaptation_alpha` everywhere. `'carried'`
-            (`[D-4]`) keeps the stratification of the suspension as a state:
-            each fraction gets a tracer `<name>_nearbed_ratio` holding
-            `r_b = c_b / c`, registered at the first `evolve` (so all
-            fractions must be added before it), advected with the flow and
-            relaxed toward `d*` over the settling time `(z_c - a)/w_s` (from
-            the profile centroid) when the flow has slowed and `d*` has
-            risen above it; in the other direction it responds at once.
-            Deposition uses `r_b c`, so a parcel entering slower water
-            deposits first at the stratification it brought with it. Unlike
-            `'armanini'` this has memory and is one-sided; its equilibrium
-            is unchanged, and it does not act where the flow is uniform or
-            quickening. It does not slow the loading of clear water from the
-            bed, which needs a layered suspension. A ratio of 0 means not
-            set and takes the local `d*`, which is what the initial state
-            and the inflow boundaries carry by default. `'two_layer'`
-            (`[D-5]`) is that layered suspension: a near-bed layer of
-            thickness `a` (the reference height, floor included) and the
-            rest of the column, each fraction carrying its upper-layer mass
-            in a tracer `<name>_upper` (registered at the first `evolve`)
-            with the lower layer as the remainder of its total. Settling
-            moves sediment down and an exchange coefficient up, set so that
-            the two-layer equilibrium reproduces the Rouse ratio `d*`
-            exactly; deposition is `v_s` times the lower-layer
-            concentration. Both directions lag: a parcel entering slower
-            water keeps its upper-layer load and settles it out over about
-            `h/w_s`, and a bed loading clear water fills the lower layer
-            first, so the depth-averaged load grows only as sediment is
-            exchanged up. Both layers are advected with the depth-averaged
-            velocity. Nothing to set at inflows; the partition there is the
-            equilibrium one.
+        adaptation : {'two_layer', 'carried', 'armanini', 'constant', 'none'}
+            How the near-bed concentration follows a change of flow.
+            `'two_layer'` (**the default**, `[D-5]`) splits the column into a
+            near-bed layer and the rest, each fraction carrying its
+            upper-layer mass in a tracer `<name>_upper`; deposition is `v_s`
+            times the lower-layer concentration, and the exchange between
+            the layers is set so the equilibrium is still the Rouse ratio
+            `d*`. `'carried'` (`[D-4]`) carries only the ratio
+            `r_b = c_b / c`, in a tracer `<name>_nearbed_ratio`, and relaxes
+            it toward `d*` over a settling time when the flow slows.
+            `'armanini'` (`[D-3]`) keeps no state and scales the exchange
+            rate by Galappatti and Vreugdenhil's `alpha` in Armanini and Di
+            Silvio's closed form. `'constant'` uses `adaptation_alpha`
+            everywhere. `'none'` deposits at `d* c` the instant the flow
+            changes, which was the default up to ANUGA 4.0.
+
+            All of them leave every equilibrium concentration untouched and
+            change only the transient. The layered ones register their
+            tracers at the first `evolve`, so every fraction must be added
+            before it. See :ref:`sediment_deposition` for which to choose,
+            and the Notes below for why the default changed.
         adaptation_alpha : float, optional
             `alpha` for `adaptation='constant'`; must be > 0.
         layer_fraction : float, optional
-            `'two_layer'` only: the near-bed layer thickness as a fraction of
-            the depth, in (0, 0.5]. Default `None`: the reference height
-            `a/h` with its floor. The exchange is re-derived so the
-            equilibrium stays the Rouse ratio whatever the thickness.
+            `'two_layer'` only: the near-bed layer thickness as a fraction
+            of the depth, in [0, 0.5], default 0.2. Zero takes the reference
+            height `a/h` with its floor instead. The exchange is re-derived
+            so the equilibrium stays the Rouse ratio whatever the thickness.
         rouse_beta : {'none', 'van_rijn'}, optional
             Correction to the Rouse number of the `'rouse'` fit. `'van_rijn'`
             divides `Z` by `1 + 2 (w_s/u*)^2` (at most 2), van Rijn's
@@ -1825,11 +1802,13 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             Factor on the (corrected) Rouse number, default 1. Van Rijn's
             trench profiles need about 0.65 on top of `'van_rijn'`.
         velocity_profile : bool, optional
-            With `'two_layer'`: advect the near-bed layer and the upper
-            layer at their log-law mean velocities instead of the
-            depth-averaged one. The near-bed layer, which holds most of
-            the sediment, then lags the flow, and the transport is the
-            profile integral of u c rather than u h c.
+            `'two_layer'` only (`[D-5v]`): advect each layer at its log-law
+            mean velocity rather than the depth-averaged one, so the
+            near-bed layer, which holds most of the sediment, lags the flow
+            and the transport is the profile integral of `u c` rather than
+            `u h c`. Default `None`, meaning on with `'two_layer'` and off
+            otherwise. A case that sets an inflow concentration to carry a
+            known load must divide it by the factor this applies.
         exchange_factor : float, optional
             `'two_layer'` only: a factor on the rate at which the partition
             relaxes toward its equilibrium, default 1 (the two-box
@@ -1837,11 +1816,27 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
         Notes
         -----
-        Without the lag, van Rijn's pick-up flume reaches its equilibrium
-        load within about 15 depths where the flume took more than 40, and
-        his trench fills about 25 % too fast (issue #389): the near-bed
-        concentration in a decelerating flow is not yet the equilibrium one
-        because the grains high in the column have not settled through it.
+        **Why the default is not `'none'`.** `[D-1]` deposits at `d* c`, and
+        `d*` is the *equilibrium* stratification of the suspension, not the
+        rate at which it reaches that equilibrium. Using one for the other
+        deposits too fast, by a factor that grows with the settling velocity
+        relative to the shear: 1.2 at `w_s/u* = 0.05`, 2.0 at 0.2, 4.1 at
+        1.0. Three flume datasets agree. In Wang and Ribberink's (1986)
+        settling flume, which has deposition and nothing else, the measured
+        decay coefficient is 1.44 and 1.55 where their own theory gives 1.47
+        and `'none'` gives 2.99; van Rijn's pick-up flume reaches its
+        equilibrium load within about 15 depths where the flume took more
+        than 40, and his trench fills about 25 % too fast (issue #389).
+        `'two_layer'` with the velocity split gives 1.50 on the first, and
+        the trench and pick-up flume improve with it too.
+
+        Results are unchanged wherever `d* = 1`, the well-mixed limit that
+        `near_bed='constant'` gives by default, because the partition
+        reduces to `[D-1]` exactly there.
+
+        See :ref:`sediment_deposition` for the closures side by side, and
+        the sediment validation cases under `validation_tests/sediment/` for
+        the measurements.
         """
         laws = {'d_star': 0, 'threshold': 1}
         if law not in laws:

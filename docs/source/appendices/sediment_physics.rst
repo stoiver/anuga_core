@@ -525,6 +525,8 @@ millimetre -- the sign of the bed change reverses. See
 
 --------------
 
+.. _sediment_deposition:
+
 Deposition
 ----------
 
