@@ -139,13 +139,20 @@ def equilibrium_load(scale):
     uh = domain.quantities['xmomentum'].centroid_values
     x = domain.centroid_coordinates[:, 0]
     sel = (x > 0.5 * L) & (x < 0.9 * L)
-    return rho_s * float(np.mean(c[sel] * uh[sel]))
+    # [D-5v] under the default closure the layers move at their own log-law
+    # speeds, so the transport is the profile integral of u c, which is
+    # beta u h c with beta the fraction's speed factor, not u h c.
+    sf = getattr(domain, 'tracer_speed_factor', None)
+    global beta_in
+    beta_in = float(np.mean(sf[0][sel])) if sf is not None else 1.0
+    return rho_s * float(np.mean(c[sel] * uh[sel])) * beta_in
 
 
 # Calibration: scale the entrainment constant so the approach flow carries
 # the measured supply. E* is close to linear in the constant at these
 # transport stages, so two secant steps land within a percent.
 scale = 1.0
+beta_in = 1.0
 history = []
 for it in range(3):
     qs = equilibrium_load(scale)
@@ -155,6 +162,10 @@ for it in range(3):
     if abs(qs / qs_in - 1.0) < 0.01:
         break
     scale *= qs_in / qs
+
+# [D-5v] the inflow supply crosses the boundary at the profile-integrated
+# speed too, so the concentration that carries qs_in is c_in / beta.
+c_in = c_in / beta_in
 
 # Bedload: Wong & Parker (2006) Eq 24, q* = K (tau* - tau_c*)^1.5, gives
 # 0.037 kg/s/m for this fine sand in the approach flow, against the
@@ -193,6 +204,7 @@ if myid == 0:
                    'dx': dx, 'S': S, 'n': n, 'h0': h0, 'u0': u0, 'q': q,
                    'k_s': k_s, 'w_s': w_s, 'v_s': v_s, 'diameter': diameter,
                    'rho_s': rho_s, 'qs_in': qs_in, 'qb_in': qb_in, 'c_in': c_in,
+                   'beta_in': beta_in,
                    'porosity': porosity, 'scale': scale, 'calibration': history,
                    'morfac': MORFAC,
                    'tau_star': tau_star, 'qb_wong_parker': qb_wp, 'K_bedload': K_cal,

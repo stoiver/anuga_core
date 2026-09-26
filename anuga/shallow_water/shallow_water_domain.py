@@ -481,6 +481,11 @@ def set_omp_num_threads(omp_num_threads: int | None = None, verbose: bool = True
     return omp_num_threads
 
 
+# [D-5] default thickness of the near-bed layer as a fraction of the depth.
+# 0.2 is what van Rijn's trench and Wang & Ribberink's settling flume are
+# reproduced with; 0 falls back to the reference height a.
+TWO_LAYER_FRACTION = 0.2
+
 class Domain(Generic_Domain):
     """Object which encapulates the shallow water model
 
@@ -758,12 +763,18 @@ class Domain(Generic_Domain):
         self.sediment_tau_c_star = None         # tau_c*     (ncl,)
         self.sediment_reference_height = None   # a     [m]  (ncl,)
         self.sediment_d_star_mode = 0           # 0 constant, 1 Rouse [S-4]
-        self.sediment_adaptation_mode = 0       # [D-3] 0 none, 1 Armanini, 2 constant
+        # [D-5] the two-layer suspension with the log-law velocity split is
+        # the DEFAULT closure: against van Rijn's trench and pick-up flume
+        # and Wang & Ribberink's settling flume the instantaneous exchange
+        # deposits at the equilibrium stratification d*, which is 2 to 4
+        # times the measured adaptation rate for w_s/u* of 0.2 to 1.
+        # adaptation='none' restores it.
+        self.sediment_adaptation_mode = 4       # 0 none, 1 Armanini, 2 constant, 3 carried, 4 two-layer
         self.sediment_adaptation_alpha = 1.0    # [D-3] alpha for mode 2
         self.sediment_nearbed_base = -1        # [D-4] first near-bed tracer, or -1
-        self.sediment_layer_fraction = 0.0     # [D-5] near-bed layer h1/h; <= 0: a/h
+        self.sediment_layer_fraction = TWO_LAYER_FRACTION   # [D-5] near-bed layer h1/h; 0: a/h
         self.sediment_exchange_factor = 1.0    # [D-5] factor on the partition's relaxation rate
-        self.sediment_velocity_profile = 0     # [D-5v] advect the layers at their log-law speeds
+        self.sediment_velocity_profile = 1     # [D-5v] advect the layers at their log-law speeds
         self.tracer_speed_factor = None        # [D-5v] (n_tracers, n) speed factors, or None
         # van Rijn-style floor a >= sediment_a_h_floor * h, applied when
         # sediment_d_star_mode = 1. Standard practice, on by default. Set to 0
@@ -1728,9 +1739,9 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         return num.maximum(z - self.sediment_z_base, 0.0)
 
     def set_deposition(self, law='d_star', tau_d=0.0, near_bed='constant',
-                       reference_height_floor=0.01, adaptation='none',
+                       reference_height_floor=0.01, adaptation='two_layer',
                        adaptation_alpha=None, layer_fraction=None,
-                       exchange_factor=1.0, velocity_profile=False,
+                       exchange_factor=1.0, velocity_profile=None,
                        rouse_beta='none', rouse_scale=1.0):
         """Select the deposition law and its near-bed treatment (spec 4.4).
 
@@ -1857,15 +1868,20 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         self.sediment_tau_d = float(tau_d)
         self.sediment_d_star_mode = modes[near_bed]
         self.sediment_a_h_floor = float(reference_height_floor)
-        if layer_fraction is not None and not 0.0 < layer_fraction <= 0.5:
-            raise ValueError('layer_fraction must be in (0, 0.5], got %r' % (layer_fraction,))
+        if layer_fraction is None:
+            layer_fraction = TWO_LAYER_FRACTION
+        if not 0.0 <= layer_fraction <= 0.5:
+            raise ValueError('layer_fraction must be in [0, 0.5], 0 meaning the '
+                             'reference height a, got %r' % (layer_fraction,))
         if not exchange_factor > 0.0:
             raise ValueError('exchange_factor must be > 0, got %r' % (exchange_factor,))
         self.sediment_adaptation_mode = adapt[adaptation]
         self.sediment_adaptation_alpha = (float(adaptation_alpha)
                                           if adaptation == 'constant' else 1.0)
-        self.sediment_layer_fraction = float(layer_fraction) if layer_fraction else 0.0
+        self.sediment_layer_fraction = float(layer_fraction)
         self.sediment_exchange_factor = float(exchange_factor)
+        if velocity_profile is None:
+            velocity_profile = (adaptation == 'two_layer')
         if velocity_profile and adaptation != 'two_layer':
             raise ValueError("velocity_profile needs adaptation='two_layer'")
         self.sediment_velocity_profile = 1 if velocity_profile else 0

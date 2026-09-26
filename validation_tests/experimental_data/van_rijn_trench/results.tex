@@ -50,16 +50,16 @@ deepest remaining point within 1.5~m of the measured position. The gentle
 1:10 trench, the one a depth-averaged model is expected to get, runs
 routinely; the 1:3 and 1:7 trenches, where the flow separates over the lip
 and van Rijn's own depth-averaged attempts failed, join it under the long
-option. \anuga{} reproduces the shape of the measured profile and the
-position of its deepest point but fills the trench about 25\,\% too fast:
-the near-bed concentration responds at once to the slower flow over the
-trench, where in the flume the sediment high in the water column takes time
-to settle through it. The adaptation lag of Galappatti and Vreugdenhil
-(\texttt{set\_deposition(} \texttt{adaptation='armanini')}) over-corrects this, so the
-measured profile lies between the two, and the carried near-bed ratio
-(\texttt{adaptation='carried'}) recovers part of the gap, 3.5, 3.1 and
-2.7~cm RMS against 3.9, 3.2 and 2.85 without it; the case runs without
-either, so that the closure it validates is the default one.
+option. The case runs the default closure, which since the two-layer suspension
+[D-5] became the default is a near-bed layer $0.2h$ thick with the log-law
+velocity split. The three tests then give 2.45, 2.19 and 1.74~cm RMS. The
+instantaneous exchange that was the default before gives 3.9, 3.2 and
+2.85: its near-bed concentration responds at once to the slower flow over
+the trench, where in the flume the sediment high in the water column takes
+time to settle through it, so the trench fills about 25\,\% too fast. The
+inflow concentration is set from the measured supply through the
+profile-integrated transport $\beta \bar u h c$ rather than $\bar u h c$,
+$\beta = 0.71$ here, since the layers move at their own speeds.
 
 \begin{figure}
 \begin{center}
@@ -99,8 +99,9 @@ scaled by the inflow supply.}
 
 \subsection*{Closure options explored on the 1:10 trench}
 
-The case as committed runs with the instantaneous exchange, so that what it
-validates is the default closure. The options below were each run on test 3
+The case runs whatever the default closure is, which since [D-5] became
+the default is the two-layer suspension with the velocity split, the bold
+row below. The options were each run on test 3
 (slopes 1:10, 15 hours, morphological factor 10) to see how far the fit can
 be taken, all on the same calibrated setup. Each is chosen by a keyword of
 \texttt{set\_deposition} (or \texttt{set\_bedload}); nothing else in the
@@ -117,26 +118,26 @@ original bed, +0.41~m$^2$, in the flume and in every run, so it is left out.
 \setlength{\tabcolsep}{3pt}
 \newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
 \newcolumntype{T}[1]{>{\ttfamily\raggedright\arraybackslash}p{#1}}
-\begin{tabular}{L{4.0cm}T{3.6cm}L{1.1cm}L{1.6cm}rr}
+\begin{tabular}{L{3.6cm}T{3.6cm}L{1.0cm}L{1.4cm}rr}
 \hline
 \textrm{option} & \textrm{chosen by} & RMS (cm) & deepest (m) & slope & toe \\
 \hline
 measured & & & 6.57, 0.079 & +0.17 & $-0.26$ \\
 \hline
-instantaneous exchange (the case) & adaptation='none' & 2.85 & 7.10, 0.039 & +0.20 & $-0.15$ \\
+instantaneous exchange (the old default) & adaptation='none' & 2.85 & 7.10, 0.039 & +0.20 & $-0.15$ \\
 Galappatti lag [D-3] & adaptation='armanini' & 3.7 & & & \\
 carried near-bed ratio [D-4] & adaptation='carried' & 2.7 & & & \\
-two-layer, near-bed layer $a$ [D-5] & adaptation='two\_layer' & 2.66 & 5.50, 0.084 & +0.08 & $-0.20$ \\
+two-layer, near-bed layer $a$ [D-5] & adaptation=\newline 'two\_layer' & 2.66 & 5.50, 0.084 & +0.08 & $-0.20$ \\
 \quad exchange rate $\times0.5$ & exchange\_factor=0.5 & 2.80 & & & \\
 \quad exchange rate $\times2$ & exchange\_factor=2 & 2.56 & & & \\
 \quad exchange rate $\times4$ & exchange\_factor=4 & 2.59 & & & \\
 \quad near-bed layer $0.05h$ & layer\_fraction=0.05 & 4.24 & & & \\
 \quad near-bed layer $0.2h$ & layer\_fraction=0.2 & 2.17 & 5.72, 0.061 & +0.14 & $-0.18$ \\
-two-layer $0.2h$, log-law velocity split [D-5v] & layer\_fraction=0.2, velocity\_profile=True & \textbf{1.74} & 6.22, 0.054 & +0.17 & $-0.19$ \\
+\textbf{two-layer $0.2h$, velocity split [D-5v]} (the default, and the case) & \textrm{the defaults} & \textbf{1.74} & 6.22, 0.054 & +0.17 & $-0.19$ \\
 \quad near-bed layer $0.1h$ & layer\_fraction=0.1 & 3.12 & & & \\
 \quad near-bed layer $0.3h$ & layer\_fraction=0.3 & 2.37 & & & \\
 \quad exchange rate $\times0.5$ & exchange\_factor=0.5 & 1.66 & 6.30, 0.055 & +0.17 & $-0.20$ \\
-\quad bedload power 2.1 (van Rijn 1984) & set\_bedload(..., m=2.1) & 2.00 & 6.90, 0.050 & +0.19 & $-0.19$ \\
+\quad bedload power 2.1 (van Rijn 1984) & set\_bedload(m=2.1) & 2.00 & 6.90, 0.050 & +0.19 & $-0.19$ \\
 \quad Rouse number $/\,(1+2(w_s/u_*)^2)$ [S-2b] & rouse\_beta='van\_rijn' & 2.07 & 5.60, 0.070 & +0.12 & $-0.20$ \\
 \quad Rouse number scaled to 0.5 & rouse\_scale=0.63 & 3.18 & 5.40, 0.083 & +0.07 & $-0.18$ \\
 \quad shear overshoot $1+\lambda(h/u)\,du/ds$, $\lambda=5$ & \textrm{experimental, not kept} & 1.77 & 6.40, 0.053 & +0.17 & $-0.19$ \\
@@ -183,7 +184,7 @@ model did.
 \end{center}
 \caption{Test 3: the two-layer suspension with and without the log-law
 velocity split, at three near-bed layer thicknesses, against the
-instantaneous exchange the case runs with.}
+instantaneous exchange that preceded it.}
 \end{figure}
 }{}
 

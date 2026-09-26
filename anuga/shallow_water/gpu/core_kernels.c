@@ -1800,7 +1800,10 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             // the equilibrium partition; the kernel writes the boundary
             // value of the upper-layer tracer as the equilibrium partition
             // of the fraction's own boundary concentration every step.
-            if (adapt_mode == 4 && nb_base >= 0) {
+            if (adapt_mode == 4 && nb_base >= 0 && ds > 0.0) {
+                /* ds > 0 is required: the partition is built from 1/d*, and
+                 * d* = 0 (deposition switched off through the per-fraction
+                 * d_star) has no stratification to carry. */
                 const anuga_int nidx = (nb_base + s) * n + k;
                 double f1 = (layer_frac > 0.0) ? layer_frac : a_h;
                 if (f1 > 0.5) f1 = 0.5;
@@ -1840,12 +1843,20 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                 // integral of u c over the profile, less than u h c.
                 if (vprof && t_sf != NULL) {
                     double b1 = 1.0, b2 = 1.0;
-                    if (f_c > 0.0) {
-                        const double Lp = 0.41 / sqrt(f_c);
-                        const double lf1 = log(f1);
+                    /* L = ln(h/z0) - 1 = kappa/sqrt(f_c). The log law is only
+                     * a profile at all once L exceeds |ln f1|, which is where
+                     * the near-bed mean is still forward-going; below that
+                     * (a thin or very rough cell, f_c large) the split is
+                     * meaningless and BOTH factors are left at 1. Without
+                     * this the upper factor runs away as h -> 0 at a wetting
+                     * front and the tracer flux collapses the time step. */
+                    const double Lp = (f_c > 0.0) ? 0.41 / sqrt(f_c) : 0.0;
+                    const double lf1 = log(f1);
+                    if (Lp > -lf1) {
                         b1 = 1.0 + lf1 / Lp;
                         if (b1 < 0.05) b1 = 0.05;
                         b2 = 1.0 - f1 * lf1 / ((1.0 - f1) * Lp);
+                        if (b2 > 2.0) b2 = 2.0;
                     }
                     const double m1n = m_pos - m2n;
                     t_sf[nidx] = b2;

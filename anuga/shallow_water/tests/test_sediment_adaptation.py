@@ -39,6 +39,7 @@ def uniform_flow(mode='legacy', diameter=2.0e-4, c0=0.01, tau_c_star=0.04,
     d.set_boundary({'left': Bd, 'right': Bd, 'top': Br, 'bottom': Br})
     d.initialize_sediment_operator(bed_evolution=False)
     d.set_sediment_friction('larsen_lamb', k_s=K_S)
+    dep.setdefault('adaptation', 'none')      # [D-5] is the default; 'plain' here is not
     d.set_deposition(law='d_star', near_bed=near_bed, **dep)
     d.add_sediment_fraction('sand', diameter=diameter, d_star=1.0,
                             tau_c_star=tau_c_star, initial_concentration=c0)
@@ -170,8 +171,15 @@ def test_bad_settings():
         d.set_deposition(adaptation='armanini', adaptation_alpha=2.0)
     d.set_deposition(adaptation='armanini')
     assert 'adaptation [D-3]' in d.sediment_summary()
-    d.set_deposition()
+    d.set_deposition()                       # [D-5] is the default closure
+    assert 'adaptation [D-5]' in d.sediment_summary()
+    assert 'velocity profile' in d.sediment_summary()
+    d.set_deposition(adaptation='none')
     assert 'adaptation' not in d.sediment_summary()
+    with pytest.raises(ValueError):
+        d.set_deposition(adaptation='none', velocity_profile=True)
+    with pytest.raises(ValueError):
+        d.set_deposition(layer_fraction=0.7)
 
 
 # ------------------------------------------------ [D-4] carried near-bed ratio
@@ -191,7 +199,8 @@ def _channel(adapt, nx=60, length=300.0, bed=None, mode='legacy', c0=0.0, U=1.0)
     d.set_boundary({'left': Bd_in, 'right': Bd_out, 'top': Br, 'bottom': Br})
     d.initialize_sediment_operator(bed_evolution=False)
     d.set_sediment_friction('larsen_lamb', k_s=K_S)
-    d.set_deposition(law='d_star', near_bed='rouse', adaptation=adapt)
+    d.set_deposition(law='d_star', near_bed='rouse', adaptation=adapt,
+                     layer_fraction=0.0, velocity_profile=False)   # the bare [D-5]
     d.add_sediment_fraction('sand', diameter=2.0e-4, initial_concentration=c0)
     d.set_tracer_boundary('sand', 'left', c0)
     return d
@@ -284,7 +293,8 @@ def test_two_layer_keeps_the_equilibrium_and_lengthens_the_adaptation(mode):
     two = _channel('two_layer', mode=mode)
     for d in (plain, two):
         d.set_deposition(law='d_star', near_bed='rouse', reference_height_floor=0.1,
-                         adaptation='two_layer' if d is two else 'none')
+                         adaptation='two_layer' if d is two else 'none',
+                         layer_fraction=0.0, velocity_profile=False)
         for _ in d.evolve(yieldstep=100.0, finaltime=900.0):
             pass
     x = plain.centroid_coordinates[:, 0]
@@ -306,7 +316,7 @@ def test_two_layer_partition_matches_the_rouse_ratio_at_equilibrium():
     from anuga import Domain
     d = _channel('two_layer')
     d.set_deposition(law='d_star', near_bed='rouse', reference_height_floor=0.1,
-                     adaptation='two_layer')
+                     adaptation='two_layer', layer_fraction=0.0, velocity_profile=False)
     for _ in d.evolve(yieldstep=100.0, finaltime=900.0):
         pass
     x = d.centroid_coordinates[:, 0]
@@ -340,7 +350,7 @@ def _profile_channel(mode, vp, nx=40, length=40.0):
     d.initialize_sediment_operator(porosity=0.4, bed_evolution=False)
     d.set_sediment_friction('larsen_lamb', k_s=0.025)
     d.set_deposition(law='d_star', near_bed='rouse', reference_height_floor=0.1,
-                     adaptation='two_layer', velocity_profile=vp)
+                     adaptation='two_layer', layer_fraction=0.0, velocity_profile=vp)
     d.add_sediment_fraction('sand', diameter=1.4e-4, initial_concentration=1e-4)
     d.set_tracer_boundary('sand', 'left', 1e-4)
     for _ in d.evolve(yieldstep=30.0, finaltime=60.0):

@@ -42,10 +42,10 @@ closure & $\lambda$ & \multicolumn{2}{c}{ln-ratio RMS} & bias \\
  & & run 1 & run 2 & \\
 \hline
 measured & 1.44, 1.55 & & & \\
-instantaneous exchange [D-1] & 2.99 & 0.73 & 0.58 & $-0.52$, $-0.38$ \\
+instantaneous exchange [D-1] (the old default) & 2.99 & 0.73 & 0.58 & $-0.52$, $-0.38$ \\
 carried near-bed ratio [D-4] & 2.99 & 0.73 & 0.58 & $-0.52$, $-0.38$ \\
 Galappatti lag [D-3] & 1.49 & 0.24 & 0.34 & $+0.21$, $+0.31$ \\
-\textbf{two-layer, velocity split [D-5]} & \textbf{1.50} & \textbf{0.11} & \textbf{0.08} & $-0.03$, $+0.07$ \\
+\textbf{two-layer, velocity split [D-5]} (the default) & \textbf{1.50} & \textbf{0.11} & \textbf{0.08} & $-0.03$, $+0.07$ \\
 \hline
 \end{tabular}
 \end{center}
@@ -64,7 +64,8 @@ the sharp drop in the first metre, leaving it 20 to 30\,\% high throughout.
 The two-layer suspension with the log-law velocity split gets both: the
 first metre deposits fast out of the near-bed layer the equilibrium profile
 arrives with, and the column then settles into the self-preserving shape and
-decays at 1.50. The case runs with it and requires
+decays at 1.50. The case runs it, and since [D-5] with the velocity split is now the
+default closure the case simply takes the defaults. It requires
 $\mathrm{RMS}\,\ln(\text{model}/\text{measured}) < 0.15$ from 1~m on; run~1
 runs routinely and run~2 joins it under the long option.
 
