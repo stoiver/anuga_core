@@ -1,6 +1,7 @@
 # outputs of a run; the sources are the *.py, *.csv, report.tex and results.tex
 *.png
 *.npz
+*.json
 *.pdf
 *.log
 *.aux
