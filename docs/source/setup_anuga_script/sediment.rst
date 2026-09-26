@@ -127,52 +127,55 @@ the change took.
 The interface at a glance
 -------------------------
 
-Choices are made by naming the **physics**, never by setting a flag:
+Choices are made by naming the **physics**, never by setting a flag. Each
+call below links to its entry in the :class:`~anuga.Domain` reference, where
+the docstring lists every argument, the values it accepts and what each one
+means:
 
 .. list-table::
    :header-rows: 1
-   :widths: 54 36 10
+   :widths: 58 32 10
 
    * - call
      - chooses
      - spec
-   * - ``initialize_sediment_operator(...)``
+   * - :meth:`initialize_sediment_operator(...) <anuga.Domain.initialize_sediment_operator>`
      - sediment transport on, and the domain-wide parameters
      - 2.2
-   * - ``add_sediment_fraction(name, diameter, ...)``
+   * - :meth:`add_sediment_fraction(name, diameter, ...) <anuga.Domain.add_sediment_fraction>`
      - a sediment fraction to carry, and its own properties
      - 2.2
-   * - ``set_bed_material(material, ...)``
+   * - :meth:`set_bed_material(material, ...) <anuga.Domain.set_bed_material>`
      - the erosion law
      - 4.1.1
-   * - ``set_deposition(law, near_bed, ...)``
+   * - :meth:`set_deposition(law, near_bed, ...) <anuga.Domain.set_deposition>`
      - the deposition law and near-bed ratio
      - 4.4
-   * - ``set_shear_closure(closure)``
+   * - :meth:`set_shear_closure(closure) <anuga.Domain.set_shear_closure>`
      - how ``tau_b`` is formed
      - 3.2
-   * - ``set_sediment_friction(mode, ...)``
+   * - :meth:`set_sediment_friction(mode, ...) <anuga.Domain.set_sediment_friction>`
      - the friction factor feeding ``tau_b``
      - 3.3
-   * - ``set_bedload(formula, ...)``
+   * - :meth:`set_bedload(formula, ...) <anuga.Domain.set_bedload>`
      - bedload transport, or off
      - 5
-   * - ``set_sediment_parameters(...)``
+   * - :meth:`set_sediment_parameters(...) <anuga.Domain.set_sediment_parameters>`
      - the scalar physical properties
      - 2.4, 6
-   * - ``set_erodible_base(...)``
+   * - :meth:`set_erodible_base(...) <anuga.Domain.set_erodible_base>`
      - the depth below which nothing erodes
      - 4.5
-   * - ``set_erodible_region(...)``
+   * - :meth:`set_erodible_region(...) <anuga.Domain.set_erodible_region>`
      - where erosion may act at all
      - 4.5
-   * - ``set_angle_of_repose(...)``
+   * - :meth:`set_angle_of_repose(...) <anuga.Domain.set_angle_of_repose>`
      - relaxation of over-steep bed slopes
      - 7
-   * - ``set_tracer_source(name, values)``
+   * - :meth:`set_tracer_source(name, values) <anuga.Domain.set_tracer_source>`
      - an external source
      - 2.6
-   * - ``set_tracer_boundary(name, tag, value)``
+   * - :meth:`set_tracer_boundary(name, tag, value) <anuga.Domain.set_tracer_boundary>`
      - inflow concentration, per boundary tag
      - 2.5
 
