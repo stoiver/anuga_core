@@ -17,8 +17,10 @@ import matplotlib.pyplot as plt
 
 from validate_settling import compare, measured
 
-LABELS = {'none': 'instantaneous exchange [D-1], the default', 'armanini': 'Galappatti lag [D-3]',
-          'carried': 'carried near-bed ratio [D-4] (same as [D-1] here)', 'two_layer': 'two-layer + velocity split [D-5] (the case)'}
+LABELS = {'none': 'instantaneous exchange [D-1], the old default',
+          'armanini': 'Galappatti lag [D-3]',
+          'carried': 'carried near-bed ratio [D-4] (same as [D-1] here)',
+          'two_layer': 'two-layer + velocity split [D-5], the default'}
 for run in (1, 2):
     files = sorted(glob.glob('settling_run%d_*.npz' % run))
     if not files:
