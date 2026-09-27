@@ -65,7 +65,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14', '3.15']
 
     steps:
       - uses: actions/checkout@v7
@@ -89,7 +89,10 @@ jobs:
           # (GIL) build: python_abi uses the cp3XX tag consistently across
           # versions, so this excludes cp3XXt and is a no-op for 3.10-3.13.
           pytag=$(echo "${{ matrix.python-version }}" | tr -d .)
-          conda create -n anuga_env -c conda-forge \
+          # conda-forge/label/python_rc carries the CPython release candidates
+          # (3.15 until it ships). It is empty of released versions, so listing
+          # it is a no-op for 3.10-3.14; drop it once 3.15 is final.
+          conda create -n anuga_env -c conda-forge/label/python_rc -c conda-forge \
             python=${{ matrix.python-version }} "python_abi=${{ matrix.python-version }}=*_cp${pytag}" pip \
             meson-python meson ninja cython pybind11 numpy pkg-config
 
@@ -195,7 +198,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14', '3.15']
 
     steps:
       - uses: actions/checkout@v7
@@ -217,7 +220,8 @@ jobs:
         run: |
           # Pin the standard (GIL) CPython ABI (see build-wheels above).
           pytag=$(echo "${{ matrix.python-version }}" | tr -d .)
-          CONDA_SUBDIR=osx-64 conda create -n anuga_env -c conda-forge \
+          CONDA_SUBDIR=osx-64 conda create -n anuga_env \
+            -c conda-forge/label/python_rc -c conda-forge \
             python=${{ matrix.python-version }} "python_abi=${{ matrix.python-version }}=*_cp${pytag}" pip \
             meson-python meson ninja cython pybind11 numpy pkg-config compilers
           conda activate anuga_env
