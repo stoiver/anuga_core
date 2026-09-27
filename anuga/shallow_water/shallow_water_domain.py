@@ -3373,7 +3373,28 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
     # Plotting methods
     #---------------------------------------------------------------
     def set_plotter(self, *args, **kwargs):
-        """Set the plotter for this domain
+        """Attach a `Domain_plotter` to this domain and return it.
+
+        The plotter is created on the first call and kept on the domain as
+        `domain.dplotter`; later calls return the one already there and
+        ignore their arguments. Its arrays and plotting methods are also
+        mirrored onto the domain, so `domain.plot_depth_frame()` and
+        `plotter.plot_depth_frame()` are the same call.
+
+        Parameters
+        ----------
+        *args, **kwargs
+            Passed to :class:`~anuga.Domain_plotter` on the first call, e.g.
+            `absolute=True` to plot in the domain's absolute coordinates.
+
+        Returns
+        -------
+        Domain_plotter
+            The plotter, so it can be named directly::
+
+                dplotter = domain.set_plotter(absolute=True)
+
+            rather than reaching for `domain.dplotter` afterwards.
         """
 
         #FIXME SR: Should look into seeing if the triang can use the
@@ -3410,6 +3431,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         self.plot_speed_frame = self.dplotter.plot_speed_frame
         self.make_speed_animation = self.dplotter.make_speed_animation
 
+        return self.dplotter
 
     def triplot(self, *args,  **kwargs):
 

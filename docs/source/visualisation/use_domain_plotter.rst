@@ -58,6 +58,16 @@ directly to the domain for convenience.
    domain.set_plotter(plot_dir='_plot', min_depth=0.01)
    # Now domain.plot_depth_frame(), domain.save_depth_frame(), etc. are available
 
+It also returns the plotter it attached, so you can name it in the same
+line rather than reaching for ``domain.dplotter`` afterwards:
+
+.. code-block:: python
+
+   dplotter = domain.set_plotter(absolute=True)
+
+The plotter is created on the first call and kept as ``domain.dplotter``;
+a later call returns that same one and ignores its arguments.
+
 .. list-table:: Constructor arguments
    :header-rows: 1
    :widths: 25 15 60

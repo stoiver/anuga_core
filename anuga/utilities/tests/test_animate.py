@@ -755,3 +755,37 @@ class Test_tile_client_config(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class Test_set_plotter_returns_the_plotter(unittest.TestCase):
+    """`domain.set_plotter()` hands back the plotter it attaches, so the
+    common two-line form collapses to one."""
+
+    def _domain(self):
+        import anuga
+        d = anuga.rectangular_cross_domain(6, 6, len1=10.0, len2=10.0)
+        d.store = False
+        d.set_quantity('elevation', 0.0)
+        d.set_quantity('stage', 1.0)
+        return d
+
+    def test_it_returns_the_plotter_it_attached(self):
+        import anuga
+        d = self._domain()
+        plotter = d.set_plotter(absolute=True)
+        assert isinstance(plotter, anuga.Domain_plotter)
+        assert plotter is d.dplotter
+
+    def test_a_second_call_returns_the_same_plotter(self):
+        """The plotter is built once; later calls hand back the same one."""
+        d = self._domain()
+        first = d.set_plotter()
+        assert d.set_plotter() is first
+
+    def test_the_domain_still_mirrors_the_plotter(self):
+        """Returning it does not stop the arrays and methods being copied
+        onto the domain, which existing scripts rely on."""
+        d = self._domain()
+        plotter = d.set_plotter()
+        assert d.triang is plotter.triang
+        assert d.plot_depth_frame == plotter.plot_depth_frame
