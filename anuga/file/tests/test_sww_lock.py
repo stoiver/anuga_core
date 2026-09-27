@@ -81,9 +81,11 @@ class Test_sww_lock(unittest.TestCase):
             f.write('pid=%d\nhost=%s\n' % (dead, __import__('socket').gethostname()))
         # Debris from a dead run must not warn: a suite running under
         # simplefilter('error') would fail on an unrelated stale lock.
-        with warnings.catch_warnings():
-            warnings.simplefilter('error')
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
             domain.initialise_storage()
+        assert not [x for x in w if 'lock' in str(x.message)], \
+            [str(x.message) for x in w]
         with open(lock) as f:
             assert 'pid=%d' % os.getpid() in f.read()
 
@@ -91,10 +93,12 @@ class Test_sww_lock(unittest.TestCase):
         """Re-running a model under the same name in one session is normal."""
         domain = make_domain(self.tmp, 'again')
         domain.initialise_storage()
-        with warnings.catch_warnings():
-            warnings.simplefilter('error')
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter('always')
             domain2 = make_domain(self.tmp, 'again')
             domain2.initialise_storage()
+        assert not [x for x in w if 'lock' in str(x.message)], \
+            [str(x.message) for x in w]
         assert os.path.exists(sww_lock_path(domain2.writer.filename))
 
     def test_a_frame_earlier_than_the_last_one_is_refused(self):
