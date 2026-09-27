@@ -75,7 +75,14 @@ jobs:
         with:
           miniforge-version: latest
           use-mamba: true
-          python-version: ${{ matrix.python-version }}
+          # No python-version here. The action would create its own 'test' env
+          # from conda-forge alone, which cannot resolve a CPython release
+          # candidate: 3.15 failed with "_python_rc does not exist (perhaps a
+          # missing channel)" before any of our steps ran. Nothing uses that
+          # env -- every later step activates anuga_env, built below with the
+          # right channels -- so it is simply not asked for. This is what
+          # build-wheels-osx64 already does, and why it passed on 3.15 when
+          # these three did not.
           auto-update-conda: true
           conda-remove-defaults: true
 
