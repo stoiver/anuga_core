@@ -70,7 +70,7 @@ class Test_sww_lock(unittest.TestCase):
         assert 'process %d' % other in str(cm.exception)
         os.remove(lock)
 
-    def test_a_stale_lock_is_taken_over_with_a_warning(self):
+    def test_a_stale_lock_is_taken_over_silently(self):
         domain = make_domain(self.tmp, 'stale')
         lock = sww_lock_path(os.path.join(self.tmp, 'stale.sww'))
         # A process that has certainly exited
@@ -79,11 +79,11 @@ class Test_sww_lock(unittest.TestCase):
         dead = proc.pid
         with open(lock, 'w') as f:
             f.write('pid=%d\nhost=%s\n' % (dead, __import__('socket').gethostname()))
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter('always')
+        # Debris from a dead run must not warn: a suite running under
+        # simplefilter('error') would fail on an unrelated stale lock.
+        with warnings.catch_warnings():
+            warnings.simplefilter('error')
             domain.initialise_storage()
-        assert any('no longer running' in str(x.message) for x in w), \
-            [str(x.message) for x in w]
         with open(lock) as f:
             assert 'pid=%d' % os.getpid() in f.read()
 

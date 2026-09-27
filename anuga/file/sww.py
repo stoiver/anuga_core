@@ -118,9 +118,13 @@ def acquire_sww_lock(filename):
     """Take the writer lock for `filename`, or raise SWWFileInUseError.
 
     A lock left by a process that is no longer running (a crash, a kill)
-    is taken over with a warning. A lock held by this very process is
-    taken over silently: re-running a model under the same name in one
-    session is normal. A lock from another host cannot be checked for
+    is taken over SILENTLY: the file is debris, and the run that left it
+    can no longer be writing. Warning about it made an unrelated run fail
+    under `warnings.simplefilter('error')`, which is a state a test suite
+    reaches easily; the takeover is logged at DEBUG instead, so it is still
+    on the record for anyone who turns that level on. A lock held by this very process is
+    likewise taken over silently: re-running a model under the same name in
+    one session is normal. A lock from another host cannot be checked for
     liveness and is respected; the message says how to clear it.
     """
     import atexit
@@ -139,9 +143,8 @@ def acquire_sww_lock(filename):
         if pid == me:
             pass                                    # our own earlier run
         elif same_host and pid is not None and not _pid_is_alive(pid):
-            warnings.warn(
-                'Taking over the SWW writer lock %s left by process %d, '
-                'which is no longer running' % (path, pid), stacklevel=3)
+            log.debug('Taking over the SWW writer lock %s left by process '
+                      '%d, which is no longer running' % (path, pid))
         else:
             who = 'process %s on %s' % (pid, other_host or host)
             raise SWWFileInUseError(
