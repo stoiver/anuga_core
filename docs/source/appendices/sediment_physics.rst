@@ -525,15 +525,24 @@ millimetre -- the sign of the bed change reverses. See
 
 --------------
 
+.. _sediment_deposition:
+
 Deposition
 ----------
 
-Deposition is the settling flux out of the water column. The default, after
-[P14]_ and [FG21]_, is the near-bed concentration times the settling velocity:
+Deposition is the settling flux out of the water column: the near-bed
+concentration times the settling velocity, after [P14]_ and [FG21]_.
 
 .. math::
 
    D = c_b\, v_s = d^{*}(Z)\, c\, v_s \qquad \text{[D-1]}
+
+What :math:`c_b` is depends on the adaptation closure below. Taking it as
+:math:`d^{*} c`, the equilibrium stratification of the moment, was the
+default up to ANUGA 4.0 and is still available as
+``set_deposition(adaptation='none')``; since 4.1 the default carries
+:math:`c_b` as a state (:spec:`D-5`), because three flume datasets show the
+instantaneous form depositing two to four times too fast.
 
 The alternative, from [RDy26]_, is a threshold form with a critical
 *deposition* stress, which switches deposition off in flow strong enough to
@@ -794,7 +803,7 @@ exchange :math:`\alpha`, and with the well-mixed ``d* = 1`` the option
 fraction's reference height with the same floor as ``'rouse'``.
 
 **The default.** ``'two_layer'`` with ``layer_fraction=0.2`` and
-``velocity_profile=True`` is what ``set_deposition`` selects if you say
+``velocity_profile=True`` is what :meth:`~anuga.Domain.set_deposition` selects if you say
 nothing; ``adaptation='none'`` restores the instantaneous exchange that
 was the default up to ANUGA 4.0. The near-bed tracers it registers at the
 first ``evolve`` are the only change to a script's tracer list, and they

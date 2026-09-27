@@ -813,7 +813,7 @@ class Domain(Generic_Domain):
         # spec assumes. See set_erodible_base().
         self.sediment_z_base = None
         self.sediment_has_z_base = 0
-        self.sediment_shear_factor = None      # [T-12] per-centroid factor on the sediment's bed shear
+        self.sediment_shear_factor = None      # [T-16] per-centroid factor on the sediment's bed shear
         # The two user intents behind sediment_z_base, kept apart so they
         # compose: a base is a DEPTH limit, a region is a WHERE limit, and
         # setting one must not silently discard the other. Both are folded
@@ -1466,7 +1466,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             del self._gpu_boundary_info_initialized
 
     def set_shear_amplification(self, factor=None):
-        """Multiply the bed shear the sediment sees by a per-cell factor `[T-12]`.
+        """Multiply the bed shear the sediment sees by a per-cell factor `[T-16]`.
 
         The depth-averaged shear is the uniform-flow one and misses the
         local amplification at obstacles: at a bridge pier the horseshoe
@@ -1765,57 +1765,34 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             by the adaptation lag. Default 0.01. Set to 0 to reach anugaSed's
             regime, which applies no floor -- see spec 12, D4b, where this
             is the largest single divergence from them.
-        adaptation : {'none', 'armanini', 'constant'}
-            `[D-3]`, the adaptation lag of the near-bed concentration.
-            `'none'` (default): the exchange `E - D = d* v_s (c_eq - c)`
-            responds at once to the local flow, as if the vertical profile
-            were always the equilibrium one. `'armanini'`: the exchange is
-            `alpha v_s (c_eq - c)` after Galappatti & Vreugdenhil (1985),
-            with `alpha(w_s/u*, a/h)` from Armanini & Di Silvio's (1988)
-            closed form, `1/alpha = a/h + (1 - a/h) exp[-1.5 (a/h)^(-1/6)
-            w_s/u*]`. Both erosion and deposition are scaled by `alpha/d*`,
-            so every equilibrium concentration is unchanged and only the
-            transient slows: the load adapts over `h/(alpha w_s)` instead of
-            `h/(d* w_s)`. `alpha` is 1 in the well-mixed limit and `h/a`
-            when fully stratified, so pair it with `near_bed='rouse'`.
-            `'constant'` uses `adaptation_alpha` everywhere. `'carried'`
-            (`[D-4]`) keeps the stratification of the suspension as a state:
-            each fraction gets a tracer `<name>_nearbed_ratio` holding
-            `r_b = c_b / c`, registered at the first `evolve` (so all
-            fractions must be added before it), advected with the flow and
-            relaxed toward `d*` over the settling time `(z_c - a)/w_s` (from
-            the profile centroid) when the flow has slowed and `d*` has
-            risen above it; in the other direction it responds at once.
-            Deposition uses `r_b c`, so a parcel entering slower water
-            deposits first at the stratification it brought with it. Unlike
-            `'armanini'` this has memory and is one-sided; its equilibrium
-            is unchanged, and it does not act where the flow is uniform or
-            quickening. It does not slow the loading of clear water from the
-            bed, which needs a layered suspension. A ratio of 0 means not
-            set and takes the local `d*`, which is what the initial state
-            and the inflow boundaries carry by default. `'two_layer'`
-            (`[D-5]`) is that layered suspension: a near-bed layer of
-            thickness `a` (the reference height, floor included) and the
-            rest of the column, each fraction carrying its upper-layer mass
-            in a tracer `<name>_upper` (registered at the first `evolve`)
-            with the lower layer as the remainder of its total. Settling
-            moves sediment down and an exchange coefficient up, set so that
-            the two-layer equilibrium reproduces the Rouse ratio `d*`
-            exactly; deposition is `v_s` times the lower-layer
-            concentration. Both directions lag: a parcel entering slower
-            water keeps its upper-layer load and settles it out over about
-            `h/w_s`, and a bed loading clear water fills the lower layer
-            first, so the depth-averaged load grows only as sediment is
-            exchanged up. Both layers are advected with the depth-averaged
-            velocity. Nothing to set at inflows; the partition there is the
-            equilibrium one.
+        adaptation : {'two_layer', 'carried', 'armanini', 'constant', 'none'}
+            How the near-bed concentration follows a change of flow.
+            `'two_layer'` (**the default**, `[D-5]`) splits the column into a
+            near-bed layer and the rest, each fraction carrying its
+            upper-layer mass in a tracer `<name>_upper`; deposition is `v_s`
+            times the lower-layer concentration, and the exchange between
+            the layers is set so the equilibrium is still the Rouse ratio
+            `d*`. `'carried'` (`[D-4]`) carries only the ratio
+            `r_b = c_b / c`, in a tracer `<name>_nearbed_ratio`, and relaxes
+            it toward `d*` over a settling time when the flow slows.
+            `'armanini'` (`[D-3]`) keeps no state and scales the exchange
+            rate by Galappatti and Vreugdenhil's `alpha` in Armanini and Di
+            Silvio's closed form. `'constant'` uses `adaptation_alpha`
+            everywhere. `'none'` deposits at `d* c` the instant the flow
+            changes, which was the default up to ANUGA 4.0.
+
+            All of them leave every equilibrium concentration untouched and
+            change only the transient. The layered ones register their
+            tracers at the first `evolve`, so every fraction must be added
+            before it. See :ref:`sediment_deposition` for which to choose,
+            and the Notes below for why the default changed.
         adaptation_alpha : float, optional
             `alpha` for `adaptation='constant'`; must be > 0.
         layer_fraction : float, optional
-            `'two_layer'` only: the near-bed layer thickness as a fraction of
-            the depth, in (0, 0.5]. Default `None`: the reference height
-            `a/h` with its floor. The exchange is re-derived so the
-            equilibrium stays the Rouse ratio whatever the thickness.
+            `'two_layer'` only: the near-bed layer thickness as a fraction
+            of the depth, in [0, 0.5], default 0.2. Zero takes the reference
+            height `a/h` with its floor instead. The exchange is re-derived
+            so the equilibrium stays the Rouse ratio whatever the thickness.
         rouse_beta : {'none', 'van_rijn'}, optional
             Correction to the Rouse number of the `'rouse'` fit. `'van_rijn'`
             divides `Z` by `1 + 2 (w_s/u*)^2` (at most 2), van Rijn's
@@ -1825,11 +1802,13 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             Factor on the (corrected) Rouse number, default 1. Van Rijn's
             trench profiles need about 0.65 on top of `'van_rijn'`.
         velocity_profile : bool, optional
-            With `'two_layer'`: advect the near-bed layer and the upper
-            layer at their log-law mean velocities instead of the
-            depth-averaged one. The near-bed layer, which holds most of
-            the sediment, then lags the flow, and the transport is the
-            profile integral of u c rather than u h c.
+            `'two_layer'` only (`[D-5v]`): advect each layer at its log-law
+            mean velocity rather than the depth-averaged one, so the
+            near-bed layer, which holds most of the sediment, lags the flow
+            and the transport is the profile integral of `u c` rather than
+            `u h c`. Default `None`, meaning on with `'two_layer'` and off
+            otherwise. A case that sets an inflow concentration to carry a
+            known load must divide it by the factor this applies.
         exchange_factor : float, optional
             `'two_layer'` only: a factor on the rate at which the partition
             relaxes toward its equilibrium, default 1 (the two-box
@@ -1837,11 +1816,27 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
         Notes
         -----
-        Without the lag, van Rijn's pick-up flume reaches its equilibrium
-        load within about 15 depths where the flume took more than 40, and
-        his trench fills about 25 % too fast (issue #389): the near-bed
-        concentration in a decelerating flow is not yet the equilibrium one
-        because the grains high in the column have not settled through it.
+        **Why the default is not `'none'`.** `[D-1]` deposits at `d* c`, and
+        `d*` is the *equilibrium* stratification of the suspension, not the
+        rate at which it reaches that equilibrium. Using one for the other
+        deposits too fast, by a factor that grows with the settling velocity
+        relative to the shear: 1.2 at `w_s/u* = 0.05`, 2.0 at 0.2, 4.1 at
+        1.0. Three flume datasets agree. In Wang and Ribberink's (1986)
+        settling flume, which has deposition and nothing else, the measured
+        decay coefficient is 1.44 and 1.55 where their own theory gives 1.47
+        and `'none'` gives 2.99; van Rijn's pick-up flume reaches its
+        equilibrium load within about 15 depths where the flume took more
+        than 40, and his trench fills about 25 % too fast (issue #389).
+        `'two_layer'` with the velocity split gives 1.50 on the first, and
+        the trench and pick-up flume improve with it too.
+
+        Results are unchanged wherever `d* = 1`, the well-mixed limit that
+        `near_bed='constant'` gives by default, because the partition
+        reduces to `[D-1]` exactly there.
+
+        See :ref:`sediment_deposition` for the closures side by side, and
+        the sediment validation cases under `validation_tests/sediment/` for
+        the measurements.
         """
         laws = {'d_star': 0, 'threshold': 1}
         if law not in laws:
@@ -1902,67 +1897,59 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                           freeze_slope=False):
         """Select how bed shear stress is obtained (spec 3.1 / 3.4).
 
-        `'quadratic_drag'` (default) -- `[T-1]`, `tau_b = rho f_c |v|^2`. Makes
-        no equilibrium assumption.
-
-        `'depth_slope'` -- `[T-7]`, `tau_b = rho g h S` with `S` the bed slope
-        magnitude, as `aSM16` Eqs 6-7 and hence anugaSed. This is the steady
-        uniform (normal) flow approximation: it assumes the energy slope equals
-        the **bed** slope and the flow is locally in equilibrium.
-
-        `S` is the magnitude of the least-squares gradient of the bed (or, for
-        `'energy_slope'`, the stage) centroid values over the cell and its
-        neighbours, one-sided at boundaries, so a plane gives its slope in
-        every cell, walls and corners included. It is NOT read from the edge
-        values, which the DE algorithms rebuild each step through the
-        hydrodynamic limiter (that gave zero slope along reflective walls).
-        A slope discontinuity is resolved over one cell either side.
-
-        With the bed evolving, `'depth_slope'` feeds back on itself: erosion
-        roughens the bed, a rougher bed has steeper local slopes, steeper
-        slopes erode faster. That is the closure, not the discretisation --
-        anugaSed contains it with the domain-global clamp the notes below
-        describe. Two explicit bounds are offered instead:
-
         Parameters
         ----------
+        closure : {'quadratic_drag', 'depth_slope', 'energy_slope'}
+            `'quadratic_drag'` (default) -- `[T-1]`, `tau_b = rho f_c |v|^2`,
+            which makes no equilibrium assumption.
+            `'depth_slope'` -- `[T-7]`, `tau_b = rho g h S` with `S` the bed
+            slope magnitude, as `aSM16` Eqs 6-7 and hence anugaSed: the
+            steady uniform (normal) flow approximation.
+            `'energy_slope'` -- `[T-7e]`, the same form with `S` the
+            **free-surface** slope, which under the shallow-water assumption
+            is the energy grade line, so it drops `[T-7]`'s equilibrium
+            assumption. It is what the older `Bed_shear_erosion_operator`
+            used (`EN_slope`).
         max_slope : float, optional
-            Cap on `S` for `'depth_slope'` and `'energy_slope'`, applied per
-            cell each step. `None` (default) or 0: no cap. A stated,
-            spatially uniform bound in place of anugaSed's undocumented
-            `S <- min(S, mean(S)/2)`.
+            Cap on `S` for the two slope closures, applied per cell each
+            step. `None` (default) or 0: no cap. A stated, spatially uniform
+            bound in place of anugaSed's undocumented `S <- min(S, mean(S)/2)`.
         freeze_slope : bool, optional
-            `'depth_slope'` only. Take `S` from the bed as it is when this is
-            called (or when the first grain size is registered, whichever is
-            later; call it after `set_quantity('elevation', ...)`) and keep
-            it for the run, instead of re-reading the evolving bed each
-            step. `S` is then the reach slope the closure was written for,
-            the feedback is gone, and the bed can evolve under it. See
-            :meth:`bed_slope_magnitude`.
-
-        Prefer `'quadratic_drag'` or `'energy_slope'` for morphological
-        runs; `'depth_slope'` with `freeze_slope=True` is the reproducible
-        way to run the anugaSed closure on a moving bed.
-
-        `'energy_slope'` -- `[T-7e]`, the same `tau_b = rho g h S` with `S` the
-        **free-surface** slope magnitude instead. Under the shallow-water
-        assumption the free surface is the energy grade line, so this drops
-        `[T-7]`'s equilibrium assumption and uses the slope actually driving
-        the flow. Prefer it wherever the bed slope is not a good proxy for the
-        energy slope: backwater, a pool-riffle sequence, a bed that is flat but
-        drawing down, a dam break. It is also what the older
-        `Bed_shear_erosion_operator` used (`EN_slope`), so it is the closure to
-        pick when reproducing a model built on that operator.
+            `'depth_slope'` only. Take `S` from the bed as it stands when
+            this is called, or when the first grain size is registered,
+            whichever is later, and keep it for the run instead of re-reading
+            the evolving bed. See :meth:`bed_slope_magnitude`.
 
         Notes
         -----
-        Spec 3.4 recommends `[T-1]` and keeps `[T-7]` only for reproducing
-        published anugaSed results, for three reasons: normal-flow equilibrium
-        is exactly what fails in the dam-breach and outburst floods this work
-        targets; `S` should be the energy slope, not the bed slope (substituting
-        the energy slope into `[T-7]` recovers `[T-1]` identically); and the
-        domain-global slope clamp anugaSed applies has no counterpart in their
-        own manual.
+        **Which to use.** Prefer `'quadratic_drag'`, or `'energy_slope'`
+        wherever the bed slope is not a good proxy for the energy slope:
+        backwater, a pool-riffle sequence, a flat bed that is drawing down, a
+        dam break. `'depth_slope'` with `freeze_slope=True` is the
+        reproducible way to run the anugaSed closure on a moving bed.
+
+        **How `S` is formed.** The magnitude of the least-squares gradient of
+        the bed, or of the stage for `'energy_slope'`, over the cell and its
+        neighbours, one-sided at boundaries, so a plane gives its slope in
+        every cell, walls and corners included. It is NOT read from the edge
+        values, which the DE algorithms rebuild each step through the
+        hydrodynamic limiter -- that gave zero slope along reflective walls.
+        A slope discontinuity is resolved over one cell either side.
+
+        **The feedback.** With the bed evolving, `'depth_slope'` feeds back
+        on itself: erosion roughens the bed, a rougher bed has steeper local
+        slopes, steeper slopes erode faster. That is the closure, not the
+        discretisation; anugaSed contains it with a domain-global clamp, and
+        `max_slope` and `freeze_slope` are the two explicit bounds offered in
+        its place.
+
+        **Why `[T-1]` is recommended.** Spec 3.4 keeps `[T-7]` only for
+        reproducing published anugaSed results, for three reasons:
+        normal-flow equilibrium is exactly what fails in the dam-breach and
+        outburst floods this work targets; `S` should be the energy slope,
+        not the bed slope, and substituting it into `[T-7]` recovers `[T-1]`
+        identically; and the domain-global slope clamp anugaSed applies has
+        no counterpart in their own manual.
 
         **This does not reproduce anugaSed exactly.** Their code additionally
         divides the elevation gradient by a domain-mean cell size and applies
@@ -2264,18 +2251,22 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         rho_w : float
             Water density, used to form the dimensional bed shear stress.
         morphological_factor : float
-            Morphological acceleration factor `M` (Delft3D's MORFAC).
-            Every step's bed change, from the suspended exchange `[G-4]`
-            and from bedload `[G-5]`, is multiplied by `M`; the erodible
-            base `[L-5]` is respected. The water column is untouched, so
-            the suspension still adapts on its own (fast) time scale while
-            the bed reaches a morphological time `M` times longer than the
-            hydrodynamic one simulated. Valid while the bed changes little
-            over one hydrodynamic adjustment time; a tidal case needs `M`
-            such that `M` tidal cycles average out, and a flume with a
-            steady flow tolerates `M` of 10 or more. Default 1 (off). The
-            bed and water-column sediment budgets then differ by exactly
-            `M`, by construction.
+            Morphological acceleration factor `M` (Delft3D's MORFAC), which
+            multiplies every step's bed change so the bed reaches a
+            morphological time `M` times longer than the hydrodynamic one
+            simulated. Default 1 (off). See the Notes.
+
+        Notes
+        -----
+        **The morphological factor.** `M` multiplies the bed change from the
+        suspended exchange `[G-4]` and from bedload `[G-5]` alike, and the
+        erodible base `[L-5]` is still respected. The water column is
+        untouched, so the suspension keeps adapting on its own fast time
+        scale while the bed runs ahead. That holds while the bed changes
+        little over one hydrodynamic adjustment time: a tidal case needs an
+        `M` for which `M` tidal cycles average out, while a flume in steady
+        flow tolerates 10 or more. The bed and water-column sediment budgets
+        then differ by exactly `M`, by construction.
         """
         if morphological_factor is not None:
             if not morphological_factor > 0.0:
@@ -2317,21 +2308,34 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         if self.n_sediment_classes == 0:
             return 'sediment: no sediment fractions registered'
 
-        ero = {0: "Shields / Smith-McLean, non-cohesive (sand, gravel)   [E-1]",
+        ero = {0: "Shields / Smith-McLean, non-cohesive (sand, gravel), "
+                  "gamma0=%.4g   [E-1]" % self.sediment_gamma0,
                1: "Hanson & Simon, cohesive (silt, clay)   [E-3]",
                2: "Partheniades (RDycore)   [E-4]",
                3: "de Leeuw et al. 2020, non-cohesive bed material load "
-                  "(A=%.3g alpha=%.3g beta=%.3g)   [E-6]"
-                  % (self.sediment_dl_A, self.sediment_dl_alpha, self.sediment_dl_beta),
+                  "(A=%.3g alpha=%.3g beta=%.3g, X0=%.3g, k_s=%s)   [E-6]"
+                  % (self.sediment_dl_A, self.sediment_dl_alpha,
+                     self.sediment_dl_beta, self.sediment_dl_threshold,
+                     ('%.4g m' % self.sediment_dl_ks) if self.sediment_dl_ks > 0.0
+                     else '%.3g d' % self.sediment_dl_ks_factor),
                }[self.sediment_erosion_mode]
         dep = {0: "D = d* c v_s   [D-1]", 1: "D = v_s c (1 - tau_b/tau_d)   [D-2]"
                }[self.sediment_deposition_mode]
+        if self.sediment_deposition_mode == 0 and self.sediment_adaptation_mode in (3, 4):
+            # the near-bed concentration is carried, not d* c: say so here
+            # rather than leave [D-1] to be read as the whole story
+            dep = ("D = c_b v_s with c_b carried   [D-1] under %s"
+                   % ('[D-4]' if self.sediment_adaptation_mode == 3 else '[D-5]'))
         dstar = {0: "constant, per fraction", 1: "Rouse profile   [S-4]"
                  }[self.sediment_d_star_mode]
         shear = {0: "quadratic drag, tau_b = rho f_c |v|^2   [T-1]",
                  1: "depth-slope, tau_b = rho g h S (bed slope; aSM16)   [T-7]",
                  2: "energy-slope, tau_b = rho g h S (free surface)   [T-7e]"
                  }[self.sediment_shear_closure]
+        if self.sediment_shear_factor is not None:
+            f = self.sediment_shear_factor
+            shear += ("; amplified by %.3g to %.3g per cell   [T-16]"
+                      % (f.min(), f.max()))
         if self.sediment_shear_closure in (1, 2):
             bounds = []
             if self.sediment_max_slope > 0.0:
@@ -2367,6 +2371,9 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
              '  shear closure      : %s' % shear,
              '  friction closure   : %s' % fric,
              '  bedload            : %s' % bl,
+             *(['  bedload h_min [K-7]: %.4g m (none below, full above twice it)'
+                % self.sediment_bedload_h_min]
+               if self.sediment_bedload_mode and self.sediment_bedload_h_min > 0.0 else []),
              '  bed evolution      : %s  (%s)'
              % (self.sediment_bed_evolution,
                 'Phase 4, evolving' if self.sediment_bed_evolution
