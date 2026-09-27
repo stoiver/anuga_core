@@ -68,6 +68,13 @@ line rather than reaching for ``domain.dplotter`` afterwards:
 The plotter is created on the first call and kept as ``domain.dplotter``;
 a later call returns that same one and ignores its arguments.
 
+Either way the domain gains the plotter's arrays and plotting methods, so
+``domain.plot_depth_frame()`` and ``dplotter.plot_depth_frame()`` are the
+same call. The derived quantities ``depth``, ``xvel``, ``yvel``, ``speed``
+and ``speed_depth`` are computed on access, so reading ``domain.speed``
+inside an evolve loop gives the speed at that yieldstep, not at the moment
+``set_plotter`` was called.
+
 .. list-table:: Constructor arguments
    :header-rows: 1
    :widths: 25 15 60

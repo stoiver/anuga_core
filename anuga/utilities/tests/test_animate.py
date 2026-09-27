@@ -789,3 +789,44 @@ class Test_set_plotter_returns_the_plotter(unittest.TestCase):
         plotter = d.set_plotter()
         assert d.triang is plotter.triang
         assert d.plot_depth_frame == plotter.plot_depth_frame
+
+
+class Test_domain_derived_plot_quantities(unittest.TestCase):
+    """depth, xvel, yvel, speed and speed_depth are properties of the domain
+    that read through to the plotter, so they follow the run. Copying their
+    values in set_plotter froze them at the moment it was called."""
+
+    def _domain(self):
+        import anuga
+        d = anuga.rectangular_cross_domain(6, 6, len1=10.0, len2=10.0)
+        d.store = False
+        d.set_quantity('elevation', 0.0)
+        d.set_quantity('stage', 1.0)
+        d.set_quantity('xmomentum', 0.5)
+        d.set_boundary({t: anuga.Reflective_boundary(d)
+                        for t in d.get_boundary_tags()})
+        return d
+
+    def test_they_exist_and_match_the_plotter(self):
+        d = self._domain()
+        p = d.set_plotter()
+        for name in ('depth', 'xvel', 'yvel', 'speed', 'speed_depth'):
+            assert np.allclose(getattr(d, name), getattr(p, name)), name
+
+    def test_they_follow_the_run(self):
+        d = self._domain()
+        p = d.set_plotter()
+        before = {n: getattr(d, n).copy()
+                  for n in ('depth', 'xvel', 'speed')}
+        for _ in d.evolve(yieldstep=1.0, finaltime=2.0):
+            pass
+        for n, was in before.items():
+            assert not np.allclose(getattr(d, n), was), \
+                '%s did not change over the run' % n
+            assert np.allclose(getattr(d, n), getattr(p, n)), n
+
+    def test_without_a_plotter_they_say_so(self):
+        d = self._domain()
+        with self.assertRaises(AttributeError) as cm:
+            d.depth
+        assert 'set_plotter' in str(cm.exception)

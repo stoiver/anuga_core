@@ -3372,6 +3372,40 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
     #---------------------------------------------------------------
     # Plotting methods
     #---------------------------------------------------------------
+    def _plotter_quantity(self, name):
+        """A derived quantity of the attached plotter, computed on access."""
+        if self.dplotter is None:
+            raise AttributeError(
+                "domain.%s needs a plotter: call domain.set_plotter() first "
+                "(it returns the plotter, so dplotter = domain.set_plotter() "
+                "gives you dplotter.%s as well)" % (name, name))
+        return getattr(self.dplotter, name)
+
+    @property
+    def depth(self):
+        """Depth at the plotter's vertices, `stage - elevation`."""
+        return self._plotter_quantity('depth')
+
+    @property
+    def xvel(self):
+        """x velocity at the plotter's vertices, zero below `min_depth`."""
+        return self._plotter_quantity('xvel')
+
+    @property
+    def yvel(self):
+        """y velocity at the plotter's vertices, zero below `min_depth`."""
+        return self._plotter_quantity('yvel')
+
+    @property
+    def speed(self):
+        """Speed at the plotter's vertices, `hypot(xvel, yvel)`."""
+        return self._plotter_quantity('speed')
+
+    @property
+    def speed_depth(self):
+        """Speed times depth at the plotter's vertices."""
+        return self._plotter_quantity('speed_depth')
+
     def set_plotter(self, *args, **kwargs):
         """Attach a `Domain_plotter` to this domain and return it.
 
@@ -3410,8 +3444,10 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         self.ymom = self.dplotter.ymom
         self.elev = self.dplotter.elev
         self.friction = self.dplotter.friction
-        self.xvel = self.dplotter.xvel
-        self.yvel = self.dplotter.yvel
+        # depth, xvel, yvel, speed and speed_depth are NOT copied here: they
+        # are properties on the plotter that recompute from stage and
+        # elevation, so copying froze them at the moment set_plotter was
+        # called. They are properties of the domain too, just below.
         self.x = self.dplotter.x
         self.y = self.dplotter.y
         self.xc = self.dplotter.xc
