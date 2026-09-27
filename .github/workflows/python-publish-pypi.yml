@@ -178,10 +178,16 @@ jobs:
           done
           repairwheel "${libdirs[@]}" -o dist dist-wheel/*.whl
 
+      # 3.15 is built to prove it compiles, but NOT published: the wheel
+      # would be built against a release candidate. Its artifact is named
+      # outside the `wheel-*` pattern the publish jobs collect. Rename it
+      # back to wheel-py... once 3.15 is final.
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v7
         with:
-          name: wheel-py${{ matrix.python-version }}-${{ matrix.os }}
+          name: ${{ matrix.python-version == '3.15'
+                    && format('unpublished-py{0}-{1}', matrix.python-version, matrix.os)
+                    || format('wheel-py{0}-{1}', matrix.python-version, matrix.os) }}
           path: dist/*.whl
 
   # ---------------------------------------------------------------------------
@@ -241,10 +247,14 @@ jobs:
           pip install repairwheel
           repairwheel -l "$CONDA_PREFIX/lib" -o dist dist-wheel/*.whl
 
+      # Built but not published while 3.15 is a release candidate; see the
+      # note on the build-wheels job above.
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v7
         with:
-          name: wheel-osx64-py${{ matrix.python-version }}
+          name: ${{ matrix.python-version == '3.15'
+                    && format('unpublished-osx64-py{0}', matrix.python-version)
+                    || format('wheel-osx64-py{0}', matrix.python-version) }}
           path: dist/*.whl
 
   # ---------------------------------------------------------------------------
