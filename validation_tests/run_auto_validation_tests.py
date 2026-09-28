@@ -38,9 +38,12 @@ dirs_to_skip += ['patong'] # requires downloaded data, takes many hours
 prune_dirs = {'OUTPUT', '__pycache__', '.git', '.svn', '.pytest_cache',
               '.ipynb_checkpoints', 'build', 'dist'}
 
-# Long-running HEC-RAS bridge/weir behaviour cases (>100 s each). Skipped by
-# default to keep the routine run fast; pass -l/--long to include them.
-long_dirs = ['bridge_hecras', 'bridge_hecras2', 'lateral_weir_hecras']
+# Long-running cases, skipped by default to keep the routine run fast; pass
+# -l/--long to include them. The HEC-RAS bridge/weir behaviour cases take
+# >100 s each; towradgi is a full catchment study that needs its downloaded
+# data and runs for many minutes.
+long_dirs = ['bridge_hecras', 'bridge_hecras2', 'lateral_weir_hecras',
+             'towradgi']
 if not anuga_args.long:
     dirs_to_skip += long_dirs
 
@@ -89,7 +92,7 @@ print(80*'=')
 print('Running all validation tests - some may take many minutes')
 print('and some may require memory in the order of 8-16GB       ')
 if not anuga_args.long:
-    print('(skipping long HEC-RAS behaviour tests: %s; pass -l/--long to include)'
+    print('(skipping long cases: %s; pass -l/--long to include)'
           % ', '.join(long_dirs))
 print(80*'=')
 
