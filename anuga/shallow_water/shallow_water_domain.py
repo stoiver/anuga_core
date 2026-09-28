@@ -3372,8 +3372,63 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
     #---------------------------------------------------------------
     # Plotting methods
     #---------------------------------------------------------------
+    def _plotter_quantity(self, name):
+        """A derived quantity of the attached plotter, computed on access."""
+        if self.dplotter is None:
+            raise AttributeError(
+                "domain.%s needs a plotter: call domain.set_plotter() first "
+                "(it returns the plotter, so dplotter = domain.set_plotter() "
+                "gives you dplotter.%s as well)" % (name, name))
+        return getattr(self.dplotter, name)
+
+    @property
+    def depth(self):
+        """Depth at the plotter's vertices, `stage - elevation`."""
+        return self._plotter_quantity('depth')
+
+    @property
+    def xvel(self):
+        """x velocity at the plotter's vertices, zero below `min_depth`."""
+        return self._plotter_quantity('xvel')
+
+    @property
+    def yvel(self):
+        """y velocity at the plotter's vertices, zero below `min_depth`."""
+        return self._plotter_quantity('yvel')
+
+    @property
+    def speed(self):
+        """Speed at the plotter's vertices, `hypot(xvel, yvel)`."""
+        return self._plotter_quantity('speed')
+
+    @property
+    def speed_depth(self):
+        """Speed times depth at the plotter's vertices."""
+        return self._plotter_quantity('speed_depth')
+
     def set_plotter(self, *args, **kwargs):
-        """Set the plotter for this domain
+        """Attach a `Domain_plotter` to this domain and return it.
+
+        The plotter is created on the first call and kept on the domain as
+        `domain.dplotter`; later calls return the one already there and
+        ignore their arguments. Its arrays and plotting methods are also
+        mirrored onto the domain, so `domain.plot_depth_frame()` and
+        `plotter.plot_depth_frame()` are the same call.
+
+        Parameters
+        ----------
+        *args, **kwargs
+            Passed to :class:`~anuga.Domain_plotter` on the first call, e.g.
+            `absolute=True` to plot in the domain's absolute coordinates.
+
+        Returns
+        -------
+        Domain_plotter
+            The plotter, so it can be named directly::
+
+                dplotter = domain.set_plotter(absolute=True)
+
+            rather than reaching for `domain.dplotter` afterwards.
         """
 
         #FIXME SR: Should look into seeing if the triang can use the
@@ -3389,8 +3444,10 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         self.ymom = self.dplotter.ymom
         self.elev = self.dplotter.elev
         self.friction = self.dplotter.friction
-        self.xvel = self.dplotter.xvel
-        self.yvel = self.dplotter.yvel
+        # depth, xvel, yvel, speed and speed_depth are NOT copied here: they
+        # are properties on the plotter that recompute from stage and
+        # elevation, so copying froze them at the moment set_plotter was
+        # called. They are properties of the domain too, just below.
         self.x = self.dplotter.x
         self.y = self.dplotter.y
         self.xc = self.dplotter.xc
@@ -3410,6 +3467,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         self.plot_speed_frame = self.dplotter.plot_speed_frame
         self.make_speed_animation = self.dplotter.make_speed_animation
 
+        return self.dplotter
 
     def triplot(self, *args,  **kwargs):
 
