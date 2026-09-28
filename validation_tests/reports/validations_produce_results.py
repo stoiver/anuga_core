@@ -16,6 +16,7 @@ args = anuga.get_args()
 alg = args.alg
 np = args.np
 verbose = args.verbose
+no_run = getattr(args, 'no_run', False)
 
 #---------------------------------
 # Get the current svn revision
@@ -29,12 +30,12 @@ minor_version = version_split[1]
 
 
 #----------------------------------
-# Now it is ok to create the latex 
+# Now it is ok to create the latex
 # macro file with run parameters
 #
 # FIXME: THis is a little dangerous as
 # this is changed before all the tests
-# are run. 
+# are run.
 #----------------------------------
 
 f = open('saved_parameters.tex', 'w')
@@ -86,7 +87,7 @@ for dir in Upper_dirs:
     print(72 * '=')
     print('Directory: ' + dir)
     print(72 * '=')
-    
+
     #print 'Changing to', os.getcwd()
     dir = '.'
     Lower_dirs =  [name for name in os.listdir(dir) if os.path.isdir(os.path.join(dir, name))]
@@ -100,6 +101,10 @@ for dir in Upper_dirs:
 
 
     for l_dir in Lower_dirs:
+        if not os.path.isfile(os.path.join(l_dir, 'produce_results.py')):
+            # __pycache__ and the like
+            continue
+
         os.chdir(l_dir)
         #print os.getcwd()
         print(60 * '=')
@@ -108,25 +113,25 @@ for dir in Upper_dirs:
         print(60 * '=')
         try:
             t0 = time.time()
+            cmd = 'python produce_results.py -alg %s -np %s '% (str(alg),str(np))
             if verbose:
-                cmd = 'python produce_results.py -alg %s -np %s -v '% (str(alg),str(np))
-            else:
-                cmd = 'python produce_results.py -alg %s -np %s '% (str(alg),str(np))
+                cmd += '-v '
+            if no_run:
+                cmd += '-nr '
             print(2 * indent + 'Running: ' + cmd)
             os.system(cmd)
             t1 = time.time() - t0
             time_total += t1
             print(2 * indent + 'That took ' + str(t1) + ' secs')
-        except:
+        except Exception:
             print(2 * indent + 'Failed running produce_results in ' + os.getcwd())
-            pass
 
         os.chdir('..')
         #print 'Changing to', os.getcwd()
 
     os.chdir('..')
     #print 'Changing to', os.getcwd()
-    
+
 os.chdir(buildroot)
 
 print(72 * '=')
