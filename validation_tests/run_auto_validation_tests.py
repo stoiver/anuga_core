@@ -28,9 +28,23 @@ anuga_args = anuga.get_args()
 dirs_to_skip = ['.']       # avoid infinite recursion
 dirs_to_skip += ['patong'] # requires downloaded data, takes many hours
 
-# Long-running HEC-RAS bridge/weir behaviour cases (>100 s each). Skipped by
-# default to keep the routine run fast; pass -l/--long to include them.
-long_dirs = ['bridge_hecras', 'bridge_hecras2', 'lateral_weir_hecras']
+# Directories whose SUBTREES are skipped entirely. A finished run leaves a
+# copy of the case's own scripts beside its results -- towradgi snapshots
+# code/ into OUTPUT/RUN_<timestamp>/code/ -- so walking into them collects
+# the same validate_*.py once per past run: 86 copies against 47 real cases
+# on a machine that had run it a few times. OUTPUT is gitignored, so these
+# are purely local artefacts and never appear in CI, which is why this went
+# unnoticed.
+prune_dirs = {'OUTPUT', '__pycache__', '.git', '.svn', '.pytest_cache',
+              '.ipynb_checkpoints', 'build', 'dist'}
+
+# Long-running cases, skipped by default to keep the routine run fast; pass
+# -l/--long to include them. The HEC-RAS bridge/weir behaviour cases take
+# >100 s each; towradgi is a full catchment study that needs its downloaded
+# data and runs for many minutes; van_rijn_trench runs three 15 m flume
+# experiments to steady state.
+long_dirs = ['bridge_hecras', 'bridge_hecras2', 'lateral_weir_hecras',
+             'towradgi', 'van_rijn_trench']
 if not anuga_args.long:
     dirs_to_skip += long_dirs
 
@@ -39,8 +53,11 @@ all_tests = []
 
 for dirpath, dirnames, filenames in os.walk('.'):
 
-    if '.svn' in dirnames:
-        dirnames.remove('.svn')
+    # Prune in place, so os.walk does not descend. The old code skipped a
+    # directory's own files with `continue` but still walked its children,
+    # so a skipped case's subdirectories were searched anyway.
+    dirnames[:] = [d for d in dirnames
+                   if d not in prune_dirs and d not in dirs_to_skip]
 
     dirname = os.path.split(dirpath)[-1]
     if dirname in dirs_to_skip:
@@ -76,7 +93,7 @@ print(80*'=')
 print('Running all validation tests - some may take many minutes')
 print('and some may require memory in the order of 8-16GB       ')
 if not anuga_args.long:
-    print('(skipping long HEC-RAS behaviour tests: %s; pass -l/--long to include)'
+    print('(skipping long cases: %s; pass -l/--long to include)'
           % ', '.join(long_dirs))
 print(80*'=')
 
@@ -161,18 +178,30 @@ for path, filename in regression_tests:
 # Summary
 # ---------------------------------------------------------------------------
 
+def format_elapsed(seconds):
+    """Seconds, plus a minutes/hours reading once the number stops being
+    readable on its own."""
+    if seconds < 60.0:
+        return '%.1f seconds' % seconds
+    m, s = divmod(int(round(seconds)), 60)
+    if m < 60:
+        return '%.1f seconds (%d m %02d s)' % (seconds, m, s)
+    h, m = divmod(m, 60)
+    return '%.1f seconds (%d h %02d m %02d s)' % (seconds, h, m, s)
+
+
 total_elapsed = time.time() - t0
 n_passed = sum(1 for _, rc, _, _ in results if rc == 0)
 n_failed = len(results) - n_passed
 
 print()
 print(80*'=')
-print(f'VALIDATION SUMMARY  ({total_elapsed:.1f} s total)')
+print('VALIDATION SUMMARY')
 print(80*'=')
 
 col = 56
 print(f"  {'Test':<{col}} {'Runner':>6}  {'Result':>12}  {'Time':>8}")
-print(f"  {'-'*col}  {'-'*6}  {'-'*12}  {'-'*8}")
+print(f"  {'-'*col} {'-'*6}  {'-'*12}  {'-'*8}")
 for label, rc, elapsed, runner in results:
     status = 'PASSED' if rc == 0 else f'FAILED ({rc})'
     marker = '  ' if rc == 0 else '* '
@@ -180,9 +209,9 @@ for label, rc, elapsed, runner in results:
 
 print()
 if n_failed == 0:
-    print(f'All {n_passed} validation tests PASSED.')
+    print(f'All {n_passed} validation tests PASSED in {format_elapsed(total_elapsed)}.')
 else:
-    print(f'{n_passed} PASSED,  {n_failed} FAILED.')
+    print(f'{n_passed} PASSED,  {n_failed} FAILED, in {format_elapsed(total_elapsed)}.')
     print()
     print('Failed tests:')
     for label, rc, _, runner in results:
