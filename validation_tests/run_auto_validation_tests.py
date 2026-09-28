@@ -41,11 +41,12 @@ prune_dirs = {'OUTPUT', '__pycache__', '.git', '.svn', '.pytest_cache',
 
 # Long-running cases, skipped by default to keep the routine run fast; pass
 # -l/--long to include them. The HEC-RAS bridge/weir behaviour cases take
-# >100 s each; towradgi is a full catchment study that needs its downloaded
-# data and runs for many minutes; van_rijn_trench runs three 15 m flume
-# experiments to steady state.
+# >100 s each; towradgi_simulation builds the catchment mesh from the DEM,
+# where the plain towradgi case reuses the cached towradgi.tsh and comes in
+# under a minute; van_rijn_trench runs three 15 m flume experiments to
+# steady state.
 long_dirs = ['bridge_hecras', 'bridge_hecras2', 'lateral_weir_hecras',
-             'towradgi', 'van_rijn_trench']
+             'towradgi_simulation', 'van_rijn_trench']
 if not anuga_args.long:
     dirs_to_skip += long_dirs
 
