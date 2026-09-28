@@ -28,6 +28,16 @@ anuga_args = anuga.get_args()
 dirs_to_skip = ['.']       # avoid infinite recursion
 dirs_to_skip += ['patong'] # requires downloaded data, takes many hours
 
+# Directories whose SUBTREES are skipped entirely. A finished run leaves a
+# copy of the case's own scripts beside its results -- towradgi snapshots
+# code/ into OUTPUT/RUN_<timestamp>/code/ -- so walking into them collects
+# the same validate_*.py once per past run: 86 copies against 47 real cases
+# on a machine that had run it a few times. OUTPUT is gitignored, so these
+# are purely local artefacts and never appear in CI, which is why this went
+# unnoticed.
+prune_dirs = {'OUTPUT', '__pycache__', '.git', '.svn', '.pytest_cache',
+              '.ipynb_checkpoints', 'build', 'dist'}
+
 # Long-running HEC-RAS bridge/weir behaviour cases (>100 s each). Skipped by
 # default to keep the routine run fast; pass -l/--long to include them.
 long_dirs = ['bridge_hecras', 'bridge_hecras2', 'lateral_weir_hecras']
@@ -39,8 +49,11 @@ all_tests = []
 
 for dirpath, dirnames, filenames in os.walk('.'):
 
-    if '.svn' in dirnames:
-        dirnames.remove('.svn')
+    # Prune in place, so os.walk does not descend. The old code skipped a
+    # directory's own files with `continue` but still walked its children,
+    # so a skipped case's subdirectories were searched anyway.
+    dirnames[:] = [d for d in dirnames
+                   if d not in prune_dirs and d not in dirs_to_skip]
 
     dirname = os.path.split(dirpath)[-1]
     if dirname in dirs_to_skip:
