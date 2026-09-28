@@ -196,7 +196,7 @@ n_failed = len(results) - n_passed
 
 print()
 print(80*'=')
-print(f'VALIDATION SUMMARY  ({total_elapsed:.1f} s total)')
+print('VALIDATION SUMMARY')
 print(80*'=')
 
 col = 56
