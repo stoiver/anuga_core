@@ -11,6 +11,7 @@ Runs two groups of validation tests:
    On first run use --force-regen to generate the baseline .csv files.
 """
 
+import collections
 import os
 import sys
 import time
@@ -195,17 +196,47 @@ n_passed = sum(1 for _, rc, _, _ in results if rc == 0)
 n_failed = len(results) - n_passed
 
 print()
-print(80*'=')
 print('VALIDATION SUMMARY')
-print(80*'=')
+print()
 
-col = 56
-print(f"  {'Test':<{col}} {'Runner':>6}  {'Result':>12}  {'Time':>8}")
-print(f"  {'-'*col} {'-'*6}  {'-'*12}  {'-'*8}")
+# The case column names the directory, not the whole path: a case's script
+# is nearly always validate_<directory>.py, so repeating it costs 44
+# characters a row and says nothing. A directory that holds more than one
+# test keeps its filenames, since there the name is what tells them apart.
+n_per_dir = collections.Counter(os.path.dirname(label) for label, _, _, _ in results)
+
+rows = []
 for label, rc, elapsed, runner in results:
-    status = 'PASSED' if rc == 0 else f'FAILED ({rc})'
-    marker = '  ' if rc == 0 else '* '
-    print(f"{marker}{label:<{col}} {runner:>6}  {status:>12}  {elapsed:>7.1f}s")
+    case = os.path.relpath(os.path.dirname(label), '.')
+    if n_per_dir[os.path.dirname(label)] > 1:
+        case = os.path.join(case, os.path.basename(label))
+    rows.append((case, runner,
+                 'PASSED' if rc == 0 else f'FAILED ({rc})',
+                 f'{elapsed:.1f} s'))
+
+header = ('Case', 'Runner', 'Result', 'Time')
+width = [max(len(r[i]) for r in rows + [header]) for i in range(4)]
+rule = '+' + '+'.join('-' * (w + 2) for w in width) + '+'
+
+
+def print_row(cells, pad=' '):
+    print('|' + '|'.join(
+        pad + (c.rjust(w) if i == 3 else c.ljust(w)) + pad
+        for i, (c, w) in enumerate(zip(cells, width))) + '|')
+
+
+print(rule)
+print_row(header)
+print(rule)
+group = None
+for row in rows:
+    # A rule wherever the top-level group changes, so 40-odd rows do not read
+    # as one block. The rows are sorted, so each group is contiguous.
+    if group is not None and row[0].split(os.sep)[0] != group:
+        print(rule)
+    group = row[0].split(os.sep)[0]
+    print_row(row)
+print(rule)
 
 print()
 if n_failed == 0:
@@ -224,6 +255,6 @@ if regression_tests:
     print('  cd validation_tests/behaviour_only')
     print('  pytest test_regression_*.py --force-regen')
 
-print(80*'=')
+print()
 
 sys.exit(0 if n_failed == 0 else 1)
