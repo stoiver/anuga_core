@@ -160,6 +160,38 @@ class Test_sww_lock(unittest.TestCase):
             holder.kill()
             holder.wait()
 
+    def test_the_conflict_names_when_and_what_started_the_other_run(self):
+        """A bare pid is little help when the other run is a notebook in
+        another tab, so the message carries the start time and script the
+        lock records."""
+        domain = make_domain(self.tmp, 'named')
+        lock = sww_lock_path(os.path.join(self.tmp, 'named.sww'))
+        alive = os.getppid()                  # a pid that is certainly running
+        with open(lock, 'w') as f:
+            f.write('pid=%d\nhost=%s\nstarted=2026-09-28T09:15:02\n'
+                    'script=/somewhere/ipykernel_launcher.py\n'
+                    % (alive, __import__('socket').gethostname()))
+        with self.assertRaises(SWWFileInUseError) as cm:
+            domain.initialise_storage()
+        msg = str(cm.exception)
+        assert 'started 2026-09-28T09:15:02' in msg, msg
+        assert 'ipykernel_launcher.py' in msg, msg
+        os.remove(lock)
+
+    def test_a_lock_without_those_fields_still_reports_the_process(self):
+        """Locks written by an older ANUGA carry only pid and host."""
+        domain = make_domain(self.tmp, 'bare')
+        lock = sww_lock_path(os.path.join(self.tmp, 'bare.sww'))
+        alive = os.getppid()
+        with open(lock, 'w') as f:
+            f.write('pid=%d\nhost=%s\n' % (alive, __import__('socket').gethostname()))
+        with self.assertRaises(SWWFileInUseError) as cm:
+            domain.initialise_storage()
+        msg = str(cm.exception)
+        assert 'process %d' % alive in msg, msg
+        assert 'started' not in msg, msg
+        os.remove(lock)
+
 
 if __name__ == '__main__':
     unittest.main()

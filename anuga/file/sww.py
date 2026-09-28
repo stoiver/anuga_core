@@ -96,22 +96,36 @@ def _pid_is_alive(pid):
 
 
 def _read_sww_lock(path):
-    """The (pid, host) recorded in a lock file, or (None, None)."""
-    pid = host = None
+    """What a lock file records, as a dict. Missing keys are absent, and an
+    unreadable file gives {}; `pid` is an int or absent."""
+    fields = {}
     try:
         with open(path) as f:
             for line in f:
-                key, _, value = line.strip().partition('=')
-                if key == 'pid':
-                    try:
-                        pid = int(value)
-                    except ValueError:
-                        pid = None
-                elif key == 'host':
-                    host = value
+                key, sep, value = line.strip().partition('=')
+                if sep and value:
+                    fields[key] = value
     except OSError:
-        pass
-    return pid, host
+        return {}
+    if 'pid' in fields:
+        try:
+            fields['pid'] = int(fields['pid'])
+        except ValueError:
+            del fields['pid']
+    return fields
+
+
+def _describe_sww_lock(fields, host):
+    """Who holds a lock, for the error message: the process and host, plus
+    the start time and script the lock records. A bare pid is little help
+    when the other run is a notebook in another tab."""
+    who = 'process %s on %s' % (fields.get('pid', '?'), fields.get('host') or host)
+    started, script = fields.get('started'), fields.get('script')
+    if started:
+        who += ', started %s' % started
+    if script:
+        who += ', by %s' % script
+    return who
 
 
 def acquire_sww_lock(filename):
@@ -138,7 +152,9 @@ def acquire_sww_lock(filename):
     host = socket.gethostname()
 
     if os.path.exists(path):
-        pid, other_host = _read_sww_lock(path)
+        fields = _read_sww_lock(path)
+        pid = fields.get('pid')
+        other_host = fields.get('host')
         same_host = (other_host is None or other_host == host)
         if pid == me:
             pass                                    # our own earlier run
@@ -146,7 +162,7 @@ def acquire_sww_lock(filename):
             log.debug('Taking over the SWW writer lock %s left by process '
                       '%d, which is no longer running' % (path, pid))
         else:
-            who = 'process %s on %s' % (pid, other_host or host)
+            who = _describe_sww_lock(fields, host)
             raise SWWFileInUseError(
                 'The SWW file %s is being written by another run (%s, lock '
                 'file %s). Two runs appending to one SWW file interleave '
@@ -174,7 +190,7 @@ def acquire_sww_lock(filename):
 def release_sww_lock(path):
     """Remove a lock this process holds. Safe to call twice."""
     _held_sww_locks.discard(path)
-    pid, _ = _read_sww_lock(path)
+    pid = _read_sww_lock(path).get('pid')
     if pid == os.getpid():
         try:
             os.remove(path)
