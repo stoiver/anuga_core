@@ -142,6 +142,15 @@ struct domain {
      * The three fields are the centroid values of the veg_density (stems per
      * m^2), veg_diameter (m) and veg_height (m) quantities; NULL when off. */
     anuga_int vegetation_mode;
+
+    /* Manning friction variant, mirroring friction.py's dispatch:
+     *   0 = flat  (the default): no bed-slope factor
+     *   1 = sloped: the drag carries zs = sqrt(1 + zx^2 + zy^2)
+     * The ADER-2 predictor drag reads this so that it applies exactly the
+     * same coefficient the corrector will, which the steady-state balance
+     * derived above core_ader_friction_factor() depends on: on a 1:10 bed
+     * a zs the corrector does not have is a 0.5% error in gamma. */
+    anuga_int use_sloped_mannings;
     double vegetation_Cd;            /* stem drag coefficient, 1.68 */
     double vegetation_bed_chezy;     /* Cb, 65 */
     double* veg_density_centroid_values;

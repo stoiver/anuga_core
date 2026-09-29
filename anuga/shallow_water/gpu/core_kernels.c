@@ -120,6 +120,65 @@ void core_extrapolate_centroid_pass(struct domain *D) {
 
 }
 
+// Manning drag factor for the ADER-2 predictor, shared by the fused edge pass
+// and the standalone predictor kernel so the two cannot drift.
+//
+// The predictor's time derivatives carry the flux Jacobian and the gravity
+// term g*h*grad(w), but no drag.  On a slope in thin flow the balance IS
+// gravity against friction, so without this the half state is pulled downhill
+// unresisted, the fluxes are taken from it, and the corrector's friction --
+// which sees Q^n, not the half state -- cannot recover the difference.  On
+// validation_tests/analytical_exact/rundown_mild_slope_coarse (3.9 mm of
+// water on a 1:10 slope) the stock predictor settled at 0.448 of the
+// prescribed discharge; with this, at beta 1, it holds 0.9997 -- the same as
+// DE0 and DE1, which have no predictor and were always exact there.  At beta
+// 0.5 it holds 0.880, which is the limiter's error and not the predictor's:
+// DE0 at beta 0.5 gives 0.877 on the same case.
+//
+// core_ader_ck_predictor(), the centroid variant, is deliberately left alone:
+// it is exposed through the extension modules but no evolve path uses it.
+//
+// Applied as the semi-implicit factor 1/(1 + gamma*dt) rather than folded
+// into duh_dt as -gamma*uh: Manning drag is stiff in thin flow, where
+// gamma*dt is order one or more, and the explicit form then overshoots
+// through zero and drives a cell-to-cell momentum oscillation.  The same
+// linearisation the corrector uses is unconditionally sign-preserving.
+//
+// gamma MUST come from the PRE-shift state, and the callers pass it that way.
+// On steady uniform flow -- constant depth h0, linear bed so wx = -S0,
+// constant uh = q, vh = 0 -- every derivative term above vanishes except
+//     duh_dt = -g*h*wx = +g*h0*S0,
+// and the friction balance is g*h0*S0 = gamma*q, so the shift gives
+//     uh* = q + dt*g*h0*S0 = q*(1 + gamma*dt)
+// and this factor returns exactly q.  The predictor is then stationary on the
+// steady state, as the DE0/DE1/DE2 steps are, and the corrector inherits it:
+// with Q^{n+1/2} == Q^n there, its own coefficient is the same either way.
+//
+// Evaluating gamma on the POST-shift momentum instead gives
+// gamma' = gamma*(1 + gamma*dt) and leaves
+//     uh_pred = q*(1 + x)/(1 + x + x^2),   x = gamma*dt,
+// which is 2/3 of q at x = 1: a systematic, stiffness-dependent deficit.
+//
+// zs is the sloped-Manning factor sqrt(1 + zx^2 + zy^2), matching
+// core_manning_friction_sloped_semi_implicit_edge_based().  Both callers get
+// the bed gradient free as grad(w) - grad(h), since w = z + h.
+#pragma omp declare target
+static inline double core_ader_friction_factor(double g, double eta, double zs,
+                                               double eps, double seven_thirds,
+                                               double h_e, double uh_e,
+                                               double vh_e, double dt) {
+    if (eta <= 1.0e-16 || dt == 0.0 || h_e < eps) {
+        return 1.0;
+    }
+    double speed = sqrt(uh_e * uh_e + vh_e * vh_e);
+    if (speed == 0.0) {
+        return 1.0;
+    }
+    double gamma = g * eta * eta * zs * speed / pow(h_e, seven_thirds);
+    return 1.0 / (1.0 + gamma * dt);
+}
+#pragma omp end declare target
+
 // The edge pass: the second-order reconstruction proper.  Reads the
 // neighbours' centroid values (via surrogate_neighbours), so it MUST be a
 // separate kernel launch from anything that writes centroid values -- there is
@@ -167,6 +226,8 @@ void core_extrapolate_edge_pass_on(struct domain *D, double predictor_dt,
     double * restrict ymom_ev = D->ymom_edge_values;
     double * restrict bed_ev = D->bed_edge_values;
     double * restrict height_ev = D->height_edge_values;
+    double * restrict friction_cv = D->friction_centroid_values;   // predictor drag
+    const int sloped_mannings = (int)D->use_sloped_mannings;
 
     anuga_geom_t * restrict centroid_coords = D->centroid_coordinates;
     anuga_geom_t * restrict edge_coords = D->edge_coordinates;
@@ -536,11 +597,34 @@ void core_extrapolate_edge_pass_on(struct domain *D, double predictor_dt,
                 // dw_dt, so stage - height still equals the true bed everywhere
                 // except clamped near-dry edges -- and the pre-shift bed_ev
                 // (the true bed) is what the boundary kernels should read.
+                // Manning drag on the half-advanced state; see
+                // core_ader_friction_factor().  The bed gradient is
+                // grad(w) - grad(h), already in registers.
+                double zs_p = 1.0;
+                if (sloped_mannings) {
+                    double zx_p = wx - hx;               // w = z + h
+                    double zy_p = wy - hy;
+                    zs_p = sqrt(1.0 + zx_p * zx_p + zy_p * zy_p);
+                }
+                double eta_p = friction_cv[k];
+
                 for (int i = 0; i < 3; i++) {
+                    // gamma from the PRE-shift state: that is what makes the
+                    // step exact on steady uniform flow.  See the derivation
+                    // above core_ader_friction_factor().
+                    double fac = core_ader_friction_factor(
+                        g_pred, eta_p, zs_p, minimum_allowed_height,
+                        ANUGA_SEVEN_THIRDS, height_ev[k3 + i],
+                        xmom_ev[k3 + i], ymom_ev[k3 + i], predictor_dt);
+
                     stage_ev[k3 + i] += predictor_dt * dw_dt;
-                    xmom_ev[k3 + i] += predictor_dt * duh_dt;
-                    ymom_ev[k3 + i] += predictor_dt * dvh_dt;
-                    height_ev[k3 + i] = fmax(height_ev[k3 + i] + predictor_dt * dw_dt, 0.0);
+                    double uh_e = xmom_ev[k3 + i] + predictor_dt * duh_dt;
+                    double vh_e = ymom_ev[k3 + i] + predictor_dt * dvh_dt;
+                    height_ev[k3 + i] = fmax(height_ev[k3 + i]
+                                             + predictor_dt * dw_dt, 0.0);
+
+                    xmom_ev[k3 + i] = uh_e * fac;
+                    ymom_ev[k3 + i] = vh_e * fac;
                 }
             }
         }
@@ -4253,9 +4337,13 @@ void core_ader_ck_predictor_edge(struct domain *D, double dt) {
     double * restrict xmom_ev   = D->xmom_edge_values;
     double * restrict ymom_ev   = D->ymom_edge_values;
     double * restrict height_ev = D->height_edge_values;
+    double * restrict friction_cv = D->friction_centroid_values;   // predictor drag
+    const int sloped_mannings = (int)D->use_sloped_mannings;
 
     anuga_geom_t * restrict edge_coords     = D->edge_coordinates;
     anuga_geom_t * restrict centroid_coords = D->centroid_coordinates;
+
+    const double seven_thirds = ANUGA_SEVEN_THIRDS;
 
     OMP_PARALLEL_LOOP
     for (anuga_int k = 0; k < n; k++) {
@@ -4318,13 +4406,39 @@ void core_ader_ck_predictor_edge(struct domain *D, double dt) {
         double dvh_dt = -(v_c*h_c*ux + u_c*h_c*vx + u_c*v_c*hx
                          + 2.0*v_c*h_c*vy + v_c*v_c*hy + g_h * wy);
 
+        // Manning drag on the half-advanced state.  The derivative terms
+        // above carry the flux Jacobian and the gravity term g*h*grad(w) but
+        // no drag, so on a slope the predictor is pulled downhill with
+        // nothing resisting it: in thin flow, where gravity against friction
+        // IS the balance, the fluxes are then taken from an over-driven state
+        // that the corrector's friction cannot claw back.  On the coarse mild
+        // slope that cost 55% of the discharge.  See
+        // core_ader_friction_factor() for why this is applied as a factor
+        // rather than folded into duh_dt.
+        double zs_p = 1.0;
+        if (sloped_mannings) {
+            double zx_p = wx - hx;                   // w = z + h
+            double zy_p = wy - hy;
+            zs_p = sqrt(1.0 + zx_p * zx_p + zy_p * zy_p);
+        }
+        double eta_p = friction_cv[k];
+
         // Shift all three edges by the same centroid delta (slopes preserved)
         for (int i = 0; i < 3; i++) {
-            double new_stage = stage_ev[k3 + i] + dt * dw_dt;
-            stage_ev[k3 + i] = new_stage;
-            xmom_ev[k3 + i] += dt * duh_dt;
-            ymom_ev[k3 + i] += dt * dvh_dt;
+            // gamma from the PRE-shift state; see core_ader_friction_factor().
+            double fac = core_ader_friction_factor(g, eta_p, zs_p, eps,
+                                                   seven_thirds,
+                                                   height_ev[k3 + i],
+                                                   xmom_ev[k3 + i],
+                                                   ymom_ev[k3 + i], dt);
+
+            stage_ev[k3 + i] += dt * dw_dt;
+            double uh_e = xmom_ev[k3 + i] + dt * duh_dt;
+            double vh_e = ymom_ev[k3 + i] + dt * dvh_dt;
             height_ev[k3 + i] = fmax(height_ev[k3 + i] + dt * dw_dt, 0.0);
+
+            xmom_ev[k3 + i] = uh_e * fac;
+            ymom_ev[k3 + i] = vh_e * fac;
         }
         } // end if (fabs(det) >= 1.0e-20)
     }

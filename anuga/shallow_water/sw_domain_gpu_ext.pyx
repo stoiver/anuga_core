@@ -168,6 +168,7 @@ cdef extern from "gpu_domain.h" nogil:
         double* sediment_qby
         double sediment_c_pack
         int64_t vegetation_mode
+        int64_t use_sloped_mannings
         double vegetation_Cd
         double vegetation_bed_chezy
         double* veg_density_centroid_values
@@ -969,6 +970,7 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     D.sediment_bedload_h_min = getattr(domain_object, 'sediment_bedload_h_min', 0.0)
     cdef double[::1] veg1
     D.vegetation_mode = getattr(domain_object, 'vegetation_mode', 0)
+    D.use_sloped_mannings = 1 if getattr(domain_object, 'use_sloped_mannings', False) else 0
     D.vegetation_Cd = getattr(domain_object, 'vegetation_Cd', 1.68)
     D.vegetation_bed_chezy = getattr(domain_object, 'vegetation_bed_chezy', 65.0)
     if D.vegetation_mode > 0:
