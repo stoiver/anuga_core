@@ -3773,11 +3773,20 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         self.set_default_order(2)
         self.set_extrapolate_velocity()
 
-        self.beta_w = 0.5
+        # beta 1.0, not the 0.5 DE0 uses.  Both of the cases that pin this
+        # down want it: on the deep-water sinusoid, beta 0.5 keeps only 32% of
+        # the wave amplitude across the domain where beta 1.0 keeps 100%; and
+        # on rundown_mild_slope_coarse, beta 0.5 holds 0.880 of the prescribed
+        # discharge where beta 1.0 holds 0.9997, matching DE1.  The 0.5 error
+        # on the slope is the limiter's, not the ADER step's -- DE0 at beta
+        # 0.5 gives 0.877 there too -- and it only became visible once the
+        # predictor was made steady-state exact (see
+        # core_ader_friction_factor() in core_kernels.c).
+        self.beta_w = 1.0
         self.beta_w_dry = 0.0
-        self.beta_uh = 0.5
+        self.beta_uh = 1.0
         self.beta_uh_dry = 0.0
-        self.beta_vh = 0.5
+        self.beta_vh = 1.0
         self.beta_vh_dry = 0.0
 
         self.set_store_centroids(True)

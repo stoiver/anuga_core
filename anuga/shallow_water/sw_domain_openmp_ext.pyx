@@ -83,6 +83,7 @@ cdef extern from "sw_domain_openmp.c" nogil:
 		double* sediment_qba
 		double sediment_c_pack
 		anuga_int vegetation_mode
+		anuga_int use_sloped_mannings
 		double vegetation_Cd
 		double vegetation_bed_chezy
 		double* veg_density_centroid_values
@@ -297,6 +298,7 @@ cdef inline get_python_domain_parameters(domain *D, object domain_py_object):
 	D.sediment_bedload_h_min = getattr(domain_py_object, 'sediment_bedload_h_min', 0.0)
 	cdef double[::1] veg1
 	D.vegetation_mode = getattr(domain_py_object, 'vegetation_mode', 0)
+	D.use_sloped_mannings = 1 if getattr(domain_py_object, 'use_sloped_mannings', False) else 0
 	D.vegetation_Cd = getattr(domain_py_object, 'vegetation_Cd', 1.68)
 	D.vegetation_bed_chezy = getattr(domain_py_object, 'vegetation_bed_chezy', 65.0)
 	if D.vegetation_mode > 0:
@@ -1433,6 +1435,8 @@ def manning_friction_flat_semi_implicit(object domain_py_object, update_domain_c
 	with nogil:
 		_openmp_manning_friction_flat_semi_implicit(D)
 
+
+
 def vegetation_friction_semi_implicit(object domain_py_object, update_domain_c_struct=False):
 	"""Baptist vegetation drag (spec 8) into the semi-implicit update; no-op when off."""
 	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=update_domain_c_struct)
@@ -1453,6 +1457,8 @@ def manning_friction_sloped_semi_implicit_edge_based(object domain_py_object, up
 
 	with nogil:
 		_openmp_manning_friction_sloped_semi_implicit_edge_based(D)
+
+
 
 # FIXME SR: Why is the order of arguments different from the C function?
 def manning_friction_flat(double g, double eps,
