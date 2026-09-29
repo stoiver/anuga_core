@@ -3653,6 +3653,20 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         self.set_default_order(2)
         self.set_extrapolate_velocity()
 
+        # beta 0.5 is what DE0 is for: it is strictly monotone at shocks,
+        # where beta 1.0 overshoots (0.2% of the dam height on the dry dam
+        # break), and it is the diffusive fallback for nasty terrain.
+        #
+        # It is NOT free.  It damps propagating waves heavily -- on the
+        # deep_wave validation case DE0 keeps 16% of the forced amplitude at
+        # the far edge against DE1's 97% -- and it cannot reconstruct a linear
+        # stage exactly, since the limiter scales the gradient by beta on
+        # genuinely linear data.  That flattens the bed the solver works with
+        # (z = w - h) and costs steady slope flow about 12% of its discharge.
+        # Both are the limiter, not the Euler stepping: DE0 at beta 1.0 gives
+        # 97% and 100% respectively.  See docs/source/setup_anuga_script/
+        # flow_algorithms.rst, and _set_DE_ader2_defaults() for the case where
+        # the same limiter broke a steady state outright.
         self.beta_w=0.5
         self.beta_w_dry=0.0
         self.beta_uh=0.5
