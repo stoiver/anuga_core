@@ -24,7 +24,16 @@ def produce_report(script, args=None):
 
     # Get the arguments from the calling script
 
-    run_anuga_script(script, args=args)
+    if getattr(args, 'no_run', False):
+        # Reuse whatever the case directory already holds: the plot scripts
+        # read the sww files, so the report can be rebuilt without repeating
+        # the simulations.
+        if verbose:
+            print(50*'=')
+            print('Skipping %s, reusing the existing output' % script)
+            print(50*'=')
+    else:
+        run_anuga_script(script, args=args)
 
     # We don't want to run plot_results in parallel
     args.np = 1

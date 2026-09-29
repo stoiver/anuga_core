@@ -124,10 +124,14 @@ class TestSaveParametersTex(unittest.TestCase):
 class TestProduceReport(unittest.TestCase):
     """produce_report orchestrates run_anuga_script × 2 + typeset_report."""
 
-    def _make_args(self, verbose=False, np=1):
+    def _make_args(self, verbose=False, np=1, no_run=False):
         args = MagicMock()
         args.verbose = verbose
         args.np = np
+        # MagicMock hands back a truthy object for any attribute not set here,
+        # so every flag produce_report reads has to be spelled out or the mock
+        # silently takes the opposite branch.
+        args.no_run = no_run
         return args
 
     def test_calls_run_script_then_plot_then_typeset(self):
@@ -156,6 +160,17 @@ class TestProduceReport(unittest.TestCase):
 
         second_call_script = mock_run.call_args_list[1][0][0]
         self.assertEqual(second_call_script, 'plot_results.py')
+
+    def test_no_run_skips_the_simulation(self):
+        """-nr reuses the existing sww: only plot_results.py runs."""
+        args = self._make_args(no_run=True)
+        with patch.object(_pr_mod, 'run_anuga_script') as mock_run, \
+             patch.object(_pr_mod, 'typeset_report') as mock_ts:
+            _pr_mod.produce_report('sim.py', args=args)
+
+        self.assertEqual(mock_run.call_count, 1)
+        self.assertEqual(mock_run.call_args_list[0][0][0], 'plot_results.py')
+        self.assertEqual(mock_ts.call_count, 1)
 
     def test_np_set_to_1_for_plot_step(self):
         """produce_report forces np=1 for the plot_results.py step."""
