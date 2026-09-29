@@ -3653,20 +3653,24 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         self.set_default_order(2)
         self.set_extrapolate_velocity()
 
-        # beta 0.5 is what DE0 is for: it is strictly monotone at shocks,
-        # where beta 1.0 overshoots (0.2% of the dam height on the dry dam
-        # break), and it is the diffusive fallback for nasty terrain.
+        # beta 0.5 is not a preference, it is what keeps forward Euler
+        # stable.  Raising it to 1.0 makes DE0 go unstable on deep_wave (the
+        # stage reaches 25-29 against a forced amplitude of 1.0), destroys
+        # monotonicity at the dry dam break (total variation 112 against the
+        # exact 10.0, with a 0.43 m overshoot where beta 0.5 has none) and
+        # degrades the dry avalanche (RMS 0.29 against 0.051).  Do not raise
+        # it here; DE1 and DE_ader2 pair beta 1.0 with a second-order time
+        # integrator that can carry it.
         #
-        # It is NOT free.  It damps propagating waves heavily -- on the
-        # deep_wave validation case DE0 keeps 16% of the forced amplitude at
-        # the far edge against DE1's 97% -- and it cannot reconstruct a linear
-        # stage exactly, since the limiter scales the gradient by beta on
-        # genuinely linear data.  That flattens the bed the solver works with
+        # The price is damping.  DE0 keeps 66% of the forced amplitude across
+        # the deep_wave domain against DE1's 97%, so it is a poor choice for
+        # wave propagation.  beta < 1 also cannot reconstruct a linear stage
+        # exactly -- the limiter scales the gradient by beta on genuinely
+        # linear data -- which flattens the bed the solver works with
         # (z = w - h) and costs steady slope flow about 12% of its discharge.
-        # Both are the limiter, not the Euler stepping: DE0 at beta 1.0 gives
-        # 97% and 100% respectively.  See docs/source/setup_anuga_script/
-        # flow_algorithms.rst, and _set_DE_ader2_defaults() for the case where
-        # the same limiter broke a steady state outright.
+        # See docs/source/setup_anuga_script/flow_algorithms.rst, and
+        # _set_DE_ader2_defaults() for the case where that reconstruction
+        # error broke a steady state outright.
         self.beta_w=0.5
         self.beta_w_dry=0.0
         self.beta_uh=0.5

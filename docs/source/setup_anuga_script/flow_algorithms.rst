@@ -71,27 +71,38 @@ Recommendation
 
   .. warning::
 
-     **DE0 damps propagating waves heavily.**  On the ``deep_wave`` validation
-     case, where a sinusoid is forced at one edge of the domain, DE0 retains
-     only 16 % of the forced amplitude by the far edge, against 97 % for DE1.
-     The cause is the β = 0.5 limiter rather than the Euler time stepping: DE0
-     run with β = 1.0 retains 97 %, the same as DE1.
+     **DE0 damps propagating waves.**  On the ``deep_wave`` validation case,
+     where a sinusoid is forced at one edge of the domain, DE0 retains 66 % of
+     the forced amplitude by the far edge, against 97 % for DE1 and 101 % for
+     ``DE_ader2``.
 
      Do not use DE0 for tsunami propagation, seiching, tidal resonance or any
      other problem where a wave has to travel a long way without losing
-     amplitude.  Use DE1 (or ``DE_ader2``, at DE0's cost per step).
+     amplitude.  Use DE1, or ``DE_ader2`` at DE0's cost per step.
 
-     The same limiter also costs DE0 accuracy on steady flow down a slope: on
+     β = 0.5 also costs DE0 accuracy on steady flow down a slope: on
      ``rundown_mild_slope_coarse`` it carries 88 % of the prescribed discharge
-     where DE1 carries 100 %.  β = 0.5 cannot reconstruct a linear stage
-     exactly — the limiter scales the gradient by β on genuinely linear data —
-     so the bed the solver reconstructs is flatter than the real one and
-     gravity drives the flow less hard.
+     where DE1 carries 100 %.  β < 1 cannot reconstruct a linear stage exactly
+     — the limiter scales the gradient by β on genuinely linear data — so the
+     bed the solver reconstructs (``z = w - h``) comes out flatter than the
+     real one and gravity drives the flow less hard.
 
-     What β = 0.5 buys in return is strict monotonicity at shocks.  On the dry
-     dam break DE0 produces no overshoot at all, while β = 1.0 overshoots the
-     reservoir level by 0.2 %.  That is the trade: pick DE0 for robustness on
-     nasty terrain, not for accuracy.
+  .. note::
+
+     **Do not "fix" this by raising DE0's β.**  The reduced β is not a
+     conservative preference, it is what keeps forward Euler stable.  Run with
+     β = 1.0, DE0:
+
+     * goes unstable on ``deep_wave`` — the stage reaches 25–29 against a
+       forced amplitude of 1.0, and the momentum 900 against 32;
+     * loses monotonicity at the dry dam break — total variation 112 against
+       the exact 10.0, with a 0.43 m overshoot where β = 0.5 has none, and
+       twelve times the RMS error;
+     * gets worse on the dry avalanche, RMS 0.29 against 0.051.
+
+     If you need both stability and wave fidelity, that is what DE1 and
+     ``DE_ader2`` are for: they pair β = 1.0 with a second-order time
+     integrator that can carry it.
 
 * **DE_ader2 is the future default.** It achieves the same 2nd-order temporal
   accuracy as DE1 but requires only one flux call per timestep (the same as
