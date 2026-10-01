@@ -116,6 +116,7 @@ x_velocity.png
 y_velocity.png
 depth_y.png
 depth_x.png
+rollwave_*.png
 Shoreline_position.png
 Shoreline_velocity.png
 figure_*.png
