@@ -33,10 +33,12 @@ Publishing a GitHub release (the same event that triggers PyPI) starts it:
 
 ## One-off setup
 
-- [ ] Create the ANUGA Zenodo community and add the other maintainers as
-      managers. Store its identifier (the slug in its URL) as the repository
-      variable `ZENODO_COMMUNITY`. Drafts are then filed into it, and
-      publishing one submits it to the community, where an owner accepts it.
+- [x] Create the ANUGA Zenodo community, identifier `anuga`
+      (https://zenodo.org/communities/anuga), and store the identifier as the
+      repository variable `ZENODO_COMMUNITY` (both done 2026-10-01). Drafts
+      are then filed into it, and publishing one submits it to the
+      community, where an owner accepts it.
+- [ ] Add the other maintainers to the community as managers.
 - [ ] On zenodo.org, logged in with your own GitHub account:
       Applications → Personal access tokens → new token, scopes
       `deposit:write` and `deposit:actions`. Store it as the repository
