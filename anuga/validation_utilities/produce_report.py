@@ -5,6 +5,8 @@ __author__="stephen"
 __date__ ="$20/08/2012 11:20:00 PM$"
 
 
+import sys
+
 from anuga import run_anuga_script
 from anuga.validation_utilities import typeset_report
 
@@ -33,12 +35,18 @@ def produce_report(script, args=None):
             print('Skipping %s, reusing the existing output' % script)
             print(50*'=')
     else:
-        run_anuga_script(script, args=args)
+        # A failure is fatal: validations_produce_results.py, and through it
+        # the release workflow, sees this case's non-zero exit.
+        res = run_anuga_script(script, args=args)
+        if res != 0:
+            sys.exit('%s failed with return code %s' % (script, res))
 
     # We don't want to run plot_results in parallel
     args.np = 1
 
-    run_anuga_script('plot_results.py', args=args)
+    res = run_anuga_script('plot_results.py', args=args)
+    if res != 0:
+        sys.exit('plot_results.py failed with return code %s' % res)
 
     typeset_report(verbose=verbose)
 

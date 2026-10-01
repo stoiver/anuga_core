@@ -136,7 +136,7 @@ class TestProduceReport(unittest.TestCase):
 
     def test_calls_run_script_then_plot_then_typeset(self):
         args = self._make_args()
-        with patch.object(_pr_mod, 'run_anuga_script') as mock_run, \
+        with patch.object(_pr_mod, 'run_anuga_script', return_value=0) as mock_run, \
              patch.object(_pr_mod, 'typeset_report') as mock_ts:
             _pr_mod.produce_report('myscript.py', args=args)
 
@@ -145,7 +145,7 @@ class TestProduceReport(unittest.TestCase):
 
     def test_first_run_uses_supplied_script(self):
         args = self._make_args()
-        with patch.object(_pr_mod, 'run_anuga_script') as mock_run, \
+        with patch.object(_pr_mod, 'run_anuga_script', return_value=0) as mock_run, \
              patch.object(_pr_mod, 'typeset_report'):
             _pr_mod.produce_report('sim.py', args=args)
 
@@ -154,7 +154,7 @@ class TestProduceReport(unittest.TestCase):
 
     def test_second_run_uses_plot_results(self):
         args = self._make_args()
-        with patch.object(_pr_mod, 'run_anuga_script') as mock_run, \
+        with patch.object(_pr_mod, 'run_anuga_script', return_value=0) as mock_run, \
              patch.object(_pr_mod, 'typeset_report'):
             _pr_mod.produce_report('sim.py', args=args)
 
@@ -164,7 +164,7 @@ class TestProduceReport(unittest.TestCase):
     def test_no_run_skips_the_simulation(self):
         """-nr reuses the existing sww: only plot_results.py runs."""
         args = self._make_args(no_run=True)
-        with patch.object(_pr_mod, 'run_anuga_script') as mock_run, \
+        with patch.object(_pr_mod, 'run_anuga_script', return_value=0) as mock_run, \
              patch.object(_pr_mod, 'typeset_report') as mock_ts:
             _pr_mod.produce_report('sim.py', args=args)
 
@@ -175,11 +175,33 @@ class TestProduceReport(unittest.TestCase):
     def test_np_set_to_1_for_plot_step(self):
         """produce_report forces np=1 for the plot_results.py step."""
         args = self._make_args(np=4)
-        with patch.object(_pr_mod, 'run_anuga_script'), \
+        with patch.object(_pr_mod, 'run_anuga_script', return_value=0), \
              patch.object(_pr_mod, 'typeset_report'):
             _pr_mod.produce_report('sim.py', args=args)
 
         self.assertEqual(args.np, 1)
+
+    def test_failed_simulation_exits_without_plotting(self):
+        """A failing simulation is fatal, so the report driver sees it."""
+        args = self._make_args()
+        with patch.object(_pr_mod, 'run_anuga_script', return_value=1) as mock_run, \
+             patch.object(_pr_mod, 'typeset_report') as mock_ts:
+            with self.assertRaises(SystemExit) as cm:
+                _pr_mod.produce_report('sim.py', args=args)
+
+        self.assertIn('sim.py', str(cm.exception.code))
+        self.assertEqual(mock_run.call_count, 1)
+        self.assertEqual(mock_ts.call_count, 0)
+
+    def test_failed_plot_exits_without_typesetting(self):
+        args = self._make_args()
+        with patch.object(_pr_mod, 'run_anuga_script', side_effect=[0, 2]), \
+             patch.object(_pr_mod, 'typeset_report') as mock_ts:
+            with self.assertRaises(SystemExit) as cm:
+                _pr_mod.produce_report('sim.py', args=args)
+
+        self.assertIn('plot_results.py', str(cm.exception.code))
+        self.assertEqual(mock_ts.call_count, 0)
 
     def test_accessible_from_package(self):
         from anuga.validation_utilities import produce_report
