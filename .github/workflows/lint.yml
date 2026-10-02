@@ -69,3 +69,23 @@ jobs:
 
       - name: Run the analyser
         run: bash scripts/c_static_analysis.sh
+
+  citation:
+    # Zenodo archives each published release as software, taking its metadata
+    # from CITATION.cff. An invalid file (the licence once failed: it must be an
+    # SPDX identifier) is caught here, when the file changes, rather than when
+    # a release fails to archive.
+    name: CITATION.cff valid
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install cffconvert
+        run: pip install cffconvert
+
+      - name: Validate CITATION.cff
+        run: cffconvert --validate -i CITATION.cff
