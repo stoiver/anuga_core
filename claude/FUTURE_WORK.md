@@ -224,7 +224,7 @@ Speculative future work: add EPSG/`Geo_reference` coordinate support to
 
 ---
 
-**P2.11 Overlaid algorithm comparisons for the key validation cases** (session 58).
+~~**P2.11 Overlaid algorithm comparisons for the key validation cases**~~ (session 58). **Not pursued** (decided 2026-10-02): the combined report's DE0 | DE1 | DE_ader2 panels are sufficient.
 The combined report (PR #409) shows each figure as DE0 | DE1 | DE_ader2 panels,
 which covers every case but compares less well than one plot with the three
 algorithms overlaid, as `rundown_mild_slope/compare_solvers.py` does. Convert
