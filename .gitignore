@@ -81,7 +81,13 @@ validation_tests/case_studies/towradgi_simulation/PARTITIONS
 validation_tests/case_studies/towradgi_simulation/CHECKPOINTS
 validation_tests/case_studies/towradgi_simulation/Validation
 
-validation_tests/reports/validations_report_alg_DE1.pdf
+validation_tests/reports/validations_report_alg_*.pdf
+validation_tests/reports/validations_report_combined.pdf
+validation_tests/reports/anuga-*-validation-*.pdf
+validation_tests/reports/algs/
+validation_tests/reports/combined/
+validation_tests/reports/combined_algs.tex
+validation_tests/reports/combined_summary.tex
 
 examples/cairns_excel/cairns_initialcond
 

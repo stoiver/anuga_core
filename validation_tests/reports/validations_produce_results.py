@@ -82,6 +82,7 @@ print(Upper_dirs)
 time_total = 0.0
 test_number = 1
 failed = []
+status = []      # (case, 'ok' | 'failed', seconds), for the combined report
 for dir in Upper_dirs:
     upper_dir = dir
 
@@ -128,14 +129,17 @@ for dir in Upper_dirs:
             # makes this script exit non-zero (the release workflow gates on
             # it), but the remaining cases still run and the report is still
             # typeset from whatever was produced.
-            if os.system(cmd) != 0:
+            ok = os.system(cmd) == 0
+            if not ok:
                 failed.append(os.path.join(upper_dir, l_dir))
             t1 = time.time() - t0
             time_total += t1
+            status.append((upper_dir + '/' + l_dir, 'ok' if ok else 'failed', t1))
             print(2 * indent + 'That took ' + str(t1) + ' secs')
         except Exception:
             print(2 * indent + 'Failed running produce_results in ' + os.getcwd())
             failed.append(os.path.join(upper_dir, l_dir))
+            status.append((upper_dir + '/' + l_dir, 'failed', time.time() - t0))
 
         os.chdir('..')
         #print 'Changing to', os.getcwd()
@@ -152,6 +156,12 @@ print(72 * '=')
 
 # go back to reports directory to typeset report
 os.chdir('reports')
+
+# Per-case outcome and run time, read by validations_combine_algs.py
+with open('case_status_alg_%s.csv' % str(alg), 'w') as f:
+    f.write('case,status,seconds\n')
+    for case, outcome, secs in status:
+        f.write('%s,%s,%.1f\n' % (case, outcome, secs))
 
 
 # A stale PDF from an earlier run must not pass for this one

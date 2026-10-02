@@ -24,10 +24,14 @@ Publishing a GitHub release (the same event that triggers PyPI) starts it:
    `produce_results.py`, then the LaTeX), and keeps the PDF and logs as an
    artifact for 90 days. It is a gate: the script exits non-zero if any case
    fails or the report does not typeset, and then nothing below runs.
-2. **attach**: uploads `anuga-<tag>-validation-<alg>.pdf` to the release.
-   This runs for release candidates too.
-3. **zenodo**: final releases only. Creates a **draft** new version of the
-   Zenodo record with the three PDFs and the metadata: version = tag, creators
+2. **combine**: builds `anuga-<tag>-validation-combined.pdf` from the
+   figures each report job collected (`validations_combine_algs.py`): every
+   case once, a summary table, and each figure that differs between the
+   algorithms as one panel per algorithm. It needs only LaTeX.
+3. **attach**: uploads the combined PDF and `anuga-<tag>-validation-<alg>.pdf`
+   to the release. This runs for release candidates too.
+4. **zenodo**: final releases only. Creates a **draft** new version of the
+   Zenodo record with the four PDFs and the metadata: version = tag, creators
    from `CITATION.cff`, CC-BY 4.0, *isSupplementTo* the GitHub release. It
    never publishes, because a published Zenodo record cannot be deleted.
 
@@ -72,7 +76,7 @@ version of the same record, under the same concept DOI.
 - [ ] If a report job fails, its artifact holds `produce_<alg>.log` and the
       LaTeX log. Fix the case, then re-run by hand with tag = the release.
 - [ ] Final releases: open the Zenodo draft linked from the zenodo job's
-      summary, check the three PDFs open and the metadata is right, and press
+      summary, check the four PDFs open and the metadata is right, and press
       **Publish**.
 - [ ] Add the new version's DOI to the GitHub release notes.
 

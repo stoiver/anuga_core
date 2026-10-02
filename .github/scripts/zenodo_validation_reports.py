@@ -52,10 +52,14 @@ def metadata(tag, release_url, creators, community=''):
         'publication_date': datetime.date.today().isoformat(),
         'description': (
             '<p>Validation reports for ANUGA %s, built from the tagged release '
-            'by its release workflow. Each PDF covers the analytical, '
+            'by its release workflow. They cover the analytical, '
             'experimental, behaviour and sediment cases of the ANUGA '
-            'validation suite run with one flow algorithm (the file name '
-            'says which). The large case studies are not included.</p>'
+            'validation suite; the large case studies are not included.</p>'
+            '<p>The combined report (file name ending -combined.pdf) runs every '
+            'case with the flow algorithms DE0, DE1 and DE_ader2 and shows '
+            'their results side by side, with a summary table at the front. '
+            'The other files are the full report for each algorithm on its '
+            'own, with full-size figures.</p>'
             '<p>The cases, their reference solutions and the scripts that '
             'produce these reports are in the validation_tests directory of '
             'the ANUGA repository.</p>' % tag),

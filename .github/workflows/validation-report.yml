@@ -101,6 +101,15 @@ jobs:
           set -o pipefail
           python validations_produce_results.py -alg "$ALG" -l 2>&1 | tee "produce_${ALG}.log"
           mv "validations_report_alg_${ALG}.pdf" "anuga-${TAG}-validation-${ALG}.pdf"
+          # This algorithm's figures and case status, for the combined report
+          python validations_combine_algs.py collect -alg "$ALG"
+
+      - name: Keep the figures for the combined report
+        uses: actions/upload-artifact@v7
+        with:
+          name: validation-figures-${{ matrix.alg }}
+          path: validation_tests/reports/algs/
+          retention-days: 7
 
       - name: Keep the report
         if: always()
@@ -115,9 +124,52 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
+  # One report with every case once and each figure per algorithm side by
+  # side. Needs only LaTeX and the figures the report jobs collected.
+  combine:
+    name: Combined report
+    needs: [report]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
+          sparse-checkout: validation_tests
+
+      - name: Install LaTeX
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            texlive-latex-base texlive-latex-recommended texlive-latex-extra \
+            texlive-fonts-recommended
+
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: validation-figures-*
+          merge-multiple: true
+          path: validation_tests/reports/algs
+
+      - name: Build the combined report
+        run: |
+          set -euo pipefail
+          cd validation_tests/reports
+          python3 validations_combine_algs.py combine
+          mv validations_report_combined.pdf "anuga-${TAG}-validation-combined.pdf"
+
+      - name: Keep the combined report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: validation-report-combined
+          path: |
+            validation_tests/reports/anuga-*-validation-combined.pdf
+            validation_tests/reports/validations_report_combined.log
+          if-no-files-found: warn
+          retention-days: 90
+
   attach:
     name: Attach to the release
-    needs: [report]
+    needs: [report, combine]
     if: github.event_name == 'release' || inputs.attach
     runs-on: ubuntu-latest
     permissions:
@@ -137,7 +189,7 @@ jobs:
 
   zenodo:
     name: Zenodo draft
-    needs: [report]
+    needs: [report, combine]
     # Final releases only; release candidates get the GitHub assets alone.
     # By hand: inputs.zenodo picks the sandbox or production.
     if: >-
