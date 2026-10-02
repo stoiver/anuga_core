@@ -80,6 +80,17 @@ discretisation, and the validation suite, and has a DOI:
 
    https://dx.doi.org/10.13140/RG.2.2.17267.81446
 
+Validation reports
+------------------
+
+The validation reports of each final release are archived on Zenodo as
+versions of the *ANUGA validation reports* record. Each version has its own
+DOI and is linked from the corresponding release on the
+`GitHub releases page <https://github.com/anuga-community/anuga_core/releases>`_.
+When a result depends on ANUGA reproducing one of the validation cases, cite
+the version that matches the ANUGA release you used. See
+:ref:`anuga-validation` for what the reports contain.
+
 License
 -------
 

@@ -34,19 +34,30 @@ that the numerical solution meets a specified tolerance.
 
 **Selecting a flow algorithm**
 
-Many tests accept a ``--alg`` argument to select the flow algorithm:
+The ``-alg`` argument selects the flow algorithm:
 
 .. code-block:: bash
 
-   python run_auto_validation_tests.py --alg DE1
+   python run_auto_validation_tests.py -alg DE_ader2
 
-Valid options are ``DE0`` (first-order, default) and ``DE1`` (second-order).
+The default is ``DE1``. Any algorithm accepted by
+``Domain.set_flow_algorithm`` can be given, for example ``DE0``, ``DE1``,
+``DE2`` or ``DE_ader2``.
+
+**Long cases**
+
+The HEC-RAS bridge and weir behaviour cases take much longer than the rest and
+are skipped unless ``-l`` (``--long``) is given:
+
+.. code-block:: bash
+
+   python run_auto_validation_tests.py -alg DE1 -l
 
 **Verbose output**
 
 .. code-block:: bash
 
-   python run_auto_validation_tests.py --verbose
+   python run_auto_validation_tests.py -v
 
 **Running a single test**
 
@@ -61,13 +72,38 @@ directory:
 **Producing a PDF report**
 
 Each test directory contains a ``produce_results.py`` script that runs the
-numerical simulation and writes a LaTeX report.  To produce reports for all
-tests (excluding the large case studies):
+simulation, plots the results and typesets that case's ``report.pdf``. To
+produce the combined report for all cases (excluding the large case
+studies):
 
 .. code-block:: bash
 
    cd validation_tests/reports
-   python all_tests_produce_report.py
+   python validations_produce_results.py -alg DE1 -l
+
+This writes ``validations_report_alg_DE1.pdf``. It needs ``pdflatex`` and
+``bibtex`` with the ``datatool``, ``placeins`` and ``titlesec`` packages (on
+Debian or Ubuntu, ``texlive-latex-extra``). It exits non-zero, after still
+typesetting what it could, if any case fails to produce its results.
+
+Add ``-nr`` (``--no-run``) to rebuild the plots and the report from the
+``.sww`` files already in the case directories, without running the
+simulations again.
+
+Validation reports for each release
+------------------------------------
+
+The PDF reports for every ANUGA release are built from the tagged commit, for
+the ``DE0``, ``DE1`` and ``DE_ader2`` flow algorithms, by the
+``validation-report.yml`` workflow. They are attached to the release on the
+`GitHub releases page <https://github.com/anuga-community/anuga_core/releases>`_,
+and for final releases (not release candidates) they are also archived on
+Zenodo as a version of the *ANUGA validation reports* record, with its own
+DOI. The Zenodo record is linked from the GitHub release. Cite the version
+that matches the ANUGA release you used (see :doc:`../citing`).
+
+The workflow is a release gate: if any case fails to produce its results, no
+reports are attached.
 
 
 Nightly run in CI

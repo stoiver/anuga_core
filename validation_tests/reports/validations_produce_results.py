@@ -17,6 +17,7 @@ alg = args.alg
 np = args.np
 verbose = args.verbose
 no_run = getattr(args, 'no_run', False)
+long_cases = getattr(args, 'long', False)
 
 #---------------------------------
 # Get the current svn revision
@@ -80,7 +81,9 @@ print(Upper_dirs)
 
 time_total = 0.0
 test_number = 1
+failed = []
 for dir in Upper_dirs:
+    upper_dir = dir
 
     os.chdir(dir)
 
@@ -118,13 +121,21 @@ for dir in Upper_dirs:
                 cmd += '-v '
             if no_run:
                 cmd += '-nr '
+            if long_cases:
+                cmd += '-l '
             print(2 * indent + 'Running: ' + cmd)
-            os.system(cmd)
+            # A case whose produce_results fails is reported at the end and
+            # makes this script exit non-zero (the release workflow gates on
+            # it), but the remaining cases still run and the report is still
+            # typeset from whatever was produced.
+            if os.system(cmd) != 0:
+                failed.append(os.path.join(upper_dir, l_dir))
             t1 = time.time() - t0
             time_total += t1
             print(2 * indent + 'That took ' + str(t1) + ' secs')
         except Exception:
             print(2 * indent + 'Failed running produce_results in ' + os.getcwd())
+            failed.append(os.path.join(upper_dir, l_dir))
 
         os.chdir('..')
         #print 'Changing to', os.getcwd()
@@ -143,14 +154,25 @@ print(72 * '=')
 os.chdir('reports')
 
 
+# A stale PDF from an earlier run must not pass for this one
+if os.path.isfile('validations_report.pdf'):
+    os.remove('validations_report.pdf')
 os.system('python validations_typeset_report.py')
 
-import subprocess
-cmd = 'mv validations_report.pdf validations_report_alg_%s.pdf' % (str(alg))
-print(cmd)
-subprocess.call([cmd], shell=True)
+import sys
 
+report = 'validations_report_alg_%s.pdf' % str(alg)
+if os.path.isfile('validations_report.pdf'):
+    os.replace('validations_report.pdf', report)
+    print('Wrote ' + report)
+else:
+    print('validations_report.pdf was not produced (see validations_report.log)')
+    failed.append('reports (typesetting)')
 
-
-
-
+if failed:
+    print(72 * '=')
+    print('%d case(s) failed to produce results:' % len(failed))
+    for name in failed:
+        print(indent + name)
+    print(72 * '=')
+    sys.exit(1)
