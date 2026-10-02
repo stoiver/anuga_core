@@ -57,11 +57,16 @@ Publishing a GitHub release (the same event that triggers PyPI) starts it:
       archived as **software** with its own DOI, a different record from the
       reports. Once it exists, add the concept DOI to `docs/source/citing.rst`
       and `CITATION.cff` (`doi:`).
-- [ ] Dry run against the sandbox: Actions → Validation reports → Run
-      workflow, tag = the latest release, attach = off, zenodo = sandbox.
-      The job summary prints the draft link and its **concept record id**.
-      Check the draft on sandbox.zenodo.org, then store the concept record id
-      as the repository **variable** `ZENODO_SANDBOX_CONCEPT_RECID`.
+- [x] Dry run against the sandbox (2026-10-02). It was run locally with
+      `zenodo_validation_reports.py --sandbox`, because "Run workflow" only
+      offers workflows that are on the default branch (`main`), which this
+      one will not be until the next release. Both paths worked against the
+      real API: the first run created and published record 612560 (concept
+      612559, metadata and files checked), and the second, with
+      `--concept-recid 612559`, made a new-version draft, removed the
+      carried-over files and uploaded the new ones. `ZENODO_SANDBOX_CONCEPT_RECID`
+      is set to 612559. Once the workflow is on `main`, a by-hand run with
+      zenodo = sandbox tests the workflow wiring itself (secrets, artifacts).
       Publishing on the sandbox is harmless.
 
 The first production run has no `ZENODO_CONCEPT_RECID` variable, so it

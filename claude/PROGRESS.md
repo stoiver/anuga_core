@@ -1,6 +1,6 @@
 # ANUGA Code & Documentation Improvement Progress
 
-Last updated: 2026-07-08 (session 47)
+Last updated: 2026-10-02 (session 58)
 Branch: `develop` (all feature branches merged)
 
 Full history of completed work: `claude/PROGRESS_ARCHIVE.md`
@@ -28,7 +28,8 @@ Future work recommendations: `claude/FUTURE_WORK.md`
 | Documentation overhaul (session 47) | 15 | 15 | 0 |
 | GPU mode-2 Time_boundary fix | 2 | 2 | 0 |
 | Operator-timing fixes (DE1 rk2, DE2 rk3) | 2 | 2 | 0 |
-| **Total** | **228** | **220** | **8** |
+| Validation reports per release (session 58) | 5 | 4 | 1 |
+| **Total** | **233** | **224** | **9** |
 
 ---
 
@@ -47,6 +48,16 @@ Future work recommendations: `claude/FUTURE_WORK.md`
 - [ ] **G4.1** Gordon Bell metrics — per-kernel timing (not just totals), roofline model comparison, peak theoretical FLOP/s
 - [ ] **G4.2** Physical benchmark validation — Thacker paraboloid, dam break (Ritter), tide gauge comparison in GPU mode
 - [ ] **G4.3** Multi-node strong scaling — 20 M triangles, 1→64 GPUs; demonstrate ~50× runtime reduction
+
+### Validation reports per release (session 58)
+
+- [x] Roll-wave + stable cases in `rundown_mild_slope`, solver comparison (PR #407)
+- [x] DE_ader2 dt-dependent steady state documented (KNOWN_ISSUES)
+- [x] Release workflow: per-algorithm reports, release assets, Zenodo draft (PR #408)
+- [x] Zenodo sandbox dry run (create + new version), tokens, `anuga` community
+- [ ] Combined three-algorithm report (PR #409, open). After the next
+  develop→main merge, run the workflow by hand with zenodo = sandbox to test
+  its wiring, and add the community co-managers.
 
 ### GPU correctness
 
