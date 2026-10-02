@@ -43,7 +43,7 @@ for test in (1, 2, 3):
     pyplot.title('Trench test %d: bed level below the flume bed' % test)
     pyplot.xlabel('x (m)')
     pyplot.ylabel('bed level (m)')
-    pyplot.legend(loc='lower right', fontsize=8)
+    pyplot.legend(loc='lower right', fontsize='small')
     pyplot.savefig('bed_profile_test%d.png' % test)
 
     pyplot.clf()

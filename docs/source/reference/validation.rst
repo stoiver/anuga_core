@@ -90,12 +90,33 @@ Add ``-nr`` (``--no-run``) to rebuild the plots and the report from the
 ``.sww`` files already in the case directories, without running the
 simulations again.
 
+To build the combined report locally, run each algorithm and collect its
+figures before running the next (each run overwrites the case directories),
+then combine:
+
+.. code-block:: bash
+
+   cd validation_tests/reports
+   for alg in DE0 DE1 DE_ader2; do
+       python validations_produce_results.py -alg $alg -l
+       python validations_combine_algs.py collect -alg $alg
+   done
+   python validations_combine_algs.py combine
+
+This writes ``validations_report_combined.pdf``. New cases go in
+``validations_report_body.tex``, which both reports share.
+
 Validation reports for each release
 ------------------------------------
 
 The PDF reports for every ANUGA release are built from the tagged commit, for
 the ``DE0``, ``DE1`` and ``DE_ader2`` flow algorithms, by the
-``validation-report.yml`` workflow. They are attached to the release on the
+``validation-report.yml`` workflow. The main one is the **combined report**
+(``anuga-<version>-validation-combined.pdf``): every case once, a summary
+table of each case's outcome and run time per algorithm, and each figure
+that differs between the algorithms shown as a row of panels, one per
+algorithm. The full report for each algorithm on its own is published
+alongside it. They are attached to the release on the
 `GitHub releases page <https://github.com/anuga-community/anuga_core/releases>`_,
 and for final releases (not release candidates) they are also archived on
 Zenodo as a version of the *ANUGA validation reports* record, with its own

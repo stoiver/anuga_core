@@ -24,10 +24,14 @@ Publishing a GitHub release (the same event that triggers PyPI) starts it:
    `produce_results.py`, then the LaTeX), and keeps the PDF and logs as an
    artifact for 90 days. It is a gate: the script exits non-zero if any case
    fails or the report does not typeset, and then nothing below runs.
-2. **attach**: uploads `anuga-<tag>-validation-<alg>.pdf` to the release.
-   This runs for release candidates too.
-3. **zenodo**: final releases only. Creates a **draft** new version of the
-   Zenodo record with the three PDFs and the metadata: version = tag, creators
+2. **combine**: builds `anuga-<tag>-validation-combined.pdf` from the
+   figures each report job collected (`validations_combine_algs.py`): every
+   case once, a summary table, and each figure that differs between the
+   algorithms as one panel per algorithm. It needs only LaTeX.
+3. **attach**: uploads the combined PDF and `anuga-<tag>-validation-<alg>.pdf`
+   to the release. This runs for release candidates too.
+4. **zenodo**: final releases only. Creates a **draft** new version of the
+   Zenodo record with the four PDFs and the metadata: version = tag, creators
    from `CITATION.cff`, CC-BY 4.0, *isSupplementTo* the GitHub release. It
    never publishes, because a published Zenodo record cannot be deleted.
 
@@ -53,11 +57,16 @@ Publishing a GitHub release (the same event that triggers PyPI) starts it:
       archived as **software** with its own DOI, a different record from the
       reports. Once it exists, add the concept DOI to `docs/source/citing.rst`
       and `CITATION.cff` (`doi:`).
-- [ ] Dry run against the sandbox: Actions → Validation reports → Run
-      workflow, tag = the latest release, attach = off, zenodo = sandbox.
-      The job summary prints the draft link and its **concept record id**.
-      Check the draft on sandbox.zenodo.org, then store the concept record id
-      as the repository **variable** `ZENODO_SANDBOX_CONCEPT_RECID`.
+- [x] Dry run against the sandbox (2026-10-02). It was run locally with
+      `zenodo_validation_reports.py --sandbox`, because "Run workflow" only
+      offers workflows that are on the default branch (`main`), which this
+      one will not be until the next release. Both paths worked against the
+      real API: the first run created and published record 612560 (concept
+      612559, metadata and files checked), and the second, with
+      `--concept-recid 612559`, made a new-version draft, removed the
+      carried-over files and uploaded the new ones. `ZENODO_SANDBOX_CONCEPT_RECID`
+      is set to 612559. Once the workflow is on `main`, a by-hand run with
+      zenodo = sandbox tests the workflow wiring itself (secrets, artifacts).
       Publishing on the sandbox is harmless.
 
 The first production run has no `ZENODO_CONCEPT_RECID` variable, so it
@@ -72,7 +81,7 @@ version of the same record, under the same concept DOI.
 - [ ] If a report job fails, its artifact holds `produce_<alg>.log` and the
       LaTeX log. Fix the case, then re-run by hand with tag = the release.
 - [ ] Final releases: open the Zenodo draft linked from the zenodo job's
-      summary, check the three PDFs open and the metadata is right, and press
+      summary, check the four PDFs open and the metadata is right, and press
       **Publish**.
 - [ ] Add the new version's DOI to the GitHub release notes.
 

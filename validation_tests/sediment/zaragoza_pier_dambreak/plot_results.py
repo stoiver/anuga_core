@@ -70,7 +70,7 @@ for npz in sorted(glob.glob('pier_P?_bed.npz')):
     ax.axvspan(1.6 - 0.015, 1.6 + 0.015, color='0.8', label='pier')
     ax.set_xlabel('x from the gate (m)'); ax.set_ylabel('bed change (mm)'); ax.grid(alpha=0.3)
     ax.set_title('%s: bed change along the centreline (y = 0.12 +- 0.0125 m)' % case)
-    ax.legend(fontsize=8, ncol=2)
+    ax.legend(fontsize='small', ncol=2)
     fig.tight_layout(); fig.savefig('centreline_%s.png' % case, dpi=130); plt.close(fig)
     # water surface along the centreline during the first dam-break
     if os.path.exists('kinect_%s_wse.csv' % case) and os.path.exists('pier_%s.sww' % case):
@@ -95,5 +95,5 @@ for npz in sorted(glob.glob('pier_P?_bed.npz')):
             ax.plot(xc[sel][o], 1000 * stage[i][o], '-', color='C%d' % k, label='ANUGA t = %.2f s' % ts[i])
         ax.set_xlabel('x from the gate (m)'); ax.set_ylabel('water surface above the initial bed (mm)')
         ax.set_title('%s: water surface along the centreline, first dam-break' % case); ax.grid(alpha=0.3)
-        ax.legend(fontsize=7, ncol=5); ax.set_ylim(-5, 60)
+        ax.legend(fontsize='x-small', ncol=5); ax.set_ylim(-5, 60)
         fig.tight_layout(); fig.savefig('wse_%s.png' % case, dpi=130); plt.close(fig)

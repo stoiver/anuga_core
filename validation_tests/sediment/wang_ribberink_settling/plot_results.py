@@ -38,6 +38,6 @@ for run in (1, 2):
         ax.plot(xc, cc, lw=1.5, label=LABELS.get(adapt, adapt))
     ax.axvline(16.0, color='0.7', ls=':')
     ax.set_xlim(0, 17); ax.set_ylim(0, 160); ax.set_xlabel('x from the start of the perforated bed (m)')
-    ax.set_ylabel('depth-averaged concentration (ppm)'); ax.grid(alpha=0.3); ax.legend(fontsize=8)
+    ax.set_ylabel('depth-averaged concentration (ppm)'); ax.grid(alpha=0.3); ax.legend(fontsize='small')
     ax.set_title('Wang & Ribberink settling flume, run %d' % run)
     fig.tight_layout(); fig.savefig('concentration_run%d.png' % run, dpi=130); plt.close(fig)

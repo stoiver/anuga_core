@@ -1,6 +1,6 @@
 # Future Work Recommendations
 
-Generated: 2026-04-24 (session 23). Last updated: 2026-07-19 (session 50).
+Generated: 2026-04-24 (session 23). Last updated: 2026-10-02 (session 58).
 Based on codebase investigation cross-referenced against 50 sessions of completed work.
 
 Items marked ~~strikethrough~~ have been invalidated (see notes).
@@ -224,6 +224,17 @@ Speculative future work: add EPSG/`Geo_reference` coordinate support to
 
 ---
 
+**P2.11 Overlaid algorithm comparisons for the key validation cases** (session 58).
+The combined report (PR #409) shows each figure as DE0 | DE1 | DE_ader2 panels,
+which covers every case but compares less well than one plot with the three
+algorithms overlaid, as `rundown_mild_slope/compare_solvers.py` does. Convert
+the cases where the algorithms differ most (dam breaks, deep_wave, run-up,
+sediment) one at a time. The open design point: the CI combine job sees only
+the collected figures, so either each case's plot step writes a small data
+file (centreline profile, gauge series) that `collect` also copies, or the
+overlay is drawn inside the case by running all algorithms there, as
+compare_solvers does.
+
 ## Priority 3 — Larger initiatives (weeks to months)
 
 **P3.1 Implement local timestepping (GPU-compatible redesign)**
@@ -314,6 +325,15 @@ Existing frame-generation pipeline as backend.
 `Rate_operator`, `File_boundary`, etc. Would reduce boilerplate for common operational setups.
 
 ---
+
+**Held timestep for DE_ader2** (session 58; see KNOWN_ISSUES "DE_ader2's
+steady state depends on dt"). Holding dt until the CFL limit forces it down,
+and meeting output times with equal steps, stops DE_ader2's self-sustained
+unsteadiness in unstable flow (unseeded roll waves went steady to 1e-13 at
+MARGIN 0.7-0.85). Not adopted: it is fragile (MARGIN 0.9, or a raise rule,
+re-establishes the loop), costs about 1/MARGIN more steps, and would have to go
+into the legacy, unified C and GPU step paths. The prototype is described in
+KNOWN_ISSUES. Revisit only if the effect matters in a real application.
 
 ## Invalidated suggestions
 
