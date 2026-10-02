@@ -45,7 +45,10 @@ def uncommented(text):
 def cases():
     """Case paths relative to validation_tests/, in report order."""
     with open(os.path.join(HERE, 'validations_report_body.tex')) as f:
-        return CASE.findall(uncommented(f.read()))
+        text = uncommented(f.read())
+    # The appendix shows \inputresults{../Directory/Name} as an example
+    text = re.sub(r'\\begin\{verbatim\}.*?\\end\{verbatim\}', '', text, flags=re.S)
+    return CASE.findall(text)
 
 
 def figures(case):

@@ -8,6 +8,9 @@ import time
 
 import anuga
 from anuga import indent
+
+# Larger plot text and 200 dpi for every case's figures (see matplotlibrc)
+os.environ['MATPLOTLIBRC'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'matplotlibrc')
 #from anuga.validation_utilities.parameters import alg
 #from anuga.validation_utilities.parameters import cfl
 
