@@ -16,11 +16,16 @@ up-to-date APA or BibTeX entry from it. A minimal BibTeX entry:
 .. code-block:: bibtex
 
    @software{anuga,
-     title     = {ANUGA Hydrodynamic Inundation Modelling},
+     title     = {{ANUGA}: hydrodynamic modelling of floods, storm surges and tsunamis},
      author    = {Roberts, Stephen and Davies, Gareth and Nielsen, Ole and others},
      publisher = {Australian National University and Geoscience Australia},
      url       = {https://github.com/anuga-community/anuga_core}
    }
+
+From version 4.1.0, each release is also archived on Zenodo with a DOI of its
+own, linked from the release on the
+`GitHub releases page <https://github.com/anuga-community/anuga_core/releases>`_.
+Cite that DOI to identify the exact version you used.
 
 ANUGA was created by Geoscience Australia and the Mathematical Sciences Institute
 at the Australian National University, and is now maintained by a community of
