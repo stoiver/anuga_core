@@ -52,7 +52,22 @@ PIER_LEN = float(os.environ.get('ZARAGOZA_PIER_LEN', '2.0'))
 # 1: the amplification acts on the front and flanks only (the horseshoe
 # vortex), fading to none in the wake; 0: all round.
 PIER_FRONT = int(os.environ.get('ZARAGOZA_PIER_FRONT', '0'))
-output_file = 'pier_%s' % CASE
+# Suspended load as well as bedload (off by default: the case is bedload
+# only). With it, the sand can be entrained (Smith-McLean, critical Shields
+# number 0.047) and settle with the Rouse near-bed profile, for testing whether
+# sand lifted at the pier is carried past the near wake.
+SUSPENSION = int(os.environ.get('ZARAGOZA_SUSPENSION', '0'))
+# A downstream tail on the shear amplification (on by default, A = 2 over
+# 5 pier diameters; ZARAGOZA_WAKE_AMP=0 turns it off). Behind the
+# pier the depth-averaged flow is sheltered, so its shear drops and the bedload
+# stops within a diameter; in the flume the horseshoe-vortex legs and the shed
+# wake vortices keep the bed shear raised for several diameters. The tail adds
+# WAKE_AMP * exp(-s / (WAKE_LEN * D)) * exp(-y'^2 / (2 D^2)) to the factor, with
+# s the distance downstream of the pier's rear face and D the pier diameter.
+WAKE_AMP = float(os.environ.get('ZARAGOZA_WAKE_AMP', '2.0'))
+WAKE_LEN = float(os.environ.get('ZARAGOZA_WAKE_LEN', '5.0'))
+# ZARAGOZA_TAG suffixes the output names, so experiments can run side by side
+output_file = 'pier_%s%s' % (CASE, os.environ.get('ZARAGOZA_TAG', ''))
 
 # --- geometry (m); x from the gate along the flume, y from the right wall ---
 W = 0.24
@@ -73,6 +88,12 @@ REPOSE = 32.0                         # degrees
 # gate to the exit and not only over the sand, which is finer again, and the
 # pier finer still.
 A_COARSE, A_FLUME, A_SAND, A_PIER = 4.0e-4, 1.5e-4, 1.0e-4, 2.0e-5
+# Wake-resolution experiments (defaults leave the case unchanged): the pier
+# box's triangle area, how far downstream the box reaches, and the output
+# interval, fine enough to see vortex shedding (period about 0.15 s).
+A_PIER = float(os.environ.get('ZARAGOZA_A_PIER', str(A_PIER)))
+BOX_X1 = float(os.environ.get('ZARAGOZA_BOX_X1', '1.75'))
+YIELD = float(os.environ.get('ZARAGOZA_YIELD', '0.1'))
 
 
 def pier_polygon(case, n=16):
@@ -101,8 +122,8 @@ hole = pier_polygon(CASE)
 # tiny triangles. The pier box is a genuine interior polygon, well clear of
 # both walls.
 X_IN, X_OUT = X_SAND0 - 0.05, X_SAND1 + 0.05      # ends of the sand reach
-pier_box = [(X_PIER - 0.12, 0.03), (X_PIER + 0.15, 0.03),
-            (X_PIER + 0.15, W - 0.03), (X_PIER - 0.12, W - 0.03)]
+pier_box = [(X_PIER - 0.12, 0.03), (BOX_X1, 0.03),
+            (BOX_X1, W - 0.03), (X_PIER - 0.12, W - 0.03)]
 regions = [(pier_box, A_PIER)]
 region_points = [[0.5 * X_IN, 0.5 * W, A_FLUME],                 # gate to sand
                  [0.5 * (X_IN + X_PIER) - 0.1, 0.06, A_SAND],   # the sand reach
@@ -147,9 +168,14 @@ if myid == 0:
 
     # --- sediment: bedload only, over a 5 cm erodible layer in the sand reach ---
     domain.initialize_sediment_operator(porosity=POROSITY, bed_evolution=True)
-    domain.set_deposition(law='threshold', tau_d=0.0)              # no settling exchange
-    domain.add_sediment_fraction('sand', diameter=D_SAND, tau_c_star=1.0e9,   # no entrainment
-                                 initial_concentration=0.0)
+    if SUSPENSION:
+        domain.set_deposition(near_bed='rouse')
+        domain.add_sediment_fraction('sand', diameter=D_SAND, tau_c_star=0.047,
+                                     initial_concentration=0.0)
+    else:
+        domain.set_deposition(law='threshold', tau_d=0.0)          # no settling exchange
+        domain.add_sediment_fraction('sand', diameter=D_SAND, tau_c_star=1.0e9,   # no entrainment
+                                     initial_concentration=0.0)
     domain.set_bedload('wong_parker_eq24', open_boundaries=['outflow'], min_depth=2.0 * D_SAND)
     xc = domain.centroid_coordinates[:, 0]
     z = domain.quantities['elevation'].centroid_values
@@ -169,6 +195,12 @@ if myid == 0:
                 # downstream quadrant: cos of the angle from upstream, clipped
                 ang = np.arctan2(np.abs(y - Y_PIER), -(x - X_PIER))
                 amp = amp * np.clip(1.5 - ang / (0.5 * np.pi), 0.0, 1.0)
+            if WAKE_AMP > 0.0:
+                D = 2.0 * R
+                s_down = x - (X_PIER + half + R)
+                tail = (WAKE_AMP * np.exp(-np.maximum(s_down, 0.0) / (WAKE_LEN * D))
+                        * np.exp(-0.5 * ((y - Y_PIER) / D) ** 2))
+                amp = amp + np.where(s_down > 0.0, tail, 0.0)
             return 1.0 + amp
         domain.set_shear_amplification(amplification)
     if verbose:
@@ -235,7 +267,7 @@ for event in range(EVENTS):
             for t in domain.evolve(yieldstep=GATE_DT, finaltime=t_start + k * GATE_DT):
                 pass
             set_gate(gate_crest(k * GATE_DT))
-    for t in domain.evolve(yieldstep=0.1, finaltime=(event + 1) * T_EVENT):
+    for t in domain.evolve(yieldstep=YIELD, finaltime=(event + 1) * T_EVENT):
         if myid == 0 and verbose:
             print(domain.timestepping_statistics())
     beds.append(domain.quantities['elevation'].centroid_values.copy())
@@ -245,10 +277,10 @@ for event in range(EVENTS):
 
 domain.sww_merge(delete_old=True)
 if myid == 0:
-    np.savez('pier_%s_bed.npz' % CASE, x=domain.centroid_coordinates[:, 0],
+    np.savez('%s_bed.npz' % output_file, x=domain.centroid_coordinates[:, 0],
              y=domain.centroid_coordinates[:, 1], z0=z0, beds=np.array(beds),
              areas=domain.areas)
-    with open('pier_%s_parameters.json' % CASE, 'w') as f:
+    with open('%s_parameters.json' % output_file, 'w') as f:
         json.dump({'case': CASE, 'events': EVENTS, 't_event': T_EVENT, 'alg': alg,
                    'porosity': POROSITY, 'd_sand': D_SAND, 'n_pvc': N_PVC, 'n_sand': N_SAND,
                    'repose': REPOSE, 'triangles': int(domain.number_of_elements),
