@@ -1,5 +1,76 @@
 # ANUGA 4.1.0 (unreleased)
 
+ANUGA 4.1.0 adds two new capabilities to the solver: **passive tracers**,
+concentrations carried with the water, and **sediment transport** built on
+them, with suspended load, bedload and an evolving bed. Both run in both
+compute modes, offload to a GPU, and work in parallel. Vegetation drag joins
+the friction, and every release now ships its validation reports.
+
+Most existing scripts run unchanged. The exceptions are scripts that still use
+the forcing classes deprecated in 4.0.0, which are now removed, and runs with
+the `DE_ader2` flow algorithm, whose results change (see *Breaking changes*).
+
+## Highlights
+
+### Passive tracers
+
+A tracer is a depth-averaged concentration `c` carried as the conserved
+quantity `h c` through the same flux kernel as the water: dye, salt, a
+pollutant, or a sediment fraction.
+
+```python
+domain.add_tracer('salinity')
+domain.set_tracer('salinity', 35.0)                    # initial field
+domain.set_tracer_boundary('salinity', 'ocean', 35.0)  # inflow values per tag
+domain.set_tracer_boundary('salinity', 'river', 0.0)
+```
+
+Tracers have their own boundary values, are written to the SWW as
+`<name>_c`, are distributed and reordered with the mesh in parallel, and come
+with mass diagnostics (`get_tracer_mass`,
+`get_tracer_boundary_flux_integral`, `check_tracer_conservation`). The
+operators that add or remove water carry them too: inlets, structures
+(culverts, weirs, bridges) and rate operators (see *Selected fixes*). See the
+*Passive Tracers* page of the setup guide.
+
+### Sediment transport
+
+One or more sediment fractions, each a tracer, with suspended load
+(entrainment, settling and the adaptation of the suspension), bedload, and
+bed evolution through the Exner equation, limited by an erodible base and an
+angle of repose. One line turns it on; the rest is optional:
+
+```python
+domain.add_sediment_fraction('sand', diameter=2.0e-4)
+```
+
+It offers a choice of entrainment laws (Smith-McLean by default, de Leeuw et
+al. 2020), deposition and adaptation closures, bed-shear closures, and
+bedload laws including Grass. A morphological factor reaches long
+timescales, and the bed shear sees vegetation and can be amplified locally
+at structures. It can all be set up from a TOML scenario's `[sediment]`
+table. The physics is written out with references in the *Sediment physics*
+appendix, and nine validation cases, five analytical and four laboratory
+flumes, have their own chapter in the validation report. See the *Sediment
+transport* page of the setup guide.
+
+### Vegetation drag
+
+`domain.set_vegetation_drag(density, diameter, height)` adds the drag of a
+stem field, emergent or submerged, with the vegetated Chezy coefficient of
+Baptist et al. (2007), in the friction kernel of both compute modes (see
+*Smaller improvements*).
+
+### Validation reports with every release
+
+Publishing a release now builds the validation reports from the tagged
+commit: one combined report that shows every case with the `DE0`, `DE1` and
+`DE_ader2` flow algorithms side by side, and the full report for each. They
+are attached to the GitHub release and archived on Zenodo with a DOI. The
+validation suite also runs nightly in CI, and `rundown_mild_slope` now shows
+the roll-wave instability of fast shallow flow on a slope, compared across
+the flow algorithms.
+
 ## Breaking changes
 
 * **The legacy forcing-function classes have been removed**, as announced in
@@ -40,6 +111,18 @@
   analytical sediment validation cases all sit in that limit and are
   untouched. Each fraction gains one tracer, `<name>_upper`, registered at
   the first `evolve` and appearing in the SWW output.
+
+* **`DE_ader2` results change** (#404). The ADER-2 predictor had no friction,
+  so on friction-dominated flow it over-drove the state the fluxes were taken
+  from: on a 1:10 slope with 3.9 mm of water it carried 0.45 of the
+  prescribed discharge where DE0 and DE1 are exact. Manning drag is now
+  applied in the predictor, semi-implicitly. The default limiter beta for
+  `DE_ader2` rises from 0.5 to 1.0, because beta 0.5 flattens the
+  reconstructed bed on a linear slope and damps propagating waves (32% of
+  the forced amplitude kept across the `deep_wave` domain, against 100% at
+  1.0). The slope case now carries 0.9997 of the discharge. `DE0`, `DE1` and
+  `DE2` are bit-identical to 4.0. `domain.set_beta(0.5)` restores the old
+  limiter but not the old predictor.
 
 ## Selected fixes
 
@@ -103,8 +186,9 @@
   shared time dimension, giving a file that opened fine and held plausible
   data with a non-monotonic time variable (#232). The writer now holds a
   sidecar `<name>.sww.lock` for the life of the run and a second run that
-  would create the same file stops with `SWWFileInUseError`; stale locks from
-  dead processes are taken over with a warning. It also refuses to append a
+  would create the same file stops with `SWWFileInUseError`, naming the
+  process and host that hold the lock (#399). A stale lock left by a process
+  that is no longer running is taken over silently (logged at DEBUG, #395). It also refuses to append a
   frame earlier than the last one on file that rewrites no existing frame
   (`SWWTimeOrderError`); checkpoint resumes, which rewrite frames, still work.
 * Sediment transport: the bed slope for the `'depth_slope'` shear closure
@@ -115,8 +199,31 @@
   slope and never eroded, and the slope was reduced wherever the limiter
   engaged. Results change for those closures near boundaries, kinks and
   steps; `'quadratic_drag'` (the default) is unaffected.
+* The C extension audit's correctness items (#345, #349): a gradient on a
+  degenerate triangle falls back to flat instead of producing NaN; both
+  conjugate-gradient solvers report breakdown instead of dividing by zero;
+  the arrays handed to the C domain are checked for size; allocation
+  failures in the GPU halo and inlet setup, the quad tree and the sparse
+  matrices are reported instead of exiting or crashing; and GPU errors that
+  were only printed to stderr now raise in Python with the message.
 
 ## Smaller improvements
+
+* Strict compute mode (#346): `set_compute_mode(..., strict=True)`,
+  `set_gpu_offload(..., strict=True)` or `ANUGA_STRICT_COMPUTE_MODE=1` turn
+  every silent fall-back to the host, for example a boundary type the GPU
+  path does not support, into an error at setup, so a run that should be on
+  the GPU cannot quietly run on the CPU.
+* `Domain.set_plotter()` returns the plotter it attaches (#398).
+* The validation suite: the reports can be rebuilt from the SWW files already
+  on disk (`-nr`, #403), the runner prints a summary table (#400, #401), and
+  a failing case now makes the report build fail instead of being skipped
+  silently. The combined three-algorithm report and the release workflow are
+  described under *Highlights*.
+* Documentation: the sediment physics specification is published as an
+  appendix with its equations typeset (#318, #322), the `Domain` reference
+  lists every public method with a guard against drift (#320), and the flow
+  algorithms page warns that `DE0` damps propagating waves (#405).
 
 * The sediment kernel sees the vegetation: in a vegetated cell its bed shear
   is the bed's share of the Baptist resistance by default,
@@ -268,6 +375,34 @@
   wind and pressure fields of the removed `_fast` classes. The file's
   precomputed time series is interpolated for every point at once
   (`anuga.utilities.function_utils.evaluate_file_function_all_points`).
+
+## Requirements
+
+* Python 3.10 – 3.15 (3.15 added, #397), numpy ≥ 2.0.
+* GeoPackage support needs `fiona` and `shapely` (`pip install anuga[data]`),
+  imported only when used.
+* GPU offload requires the NVIDIA HPC SDK (`nvc`), as in 4.0; the standard
+  build needs no GPU.
+
+## Known issues
+
+* The `'depth_slope'` shear closure takes its slope from the bed, so on an
+  evolving bed it can amplify itself: a local scour steepens the slope,
+  which raises the shear and scours faster. Bound it with `max_slope` or
+  `freeze_slope=True`, or use the default `'quadratic_drag'` closure.
+* Bedload is first order in the bed.
+* `DE_ader2`'s steady state depends slightly on the time step, so in a
+  physically unstable flow (roll waves on a steep slope) it amplifies its own
+  time-step changes where `DE1` and `DE2` stay exactly steady. The effect is
+  about 10⁻³ of the depth or less. See `claude/KNOWN_ISSUES.md`.
+
+## Thanks
+
+<!-- To fill in at release: the testers who reported on the call for
+     testing (#411), and anyone else to acknowledge. -->
+
+Thanks to everyone who tested the release candidates and reported back on
+the call for testing (#411).
 
 ---
 
