@@ -873,6 +873,14 @@ int gpu_domain_map_arrays(struct gpu_domain *GD) {
             double *sed_zb = GD->D.sediment_z_base;
             #pragma omp target enter data map(to: sed_zb[0:n])
         }
+        // Bed composition: state the device owns from here on, so copied in
+        // once and brought back by gpu_domain_sync_from_device.
+        if (GD->D.sediment_bed_composition && GD->D.sediment_bed_active != NULL
+                && GD->D.sediment_bed_substrate != NULL) {
+            double *sed_ba = GD->D.sediment_bed_active;
+            double *sed_bb = GD->D.sediment_bed_substrate;
+            #pragma omp target enter data map(to: sed_ba[0:ncl*n], sed_bb[0:ncl*n])
+        }
         // [T-16] the shear factor, input, only when set.
         double *sed_sf = GD->D.sediment_shear_factor;
         if (sed_sf != NULL) {
@@ -1344,6 +1352,12 @@ void gpu_domain_unmap_arrays(struct gpu_domain *GD) {
             double *sed_zb = GD->D.sediment_z_base;
             #pragma omp target exit data map(delete: sed_zb[0:n])
         }
+        if (GD->D.sediment_bed_composition && GD->D.sediment_bed_active != NULL
+                && GD->D.sediment_bed_substrate != NULL) {
+            double *sed_ba = GD->D.sediment_bed_active;
+            double *sed_bb = GD->D.sediment_bed_substrate;
+            #pragma omp target exit data map(delete: sed_ba[0:ncl*n], sed_bb[0:ncl*n])
+        }
         double *sed_sf = GD->D.sediment_shear_factor;
         if (sed_sf != NULL) {
             #pragma omp target exit data map(delete: sed_sf[0:n])
@@ -1490,6 +1504,13 @@ void gpu_domain_sync_from_device(struct gpu_domain *GD) {
         double *bed_cv_s = GD->D.bed_centroid_values;
         double *bed_ev_s = GD->D.bed_edge_values;
         #pragma omp target update from(bed_cv_s[0:n], bed_ev_s[0:3*n])
+        if (GD->D.sediment_bed_composition && GD->D.sediment_bed_active != NULL
+                && GD->D.sediment_bed_substrate != NULL) {
+            anuga_int ncl = GD->D.n_sediment_classes;
+            double *sed_ba = GD->D.sediment_bed_active;
+            double *sed_bb = GD->D.sediment_bed_substrate;
+            #pragma omp target update from(sed_ba[0:ncl*n], sed_bb[0:ncl*n])
+        }
     }
 }
 

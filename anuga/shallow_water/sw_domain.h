@@ -465,6 +465,23 @@ struct domain {
     double* sediment_shear_factor;
     anuga_int sediment_has_z_base;     /* 0 = unlimited depth (default) */
 
+    /* ---- bed composition (active layer) -----------------------------------
+     *
+     * Per class and cell, the solid volume per bed area [m] held in the active
+     * layer and in the substrate below it, tracer-major (ncl x n) like the
+     * tracers. Entrainment of class s is multiplied by its share of the
+     * active layer, erosion of s is capped at what the cell holds of s, and
+     * after the exchange the active layer is restored to
+     * sediment_active_layer (a bed thickness): overflow goes down at the
+     * active composition, a deficit is refilled from the substrate at the
+     * substrate composition. Amounts, not fractions, so each class is
+     * conserved exactly. sediment_bed_composition == 0 (default) leaves the
+     * kernels on the path they took before this existed. */
+    anuga_int sediment_bed_composition;
+    double sediment_active_layer;      /* active-layer bed thickness [m] */
+    double* sediment_bed_active;       /* (ncl*n) */
+    double* sediment_bed_substrate;    /* (ncl*n) */
+
     /* Scratch, (ncl x n), tracer-major like the tracer arrays.
      *
      * The suspended source is computed for every class BEFORE any of it is

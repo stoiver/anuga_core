@@ -820,6 +820,13 @@ class Domain(Generic_Domain):
         # into the single field the kernel reads by _rebuild_sediment_base().
         self._sediment_user_base = None      # (n,) from set_erodible_base
         self._sediment_erodible_mask = None  # (n,) bool from set_erodible_region
+        # Bed composition (active layer), off by default: the bed is then one
+        # shared material and every class may be entrained from it. See
+        # set_bed_composition().
+        self.sediment_bed_composition = 0
+        self.sediment_active_layer = 0.0
+        self.sediment_bed_active = None      # (ncl, n) solid volume per area [m]
+        self.sediment_bed_substrate = None   # (ncl, n)
         # Spec 7, angle-of-repose relaxation. Off by default: it is a numerical
         # heuristic, not physics, and it suppresses knickpoint retreat that may
         # be real. See set_angle_of_repose().
@@ -1295,6 +1302,11 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         rho_w = self.sediment_rho_w
         v_s = self.settling_velocity(diameter, rho_s=rho_s, rho_w=rho_w,
                                      **settling_kwargs)
+        if self.sediment_bed_composition:
+            raise RuntimeError(
+                'add every sediment fraction before set_bed_composition(): the '
+                'bed composition is held per class, so it cannot gain a class '
+                'afterwards')
         index = self.add_tracer(name, beta=beta,
                                 initial_value=initial_concentration)
 
@@ -1737,6 +1749,145 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             return None
         z = self.quantities['elevation'].centroid_values
         return num.maximum(z - self.sediment_z_base, 0.0)
+
+    def set_bed_composition(self, fractions=None, active_layer=0.01,
+                            substrate=None):
+        """Track the bed's composition per sediment class (an active layer).
+
+        Without this the bed is one shared material: any class can be
+        entrained from it wherever the shear allows, so mud keeps coming out
+        of a sand-bedded channel for as long as the bed lasts. With it the bed
+        holds an amount of each class in a thin active layer over a substrate
+        (Hirano), and:
+
+        * entrainment of a class is multiplied by its share of the active
+          layer, so a class the bed does not hold is not entrained, and a
+          bed that loses its fines armours;
+        * a class can never take more out of a cell than the cell holds of it;
+        * after each step the active layer is restored to `active_layer`:
+          on aggradation the overflow goes down at the active composition, on
+          degradation it is refilled from the substrate at the substrate
+          composition.
+
+        Each class is conserved exactly (the layers hold amounts, solid volume
+        per bed area, not fractions).
+
+        Call it AFTER every add_sediment_fraction, initialize_sediment_operator
+        (for the porosity) and set_erodible_base (for the thickness, which it
+        divides into the two layers)::
+
+            domain.set_erodible_base(depth=1.0)
+            domain.set_bed_composition({'mud': fmud, 'sand': 1 - fmud},
+                                       active_layer=0.01)
+
+        Parameters
+        ----------
+        fractions : dict
+            Class name -> volume fraction of the active layer: a scalar, a
+            per-centroid array, or a function f(x, y) of the centroid
+            coordinates (as in set_quantity). Classes not given are 0. At
+            every centroid the fractions must sum to 1 (within 1e-6); cells
+            where the erodible thickness is 0 hold nothing whatever is given.
+            ``None`` switches composition off again.
+        active_layer : float
+            Active-layer thickness [m] (bed, i.e. including pores). The
+            Caltech Wax Lake model uses 0.01 m.
+        substrate : dict, optional
+            The substrate's composition, same form. Defaults to `fractions`.
+
+        Notes
+        -----
+        Bedload and the angle-of-repose relaxation still move the bed as one
+        material (phase 1); combining them with composition warns.
+        """
+        if fractions is None:
+            self.sediment_bed_composition = 0
+            self.sediment_active_layer = 0.0
+            self.sediment_bed_active = None
+            self.sediment_bed_substrate = None
+            self._invalidate_sediment_caches()
+            return
+
+        ncl = self.n_sediment_classes
+        if ncl == 0:
+            raise RuntimeError('add the sediment fractions before set_bed_composition()')
+        if not self.sediment_has_z_base:
+            raise RuntimeError(
+                'set_bed_composition() needs a finite erodible thickness to '
+                'divide into the active layer and the substrate: call '
+                'set_erodible_base() first')
+        if not (active_layer > 0.0):
+            raise ValueError('active_layer must be > 0')
+        if substrate is None:
+            substrate = fractions
+
+        n = self.number_of_elements
+        names = self.get_sediment_names()
+
+        def fraction_table(spec, what):
+            unknown = set(spec) - set(names)
+            if unknown:
+                raise ValueError('%s: unknown sediment class(es) %s; known: %s'
+                                 % (what, sorted(unknown), names))
+            F = num.zeros((ncl, n), dtype=num.float64)
+            x = self.centroid_coordinates[:, 0]
+            y = self.centroid_coordinates[:, 1]
+            for s, name in enumerate(names):
+                v = spec.get(name, 0.0)
+                v = v(x, y) if callable(v) else v
+                F[s] = num.broadcast_to(num.asarray(v, dtype=num.float64), (n,))
+            if num.any(F < 0.0):
+                raise ValueError('%s: fractions must be >= 0' % what)
+            total = F.sum(axis=0)
+            bad = num.abs(total - 1.0) > 1e-6
+            if num.any(bad):
+                k = int(num.argmax(bad))
+                raise ValueError('%s: fractions sum to %g at cell %d (and %d '
+                                 'others); they must sum to 1'
+                                 % (what, total[k], k, int(bad.sum()) - 1))
+            return F
+
+        Fa = fraction_table(fractions, 'fractions')
+        Fs = fraction_table(substrate, 'substrate')
+
+        one_minus_lambda = 1.0 - self.sediment_porosity
+        thick = self.erodible_thickness()
+        t_act = num.minimum(thick, active_layer)
+        t_sub = thick - t_act
+        self.sediment_bed_active = num.ascontiguousarray(Fa * t_act * one_minus_lambda)
+        self.sediment_bed_substrate = num.ascontiguousarray(Fs * t_sub * one_minus_lambda)
+        self.sediment_active_layer = float(active_layer)
+        self.sediment_bed_composition = 1
+
+        if self.sediment_bedload_mode or self.sediment_repose_tan > 0.0:
+            warnings.warn(
+                'bed composition is tracked by the suspended exchange only: '
+                'bedload and the angle-of-repose relaxation still move the bed '
+                'as one material, so the layers and the elevation drift apart '
+                'where they act', stacklevel=2)
+        self._invalidate_sediment_caches()
+
+    def get_bed_composition(self, layer='active'):
+        """Volume fraction of each class in the active layer or the substrate.
+
+        Returns {class name: (n,) array}; cells holding nothing in that layer
+        give 0 for every class. The host copy is current at yieldsteps (on a
+        GPU it is synced back with the bed).
+        """
+        if not self.sediment_bed_composition:
+            return None
+        A = self.sediment_bed_active if layer == 'active' else self.sediment_bed_substrate
+        total = A.sum(axis=0)
+        safe = num.where(total > 0.0, total, 1.0)
+        return {name: num.where(total > 0.0, A[s] / safe, 0.0)
+                for s, name in enumerate(self.get_sediment_names())}
+
+    def _invalidate_sediment_caches(self):
+        """New sediment arrays must reach the C struct and the device."""
+        self._Domain_C_struct = None
+        self.gpu_interface = None
+        if hasattr(self, '_gpu_boundary_info_initialized'):
+            del self._gpu_boundary_info_initialized
 
     def set_deposition(self, law='d_star', tau_d=0.0, near_bed='constant',
                        reference_height_floor=0.01, adaptation='two_layer',
@@ -2433,6 +2584,11 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                 L.append('  erodible base [L-5]: set, but no cell is erodible')
         else:
             L.append('  erodible base [L-5]: none (unlimited depth)')
+        if self.sediment_bed_composition:
+            Fa = self.get_bed_composition('active')
+            L.append('  bed composition    : active layer %.3g m; mean active '
+                     'fractions %s' % (self.sediment_active_layer,
+                     ', '.join('%s %.3g' % (k, float(num.mean(v))) for k, v in Fa.items())))
         if self.sediment_repose_tan > 0.0:
             L.append('  angle of repose    : %.1f degrees, relax %.2g, '
                      'max %d sweeps'

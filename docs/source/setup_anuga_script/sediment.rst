@@ -169,6 +169,9 @@ means:
    * - :meth:`set_erodible_region(...) <anuga.Domain.set_erodible_region>`
      - where erosion may act at all
      - 4.5
+   * - :meth:`set_bed_composition(...) <anuga.Domain.set_bed_composition>`
+     - per-class bed composition (active layer over a substrate)
+     - 4.5
    * - :meth:`set_angle_of_repose(...) <anuga.Domain.set_angle_of_repose>`
      - relaxation of over-steep bed slopes
      - 7
@@ -604,6 +607,35 @@ one shared proportional factor, not served in registration order: the bed
 carries no per-class stratigraphy, so no class has a better claim, and the
 answer must not depend on the order you registered the fractions.
 Deposition is never scaled -- it is what replenishes the bed.
+
+Bed composition
+~~~~~~~~~~~~~~~
+
+By default the bed is one shared material, so every class can be entrained
+from it wherever the shear allows -- a fine class keeps coming out of a coarse
+bed for as long as the bed lasts. :meth:`~anuga.Domain.set_bed_composition`
+tracks the bed per class instead, as an active layer over a substrate
+(Hirano):
+
+.. code-block:: python
+
+   domain.set_erodible_base(depth=1.0)
+   domain.set_bed_composition({'mud': fmud, 'sand': 1.0 - fmud},
+                              active_layer=0.01)
+
+Entrainment of a class is multiplied by its share of the active layer, a class
+can never take more out of a cell than the cell holds of it, and after each
+step the active layer is restored to its thickness: overflow goes down at the
+active composition, a deficit is refilled from the substrate at the substrate
+composition. The layers hold amounts (solid volume per bed area), so each class
+is conserved exactly. A bed that is losing its fines therefore armours.
+``get_bed_composition('active')`` returns the fractions per class.
+
+Call it after every ``add_sediment_fraction`` and after ``set_erodible_base``,
+whose thickness it divides into the two layers. The fractions may be scalars,
+per-centroid arrays or functions ``f(x, y)``. Bedload and the angle-of-repose
+relaxation still move the bed as one material; combining them with
+composition warns.
 
 The two transport routes give **different strengths of guarantee**, and it is
 worth knowing which you are relying on:
