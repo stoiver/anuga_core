@@ -1655,12 +1655,19 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     double * restrict src_lim = D->sediment_source_limited;
     /* Bed composition. Hoisted like the rest; both arrays are required, as
      * for z_base above, so a half-bound composition cannot be dereferenced. */
-    double * restrict bed_act = D->sediment_bed_active;
-    double * restrict bed_sub = D->sediment_bed_substrate;
+    double *bed_act = D->sediment_bed_active;
+    double *bed_sub = D->sediment_bed_substrate;
     const anuga_int has_comp = (D->sediment_bed_composition && bed_act != NULL
                                 && bed_sub != NULL && bed_evolves
                                 && one_minus_lambda > 0.0);
     const double active_solid = D->sediment_active_layer * one_minus_lambda;
+    /* The GPU loop below maps these with explicit lengths, which a NULL
+     * pointer cannot take. Off, they are never touched, so stand them on the
+     * scratch array that is always mapped. (Not restrict, for that reason.) */
+    if (!has_comp) {
+        bed_act = src_lim;
+        bed_sub = src_lim;
+    }
 
     /* The slope for [T-7]/[T-7e], in a pass of its own. It reads the
      * neighbours' bed (or stage) centroids, and the loop below WRITES the
@@ -1677,7 +1684,22 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     /* With a frozen depth-slope, slope_w holds the slope of the bed at
      * setup (Domain.set_shear_closure / bed_slope_magnitude). */
 
+    /* On the GPU the per-class arrays are mapped with EXPLICIT lengths. Left
+     * implicit, nvc infers a length only while the loop is simple enough to
+     * see n_classes bound every access; past that it maps them as zero-length
+     * sections, the device read uninitialised memory (compute-sanitizer
+     * initcheck at the sedR/diam load), and mode 2 went wrong and
+     * nondeterministic with nothing in the physics changed. Present data are
+     * reused, so the clauses cost nothing. */
+#ifdef CPU_ONLY_MODE
     OMP_PARALLEL_LOOP
+#else
+    #pragma omp target teams loop \
+        map(to: v_s[0:n_classes], d_star[0:n_classes], diam[0:n_classes], \
+                sedR[0:n_classes], tau_c_star[0:n_classes], a_ref[0:n_classes]) \
+        map(tofrom: src_lim[0:n_classes*n], bed_act[0:n_classes*n], \
+                    bed_sub[0:n_classes*n])
+#endif
     for (anuga_int k = 0; k < n; k++) {
         const double h = fmax(stage_cv[k] - bed_cv[k], 0.0);
 
