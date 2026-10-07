@@ -5,9 +5,9 @@ import numpy
 from anuga.structures.boyd_box_operator import total_energy, smooth_discharge
 
 
-#=====================================================================
+# =====================================================================
 # Critical depth in a circular conduit
-#=====================================================================
+# =====================================================================
 
 def circular_critical_depth(Q, diameter, g):
     """Critical depth of discharge Q in a circular conduit of given diameter.
@@ -26,6 +26,19 @@ def circular_critical_depth(Q, diameter, g):
     Q is the discharge through ONE barrel. The same algorithm is used by the
     C kernel (circular_critical_depth in gpu_culvert_operator.c) so that
     CPU and GPU modes agree.
+
+    References: V. T. Chow, Open-Channel Hydraulics (1959), ch. 4
+    (critical flow, Q**2/g = A**3/T); W. O. Straub, "A quick and easy way
+    to calculate critical and conjugate depths in circular open channels",
+    Civil Engineering (ASCE) 48(12), 1978 (approximation used as a check in
+    the tests).
+
+    Example (1 m3/s in a 1 m pipe, g = 9.8):
+
+    >>> round(circular_critical_depth(1.0, 1.0, 9.8), 4)
+    0.5732
+    >>> circular_critical_depth(0.0, 1.0, 9.8)
+    0.0
     """
     if Q <= 0.0 or diameter <= 0.0:
         return 0.0
@@ -466,13 +479,13 @@ def boyd_pipe_function(depth,
 
     Q = min(Q, Q_outlet_tailwater)
     if local_debug:
-        anuga.log.info('%s,%.3f'
-                     % ('dcrit =',dcrit))
+        anuga.log.info('%s,%.3f' % ('dcrit =', dcrit))
         anuga.log.info('%s,%.3f,%.3f,%.3f'
                      % ('Q and Velocity and Depth=', Q,
                         culvert_velocity, outlet_culvert_depth))
 
-    culv_froude=math.sqrt(Q**2*flow_width/(anuga.g*flow_area**3))  # flow_width, flow_area already include barrels
+    # flow_width and flow_area already include all barrels
+    culv_froude = math.sqrt(Q**2*flow_width/(anuga.g*flow_area**3))
     if local_debug:
         anuga.log.info('FLOW AREA = %s' % str(flow_area))
         anuga.log.info('PERIMETER = %s' % str(perimeter))

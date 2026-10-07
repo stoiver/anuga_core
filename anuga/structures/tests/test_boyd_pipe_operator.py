@@ -131,7 +131,6 @@ class Test_boyd_pipe_operator(unittest.TestCase):
         culvert_apron = 0.0
         enquiry_gap = 5.0
 
-
         # v and d re-baselined when the critical depth became the exact
         # circular-section solution (Q unchanged). The original culvertw
         # values (v=0.78, d=0.66) imply Froude 0.34 at a depth labelled
@@ -212,7 +211,6 @@ class Test_boyd_pipe_operator(unittest.TestCase):
 
         culvert_apron = 0.0
         enquiry_gap = 5.0
-
 
         # v and d re-baselined when the critical depth became the exact
         # circular-section solution (Q unchanged). The original culvertw
@@ -295,7 +293,6 @@ class Test_boyd_pipe_operator(unittest.TestCase):
         culvert_apron = 0.0
         enquiry_gap = 5.0
 
-
         # v and d re-baselined when the critical depth became the exact
         # circular-section solution (Q unchanged). The original culvertw
         # values (v=4.94, d=1.20) had the pipe forced full; the exact
@@ -377,7 +374,6 @@ class Test_boyd_pipe_operator(unittest.TestCase):
 
         culvert_apron = 0.0
         enquiry_gap = 5.0
-
 
         # v and d re-baselined when the critical depth became the exact
         # circular-section solution (Q unchanged). The original culvertw
