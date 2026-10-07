@@ -140,6 +140,31 @@ void boyd_box_discharge(const struct culvert_params *p,
 }
 
 // ============================================================================
+// Critical depth in a circular conduit (per barrel).
+// Same algorithm as boyd_pipe_operator.py:circular_critical_depth(): solve
+// Q^2/g = A^3/T exactly by fixed-iteration bisection on the central angle
+// theta, with A = D^2/8 (theta - sin theta), T = D sin(theta/2). A^3/T is
+// monotone from 0 (dry) to infinity (full), so the root is unique and < D.
+// ============================================================================
+
+static double circular_critical_depth(double Q, double diameter, double g) {
+    if (Q <= 0.0 || diameter <= 0.0) return 0.0;
+    double target = Q * Q / g;
+    double lo = 0.0, hi = 2.0 * M_PI;
+    for (int it = 0; it < 60; it++) {
+        double theta = 0.5 * (lo + hi);
+        double area = diameter * diameter / 8.0 * (theta - sin(theta));
+        double top_width = diameter * sin(0.5 * theta);
+        if (area * area * area > target * top_width)
+            hi = theta;
+        else
+            lo = theta;
+    }
+    double theta = 0.5 * (lo + hi);
+    return 0.5 * diameter * (1.0 - cos(0.5 * theta));
+}
+
+// ============================================================================
 // Pure computation: Boyd PIPE discharge
 // Direct translation from boyd_pipe_operator.py:boyd_pipe_function()
 // ============================================================================
@@ -180,16 +205,8 @@ void boyd_pipe_discharge(const struct culvert_params *p,
 
     double Q = (Q_inlet_unsubmerged < Q_inlet_submerged) ? Q_inlet_unsubmerged : Q_inlet_submerged;
 
-    // Critical depth estimation (two formulas)
-    double dcrit1 = (bf * diameter) / 1.26 * pow(Q / sqrt(p->g) * pow(bf * diameter, 2.5), 1.0 / 3.75);
-    double dcrit2 = (bf * diameter) / 0.95 * pow(Q / sqrt(p->g) * pow(bf * diameter, 2.5), 1.0 / 1.95);
-
-    double outlet_culvert_depth;
-    if (dcrit1 / (bf * diameter) > 0.85) {
-        outlet_culvert_depth = dcrit2;
-    } else {
-        outlet_culvert_depth = dcrit1;
-    }
+    // Critical depth of the adopted flow, per barrel (exact solve)
+    double outlet_culvert_depth = circular_critical_depth(Q / barrels, bf * diameter, p->g);
 
     double flow_area, perimeter;
     double alpha;
@@ -215,14 +232,8 @@ void boyd_pipe_discharge(const struct culvert_params *p,
             flow_area = barrels * (bd / 2.0) * (bd / 2.0) * M_PI;
             perimeter = barrels * bd * M_PI;
         } else {
-            // Partial flow - recalculate critical depth
-            dcrit1 = bd / 1.26 * pow(Q / sqrt(p->g) * pow(bd, 2.5), 1.0 / 3.75);
-            dcrit2 = bd / 0.95 * pow(Q / sqrt(p->g) * pow(bd, 2.5), 1.0 / 1.95);
-
-            if (dcrit1 / bd > 0.85)
-                outlet_culvert_depth = dcrit2;
-            else
-                outlet_culvert_depth = dcrit1;
+            // Partial flow - recalculate critical depth (per barrel)
+            outlet_culvert_depth = circular_critical_depth(Q / barrels, bd, p->g);
 
             if (outlet_culvert_depth > bd) {
                 outlet_culvert_depth = bd;
