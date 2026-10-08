@@ -297,6 +297,19 @@ static double trapezoid_critical_depth(double Q, double bf_barrels_w,
 }
 
 
+// Total flow area and wetted perimeter of `barrels` trapezoidal barrels, each
+// filled to depth y: bottom + sloping sides, plus the roof (as wide as the top
+// of the section) when running full.
+static void trapezoid_section(double y, int full, double bottom, double z12,
+                              double slant, double barrels,
+                              double *area, double *perimeter) {
+    double a = bottom * y + 0.5 * z12 * y * y;
+    double p = bottom + slant * y + (full ? bottom + z12 * y : 0.0);
+    *area = barrels * a;
+    *perimeter = barrels * p;
+}
+
+
 void weir_orifice_trapezoid_discharge(const struct culvert_params *p,
                                       double driving_energy,
                                       double delta_total_energy,
@@ -325,56 +338,36 @@ void weir_orifice_trapezoid_discharge(const struct culvert_params *p,
     }
 
     double bf = 1.0 - blockage;
-    // bf * barrels * width — used throughout
-    double bfw = bf * barrels * width;
+    // Every area and perimeter is that of ONE barrel times the number of
+    // barrels (each barrel has its own sides and, running full, its own roof);
+    // blockage narrows the bottom width. Same as the Python reference.
+    double bottom = bf * width;
+    double slant = sqrt(z1 * z1 + 1.0) + sqrt(z2 * z2 + 1.0);
 
-    // Pre-compute slant lengths for perimeter
-    double sqrt_z1 = sqrt(z1 * z1 + 1.0);
-    double sqrt_z2 = sqrt(z2 * z2 + 1.0);
-
-    // Inlet control estimates
-    // Weir flow (unsubmerged): Q = 1.7 * bfw_eff * driving_energy^1.5
-    //   where bfw_eff = average of bottom and top widths = (2*width + depth*(z1+z2))/2
+    // Inlet control, per barrel times the number of barrels
+    // Weir flow (unsubmerged): Q = 1.7 * mean width * driving_energy^1.5
     double top_w  = 2.0 * width + depth * z12;
     double Q_inlet_unsubmerged = 1.7 * bf * barrels * (top_w / 2.0)
                                  * pow(driving_energy, 1.5);
-    // Orifice flow (submerged): Q = 0.8 * bfw_eff_area * sqrt(g) * sqrt(driving_energy)
-    double full_area = 0.5 * depth * (bfw + bfw + z12 * depth);
+    // Orifice flow (submerged): Q = 0.8 * full area * sqrt(g * driving_energy).
+    // The area is one unblocked barrel's: blockage and barrels are applied once.
+    double full_area = 0.5 * depth * (2.0 * width + z12 * depth);
     double Q_inlet_submerged = 0.8 * bf * barrels * sqrt(g) * full_area
                                * sqrt(driving_energy);
 
-    double Q;
-    if (Q_inlet_unsubmerged < Q_inlet_submerged) {
-        Q = Q_inlet_unsubmerged;
-    } else {
-        Q = Q_inlet_submerged;
-    }
+    double Q = (Q_inlet_unsubmerged < Q_inlet_submerged) ? Q_inlet_unsubmerged
+                                                         : Q_inlet_submerged;
 
-    // Critical depth for inlet-control Q
-    double dcrit = trapezoid_critical_depth(Q, bfw, z12, sqrt_z1, sqrt_z2, depth, g);
-
+    // Critical depth of the inlet-control flow (per barrel) and its section
+    double outlet_culvert_depth = trapezoid_critical_depth(Q / barrels, bottom, z12,
+                                                           0.0, 0.0, depth, g);
     double flow_area, perimeter;
-    if (dcrit >= depth) {
-        dcrit = depth;
-        flow_area = bfw * depth + 0.5 * z12 * depth * depth;
-        perimeter = 2.0 * bfw + z12 * depth + sqrt_z1 * depth + sqrt_z2 * depth;
-    } else {
-        flow_area = bfw * dcrit + 0.5 * z12 * dcrit * dcrit;
-        perimeter = bfw + sqrt_z1 * dcrit + sqrt_z2 * dcrit;
-    }
-
-    double outlet_culvert_depth = dcrit;
-
-    // Re-solve critical depth (same as Python — redundant for rect but kept for fidelity)
-    dcrit = trapezoid_critical_depth(Q, bfw, z12, sqrt_z1, sqrt_z2, depth, g);
-    outlet_culvert_depth = dcrit;
     if (outlet_culvert_depth >= depth) {
         outlet_culvert_depth = depth;
-        flow_area = bfw * depth + 0.5 * z12 * depth * depth;
-        perimeter = 2.0 * bfw + z12 * depth + sqrt_z1 * depth + sqrt_z2 * depth;
+        trapezoid_section(depth, 1, bottom, z12, slant, barrels, &flow_area, &perimeter);
     } else {
-        flow_area = bfw * outlet_culvert_depth + 0.5 * z12 * outlet_culvert_depth * outlet_culvert_depth;
-        perimeter = bfw + sqrt_z1 * outlet_culvert_depth + sqrt_z2 * outlet_culvert_depth;
+        trapezoid_section(outlet_culvert_depth, 0, bottom, z12, slant, barrels,
+                          &flow_area, &perimeter);
     }
 
     // Outlet-control velocity and Q
@@ -388,23 +381,20 @@ void weir_orifice_trapezoid_discharge(const struct culvert_params *p,
     if (delta_total_energy < driving_energy) {
         // Outlet control
         if (outlet_enquiry_depth > depth) {
-            // Outlet submerged — use full section
+            // Outlet submerged: the barrel runs full
             outlet_culvert_depth = depth;
-            flow_area = bfw * depth + 0.5 * z12 * depth * depth;
-            perimeter = bfw + sqrt_z1 * depth + sqrt_z2 * depth;
+            trapezoid_section(depth, 1, bottom, z12, slant, barrels, &flow_area, &perimeter);
         } else {
-            Q = fmin(Q, Q_outlet_tailwater);
-            dcrit = trapezoid_critical_depth(Q, bfw, z12, sqrt_z1, sqrt_z2, depth, g);
-            outlet_culvert_depth = dcrit;
+            // Critical depth of the inlet-control flow, as in the box and pipe
+            // (see the Python for why Q is no longer cut first).
+            outlet_culvert_depth = trapezoid_critical_depth(Q / barrels, bottom, z12,
+                                                            0.0, 0.0, depth, g);
             if (outlet_culvert_depth >= depth) {
                 outlet_culvert_depth = depth;
-                flow_area = bfw * depth + 0.5 * z12 * depth * depth;
-                perimeter = bfw + sqrt_z1 * depth + sqrt_z2 * depth;
+                trapezoid_section(depth, 1, bottom, z12, slant, barrels, &flow_area, &perimeter);
             } else {
-                flow_area = bfw * outlet_culvert_depth
-                            + 0.5 * z12 * outlet_culvert_depth * outlet_culvert_depth;
-                perimeter = bfw + sqrt_z1 * outlet_culvert_depth
-                            + sqrt_z2 * outlet_culvert_depth;
+                trapezoid_section(outlet_culvert_depth, 0, bottom, z12, slant, barrels,
+                                  &flow_area, &perimeter);
             }
         }
 
@@ -414,6 +404,10 @@ void weir_orifice_trapezoid_discharge(const struct culvert_params *p,
                                    + (manning * manning * length)
                                      / pow(hyd_rad, 1.33333)));
         Q_outlet_tailwater = flow_area * culvert_velocity;
+        Q = fmin(Q, Q_outlet_tailwater);
+    } else {
+        /* Head difference at or above the driving energy: the barrel's
+         * friction still limits the flow, as for pipes (see the Python). */
         Q = fmin(Q, Q_outlet_tailwater);
     }
 

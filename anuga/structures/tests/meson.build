@@ -1,6 +1,7 @@
 
 python_sources = [
   'test_boyd_box_operator.py',
+  'test_weir_trapezoid_hydraulics.py',
   'test_boyd_pipe_operator.py',
   'test_inlet_operator.py',
   'test_inlet_tracers.py',
