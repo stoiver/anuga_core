@@ -1,11 +1,13 @@
-"""Sediment mass is conserved across ranks in mode 1, and the parallel run
-agrees with the sequential one (#423).
+"""Sediment mass is conserved across ranks, and the parallel run agrees with
+the sequential one (#423, #424).
 
 The sediment kernels update ghost cells too, but from their state before the
 step's ghost exchange, and elevation is not in that exchange, so ghost beds
 drifted from their owners' and sediment mass leaked across partition
 boundaries (about 0.5% of the eroded volume on 2 ranks). The sediment operator
-now copies each owner's bed into its ghosts after every step.
+now copies each owner's bed into its ghosts after every step. Bedload forms the
+flux on a shared edge from the ghost's transport vector, so in mode 1 the ghosts
+are refreshed before the step too; mode 2's device halo now carries the bed.
 
 See run_parallel_sediment_mass.py for the set-up.
 """
@@ -53,17 +55,20 @@ def _read(filename):
 @pytest.mark.skipif('mpi4py' not in sys.modules, reason='requires mpi4py')
 class Test_parallel_sediment_mass(unittest.TestCase):
 
+    CASES = {'suspended': [], 'composition': ['--composition'],
+             'bedload': ['--bedload'], 'bedload_unified': ['--bedload', '--unified'],
+             'bedload_thin': ['--bedload', '--thin']}
+
     @classmethod
     def setUpClass(cls):
-        cls.files = ['sediment_mass_seq.txt', 'sediment_mass_par.txt',
-                     'sediment_mass_seq_comp.txt', 'sediment_mass_par_comp.txt']
-        seq, par, seq_c, par_c = cls.files
-        _run([sys.executable, run_filename, seq])
-        _run(_mpi_prefix(3) + [sys.executable, run_filename, par])
-        _run([sys.executable, run_filename, seq_c, '--composition'])
-        _run(_mpi_prefix(3) + [sys.executable, run_filename, par_c, '--composition'])
-        cls.results = {'seq': _read(seq), 'par': _read(par),
-                       'seq_comp': _read(seq_c), 'par_comp': _read(par_c)}
+        cls.files = []
+        cls.results = {}
+        for name, flags in cls.CASES.items():
+            seq, par = 'sediment_mass_%s_seq.txt' % name, 'sediment_mass_%s_par.txt' % name
+            cls.files += [seq, par]
+            _run([sys.executable, run_filename, seq] + flags)
+            _run(_mpi_prefix(3) + [sys.executable, run_filename, par] + flags)
+            cls.results[name] = (_read(seq), _read(par))
 
     @classmethod
     def tearDownClass(cls):
@@ -71,24 +76,35 @@ class Test_parallel_sediment_mass(unittest.TestCase):
             if os.path.exists(f):
                 os.remove(f)
 
-    def _check(self, seq_key, par_key):
-        n_seq, seq = self.results[seq_key]
-        n_par, par = self.results[par_key]
+    def _check(self, name, balance_tol=1e-10):
+        (n_seq, seq), (n_par, par) = self.results[name]
         self.assertEqual((n_seq, n_par), (1, 3))
         eroded = abs(seq[3])
         self.assertGreater(eroded, 0.1)                 # the bed really moved
         # closed box: the solid balance stays at zero on every partitioning
         self.assertLess(abs(seq[0]), 1e-10 * eroded)
-        self.assertLess(abs(par[0]), 1e-10 * eroded)
+        self.assertLess(abs(par[0]), balance_tol * eroded)
         # and the parallel run is the sequential one
         for a, b in zip(par[1:], seq[1:]):
             self.assertAlmostEqual(a, b, delta=1e-9 * max(abs(b), 1.0))
 
     def test_suspended_sediment_and_bed(self):
-        self._check('seq', 'par')
+        self._check('suspended')
 
     def test_with_bed_composition(self):
-        self._check('seq_comp', 'par_comp')
+        self._check('composition')
+
+    def test_bedload(self):
+        self._check('bedload')
+
+    def test_bedload_unified(self):
+        self._check('bedload_unified')
+
+    def test_bedload_on_an_exhausting_bed(self):
+        """Where [L-5] binds, each rank sets a ghost's exhaustion flag from that
+        ghost's own neighbourhood, which an outer ghost lacks part of, so the
+        ranks can disagree about one edge: ~1e-10 of the eroded volume."""
+        self._check('bedload_thin', balance_tol=1e-8)
 
 
 if __name__ == '__main__':
