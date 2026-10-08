@@ -55,6 +55,11 @@ extensions = [
     'myst_parser',      # renders the Markdown physics specification
 ]
 
+# MathJax 4 breaks inline maths at relations and operators, so a paragraph can
+# end with "S_s" and start the next line with "= E_s - D_s". Keep each inline
+# expression on one line; long displayed equations may still break.
+mathjax4_config = {'output': {'linebreaks': {'inline': False}}}
+
 def linkcode_resolve(domain, info):
     if domain != 'py':
         return None

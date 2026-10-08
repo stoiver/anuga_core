@@ -23,7 +23,7 @@ equations, every closure, the numerical scheme and the parameter defaults.
 | **RDy26** | Feng, D., Tan, Z., Xu, D., Johnson, J. & Bisht, G. (2026), *RDycore-sediment v1.0*, EGUsphere preprint 2026-4859 (CC BY 4.0). Equations 1–13 + Appendix A1–A7. |
 | **aSM16** | Perignon, M.C. (2016), *Using the Sediment Transport and Vegetation Operators in ANUGA*, [anugaSed/docs/anugaSed_manual.pdf](https://github.com/mperignon/anugaSed/blob/master/docs/anugaSed_manual.pdf), 4 May 2016. Equations 1–14. **This is the authoritative specification for the shipped code** and supersedes P14 where they differ. |
 | **DL09** | Davy, P. & Lague, D. (2009), *Fluvial erosion/transport equation of landscape evolution models revisited*, JGR Earth Surface 114, F03007, doi:10.1029/2008JF001146. Equations 2–8, 19. Source of the E–D framework and of {speclit}`S-4`. |
-| **P13** | Perignon, M.C., Tucker, G.E., Griffin, E.R. & Friedman, J.M. (2013), JGR Earth Surface 118(3), 1193–1209, doi:10.1002/jgrf.20073. Rio Puerco lidar differencing — the field data for validation rung 8. |
+| **P13** | Perignon, M.C., Tucker, G.E., Griffin, E.R. & Friedman, J.M. (2013), JGR Earth Surface 118(3), 1193–1209, doi:10.1002/jgrf.20073. Rio Puerco lidar differencing — the field data for a planned validation case (§10.1). |
 | **W04** | Wilson, L., Ghatan, G.J., Head, J.W. & Mitchell, K.L. (2004), JGR Planets 109, E09003, doi:10.1029/2004JE002281. Eqs 4, 13–17: Darcy–Weisbach `f_c` by bed type. |
 | **LL16** | Larsen, I.J. & Lamb, M.P. (2016), Nature 538, 229–232, doi:10.1038/nature19817. Methods: Manning–Strickler roughness closure. **Uses ANUGA.** |
 | **EH67** | Engelund, F. & Hansen, E. (1967), *A Monograph on Sediment Transport in Alluvial Streams*, Teknisk Forlag. Eqs 3.1.3, 4.3.5. |
@@ -599,7 +599,7 @@ describe different sediment:
 | Sediment | silt, clay, cohesive bank material | sand, gravel, boulders |
 | Threshold physics | inter-particle cohesion, jet-test calibrated | grain weight, Shields entrainment |
 | Calibration source | Hanson & Simon (2001) | Smith & McLean (1977) / Wong & Parker (2006) |
-| Validation case | Rio Puerco (rung 8) | Mars crater breach (rung 7) |
+| Planned field validation (§10.1) | Rio Puerco | Mars crater breach |
 | Typical `D` | < 0.1 mm | mm to cm |
 
 Selecting between them is a **statement about the bed material**, and the API should
@@ -633,7 +633,7 @@ irregular grains, but requires transcription from Dietrich or FG21 S1.
 
 **Recommendation:** implement {speclit}`S-1` as the default. It is fully specified here,
 dimensionally clean, and already the basis of the existing code. Add Dietrich as an
-option only if rung 7 (crater breach) needs it to reproduce FG21. Note DL09 themselves
+option only if a crater-breach validation case needs it to reproduce FG21. Note DL09 themselves
 take settling velocities from Dietrich (1982).
 
 > **{speclit}`S-1` numerically verified.** P13 §[54] reports `v_s = 0.00175 m s⁻¹` for
@@ -921,14 +921,13 @@ toward the same equilibrium at that rate:
 :nowrap:
 
 \begin{align}
-E - D = \alpha\, v_s\, (c_{eq} - c), \qquad
-\frac{1}{\alpha} = \frac{a}{h} + \left(1 - \frac{a}{h}\right)
-\exp\!\left[-1.5\left(\frac{a}{h}\right)^{-1/6} \frac{w_s}{u_*}\right]
-\qquad \text{[Galappatti \& Vreugdenhil 1985; Armanini \& Di Silvio 1988]} \tag{D-3}
+E - D &= \alpha\, v_s\, (c_{eq} - c), \tag{D-3} \\
+\frac{1}{\alpha} &= \frac{a}{h} + \left(1 - \frac{a}{h}\right)
+\exp\!\left[-1.5\left(\frac{a}{h}\right)^{-1/6} \frac{w_s}{u_*}\right] \nonumber
 \end{align}
 ```
 
-with `c_eq = E*/d*` the concentration at which [E-1]/[E-6] balance [D-1]. In the
+(Galappatti & Vreugdenhil 1985; Armanini & Di Silvio 1988), with `c_eq = E*/d*` the concentration at which [E-1]/[E-6] balance [D-1]. In the
 implementation both `E` and `D` are scaled by `α/d*`, so every equilibrium of the
 instantaneous forms is unchanged and only the transient slows; `α → 1` in the
 well-mixed limit `w_s/u* → 0` and `α → h/a` when fully stratified. Off by default;
@@ -947,9 +946,10 @@ depth-averaged concentration, advected with the flow and relaxed toward `d*` onl
 :nowrap:
 
 \begin{align}
-\frac{\partial (h r_b)}{\partial t} + \nabla\cdot(h r_b \mathbf{u}) = h\,\frac{d^{*} - r_b}{T_D}
-\ \text{ for } d^{*} > r_b, \qquad r_b = d^{*} \text{ otherwise}, \qquad
-T_D = \frac{z_c(Z, a/h) - a}{w_s}, \qquad D = v_s\, r_b\, c \tag{D-4}
+\frac{\partial (h r_b)}{\partial t} + \nabla\cdot(h r_b \mathbf{u})
+  &= h\,\frac{d^{*} - r_b}{T_D} \qquad \text{for } d^{*} > r_b, \tag{D-4} \\
+r_b &= d^{*} \qquad \text{otherwise}, \nonumber \\
+T_D &= \frac{z_c(Z, a/h) - a}{w_s}, \qquad D = v_s\, r_b\, c \nonumber
 \end{align}
 ```
 
@@ -1005,8 +1005,8 @@ default.
 :nowrap:
 
 \begin{align}
-\frac{\partial m_2}{\partial t} + \nabla\cdot(m_2 \mathbf{u}) &= K\,(c_1 - c_2) - v_s\, c_2, \qquad
-D = v_s\, c_1, \qquad E \text{ into layer 1} \\
+\frac{\partial m_2}{\partial t} + \nabla\cdot(m_2 \mathbf{u}) &= K\,(c_1 - c_2) - v_s\, c_2, \nonumber \\
+D &= v_s\, c_1, \qquad E \text{ into layer 1}, \nonumber \\
 \rho &= \frac{c_2}{c_1}\Big|_{eq} = \frac{1/d^{*} - a/h}{1 - a/h}, \qquad
 K = v_s\,\frac{\rho}{1 - \rho} \tag{D-5}
 \end{align}
@@ -1202,10 +1202,11 @@ Scope and interactions:
 - **Shared across classes, proportionally.** `T` is a property of the cell, not of a
   class, so the classes are limited *together*: their erosive sources are scaled by
   one common factor. Serving them in registration order would make the answer depend
-  on the order `add_sediment_class` was called, which is not physics. The bed carries
-  no per-class stratigraphy in this model, so no class has a stronger claim on the
-  last millimetre; proportional is the only choice that invents nothing. **If bed
-  stratigraphy is ever added, this rule is what must change.**
+  on the order `add_sediment_class` was called, which is not physics. By default
+  the bed carries no per-class composition, so no class has a stronger claim on the
+  last millimetre; proportional is the only choice that invents nothing. **With bed
+  composition (§5.0) this rule changes:** each class is capped at what the cell holds
+  of it, in both layers, and the shared scale no longer binds.
 - **Deposition is never scaled.** A shortage of bed material does not restrain
   deposition — deposition is what relieves it.
 - **Ordered after {speclit}`L-1` and {speclit}`L-2`.** Those bound the source by what the water
@@ -1242,6 +1243,35 @@ which is sound only because they carry no sediment budget to violate.
 ---
 
 ## 5. Bed layer model
+
+### 5.0 What is implemented: one active layer over one substrate
+
+`Domain.set_bed_composition` (4.1.0) implements the active-layer part of this model,
+with **one** substrate layer rather than a stack. The state is the solid volume per
+unit bed area of each class in each layer, `A_s` (active) and `B_s` (substrate)
+[m], filling the erodible thickness:
+
+    (1/(1-λ)) Σ_s (A_s + B_s) = z - z_base
+
+Each step, in `core_apply_sediment_source` (both compute modes):
+
+1. Entrainment by share: `E_s = F_s E*_s`, `F_s = A_s / Σ_j A_j` at the start of the
+   step; an empty active layer supplies nothing.
+2. Per-class cap, after L-1 and L-2: `S_s ≤ (A_s + B_s) / (Δt M)`. This replaces the
+   shared proportional scale of L-5 (§4.5).
+3. Exchange through the active layer, `A_s ← A_s − M Δt S_s` (a class driven below
+   zero takes the rest from its substrate), then restore its solid content
+   `L_A = H_A (1−λ)`. Aggradation sends the overflow down at the **active**
+   composition (§5.3, with one substrate); degradation refills from the substrate at
+   the **substrate** composition (§5.2, with one layer). Every transfer moves an
+   amount of one class, so each class is conserved exactly.
+
+Not implemented: the substrate stack (§5.1-5.2 with more than one layer), mass per
+area in kg m⁻² (volume is used, with porosity λ), composition carried by bedload
+(K-3) and by angle-of-repose relaxation (§7), and a mixture skin roughness. The rest
+of this section is the original RDycore-derived specification. User-facing
+description: *Sediment transport* setup page, *Bed composition*; equations:
+*Sediment physics* appendix.
 
 From `[RDy26 §2.2, A1–A3]`. One **active layer** exchanging with the water column,
 over up to 32 **substrate layers**. Per class per layer the state is mass per unit
@@ -1602,11 +1632,12 @@ matched to Figure 6 of Nepf (1999), and solves {speclit}`V-4` to obtain:
 :nowrap:
 
 \begin{align}
-C_D = \begin{cases} 1.2 & \alpha d \le 0.006 \\[4pt] 56.11\,(\alpha d)^2 - 15.28\,(\alpha d) + 1.3 - 5.465\times 10^{-4}\,(\alpha d)^{-1} & \alpha d > 0.006 \end{cases} \tag{V-5}
+C_D = \begin{cases} 1.2, & x \le 0.006, \\[4pt] 56.11\,x^2 - 15.28\,x + 1.3 - 5.465\times 10^{-4}\,x^{-1}, & x > 0.006, \end{cases}
+\tag{V-5}
 \end{align}
 ```
 
-`C_D` is evaluated per cell whenever the stem-diameter or stem-spacing fields change.
+with `x = αd`. `C_D` is evaluated per cell whenever the stem-diameter or stem-spacing fields change.
 
 > **Caveat.** {speclit}`V-5` is a fit to a fit — a cubic fit to a digitised figure, fed
 > through a force balance. It is reasonable within the range of Nepf's experiments
@@ -1733,58 +1764,37 @@ Defaults are FG21 Table 2 / P14 §3.3.2 where stated. **All must be settable.**
 
 ---
 
-## 10.1 Validation rung 8 — Lower Rio Puerco, 2006 flood
+## 10.1 Validation
 
-`[P13]` specifies this case completely enough to build it. Values are theirs.
+This specification says what the code must compute. Whether those are the right
+equations for a real flow is a separate question. The cases in
+`validation_tests/sediment/` answer it, and they run nightly with the rest of the
+validation suite (see the *Validation Test Suite* page for each case and how to run it):
 
-| Quantity | Value | Source |
-|----------|-------|--------|
-| Peak discharge `Q` (Highway 6 bridge) | 625 m³ s⁻¹ | P13 §[55] |
-| Mean active flow width `b` | 235 m | P13 §[55] |
-| Unit discharge `q` | 2.66 m² s⁻¹ | P13 §[55] |
-| Peak duration `t` | 50 400 s (14 h, Bernardo NM gauge) | P13 §[54] |
-| Representative grain size | **0.045 mm** (coarse silt) | P13 §[54], after Nordin (1963) |
-| Settling velocity `v_s` | 0.00175 m s⁻¹ | P13 §[54], Ferguson & Church (2004) |
-| Bed porosity `φ` | 0.30 | P13 §[54], Beard & Weyl (1973) |
-| Profile factor `d*` (`p`) | 1 (uniform) | P13 §[54], Nordin (1963) |
-| Study reach | 12 km | P13 abstract |
-| Deposit thickness (field) | 1–5 cm unconsolidated sand | P13 §[73] |
-| Field control | 26 pits, measured 2006 deposit thickness | P13 Figure 4 |
+- **Against closed-form solutions:**
+  - `sediment_settling`: deposition {speclit}`D-1`, the mass balance and the bed update.
+  - `sediment_erosion`: Smith–McLean entrainment {speclit}`E-1`, its threshold, and
+    the depth-slope closure {speclit}`T-7`.
+  - `sediment_settling_basin`: the steady concentration profile, the bed-rise rate and
+    the sediment budget.
+  - `sediment_equilibrium_flow`: clear water approaching the equilibrium
+    concentration in normal flow.
+  - `sediment_bed_hump`: Grass bedload and the Exner equation, against the
+    characteristic solution.
+- **Against laboratory measurements:**
+  - `van_rijn_pickup_flume`: entrainment {speclit}`E-6` and the near-bed ratio.
+  - `van_rijn_trench`: the settling lag, deposition and the Exner coupling over a
+    dredged trench.
+  - `wang_ribberink_settling`: deposition alone, with nothing else acting. It scores
+    the two-layer closure {speclit}`D-5` and runs {speclit}`D-3` and {speclit}`D-4`
+    for comparison.
+  - `zaragoza_pier_dambreak`: transient bedload over a finite sand layer, the angle of
+    repose, and scour at a pier.
 
-**Volumetric budget** (P13 §[68]–[69], with Vincent et al. 2009):
-
-| Component | Volume |
-|-----------|--------|
-| Eroded, arroyo bottom (sprayed reach) | 680 000 m³ |
-| Eroded, arroyo walls (sprayed reach) | 56 000 m³ |
-| **Total eroded, sprayed + study area** | **≈ 1 150 000 m³** |
-| Aggraded, floodplains of sprayed reach | 500 000 m³ |
-| **Total aggradation, both reaches** | **≈ 1 500 000 m³** |
-
-**What rung 8 must reproduce**, in order of stringency:
-
-1. **Qualitative** — deposition depth correlates with vegetation density, and its
-   *variability* correlates with vegetation type (P13 Figure 7). This is the result
-   the vegetation operator exists to capture.
-2. **Profile** — median deposit thickness decaying exponentially downstream from the
-   sediment source, per P13's 1-D model:
-   ```
-   [P-1]   C(x) = (C₀ − S_P/(p v_s)) · exp(−p v_s x / q) + S_P/(p v_s)     [P13 6]
-   ```
-   with `S_P` a local source term. Deviations from {speclit}`P-1` are what P13 attribute to
-   arroyo morphology and vegetation — so a 2-D model should reproduce the deviations,
-   not just the profile.
-3. **Budget** — total aggradation within the study area, against the table above.
-
-> **Caution on the budget.** P13 are explicit that the sprayed-reach volumes of
-> Vincent et al. (2009) are "not as well constrained" as their own lidar
-> differencing. Treat the 1.5×10⁶ m³ total as an order-of-magnitude check; the lidar
-> differencing over the study area is the defensible target.
-
-> **Third grain size.** P13 use 0.045 mm, P14 uses 0.1 mm, `aS16` uses 0.065 mm — all
-> for the same river, all citing the same body of work. See divergence D8; none is
-> wrong, they are choices for different purposes, but the spec must not silently
-> inherit one.
+No field-scale case has been built. The original specification planned two: the
+Rio Puerco 2006 flood `[P13]` and a Mars crater breach `[FG21]`. The Rio Puerco
+values `P13` gives, which are enough to build that case, are in
+`validation_tests/sediment/rio_puerco_2006/README.md`.
 
 ---
 

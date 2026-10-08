@@ -147,10 +147,60 @@ The sum matters once there is more than one fraction: there is **one** bed,
 and every fraction exchanges with it. The kernel accumulates a single
 :math:`dz` per cell over :math:`s` and applies it once, so fractions can
 offset each other -- sand entraining while gravel deposits leaves the bed
-still, though neither process has stopped. There is no per-fraction bed and
-no stratigraphy: nothing records which fraction the last millimetre came
+still, though neither process has stopped. By default there is no
+per-fraction bed: nothing records which fraction the last millimetre came
 from, which is why the erodible base :spec:`L-5` shares a shortage between
-fractions proportionally rather than by any order of priority.
+fractions proportionally rather than by any order of priority. Bed
+composition, below, records it.
+
+**Bed composition.** With :meth:`~anuga.Domain.set_bed_composition` the bed of
+each cell is an active layer of thickness :math:`H_A` over a substrate, after
+[Hir71]_ and [Par04]_ (see [Blo08]_ for the alternatives). The state is the
+solid volume per unit bed area of each fraction in each layer, :math:`A_s` and
+:math:`B_s` [m], so that
+
+.. math::
+
+   \frac{1}{1-\lambda}\sum_s \left(A_s + B_s\right) = z - z_\text{base}.
+
+Entrainment of fraction :math:`s` is scaled by its share of the active layer
+at the start of the step,
+
+.. math::
+
+   F_s = \frac{A_s}{\sum_j A_j}, \qquad E_s = F_s\, E^{*}_s ,
+
+where :math:`E^{*}_s` is the entrainment law's rate. After the limits
+:spec:`L-1` and :spec:`L-2`, the net exchange :math:`S_s = E_s - D_s` is
+capped at what the cell holds of the fraction,
+
+.. math::
+
+   S_s \le \frac{A_s + B_s}{\Delta t\, M},
+
+which replaces the shared proportional scale of :spec:`L-5`. The exchange passes
+through the active layer, :math:`A_s \leftarrow A_s - M\,\Delta t\,S_s` (a
+fraction driven below zero takes the rest from its substrate), and the layer
+is then restored to its solid content :math:`L_A = H_A(1-\lambda)`. On
+aggradation the overflow moves down at the active composition: each
+:math:`A_s` gives the fraction :math:`(\sum A - L_A)/\sum A` of itself to
+:math:`B_s`. On degradation the deficit is refilled at the substrate
+composition: each :math:`B_s` gives the fraction
+:math:`\min\!\left(1, (L_A - \sum A)/\sum B\right)` of itself to :math:`A_s`.
+Every transfer moves an amount of one fraction between layers, so each
+fraction's total (suspended and both layers) is conserved to round-off.
+
+Under a flow that lifts only a fine fraction, with :math:`F^{sub}` its share
+of the substrate, the active layer's fine content :math:`a` obeys
+
+.. math::
+
+   \frac{da}{dt} = -\left(1 - F^{sub}\right) \frac{E^{*}}{L_A}\, a ,
+
+so the surface coarsens and fine entrainment decays exponentially: the bed
+armours. The Caltech Wax Lake sediment model [Wan23]_ uses the same scheme with :math:`H_A` = 1 cm; it stores fractions
+rather than amounts and has no porosity. Bedload and angle-of-repose
+relaxation still move the bed as one material.
 
 **Bedload.** When bedload is switched on it moves the bed too, by the divergence
 of the bedload transport vector :math:`\mathbf{q}_b`:
@@ -410,10 +460,12 @@ material load [Wan23]_:
 
 .. math::
 
-   E^{*} = \frac{A\, X^{\beta}}{1 + 3 A\, X^{\beta}},
-   \qquad X = \left(\frac{u_{*,\mathrm{sk}}}{v_s}\right)^{\alpha}
+   \begin{aligned}
+   E^{*} &= \frac{A\, X^{\beta}}{1 + 3 A\, X^{\beta}}, \\
+   X &= \left(\frac{u_{*,\mathrm{sk}}}{v_s}\right)^{\alpha}
                \mathrm{Fr} - 0.015,
    \qquad \mathrm{Fr} = \frac{U}{\sqrt{g h}}
+   \end{aligned}
    \qquad \text{[E-6]}
 
 with :math:`E = v_s E^{*}` as before and :math:`E^{*}` the near-bed
@@ -566,9 +618,11 @@ relaxes the load toward the same equilibrium at that rate,
 
 .. math::
 
-   E - D = \alpha\, v_s\, (c_{eq} - c), \qquad
-   \frac{1}{\alpha} = \frac{a}{h} + \left(1 - \frac{a}{h}\right)
+   \begin{aligned}
+   E - D &= \alpha\, v_s\, (c_{eq} - c), \\
+   \frac{1}{\alpha} &= \frac{a}{h} + \left(1 - \frac{a}{h}\right)
    \exp\!\left[-1.5\left(\frac{a}{h}\right)^{-1/6} \frac{w_s}{u_*}\right]
+   \end{aligned}
    \qquad \text{[D-3]}
 
 with :math:`\alpha` in the closed form of [ADS88]_ and
@@ -603,9 +657,11 @@ rest :math:`h_2 = h - a`, the fraction's tracer still carrying the total
 
 .. math::
 
+   \begin{aligned}
    \frac{\partial m_2}{\partial t} + \nabla\cdot(m_2 \mathbf{u})
-   = K\,(c_1 - c_2) - v_s\, c_2, \qquad D = v_s\, c_1, \qquad
-   K = v_s \frac{\rho}{1-\rho}, \quad \rho = \frac{1/d^{*} - a/h}{1 - a/h}
+   &= K\,(c_1 - c_2) - v_s\, c_2, \qquad D = v_s\, c_1, \\
+   K &= v_s \frac{\rho}{1-\rho}, \qquad \rho = \frac{1/d^{*} - a/h}{1 - a/h}
+   \end{aligned}
    \qquad \text{[D-5]}
 
 with the exchange :math:`K` chosen so that the two-layer equilibrium
@@ -967,6 +1023,10 @@ own.
    the transport of a sediment mixture in non-equilibrium conditions.
    *Journal of Hydraulic Research*, 26(3), 275-292.
 
+.. [Blo08] Blom, A. (2008). Different approaches to handling vertical and
+   streamwise sorting in modeling river morphodynamics. *Water Resources
+   Research*, 44, W03415. doi:10.1029/2006WR005474
+
 .. [DL09] Davy, P. and Lague, D. (2009). Fluvial erosion/transport equation of
    landscape evolution models revisited. *Journal of Geophysical Research:
    Earth Surface*, 114, F03007. doi:10.1029/2008JF001146
@@ -1006,6 +1066,9 @@ own.
    streambeds in the loess area of the midwestern USA. *Hydrological
    Processes*, 15(1), 23-38.
 
+.. [Hir71] Hirano, M. (1971). River bed degradation with armouring.
+   *Proceedings of the Japan Society of Civil Engineers*, 195, 55-65.
+
 .. [LL16] Larsen, I. J. and Lamb, M. P. (2016). Progressive incision of the
    Channeled Scablands by outburst floods. *Nature*, 538(7624), 229-232.
    doi:10.1038/nature19817. Uses ANUGA.
@@ -1039,6 +1102,10 @@ own.
 .. [Wan23] Wang, D., Salter, G. and Lamb, M. P. (2023). Delta-X: Matlab
    Model for Wax Lake Delta Land Accretion. ORNL DAAC, Oak Ridge, Tennessee,
    USA. doi:10.3334/ORNLDAAC/2309
+
+.. [Par04] Parker, G. (2004). *1D Sediment Transport Morphodynamics with
+   Applications to Rivers and Turbidity Currents.* E-book, University of
+   Illinois.
 
 .. [Par65] Partheniades, E. (1965). Erosion and deposition of cohesive soils.
    *Journal of the Hydraulics Division, ASCE*, 91(1), 105-139.
