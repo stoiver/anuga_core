@@ -54,6 +54,20 @@ appendix, and nine validation cases, five analytical and four laboratory
 flumes, have their own chapter in the validation report. See the *Sediment
 transport* page of the setup guide.
 
+### Bed composition
+
+`domain.set_bed_composition({'mud': f, 'sand': 1 - f}, active_layer=0.01)`
+tracks how much of each sediment fraction the bed holds, in a thin active
+layer over a substrate (Hirano). A fraction is entrained only in proportion to
+its share of the active layer and never beyond what the cell holds, and a bed
+that loses its fines armours. Without it every fraction comes out of one shared
+bed, so mud is picked up from sand-bedded channels for as long as the bed
+lasts: in the Delta-X Wax Lake case suspended mud ran away within a day, and
+with composition the eroded area fell 15-fold and the median suspended mud
+stayed at the inflow level. Each fraction is conserved exactly, in both
+compute modes and in parallel; it is off by default. See *Bed composition* on
+the *Sediment transport* page.
+
 ### Vegetation drag
 
 `domain.set_vegetation_drag(density, diameter, height)` adds the drag of a
@@ -125,6 +139,32 @@ the flow algorithms.
   limiter but not the old predictor.
 
 ## Selected fixes
+
+* Culvert hydraulics. Four transcription errors, each shared by the Python
+  operator and its C port (which also runs serial mode-1 culverts, so CPU and
+  GPU agreed while both were wrong), are fixed. Results change for the
+  culverts each one touches.
+  - `Boyd_pipe_operator`: the critical depth used `Q/√g·D^2.5` where
+    `Q/(√g·D^2.5)` was meant, throttling pipes under about 0.8 m (a 0.375 m
+    pipe passed a fifth of its flow) and forcing pipes over about 1.2 m to run
+    full. It is now an exact solve, per barrel (#419, thanks to Dave
+    Kennewell).
+  - `Boyd_box_operator` with several barrels took the wetted perimeter of one
+    wide box, overstating outlet-controlled flow by up to 20% (#420), and
+    skipped the barrel-friction limit once the head difference reached the
+    driving energy, so flow jumped up to 2.9× on long culverts with a free
+    outlet (#421).
+  - `Weir_orifice_trapezoid_operator`: barrels and blockage were applied
+    twice in the C orifice area; several barrels acted as one wide trapezoid;
+    the full-flow perimeter left out the roof; the friction limit had the
+    same gap as the box. Its tests now reproduce the independent spreadsheet
+    they were written from (#422).
+* Sediment mass across MPI ranks. In mode 1 the sediment step ran before the
+  ghost exchange and elevation was not exchanged, so ghost beds drifted from
+  their owners' and about 0.5-1% of the eroded volume was lost at partition
+  boundaries (#423, #425); bedload leaked in both modes (#424, #426). Ghost
+  cells now take their owners' bed every step, and a partitioned run
+  conserves sediment to round-off and matches the serial one.
 
 * Inlet operators now carry tracers. `Inlet_operator` moved only water: an
   outlet (negative `Q`) took the water out and left its tracer behind, so

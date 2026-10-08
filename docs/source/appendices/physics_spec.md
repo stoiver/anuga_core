@@ -1202,10 +1202,11 @@ Scope and interactions:
 - **Shared across classes, proportionally.** `T` is a property of the cell, not of a
   class, so the classes are limited *together*: their erosive sources are scaled by
   one common factor. Serving them in registration order would make the answer depend
-  on the order `add_sediment_class` was called, which is not physics. The bed carries
-  no per-class stratigraphy in this model, so no class has a stronger claim on the
-  last millimetre; proportional is the only choice that invents nothing. **If bed
-  stratigraphy is ever added, this rule is what must change.**
+  on the order `add_sediment_class` was called, which is not physics. By default
+  the bed carries no per-class composition, so no class has a stronger claim on the
+  last millimetre; proportional is the only choice that invents nothing. **With bed
+  composition (§5.0) this rule changes:** each class is capped at what the cell holds
+  of it, in both layers, and the shared scale no longer binds.
 - **Deposition is never scaled.** A shortage of bed material does not restrain
   deposition — deposition is what relieves it.
 - **Ordered after {speclit}`L-1` and {speclit}`L-2`.** Those bound the source by what the water
@@ -1242,6 +1243,35 @@ which is sound only because they carry no sediment budget to violate.
 ---
 
 ## 5. Bed layer model
+
+### 5.0 What is implemented: one active layer over one substrate
+
+`Domain.set_bed_composition` (4.1.0) implements the active-layer part of this model,
+with **one** substrate layer rather than a stack. The state is the solid volume per
+unit bed area of each class in each layer, `A_s` (active) and `B_s` (substrate)
+[m], filling the erodible thickness:
+
+    (1/(1-λ)) Σ_s (A_s + B_s) = z - z_base
+
+Each step, in `core_apply_sediment_source` (both compute modes):
+
+1. Entrainment by share: `E_s = F_s E*_s`, `F_s = A_s / Σ_j A_j` at the start of the
+   step; an empty active layer supplies nothing.
+2. Per-class cap, after L-1 and L-2: `S_s ≤ (A_s + B_s) / (Δt M)`. This replaces the
+   shared proportional scale of L-5 (§4.5).
+3. Exchange through the active layer, `A_s ← A_s − M Δt S_s` (a class driven below
+   zero takes the rest from its substrate), then restore its solid content
+   `L_A = H_A (1−λ)`. Aggradation sends the overflow down at the **active**
+   composition (§5.3, with one substrate); degradation refills from the substrate at
+   the **substrate** composition (§5.2, with one layer). Every transfer moves an
+   amount of one class, so each class is conserved exactly.
+
+Not implemented: the substrate stack (§5.1-5.2 with more than one layer), mass per
+area in kg m⁻² (volume is used, with porosity λ), composition carried by bedload
+(K-3) and by angle-of-repose relaxation (§7), and a mixture skin roughness. The rest
+of this section is the original RDycore-derived specification. User-facing
+description: *Sediment transport* setup page, *Bed composition*; equations:
+*Sediment physics* appendix.
 
 From `[RDy26 §2.2, A1–A3]`. One **active layer** exchanging with the water column,
 over up to 32 **substrate layers**. Per class per layer the state is mass per unit

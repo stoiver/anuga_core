@@ -603,39 +603,12 @@ precision. Clamping ``z`` afterwards would leave suspended sediment that came
 from nowhere.
 
 Where several classes compete for the last of the material they are scaled by
-one shared proportional factor, not served in registration order: the bed
-carries no per-class stratigraphy, so no class has a better claim, and the
-answer must not depend on the order you registered the fractions.
-Deposition is never scaled -- it is what replenishes the bed.
-
-Bed composition
-~~~~~~~~~~~~~~~
-
-By default the bed is one shared material, so every class can be entrained
-from it wherever the shear allows -- a fine class keeps coming out of a coarse
-bed for as long as the bed lasts. :meth:`~anuga.Domain.set_bed_composition`
-tracks the bed per class instead, as an active layer over a substrate
-(Hirano):
-
-.. code-block:: python
-
-   domain.set_erodible_base(depth=1.0)
-   domain.set_bed_composition({'mud': fmud, 'sand': 1.0 - fmud},
-                              active_layer=0.01)
-
-Entrainment of a class is multiplied by its share of the active layer, a class
-can never take more out of a cell than the cell holds of it, and after each
-step the active layer is restored to its thickness: overflow goes down at the
-active composition, a deficit is refilled from the substrate at the substrate
-composition. The layers hold amounts (solid volume per bed area), so each class
-is conserved exactly. A bed that is losing its fines therefore armours.
-``get_bed_composition('active')`` returns the fractions per class.
-
-Call it after every ``add_sediment_fraction`` and after ``set_erodible_base``,
-whose thickness it divides into the two layers. The fractions may be scalars,
-per-centroid arrays or functions ``f(x, y)``. Bedload and the angle-of-repose
-relaxation still move the bed as one material; combining them with
-composition warns.
+one shared proportional factor, not served in registration order: by default
+the bed is one shared material, so no class has a better claim, and the answer
+must not depend on the order you registered the fractions. (With
+:ref:`bed composition <sediment_bed_composition>` each class is instead capped
+at what the cell holds of it.) Deposition is never scaled -- it is what
+replenishes the bed.
 
 The two transport routes give **different strengths of guarantee**, and it is
 worth knowing which you are relying on:
@@ -732,6 +705,133 @@ Cost
 None when unset. With no base configured the kernels take the path they took
 before the feature existed, and produce bitwise identical results -- which is
 asserted, not assumed, in ``test_sediment_erodible_base.py`` check E1.
+
+--------------
+
+.. _sediment_bed_composition:
+
+Bed composition
+---------------
+
+.. code-block:: python
+
+   domain.add_sediment_fraction('mud', diameter=2.0e-5)
+   domain.add_sediment_fraction('sand', diameter=1.2e-4)
+   domain.set_erodible_base(depth=1.0)
+   domain.set_bed_composition({'mud': fmud, 'sand': 1.0 - fmud},
+                              active_layer=0.01)
+
+By default the bed is one shared material: every fraction can be entrained
+from it wherever the shear allows, so a fine fraction keeps coming out of a
+coarse bed for as long as the bed lasts.
+:meth:`~anuga.Domain.set_bed_composition` tracks how much of each fraction the
+bed holds instead, in a thin **active layer** over a **substrate** (the Hirano
+active-layer model). A fraction is then only entrained where the bed holds it,
+and a bed that is losing its fines **armours**: its surface coarsens and the
+fine entrainment dies away.
+
+When to use it
+~~~~~~~~~~~~~~
+
+Use it whenever more than one fraction can be entrained and the bed is not the
+same mixture everywhere -- sandy channels beside muddy marsh, a gravel bed with
+a fine matrix -- or a run is long enough for armouring to matter. Without it,
+a mud fraction is picked up from deep, high-shear channel beds that are really
+sand. In the Delta-X Wax Lake case that ran away within a day: suspended mud
+reached hundreds of g/L against 0.12 g/L in the river. With composition the
+eroded area after one day fell from 37 km² to 2.4 km², and the median suspended
+mud stayed at the inflow concentration.
+
+With a single fraction it changes nothing: the share is always 1 and the cap is
+the whole thickness, so the answer is the shared-bed one.
+
+Setting it up
+~~~~~~~~~~~~~
+
+Call it after every :meth:`~anuga.Domain.add_sediment_fraction`, after
+:meth:`~anuga.Domain.set_sediment_parameters` (it uses the porosity) and after
+:meth:`~anuga.Domain.set_erodible_base`, whose thickness it divides between the
+two layers. A fraction added afterwards is refused, and so is a call with no
+erodible base.
+
+``fractions``
+   Fraction name to volume fraction of the active layer: a scalar, a
+   per-centroid array, or a function ``f(x, y)`` of the centroid coordinates
+   (as in ``set_quantity``). Fractions not named are 0. They must sum to 1 in
+   every cell, to within 10\ :sup:`-6`. ``None`` switches composition off.
+``active_layer``
+   The active-layer thickness, in metres of bed (pores included). Default
+   0.01 m, the Caltech Wax Lake model's value. For sand and gravel a few times
+   the coarse grain size is the usual choice; a thinner layer armours faster.
+``substrate``
+   The substrate's composition, in the same form. Defaults to ``fractions``.
+
+A cell with no erodible thickness holds nothing, whatever it is given.
+
+**A starting composition from a map.** Arrays are the usual route, for example
+the nearest value of a gridded mud-fraction map:
+
+.. code-block:: python
+
+   from scipy.spatial import cKDTree
+
+   xy_map, fmud_map = ...                     # map points (absolute) and values
+   cc = domain.get_centroid_coordinates(absolute=True)
+   fmud = fmud_map[cKDTree(xy_map).query(cc)[1]]
+   domain.set_bed_composition({'mud': fmud, 'sand': 1.0 - fmud},
+                              active_layer=0.01)
+
+What happens each step
+~~~~~~~~~~~~~~~~~~~~~~
+
+The layers hold **amounts**, the solid volume of each fraction per unit bed
+area, not fractions, so each fraction is conserved exactly. In each cell:
+
+1. The entrainment law gives a potential rate; it is multiplied by the
+   fraction's share of the active layer. An empty active layer supplies
+   nothing.
+2. A fraction may not take more out of the cell in one step than the cell
+   holds of it, in both layers together. This replaces the shared proportional
+   scale of the erodible base.
+3. The exchange passes through the active layer, which is then restored to its
+   thickness. When the bed builds up, the overflow goes down into the
+   substrate with the **active** layer's mix. When it erodes, the active layer
+   is topped up from the substrate with the **substrate's** mix.
+
+The equations are in the :ref:`Sediment physics <sediment_physics>` appendix.
+
+Reading the composition
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   F = domain.get_bed_composition('active')     # {'mud': (n,), 'sand': (n,)}
+   Fs = domain.get_bed_composition('substrate')
+
+Cells that hold nothing give 0 for every fraction. The host copy is current at
+each yieldstep; on a GPU it is copied back with the bed. The composition is not
+written to the SWW file, so save what you need at yieldsteps, for example with
+``numpy.savez``. :meth:`~anuga.Domain.sediment_summary` reports the active
+layer and the mean fractions.
+
+Interactions and limits
+~~~~~~~~~~~~~~~~~~~~~~~
+
+- **Compute modes.** The update is in the source kernel shared by both compute
+  modes, so legacy and unified (CPU or GPU) give the same answer. It costs
+  under 3% of a sediment step.
+- **Parallel.** The update is cell-local, and each rank's ghost cells take
+  their owners' bed after every step, so a partitioned run conserves each
+  fraction and matches the serial one.
+- **Morphological factor.** The layers move by the factor times the physical
+  exchange, as the bed does.
+- **Bedload and angle-of-repose relaxation** still move the bed as one
+  material, so the layers and the elevation drift apart where they act.
+  Combining them with composition warns.
+- **One substrate layer.** There is no stratigraphy below the active layer:
+  what goes down is mixed into one substrate.
+- **Bed roughness** is still taken per fraction (3 × the grain size), not from
+  the active layer's mixture.
 
 --------------
 
