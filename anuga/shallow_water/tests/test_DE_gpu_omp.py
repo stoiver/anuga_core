@@ -1373,13 +1373,15 @@ class Test_GPU_Culvert(unittest.TestCase):
         """Boyd *pipe* culvert: reported discharge and barrel velocity agree
         between mode=1 and mode=2.
 
-        Regression guard for a critical-depth translation bug in
-        boyd_pipe_discharge: it divided by ``(bf*diameter)**2.5`` where the
-        Python reference multiplies, leaving the GPU flow_area — and hence the
-        reported barrel velocity — ~8% off mode=1, while the (inlet-controlled)
-        discharge still matched. Comparing the operator velocity catches it; a
-        stage-only comparison (test_culvert_cpu_gpu_match, box only) does not.
-        Also covers the GPUCulvertManager stats write-back onto the Python op.
+        Regression guard for CPU/GPU drift in the pipe critical-depth /
+        flow-area path: a mismatch there leaves the reported barrel velocity
+        off between modes while the (inlet-controlled) discharge still
+        matches. Both paths now use the same exact circular critical-depth
+        solve (circular_critical_depth); physical correctness of that solve is
+        tested in anuga/structures/tests/test_boyd_pipe_operator.py. Comparing
+        the operator velocity catches drift; a stage-only comparison
+        (test_culvert_cpu_gpu_match, box only) does not. Also covers the
+        GPUCulvertManager stats write-back onto the Python op.
         """
         cpu_domain, cpu_op = self._create_pipe_domain('pipe_cpu')
         cpu_domain.set_multiprocessor_mode(1)
