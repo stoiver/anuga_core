@@ -1109,29 +1109,40 @@ Then print :meth:`~anuga.Domain.sediment_summary` and check it says what you mea
 
 --------------
 
-What is not implemented
------------------------
+Validation
+----------
 
-Vegetation drag (spec 8) is Phase 5 and absent. Neither validation rung of
-spec 10 -- Rio Puerco, the crater breach -- has been attempted; the evidence
-in ``anuga/shallow_water/tests/test_sediment_*.py`` is verification (the
-equations are solved correctly), which is a different claim from validation
-(they are the right equations for the field case). One step towards the
-latter is in the validation suite, which runs nightly with the other
-analytical cases: ``validation_tests/sediment/sediment_settling``
-compares the deposition term, the sediment mass balance and the bed update
-against the reference solution for sediment settling out of still water, and
-``validation_tests/sediment/sediment_erosion`` compares the
-Smith--McLean entrainment law, its threshold, the depth-slope closure (slope
-frozen) and the bed lowering against the per-cell reference for a bed that
-erodes under still water. ``validation_tests/sediment/sediment_settling_basin``
-compares the steady concentration profile and bed-rise rate of a settling
-basin with flow against the closed-form exponential, and closes the
-sediment budget between boundaries, water column and bed. ``validation_tests/sediment/sediment_equilibrium_flow``
-compares the suspended load that clear water picks up in normal flow on a
-Manning slope, under the quadratic-drag closure, against the closed-form
-approach to the equilibrium concentration.
-``validation_tests/sediment/sediment_bed_hump`` runs the classic
-Exner test, a bed hump migrating under Grass bedload, against its
-characteristic solution. The notebook :doc:`/examples/notebook_sediment_transport` walks
-through the settling case.
+The tests in ``anuga/shallow_water/tests/test_sediment_*.py`` are
+verification: they show the equations are solved correctly. Validation is the
+separate claim that they are the right equations for a real flow. The cases for
+that are in ``validation_tests/sediment/``. They run nightly with the rest of the
+validation suite, and :ref:`anuga-validation` describes each one and how to run
+it.
+
+Five cases compare against closed-form solutions:
+
+- ``sediment_settling``: deposition, the sediment mass balance and the bed
+  update, for sediment settling out of still water.
+- ``sediment_erosion``: the Smith--McLean entrainment law, its threshold, the
+  depth-slope closure and the bed lowering, for a bed eroding under still
+  water.
+- ``sediment_settling_basin``: the steady concentration profile, the bed-rise
+  rate and the sediment budget of a settling basin with flow.
+- ``sediment_equilibrium_flow``: clear water picking up sediment in normal flow,
+  approaching the equilibrium concentration.
+- ``sediment_bed_hump``: the classic Exner test, a bed hump migrating under
+  Grass bedload.
+
+Four compare against laboratory measurements:
+
+- ``van_rijn_pickup_flume``: clear water picking up sand from a bed, against
+  the measured suspended load.
+- ``van_rijn_trench``: suspended sand settling into a dredged trench, against
+  the measured bed profiles.
+- ``wang_ribberink_settling``: a suspension settling out through a bed that
+  takes everything that reaches it, which tests deposition alone.
+- ``zaragoza_pier_dambreak``: a dam break over a sand bed around a pier,
+  against the bed measured by a Kinect sensor.
+
+No field-scale case has been built yet. The notebook
+:doc:`/examples/notebook_sediment_transport` walks through the settling case.

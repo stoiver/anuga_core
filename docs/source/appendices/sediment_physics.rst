@@ -460,10 +460,12 @@ material load [Wan23]_:
 
 .. math::
 
-   E^{*} = \frac{A\, X^{\beta}}{1 + 3 A\, X^{\beta}},
-   \qquad X = \left(\frac{u_{*,\mathrm{sk}}}{v_s}\right)^{\alpha}
+   \begin{aligned}
+   E^{*} &= \frac{A\, X^{\beta}}{1 + 3 A\, X^{\beta}}, \\
+   X &= \left(\frac{u_{*,\mathrm{sk}}}{v_s}\right)^{\alpha}
                \mathrm{Fr} - 0.015,
    \qquad \mathrm{Fr} = \frac{U}{\sqrt{g h}}
+   \end{aligned}
    \qquad \text{[E-6]}
 
 with :math:`E = v_s E^{*}` as before and :math:`E^{*}` the near-bed
@@ -616,9 +618,11 @@ relaxes the load toward the same equilibrium at that rate,
 
 .. math::
 
-   E - D = \alpha\, v_s\, (c_{eq} - c), \qquad
-   \frac{1}{\alpha} = \frac{a}{h} + \left(1 - \frac{a}{h}\right)
+   \begin{aligned}
+   E - D &= \alpha\, v_s\, (c_{eq} - c), \\
+   \frac{1}{\alpha} &= \frac{a}{h} + \left(1 - \frac{a}{h}\right)
    \exp\!\left[-1.5\left(\frac{a}{h}\right)^{-1/6} \frac{w_s}{u_*}\right]
+   \end{aligned}
    \qquad \text{[D-3]}
 
 with :math:`\alpha` in the closed form of [ADS88]_ and
@@ -653,9 +657,11 @@ rest :math:`h_2 = h - a`, the fraction's tracer still carrying the total
 
 .. math::
 
+   \begin{aligned}
    \frac{\partial m_2}{\partial t} + \nabla\cdot(m_2 \mathbf{u})
-   = K\,(c_1 - c_2) - v_s\, c_2, \qquad D = v_s\, c_1, \qquad
-   K = v_s \frac{\rho}{1-\rho}, \quad \rho = \frac{1/d^{*} - a/h}{1 - a/h}
+   &= K\,(c_1 - c_2) - v_s\, c_2, \qquad D = v_s\, c_1, \\
+   K &= v_s \frac{\rho}{1-\rho}, \qquad \rho = \frac{1/d^{*} - a/h}{1 - a/h}
+   \end{aligned}
    \qquad \text{[D-5]}
 
 with the exchange :math:`K` chosen so that the two-layer equilibrium

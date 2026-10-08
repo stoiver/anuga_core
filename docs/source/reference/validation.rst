@@ -147,7 +147,7 @@ which is the way to validate a feature branch before merging it.
 Test suite structure
 ---------------------
 
-The tests are organised into five categories:
+The tests are organised into six categories:
 
 .. list-table::
    :header-rows: 1
@@ -173,6 +173,10 @@ The tests are organised into five categories:
    * - ``other_references/``
      - Comparisons against results published in the literature other than
        the experimental datasets above.
+   * - ``sediment/``
+     - Sediment transport: closed-form solutions for settling, entrainment,
+       a settling basin, equilibrium load and a migrating bed hump, and four
+       laboratory flumes with measured data.
 
 
 Benchmark descriptions
@@ -429,6 +433,111 @@ flux.
 whose grain size does not enter (Grass is total load).
 
 **Run time:** about a minute.
+
+van Rijn's sediment pick-up flume — experimental data
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Directory:** ``sediment/van_rijn_pickup_flume/``
+
+**Physical scenario:** A Delft Hydraulics flume (van Rijn 1986). Uniform flow
+0.25 m deep at 0.67 m/s, initially free of sediment, runs from a rigid bed
+onto a bed of 230 micron sand and picks up sand until the suspended load
+reaches equilibrium. The suspension is strongly stratified (Rouse number
+1.15). The data are the depth-integrated suspended loads measured at four
+stations. The bed is held fixed, as in the experiment.
+
+**What is checked:** That the flow stays at normal depth and discharge and
+reaches a steady state; that the suspended load increases along the flume;
+and, scored the way van Rijn scores a transport formula, that the
+geometric mean of the predicted-to-measured load ratio over the four
+stations lies between 0.5 and 2 with no station outside 1/3 to 3. It
+exercises the de Leeuw et al. (2020) entrainment law and the Rouse near-bed
+ratio.
+
+**Key techniques:** ``set_bed_material('noncohesive', entrainment='de_leeuw')``,
+``set_deposition(law='d_star', near_bed='rouse')``, a clear-water inflow
+through ``set_tracer_boundary``.
+
+**Run time:** about a minute and a half.
+
+
+van Rijn's migrating trench — experimental data
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Directory:** ``sediment/van_rijn_trench/``
+
+**Physical scenario:** Delft Hydraulics flume experiments (van Rijn 1986).
+A flow 0.39 m deep at 0.51 m/s, carrying 160 micron sand in equilibrium,
+crosses a trench cut across the flume. The flow slows over the trench, the
+suspended sand settles on the downstream slope and the floor, and the
+trench fills and migrates downstream. The data are the bed profiles
+measured after 15 hours for side slopes of 1:3, 1:7 and 1:10. As in van
+Rijn's own model, the entrainment constant is calibrated so that the
+approach flow is in equilibrium at the measured supply.
+
+**What is checked:** The bed level at the measured points (RMS error below
+3 cm, against a fill 8--10 cm deep), and the position of the deepest point
+of the fill (within 1.5 m of the measured one). It exercises the settling
+lag, deposition on a non-uniform flow, bedload and the Exner coupling.
+
+**Key techniques:** ``set_bedload('wong_parker_eq24', open_boundaries=...)``,
+an evolving bed with a morphological factor.
+
+**Run time:** the 1:10 trench takes a few minutes. All three trenches run
+only with ``-l`` (``--long``).
+
+
+Wang and Ribberink's settling flume — experimental data
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Directory:** ``sediment/wang_ribberink_settling/``
+
+**Physical scenario:** A Delft flume (Wang and Ribberink 1986) whose only
+sediment process is deposition. A uniform flow 0.2155 m deep at 0.558 m/s
+carries 100 micron sand in equilibrium onto 16 m of perforated plate.
+Every grain that reaches the bed falls through the plate and is not picked
+up again. The depth-averaged concentration decays along the test section.
+The data are the concentration profiles measured at six or seven stations
+in each of two runs.
+
+**What is checked:** The concentration along the test section from 1 m on,
+as the RMS of the log of the predicted-to-measured ratio (below 0.15). The
+case isolates the deposition closure and its adaptation from everything
+else: no entrainment, no bedload, no bed change. It scores the two-layer
+closure; the instantaneous closure gives 0.73 and 0.58 on the two runs.
+
+**Key techniques:** ``set_deposition(law='d_star', near_bed='rouse',
+adaptation='two_layer')``, ``initialize_sediment_operator(bed_evolution=False)``.
+
+**Run time:** under a minute. Run 2 is included only with ``-l``
+(``--long``).
+
+
+Dam break over a sand bed around a pier — experimental data
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+**Directory:** ``sediment/zaragoza_pier_dambreak/``
+
+**Physical scenario:** The Zaragoza Kinect experiments (Segovia-Burillo et
+al. 2026; data open on Zenodo, DOI 10.5281/zenodo.17777387). An 8 cm
+dam break runs down a 24 cm wide flume over a 5 cm layer of sand, past a
+pier on the centreline: a 3 cm cylinder (case P1) or a rounded rectangle
+(P2). The dam break is repeated three times over the evolving bed. A Kinect
+sensor over the pier records the bed after each event and the water
+surface during it. The flow is supercritical and the transport is bedload.
+
+**What is checked:** The bed change after the first dam break, as an RMS
+error over the Kinect window (below 6 mm, against a scatter in the
+measured field of about 4 mm). The scour depth at the pier is reported, not
+tested. It exercises the Exner coupling under a transient, a rigid base
+under a finite sand layer, the angle of repose around a scour hole, and a
+wetting front over an erodible bed.
+
+**Key techniques:** a pier as a mesh hole, ``set_erodible_base``,
+``set_angle_of_repose``, ``set_bedload('wong_parker_eq24', ...)``.
+
+**Run time:** case P2 is included only with ``-l`` (``--long``).
+
 
 Adding a new validation test
 ------------------------------
