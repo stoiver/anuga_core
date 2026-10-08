@@ -1653,6 +1653,21 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     double * restrict z_base = D->sediment_z_base;
     const anuga_int has_z_base = (D->sediment_has_z_base && z_base != NULL);
     double * restrict src_lim = D->sediment_source_limited;
+    /* Bed composition. Hoisted like the rest; both arrays are required, as
+     * for z_base above, so a half-bound composition cannot be dereferenced. */
+    double *bed_act = D->sediment_bed_active;
+    double *bed_sub = D->sediment_bed_substrate;
+    const anuga_int has_comp = (D->sediment_bed_composition && bed_act != NULL
+                                && bed_sub != NULL && bed_evolves
+                                && one_minus_lambda > 0.0);
+    const double active_solid = D->sediment_active_layer * one_minus_lambda;
+    /* The GPU loop below maps these with explicit lengths, which a NULL
+     * pointer cannot take. Off, they are never touched, so stand them on the
+     * scratch array that is always mapped. (Not restrict, for that reason.) */
+    if (!has_comp) {
+        bed_act = src_lim;
+        bed_sub = src_lim;
+    }
 
     /* The slope for [T-7]/[T-7e], in a pass of its own. It reads the
      * neighbours' bed (or stage) centroids, and the loop below WRITES the
@@ -1669,7 +1684,22 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
     /* With a frozen depth-slope, slope_w holds the slope of the bed at
      * setup (Domain.set_shear_closure / bed_slope_magnitude). */
 
+    /* On the GPU the per-class arrays are mapped with EXPLICIT lengths. Left
+     * implicit, nvc infers a length only while the loop is simple enough to
+     * see n_classes bound every access; past that it maps them as zero-length
+     * sections, the device read uninitialised memory (compute-sanitizer
+     * initcheck at the sedR/diam load), and mode 2 went wrong and
+     * nondeterministic with nothing in the physics changed. Present data are
+     * reused, so the clauses cost nothing. */
+#ifdef CPU_ONLY_MODE
     OMP_PARALLEL_LOOP
+#else
+    #pragma omp target teams loop \
+        map(to: v_s[0:n_classes], d_star[0:n_classes], diam[0:n_classes], \
+                sedR[0:n_classes], tau_c_star[0:n_classes], a_ref[0:n_classes]) \
+        map(tofrom: src_lim[0:n_classes*n], bed_act[0:n_classes*n], \
+                    bed_sub[0:n_classes*n])
+#endif
     for (anuga_int k = 0; k < n; k++) {
         const double h = fmax(stage_cv[k] - bed_cv[k], 0.0);
 
@@ -1738,6 +1768,15 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
         if (max_slope > 0.0 && S > max_slope) S = max_slope;
         const double tbr = core_tau_b_over_rho(shear_closure, f_c, vel2, grav,
                                                h, S);
+
+        /* Bed composition: the active layer's content, for the class shares
+         * F_s = bed_act[s] / act_tot at the START of the step. */
+        double act_tot = 0.0;
+        if (has_comp) {
+            for (anuga_int s = 0; s < n_classes; s++) {
+                act_tot += bed_act[s * n + k];
+            }
+        }
 
         for (anuga_int s = 0; s < n_classes; s++) {
             const anuga_int idx = s * n + k;
@@ -2081,6 +2120,13 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
                 }
             }
 
+            // Bed composition: a class is entrained in proportion to its share
+            // of the active layer (Hirano), so a bed with none of it cannot
+            // supply it, and an emptied active layer supplies nothing.
+            if (has_comp) {
+                erosion = (act_tot > 0.0) ? erosion * bed_act[idx] / act_tot : 0.0;
+            }
+
             // Net exchange of [G-3]. Deposition removes, erosion adds; [D-3]
             // scales the rate of both toward the same equilibrium.
             double source = f_adapt * (erosion - deposition);
@@ -2113,6 +2159,16 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             // The external supply is deliberately NOT folded in here: it is
             // not a bed exchange, so it must not be scaled by a bed-material
             // limiter, and it is added in the apply loop instead.
+            //
+            // Bed composition: a class may not take more out of the bed this
+            // step than the cell holds of it (active layer and substrate).
+            // Per class, so a class that is absent cannot borrow another's
+            // share of the erodible thickness the way [L-5] alone allows.
+            if (has_comp && source > 0.0) {
+                const double held = bed_act[idx] + bed_sub[idx];
+                const double cap = (held > 0.0) ? held / (timestep * morfac) : 0.0;
+                if (source > cap) source = cap;
+            }
             src_lim[idx] = source;
             if (source > 0.0) total_E += source;
             else              total_D += source;
@@ -2166,6 +2222,12 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
             if (bed_evolves && one_minus_lambda > 0.0) {
                 dz_cell += -(morfac * timestep * source) / one_minus_lambda;
             }
+            // The same exchange, as solid volume of this class, through the
+            // active layer. It may go negative here (the cap above allows
+            // what the substrate holds too); the rebalance below settles it.
+            if (has_comp) {
+                bed_act[idx] -= morfac * timestep * source;
+            }
 
             // [G-3] S_ms: external supply, added AFTER the limiters. They
             // bound bed exchange by what bed and water column can supply;
@@ -2177,6 +2239,45 @@ void core_apply_sediment_source(struct domain *D, double timestep) {
 
             // Fractional step: update the state directly with the full dt.
             t_cons[idx] += timestep * source;
+        }
+
+        // Bed composition: restore the active layer to its thickness. Every
+        // transfer below moves an amount of a class from one layer to the
+        // other, so each class is conserved exactly.
+        if (has_comp) {
+            // A class eroded past its active-layer content took the rest
+            // from the substrate (the cap guarantees the substrate had it).
+            double act = 0.0, sub = 0.0;
+            for (anuga_int s = 0; s < n_classes; s++) {
+                const anuga_int idx = s * n + k;
+                if (bed_act[idx] < 0.0) {
+                    bed_sub[idx] += bed_act[idx];
+                    bed_act[idx] = 0.0;
+                    if (bed_sub[idx] < 0.0) bed_sub[idx] = 0.0;   /* round-off */
+                }
+                act += bed_act[idx];
+                sub += bed_sub[idx];
+            }
+            if (act > active_solid) {
+                // Aggradation: the overflow goes down at the ACTIVE composition.
+                const double r = (act - active_solid) / act;
+                for (anuga_int s = 0; s < n_classes; s++) {
+                    const anuga_int idx = s * n + k;
+                    const double m = r * bed_act[idx];
+                    bed_act[idx] -= m;
+                    bed_sub[idx] += m;
+                }
+            } else if (act < active_solid && sub > 0.0) {
+                // Degradation: refill from the substrate at ITS composition.
+                const double need = active_solid - act;
+                const double r = (need < sub) ? need / sub : 1.0;
+                for (anuga_int s = 0; s < n_classes; s++) {
+                    const anuga_int idx = s * n + k;
+                    const double m = r * bed_sub[idx];
+                    bed_sub[idx] -= m;
+                    bed_act[idx] += m;
+                }
+            }
         }
         // Raise the bed by dz. The DE algorithms use DISCONTINUOUS elevation,
         // so edge values are not re-derived from the centroid and must be

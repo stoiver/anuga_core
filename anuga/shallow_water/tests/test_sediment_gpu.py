@@ -300,3 +300,35 @@ def test_angle_of_repose_relaxation_agrees():
     a, b = _both(configure, 1.0,
                  lambda d: d.quantities['elevation'].centroid_values.copy())
     assert np.abs(a - b).max() < 1e-10
+
+
+@pytest.mark.parametrize('composition', [False, True])
+def test_two_classes_on_an_erodible_base_agree(composition):
+    """Two classes over an erodible base, with and without bed composition.
+
+    Guards the explicit device maps on the sediment source loop: with them
+    implicit, a longer kernel made nvc map the per-class parameters as
+    zero-length sections, so the device read uninitialised memory and mode 2
+    drifted 0.25 m from mode 1 here, differently on every run."""
+    def configure(mode):
+        d = channel(mode=mode, nxy=(10, 10), length=(LEN, LEN))
+        d.set_sediment_parameters(porosity=0.3)
+        d.add_sediment_fraction(name='fine', diameter=1.0e-4, tau_c_star=0.04,
+                                initial_concentration=0.0)
+        d.add_sediment_fraction(name='coarse', diameter=6.0e-4, tau_c_star=0.04,
+                                initial_concentration=0.0)
+        d.set_erodible_base(depth=0.5)
+        if composition:
+            d.set_bed_composition({'fine': 0.5, 'coarse': 0.5}, active_layer=0.005)
+        return d
+
+    def read(d):
+        out = [d.quantities['elevation'].centroid_values.copy(),
+               d.get_tracer('fine').copy(), d.get_tracer('coarse').copy()]
+        if composition:
+            out.append(d.sediment_bed_active.copy())
+        return out
+
+    a, b = _both(configure, 40.0, read)
+    for x, y in zip(a, b):
+        assert np.abs(x - y).max() < 1e-8
