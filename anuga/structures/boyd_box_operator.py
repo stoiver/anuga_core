@@ -438,9 +438,12 @@ def boyd_box_function(width,
 
         Q = min(Q, Q_outlet_tailwater)
     else:
-
-        pass
-        #FIXME(Ole): What about inlet control?
+        # The head difference has reached the driving energy (a free or
+        # drawn-down outlet). The barrel's friction still limits the flow,
+        # as boyd_pipe_function applies in every regime; without this, Q
+        # jumped (1.9x box, 3.3x trapezoid) as delta_total_energy crossed
+        # driving_energy, over-predicting long or rough culverts.
+        Q = min(Q, Q_outlet_tailwater)
 
     if  flow_area <= 0.0 :
         culv_froude = 0.0

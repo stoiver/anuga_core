@@ -128,6 +128,11 @@ void boyd_box_discharge(const struct culvert_params *p,
 
         if (Q_outlet_tailwater < Q)
             Q = Q_outlet_tailwater;
+    } else {
+        /* Head difference at or above the driving energy: the barrel's
+         * friction still limits the flow, as for pipes (see the Python). */
+        if (Q_outlet_tailwater < Q)
+            Q = Q_outlet_tailwater;
     }
 
     // Barrel velocity with protection
