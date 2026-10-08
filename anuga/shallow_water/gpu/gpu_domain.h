@@ -714,6 +714,7 @@ void gpu_max_quantities_finalize(struct gpu_domain *GD);
 // Ghost exchange - the key MPI function
 // Uses GPU-aware MPI if available, otherwise does D2H/H2D for small halo buffers
 void gpu_exchange_ghosts(struct gpu_domain *GD);
+void gpu_exchange_bed_ghosts(struct gpu_domain *GD);
 
 // GPU kernels (stubs - will be implemented in sw_domain_gpu.c)
 void gpu_extrapolate_second_order(struct gpu_domain *GD);

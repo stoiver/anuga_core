@@ -134,6 +134,14 @@ class Sediment_transport_operator(Operator):
                   and domain.gpu_interface is not None
                   and not getattr(domain, '_gpu_host_writes_suppressed', False))
 
+        # Mode 1 in parallel: the fractional steps run before the step's ghost
+        # exchange, so ghost cells still hold their own, unexchanged state.
+        # The bedload flux on an edge shared with another rank is formed from
+        # the ghost's transport vector, so refresh the ghosts first (#424).
+        if (domain.parallel and not on_gpu and domain.sediment_bedload_mode
+                and getattr(domain, 'sediment_bed_evolution', False)):
+            domain.update_ghosts()
+
         if on_gpu:
             from anuga.shallow_water.sw_domain_gpu_ext import (
                 apply_sediment_source_gpu, apply_bedload_gpu)
@@ -202,6 +210,16 @@ class Sediment_transport_operator(Operator):
                 and (getattr(domain, 'sediment_bed_evolution', False)
                      or domain.sediment_repose_tan > 0.0)):
             _exchange_bed_ghosts(domain)
+        # Mode 2 exchanges before its fractional steps, so its ghosts already
+        # compute their owners' suspended bed change exactly. Bedload and
+        # repose read neighbours, and an outer ghost lacks some, so with either
+        # the device halo (which does not carry elevation) needs the bed too
+        # (#424).
+        elif (domain.parallel and on_gpu
+              and getattr(domain, 'sediment_bed_evolution', False)
+              and (domain.sediment_bedload_mode or domain.sediment_repose_tan > 0.0)):
+            from anuga.shallow_water.sw_domain_gpu_ext import exchange_bed_ghosts_gpu
+            exchange_bed_ghosts_gpu(domain.gpu_interface.gpu_dom)
 
     def parallel_safe(self):
         """Safe in parallel.

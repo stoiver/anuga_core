@@ -290,6 +290,7 @@ cdef extern from "gpu_domain.h" nogil:
 
     # MPI ghost exchange
     void gpu_exchange_ghosts(gpu_domain *GD)
+    void gpu_exchange_bed_ghosts(gpu_domain *GD)
 
     # Reflective boundary
     int gpu_reflective_init(gpu_domain *GD, int num_edges,
@@ -1649,6 +1650,14 @@ def exchange_ghosts(GPUDomain gpu_dom):
     """
     gpu_exchange_ghosts(&gpu_dom.GD)
 
+
+
+def exchange_bed_ghosts_gpu(GPUDomain gpu_dom):
+    """Give every ghost cell its owner's bed (centroid, edges shifted with it).
+
+    Called after the sediment step in parallel runs whose bed evolves (#424).
+    """
+    gpu_exchange_bed_ghosts(&gpu_dom.GD)
 
 def init_reflective_boundary(GPUDomain gpu_dom, object domain_object):
     """
