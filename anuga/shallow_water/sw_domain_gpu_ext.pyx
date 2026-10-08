@@ -154,6 +154,10 @@ cdef extern from "gpu_domain.h" nogil:
         double* sediment_z_base
         double* sediment_shear_factor
         int64_t sediment_has_z_base
+        int64_t sediment_bed_composition
+        double sediment_active_layer
+        double* sediment_bed_active
+        double* sediment_bed_substrate
         double* sediment_repose_dz
         double sediment_repose_tan
         double sediment_repose_relax
@@ -959,6 +963,10 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
     # sediment_z_base, so leaving it uninitialised makes a NULL
     # pointer look like a configured base.
     D.sediment_has_z_base = getattr(domain_object, 'sediment_has_z_base', 0)
+    # Bed composition: flag and thickness unconditionally, like the base;
+    # the kernel also requires both arrays before it dereferences them.
+    D.sediment_bed_composition = getattr(domain_object, 'sediment_bed_composition', 0)
+    D.sediment_active_layer = getattr(domain_object, 'sediment_active_layer', 0.0)
     # spec 7 repose. Scalars again set unconditionally -- the kernel
     # tests sediment_repose_tan before touching sediment_repose_dz.
     D.sediment_repose_tan = getattr(domain_object, 'sediment_repose_tan', 0.0)
@@ -1031,6 +1039,14 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
             D.sediment_bedload_supply = &sed1[0]
         else:
             D.sediment_bedload_supply = NULL
+        if getattr(domain_object, 'sediment_bed_composition', 0):
+            sed2 = domain_object.sediment_bed_active
+            D.sediment_bed_active = &sed2[0,0]
+            sed2 = domain_object.sediment_bed_substrate
+            D.sediment_bed_substrate = &sed2[0,0]
+        else:
+            D.sediment_bed_active = NULL
+            D.sediment_bed_substrate = NULL
         if domain_object.sediment_has_z_base:
             sed1 = domain_object.sediment_z_base
             D.sediment_z_base = &sed1[0]
@@ -1055,6 +1071,8 @@ cdef void get_domain_pointers(gpu_domain *GD, object domain_object):
         D.sediment_z_base = NULL
         D.sediment_shear_factor = NULL
         D.sediment_source_limited = NULL
+        D.sediment_bed_active = NULL
+        D.sediment_bed_substrate = NULL
         D.sediment_slope_work = NULL
         D.sediment_bed_exhausted = NULL
         D.sediment_repose_dz = NULL

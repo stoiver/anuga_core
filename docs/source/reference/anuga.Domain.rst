@@ -53,6 +53,7 @@
       ~Domain.get_algorithm_parameters
       ~Domain.get_area
       ~Domain.get_areas
+      ~Domain.get_bed_composition
       ~Domain.get_beta
       ~Domain.get_boundary_flux_integral
       ~Domain.get_boundary_polygon
@@ -171,6 +172,7 @@
       ~Domain.sediment_summary
       ~Domain.set_CFL
       ~Domain.set_angle_of_repose
+      ~Domain.set_bed_composition
       ~Domain.set_bed_material
       ~Domain.set_bedload
       ~Domain.set_beta

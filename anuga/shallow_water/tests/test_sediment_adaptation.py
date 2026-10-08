@@ -593,12 +593,15 @@ EXEMPT = {
     'sediment_adaptation_mode', 'sediment_rouse_beta_mode',
     'sediment_wilson_bed', 'sediment_vegetation_shear',
     'sediment_velocity_profile', 'sediment_bed_evolution',
-    'sediment_slope_frozen', 'sediment_has_z_base',
+    'sediment_slope_frozen', 'sediment_has_z_base', 'sediment_bed_composition',
     # per-fraction or per-cell state, reported in their own sections
     'sediment_diameter', 'sediment_R', 'sediment_tau_c_star', 'sediment_d_star',
     'sediment_settling_velocity', 'sediment_reference_height',
     'sediment_z_base', 'sediment_shear_factor', 'sediment_nearbed_base',
     'sediment_bedload_open', 'sediment_bedload_supply',
+    # bed composition: its own summary line (active layer and mean fractions)
+    # when it is on; with it off these are 0 / None
+    'sediment_active_layer', 'sediment_bed_active', 'sediment_bed_substrate',
     # kernel scratch, not settings
     'sediment_qbx', 'sediment_qby', 'sediment_qba', 'sediment_slope_work',
     'sediment_source_limited', 'sediment_bed_exhausted', 'sediment_repose_dz',
