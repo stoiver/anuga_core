@@ -75,10 +75,10 @@ void boyd_box_discharge(const struct culvert_params *p,
     if (dcrit > depth) {
         dcrit = depth;
         flow_area = bf * width * dcrit * barrels;
-        perimeter = 2.0 * (bf * width * barrels + dcrit);
+        perimeter = barrels * 2.0 * (bf * width + dcrit);
     } else {
         flow_area = bf * width * barrels * dcrit;
-        perimeter = 2.0 * dcrit + bf * width * barrels;
+        perimeter = barrels * (bf * width + 2.0 * dcrit);
     }
 
     double outlet_culvert_depth = dcrit;
@@ -90,10 +90,10 @@ void boyd_box_discharge(const struct culvert_params *p,
     if (outlet_culvert_depth > depth) {
         outlet_culvert_depth = depth;
         flow_area = bf * width * barrels * depth;
-        perimeter = 2.0 * (bf * width * barrels + depth);
+        perimeter = barrels * 2.0 * (bf * width + depth);
     } else {
         flow_area = bf * width * barrels * outlet_culvert_depth;
-        perimeter = bf * width * barrels + 2.0 * outlet_culvert_depth;
+        perimeter = barrels * (bf * width + 2.0 * outlet_culvert_depth);
     }
 
     double hyd_rad = flow_area / perimeter;
@@ -107,17 +107,17 @@ void boyd_box_discharge(const struct culvert_params *p,
             // Outlet submerged
             outlet_culvert_depth = depth;
             flow_area = bf * width * barrels * depth;
-            perimeter = 2.0 * (bf * width * barrels + depth);
+            perimeter = barrels * 2.0 * (bf * width + depth);
         } else {
             dcrit = pow(Q * Q / p->g / pow(bf * width * barrels, 2.0), 0.333333);
             outlet_culvert_depth = dcrit;
             if (outlet_culvert_depth > depth) {
                 outlet_culvert_depth = depth;
                 flow_area = bf * width * barrels * depth;
-                perimeter = 2.0 * (bf * width * barrels + depth);
+                perimeter = barrels * 2.0 * (bf * width + depth);
             } else {
                 flow_area = bf * width * barrels * outlet_culvert_depth;
-                perimeter = bf * width * barrels + 2.0 * outlet_culvert_depth;
+                perimeter = barrels * (bf * width + 2.0 * outlet_culvert_depth);
             }
         }
 
@@ -126,6 +126,11 @@ void boyd_box_discharge(const struct culvert_params *p,
                                 (manning * manning * length) / pow(hyd_rad, 1.33333)));
         Q_outlet_tailwater = flow_area * culvert_velocity;
 
+        if (Q_outlet_tailwater < Q)
+            Q = Q_outlet_tailwater;
+    } else {
+        /* Head difference at or above the driving energy: the barrel's
+         * friction still limits the flow, as for pipes (see the Python). */
         if (Q_outlet_tailwater < Q)
             Q = Q_outlet_tailwater;
     }

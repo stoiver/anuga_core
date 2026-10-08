@@ -40,6 +40,7 @@ python_sources = [
 'test_sediment_mms.py',
 'test_sediment_gpu.py',
 'test_sediment_repose.py',
+'test_sediment_bed_composition.py',
 'test_sediment_erodible_base.py',
 'test_sediment_source.py',
 'test_sediment_source_gpu_invalidation.py',

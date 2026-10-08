@@ -187,8 +187,21 @@ class Sediment_transport_operator(Operator):
             # boundary one sweep per TIMESTEP rather than one per sweep, so a
             # slump spanning a boundary relaxes more slowly there. Recorded in
             # PHYSICS_SPEC 7.1; serial results are unaffected.
-            if domain.parallel:
-                domain.update_ghosts(['elevation'])
+            # (Mode 1: the exchange below.)
+
+        # Mode 1 in parallel: give every ghost cell its owner's bed (#423). The
+        # sediment kernels also update ghost cells, but from their state BEFORE
+        # this step's ghost exchange (and bedload from an incomplete
+        # neighbourhood), so a ghost's bed drifted from its owner's. Elevation
+        # is not in the per-step exchange, so the drift accumulated and the
+        # fluxes across the partition boundary saw the wrong depth: sediment
+        # mass was lost and the run differed from serial by ~1%. Mode 2
+        # exchanges before its fractional steps, so its ghosts compute their
+        # owners' suspended bed change exactly.
+        if (domain.parallel and not on_gpu
+                and (getattr(domain, 'sediment_bed_evolution', False)
+                     or domain.sediment_repose_tan > 0.0)):
+            _exchange_bed_ghosts(domain)
 
     def parallel_safe(self):
         """Safe in parallel.
@@ -213,3 +226,22 @@ class Sediment_transport_operator(Operator):
         if self.domain.sediment_repose_tan > 0.0:
             return ', repose sweeps %d' % self.repose_sweeps
         return ''
+
+
+def _exchange_bed_ghosts(domain):
+    """Copy the owner's bed into every ghost cell (mode 1, parallel).
+
+    The bed is discontinuous in the DE algorithms: the sediment kernels shift a
+    cell's three edge values together with its centroid. Copying only the
+    centroid would leave a ghost's edges at its own, stale bed, so each ghost's
+    edges are shifted by the same amount its centroid moves."""
+    import numpy as num
+    ghosts = [domain.ghost_recv_dict[p][0] for p in domain.ghost_recv_dict]
+    if not ghosts:
+        return
+    ghosts = num.concatenate(ghosts)
+    bed = domain.quantities['elevation']
+    before = bed.centroid_values[ghosts].copy()
+    domain.update_ghosts(['elevation'])
+    shift = bed.centroid_values[ghosts] - before
+    bed.edge_values[ghosts, :] += shift[:, None]

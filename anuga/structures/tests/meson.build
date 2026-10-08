@@ -1,6 +1,8 @@
 
 python_sources = [
   'test_boyd_box_operator.py',
+  'test_boyd_box_barrels.py',
+  'test_culvert_friction_limit.py',
   'test_weir_trapezoid_hydraulics.py',
   'test_boyd_pipe_operator.py',
   'test_inlet_operator.py',
