@@ -1,5 +1,4 @@
 """Score the settling-flume runs against Table 1 of Wang and Ribberink (1986)."""
-import glob
 import os
 import unittest
 
@@ -43,10 +42,33 @@ def compare(run, adaptation=ADAPT):
                 bias=float(lr.mean()), k_meas=float(k_meas), k_model=float(k_model))
 
 
+def simulate(run, adaptation=ADAPT):
+    """Run numerical_settling.py for one run, so the score is never read from
+    a stale (or, in a clean checkout, missing) result file."""
+    out = 'settling_run%d_%s.npz' % (run, adaptation)
+    if os.path.exists(out):
+        os.remove(out)
+    env = {'WANG_RUN': str(run), 'WANG_ADAPTATION': adaptation}
+    saved = {k: os.environ.get(k) for k in env}
+    os.environ.update(env)
+    try:
+        if args.verbose:
+            print(indent + 'Running simulation script for run %d (%s)' % (run, adaptation))
+        res = anuga.run_anuga_script('numerical_settling.py', args=args)
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    assert res == 0, 'numerical_settling.py failed for run %d' % run
+
+
 class Test_results(unittest.TestCase):
 
     def test_settling(self):
         for run in RUNS:
+            simulate(run)
             r = compare(run)
             if args.verbose:
                 print(indent + 'run %d: decay rate %.4f /m (measured %.4f); ln-ratio RMS %.3f, bias %+.3f over x >= 1 m'

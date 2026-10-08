@@ -64,10 +64,34 @@ def compare(case, event=1):
                 eroded_model=float(np.sum(np.minimum(a, 0.0)) * 25e-6 / 1000.0))
 
 
+def simulate(case):
+    """Run numerical_pier.py for one pier, so the score is never read from a
+    stale (or, in a clean checkout, missing) result file. One dam-break is
+    enough: the score is the bed after the first."""
+    out = 'pier_%s_bed.npz' % case
+    if os.path.exists(out):
+        os.remove(out)
+    env = {'ZARAGOZA_CASE': case, 'ZARAGOZA_EVENTS': '1', 'ZARAGOZA_TAG': ''}
+    saved = {k: os.environ.get(k) for k in env}
+    os.environ.update(env)
+    try:
+        if args.verbose:
+            print(indent + 'Running simulation script for %s' % case)
+        res = anuga.run_anuga_script('numerical_pier.py', args=args)
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+    assert res == 0, 'numerical_pier.py failed for %s' % case
+
+
 class Test_results(unittest.TestCase):
 
     def test_pier_scour(self):
         for case in CASES:
+            simulate(case)
             r = compare(case)
             if args.verbose:
                 print(indent + '%s after dam-break 1: bed change RMS %.1f mm, bias %.1f mm over %d points; '
