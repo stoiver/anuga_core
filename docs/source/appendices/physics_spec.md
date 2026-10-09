@@ -515,7 +515,7 @@ recovered as a flux by multiplying by the settling velocity {speclit}`E-2`.
 **(b) Cohesive / fine-grained form** — Hanson (1990), Hanson & Simon (2001), as
 specified by `[aSM16 3–5]` and implemented in `aS16`:
 
-```{index} single: physics label; [E-3], single: physics label; [E-5], single: physics label; [E-6]
+```{index} single: physics label; [E-3], single: physics label; [E-5]
 ```
 (spec-e-3)=
 (spec-e-5)=
@@ -524,8 +524,8 @@ specified by `[aSM16 3–5]` and implemented in `aS16`:
 
 \begin{align}
 \dot{E} &= K_e\,(\tau_b - \tau_c) && \text{dimensional stress, Pa} \tag{E-3} \\
-K_e &= \frac{0.2\times 10^{-6}}{\tau_c^{0.5}} && [\mathrm{m^3\,N^{-1}\,s^{-1}}] \tag{E-5} \\
-\tau_c &= \tau_c^{*}\,(\rho_s - \rho)\, g\, D_{50} \tag{E-6}
+K_e &= \frac{0.2\times 10^{-6}}{\tau_c^{0.5}} && [\mathrm{m^3\,N^{-1}\,s^{-1}}], \nonumber \\
+\tau_c &= \tau_c^{*}\,(\rho_s - \rho)\, g\, D_{50} && \tag{E-5}
 \end{align}
 ```
 
