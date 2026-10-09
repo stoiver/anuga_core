@@ -207,6 +207,144 @@ setters; they invalidate the device mapping for you.
 
 --------------
 
+.. _sediment_decision_chart:
+
+Which options does my problem need?
+-----------------------------------
+
+Most of the choices follow from a few physical questions about the bed and
+the flow. Work down the chart; anything you skip keeps its default.
+
+.. figure:: sediment_decision_chart.*
+   :alt: Decision chart: seven questions about the bed and the flow, each
+         pointing to the setter and option it selects.
+   :width: 100%
+
+   Choosing the sediment options. The numbered list below says the same
+   with the reasons.
+
+1. **What is the bed made of?** This picks the erosion law, and it is a
+   statement about the material, not a tuning choice (spec 4.1.1). Sand,
+   gravel, and mud that is transported as flocs are
+   :meth:`set_bed_material('noncohesive') <anuga.Domain.set_bed_material>`.
+   The default Smith--McLean law suits a sand or gravel bed with a
+   critical Shields stress you trust; ``entrainment='de_leeuw'`` is the
+   choice for sand-bedded rivers and deltas (the van Rijn flume cases
+   validate it), with ``de_leeuw_fit='nghiem_2022'`` for mud and sand as
+   in the Delta-X Wax Lake model. Clay or silt that binds is
+   ``set_bed_material('cohesive', tau_crit=...)``, with ``tau_crit`` in
+   pascals, ideally from a jet test.
+
+2. **How does it move?** The Rouse number :math:`Z = w_s/(\kappa u_*)`,
+   with :math:`\kappa = 0.41`, compares settling with turbulent lifting.
+   Above about 2.5 the grains stay near the bed: switch bedload on with
+   :meth:`set_bedload('wong_parker_eq24') <anuga.Domain.set_bedload>` (and
+   give its ``open_boundaries``). From about 0.8 to 2.5 both modes matter:
+   bedload as well as the suspension. Below about 0.8 it is suspension
+   and the default (no bedload) is right. Estimate :math:`u_*` from the
+   flow you expect, for example :math:`u_* = U n \sqrt{g} / h^{1/6}` from
+   Manning, and :math:`w_s` from
+   :meth:`~anuga.Domain.settling_velocity`. The table gives :math:`Z` for
+   quartz (Ferguson--Church, smooth-sphere constants); a dash means the
+   grains do not move at all (Shields stress below 0.04).
+
+   .. list-table::
+      :header-rows: 1
+      :widths: 22 18 15 15 15 15
+
+      * - grain
+        - :math:`w_s` (m/s)
+        - :math:`u_*` = 0.02
+        - 0.05
+        - 0.1
+        - 0.2 m/s
+      * - silt, 20 µm
+        - 0.0004
+        - 0.04
+        - 0.02
+        - 0.01
+        - 0.005
+      * - very fine sand, 100 µm
+        - 0.008
+        - 0.98
+        - 0.39
+        - 0.20
+        - 0.10
+      * - fine sand, 250 µm
+        - 0.038
+        - 4.6
+        - 1.8
+        - 0.92
+        - 0.46
+      * - coarse sand, 1 mm
+        - 0.18
+        - --
+        - 9.0
+        - 4.5
+        - 2.3
+      * - gravel, 2 mm
+        - 0.30
+        - --
+        - 15
+        - 7.3
+        - 3.7
+
+3. **Is the suspension stratified?** Deposition goes with the
+   concentration near the bed, and that exceeds the depth average as soon
+   as :math:`Z` is more than about 0.1: the Rouse ratio :math:`d^*` is
+   1.3 to 1.6 there, 2 to 4 at :math:`Z = 0.3`, and 5 to 20 at 0.8,
+   depending on the reference height. Only fine silt in fast flow is well
+   mixed. Use
+   :meth:`set_deposition(near_bed='rouse') <anuga.Domain.set_deposition>`,
+   which computes the ratio per cell; otherwise keep the default
+   :math:`d^* = 1`. Keep the default ``adaptation='two_layer'`` either way:
+   it lets the near-bed concentration lag a change of flow, which is what
+   the Wang and Ribberink flume measured.
+
+4. **What sets the bed shear?** For rivers, floodplains and dam breaks keep
+   the defaults: ``'quadratic_drag'`` with the domain's own Manning
+   :math:`n`. Where there is vegetation, the stems take most of the drag;
+   :meth:`~anuga.Domain.set_vegetation_drag` with ``sediment_shear='bed'``
+   gives the sediment only the bed's share (see :doc:`vegetation`). The
+   other closures, ``'depth_slope'`` and the ``'wilson'`` and
+   ``'larsen_lamb'`` friction modes, exist to reproduce anugaSed and
+   megaflood studies, not for ordinary floods.
+
+5. **How much of the bed can erode?** By default the bed is bottomless.
+   A finite layer over rock, a lining or an apron is
+   :meth:`~anuga.Domain.set_erodible_base`; scour confined to one reach
+   or a structure that must not scour is
+   :meth:`~anuga.Domain.set_erodible_region`; banks or scour holes that
+   should slump rather than stand vertical are
+   :meth:`set_angle_of_repose(35.0) <anuga.Domain.set_angle_of_repose>`
+   (a numerical device; read its notes first).
+
+6. **Several grain sizes, and the bed sorts them?** Mud that should only
+   come from where the bed holds mud, a sand channel through a muddy marsh,
+   a bed that armours as it loses its fines: use
+   :ref:`bed composition <sediment_bed_composition>`, after the erodible
+   base. With one grain size, or a bed that is the same mixture everywhere,
+   leave it off.
+
+7. **Is the bed much slower than the flow?** Morphology over days to years
+   with a flow that adjusts in minutes:
+   ``set_sediment_parameters(morphological_factor=M)``, with :math:`M`
+   small enough that the flow still sees the bed change slowly. For a
+   check against an analytic solution with a fixed bed,
+   ``bed_evolution=False``.
+
+Then print :meth:`~anuga.Domain.sediment_summary` and check it says what
+you meant.
+
+The chart leads to a *sensible* configuration, not a *calibrated* one. The
+coefficients still need data: the van Rijn trench case, for example,
+calibrates the de Leeuw constant on the approach flow before it tests
+anything (see :ref:`anuga-validation`). The recipes under
+:ref:`sediment_choosing_a_configuration` are worked answers to the chart for
+common cases.
+
+--------------
+
 Setting sediment up
 -------------------
 
@@ -1078,6 +1216,8 @@ The others
    anything -- pick one.
 
 --------------
+
+.. _sediment_choosing_a_configuration:
 
 Choosing a configuration
 ------------------------
