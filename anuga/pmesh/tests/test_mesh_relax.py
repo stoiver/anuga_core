@@ -108,18 +108,29 @@ class Test_mesh_relax(unittest.TestCase):
 
     def test_breakline_vertices_do_not_move(self):
         breakline = [[20.0, 30.0], [80.0, 70.0]]
-        m = make_pmesh(breaklines=[breakline])
-        m.generate_mesh(verbose=False)
-        v0, _ = arrays(m)
-        m.relax_worst_cells(passes=30)
-        v1, t1 = arrays(m)
+        for slide in (False, True):
+            m = make_pmesh(breaklines=[breakline])
+            m.generate_mesh(verbose=False)
+            v0, _ = arrays(m)
+            m.relax_worst_cells(passes=30, slide=slide)
+            v1, t1 = arrays(m)
 
-        # vertices on the line  2x - 3y + 50 = 0  between its ends
-        on_line = ((num.abs(2.0 * v0[:, 0] - 3.0 * v0[:, 1] + 50.0) < 1e-9)
-                   & (v0[:, 0] >= 20.0) & (v0[:, 0] <= 80.0))
-        assert on_line.sum() > 10
-        assert num.array_equal(v0[on_line], v1[on_line])
-        assert signed_areas(v1, t1).min() > 0.0
+            # vertices on the line  2x - 3y + 50 = 0  between its ends
+            on_line = ((num.abs(2.0 * v0[:, 0] - 3.0 * v0[:, 1] + 50.0)
+                        < 1e-9) & (v0[:, 0] >= 20.0) & (v0[:, 0] <= 80.0))
+            assert on_line.sum() > 10
+            if slide:
+                # inserted vertices may slide, but stay on the line and
+                # between its ends, which do not move
+                w = v1[on_line]
+                assert num.abs(2.0 * w[:, 0] - 3.0 * w[:, 1] + 50.0).max() \
+                    < 1e-9
+                assert w[:, 0].min() >= 20.0 and w[:, 0].max() <= 80.0
+                n_in = m.number_of_input_vertices
+                assert num.array_equal(v0[:n_in], v1[:n_in])
+            else:
+                assert num.array_equal(v0[on_line], v1[on_line])
+            assert signed_areas(v1, t1).min() > 0.0
 
     def test_function_leaves_input_alone(self):
         m = make_pmesh()
