@@ -143,9 +143,10 @@ from anuga.utilities.parallel_abstraction import pypar_available, barrier
 
 # The centroid arrays the GPU interface round-trips between host and device —
 # see gpu_domain_sync_to_device()/_from_device() in gpu/gpu_domain_core.c.  Keep
-# this in step with the C.  Friction is device-resident too, but read-only on
-# the device, so a host write to it is pushed on its own (one array, no pull
-# first): see Domain.sync_friction_to_device().
+# this in step with the C.  Friction and the bed elevation are device-resident
+# too, but not carried by that round trip, so a host write to either is pushed
+# on its own: see Domain.sync_friction_to_device() and
+# Domain.sync_elevation_to_device().
 GPU_SYNCED_QUANTITIES = frozenset(('stage', 'xmomentum', 'ymomentum', 'height'))
 
 # Absolute lower bound (m^3) on the volume added by clamping negative-depth cells
@@ -4248,6 +4249,8 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             self.gpu_interface.sync_to_device()
         elif name == 'friction':
             self.sync_friction_to_device()
+        elif name == 'elevation' and not self._gpu_host_writes_suppressed:
+            self.sync_elevation_to_device()
 
     def sync_friction_to_device(self) -> None:
         """Push the host friction centroid values to the device (mode 2).
@@ -4267,6 +4270,24 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         if (self.multiprocessor_mode == MULTIPROCESSOR_GPU
                 and getattr(self, 'gpu_interface', None) is not None):
             self.gpu_interface.sync_friction_to_device()
+
+    def sync_elevation_to_device(self) -> None:
+        """Push the host bed elevation to the device (mode 2).
+
+        The flux kernels read the *device* copy of the bed (centroid and edge
+        values), which is mapped once, when the GPU interface is built, and is
+        not part of the per-step state sync.  set_quantity('elevation', ...)
+        and the CPU-only fractional-step operators (Set_elevation_operator,
+        the erosion operators) push it for you; call this after writing
+        ``quantities['elevation'].centroid_values``/``edge_values`` directly,
+        or the run keeps the old bed -- and, if stage was moved with the bed to
+        keep the depth, gains or loses that water.  No-op off the GPU or
+        before the interface exists.
+        """
+
+        if (self.multiprocessor_mode == MULTIPROCESSOR_GPU
+                and getattr(self, 'gpu_interface', None) is not None):
+            self.gpu_interface.sync_bed_to_device()
 
 
     def _sync_riverwall_to_device(self) -> None:
@@ -8049,8 +8070,15 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         # Skipping is correct rather than merely safe: a rebuilt interface is
         # populated from the host arrays, so the host-side writes are picked up
         # anyway.
+        #
+        # The bed goes back too: the state sync does not carry it, and an operator
+        # that moves it (Set_elevation_operator, the erosion operators) moves stage
+        # with it, so pushing stage alone would put the new stage on the old bed
+        # and create or destroy water.  With sediment the device owns the bed, but
+        # sync_from_device() above pulled it, so this round-trips it unchanged.
         if gpu_mode and needs_cpu_sync and self.gpu_interface is not None:
             self.gpu_interface.sync_to_device()
+            self.gpu_interface.sync_bed_to_device()
 
     def _warn_if_culverts_interleaved(self):
         """Warn once if the Boyd culverts are not contiguous in the operator list.

@@ -1445,6 +1445,27 @@ void gpu_sync_friction_to_device(struct gpu_domain *GD)
     #pragma omp target update to(friction_cv[0:n])
 }
 
+// Push the bed elevation (centroid AND edge) to the device on its own.
+//
+// Like friction, the bed is mapped once and gpu_domain_sync_to_device() does
+// not carry it -- normally z never changes. When it does change on the host
+// (set_quantity('elevation', ...) mid-run, Set_elevation_operator, the erosion
+// operators) the device would keep the old bed. Worse, those operators keep
+// the depth by moving stage with the bed, and stage DOES reach the device, so
+// the stale bed under the new stage creates water: +10% in a small test.
+// Edge values too, because the DE algorithms use a discontinuous bed and read
+// bed_ev directly. Safe with sediment: the device owns z then, but every path
+// that writes z on the host pulls it from the device first.
+void gpu_sync_bed_to_device(struct gpu_domain *GD)
+{
+    if (!GD->gpu_initialized) return;
+
+    anuga_int n = GD->D.number_of_elements;
+    double *bed_cv = GD->D.bed_centroid_values;
+    double *bed_ev = GD->D.bed_edge_values;
+    #pragma omp target update to(bed_cv[0:n], bed_ev[0:3*n])
+}
+
 // Push the external source [G-3] to the device on its own.
 //
 // set_tracer_source writes it on the HOST, and a time-varying supply -- a

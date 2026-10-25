@@ -3722,5 +3722,64 @@ class Test_GPU_FrictionSync_DepthOperator(_FrictionSyncCase, unittest.TestCase):
             d, friction=lambda h: 0.01 + 0.2 * min(h, 1.0)))
 
 
+class _ElevationSyncCase(_FrictionSyncCase):
+    """A bed changed on the host mid-run must reach the device.
+
+    The bed is mapped once, like friction, and the per-step state sync does not
+    carry it. Before sync_elevation_to_device() a mode-2 run kept the old bed;
+    with Set_elevation_operator, which moves stage with the bed to keep the
+    depth, the new stage on the old bed also created water (+10% here). Equal
+    stage on an equal host bed means equal volume, so check() covers that.
+    """
+
+    @staticmethod
+    def strip(domain):
+        x = domain.centroid_coordinates[:, 0]
+        return np.flatnonzero((x > 80.0) & (x < 120.0))
+
+    def check(self, change=None, setup=None):
+        unchanged = self.run_mode(1, name='bed_ref')
+        cpu = self.run_mode(1, change, setup, name='bed')
+        gpu = self.run_mode(2, change, setup, name='bed')
+        self.assertGreater(np.abs(cpu - unchanged).max(), 1e-4,
+                           'the bed change should alter the flow')
+        self.assertLess(np.abs(cpu - gpu).max(), 1e-10,
+                        'mode 2 did not pick up the host bed change')
+
+
+@pytest.mark.skipif(not gpu_available(), reason=_gpu_skip_reason())
+class Test_GPU_ElevationSync_SetQuantity(_ElevationSyncCase, unittest.TestCase):
+
+    def test_set_quantity_elevation_mid_run(self):
+        def change(d):
+            ids = self.strip(d)
+            d.set_quantity('elevation', -0.9, indices=ids, location='centroids')
+        self.check(change=change)
+
+
+@pytest.mark.skipif(not gpu_available(), reason=_gpu_skip_reason())
+class Test_GPU_ElevationSync_DirectWrite(_ElevationSyncCase, unittest.TestCase):
+
+    def test_direct_write_then_sync_elevation_to_device(self):
+        def change(d):
+            ids = self.strip(d)
+            elev = d.quantities['elevation']
+            elev.centroid_values[ids] += 0.15
+            elev.edge_values[ids] += 0.15
+            d.sync_elevation_to_device()
+        self.check(change=change)
+
+
+@pytest.mark.skipif(not gpu_available(), reason=_gpu_skip_reason())
+class Test_GPU_ElevationSync_Operator(_ElevationSyncCase, unittest.TestCase):
+
+    def test_set_elevation_operator(self):
+        from anuga.operators.set_elevation_operator import Set_elevation_operator
+        # The strip is raised part-way through; the operator keeps the depth.
+        self.check(setup=lambda d: Set_elevation_operator(
+            d, elevation=lambda t: -1.0 if t < 1.0 else -0.9,
+            indices=self.strip(d)))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
