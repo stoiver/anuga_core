@@ -283,6 +283,7 @@ cdef extern from "gpu_domain.h" nogil:
     void gpu_sync_riverwall_to_device(gpu_domain *GD)
     void gpu_sync_tracer_source_to_device(gpu_domain *GD)
     void gpu_sync_tracer_boundary_to_device(gpu_domain *GD)
+    void gpu_sync_friction_to_device(gpu_domain *GD)
     void gpu_sync_edge_values_from_device(gpu_domain *GD)
     int gpu_boundary_edge_sync_init(gpu_domain *GD, int num_boundary_cells, int *boundary_cell_ids)
     void gpu_boundary_edge_sync_finalize(gpu_domain *GD)
@@ -1580,6 +1581,16 @@ def sync_riverwall_to_device(GPUDomain gpu_dom):
     riverwalls.
     """
     gpu_sync_riverwall_to_device(&gpu_dom.GD)
+
+
+def sync_friction_to_device(GPUDomain gpu_dom):
+    """Push the friction centroid values to the device.
+
+    Friction is mapped once at setup and the per-step state sync carries only
+    the conserved quantities, so a host-side friction change has to be pushed
+    or the Manning kernel keeps the old values. One array.
+    """
+    gpu_sync_friction_to_device(&gpu_dom.GD)
 
 
 def sync_tracer_source_to_device(GPUDomain gpu_dom):

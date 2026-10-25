@@ -149,6 +149,11 @@ class GPU_OMP_interface:
         from anuga.shallow_water.sw_domain_gpu_ext import sync_riverwall_to_device
         sync_riverwall_to_device(self.gpu_dom)
 
+    def sync_friction_to_device(self):
+        """Push the friction centroid values to the device."""
+        from anuga.shallow_water.sw_domain_gpu_ext import sync_friction_to_device
+        sync_friction_to_device(self.gpu_dom)
+
     def sync_edge_values_from_device(self):
         """Sync edge values from device to host."""
         from anuga.shallow_water.sw_domain_gpu_ext import sync_edge_values_from_device

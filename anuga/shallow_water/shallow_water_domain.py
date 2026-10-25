@@ -142,9 +142,10 @@ from anuga.utilities.parallel_abstraction import pypar_available, barrier
 
 
 # The centroid arrays the GPU interface round-trips between host and device —
-# see gpu_domain_sync_to_device()/_from_device() in gpu/gpu_domain_core.c.  A host
-# write to any other quantity (elevation, friction, a user tracer) is not
-# device-resident state and so needs no sync.  Keep this in step with the C.
+# see gpu_domain_sync_to_device()/_from_device() in gpu/gpu_domain_core.c.  Keep
+# this in step with the C.  Friction is device-resident too, but read-only on
+# the device, so a host write to it is pushed on its own (one array, no pull
+# first): see Domain.sync_friction_to_device().
 GPU_SYNCED_QUANTITIES = frozenset(('stage', 'xmomentum', 'ymomentum', 'height'))
 
 # Absolute lower bound (m^3) on the volume added by clamping negative-depth cells
@@ -4245,6 +4246,27 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
         if self._gpu_syncs_host_quantity_write(name):
             self.gpu_interface.sync_to_device()
+        elif name == 'friction':
+            self.sync_friction_to_device()
+
+    def sync_friction_to_device(self) -> None:
+        """Push the host friction centroid values to the device (mode 2).
+
+        In mode 2 the Manning kernel reads the *device* copy of friction, which
+        is mapped once, when the GPU interface is built.  set_quantity('friction',
+        ...) pushes it for you; call this after writing
+        ``quantities['friction'].centroid_values`` directly -- e.g. a depth-
+        varying n updated in the evolve loop -- or the run silently keeps the
+        old values.  No-op off the GPU or before the interface exists.
+
+        Unlike the conserved quantities, friction is never written on the
+        device, so this is a one-array push with no pull first, and it is safe
+        inside apply_fractional_steps(), whose sync bracket does not carry it.
+        """
+
+        if (self.multiprocessor_mode == MULTIPROCESSOR_GPU
+                and getattr(self, 'gpu_interface', None) is not None):
+            self.gpu_interface.sync_friction_to_device()
 
 
     def _sync_riverwall_to_device(self) -> None:

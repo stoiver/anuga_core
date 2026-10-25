@@ -3640,5 +3640,87 @@ class Test_GPU_StructureSurfaceLevel(unittest.TestCase):
             err_msg='the device clamp does not match the host clamp')
 
 
+
+class _FrictionSyncCase:
+    """A friction changed on the host mid-run must reach the device.
+
+    Friction is mapped to the device once, when the GPU interface is built,
+    and the per-step state sync carries only the conserved quantities, so
+    before sync_friction_to_device() existed a mode-2 run silently kept the
+    original n. Each test changes friction part-way through and checks that
+    mode 2 tracks mode 1 -- and, against an unchanged run, that the change
+    matters at all.
+
+    One test per class, so that run_gpu_tests_isolated.sh gives each its own
+    process: a process that has built several mode-2 domains gets wrong
+    results from a later one (stage off by ~1 m from the 3rd-4th), with or
+    without a friction change.
+    """
+
+    def create_domain(self, name):
+        domain = rectangular_cross_domain(20, 10, len1=200., len2=100.)
+        domain.set_flow_algorithm('DE0')
+        domain.set_low_froude(0)
+        domain.set_name(name)
+        domain.set_datadir(tempfile.mkdtemp())
+        domain.store = False
+        domain.set_quantity('elevation', lambda x, y: -x / 100.0)
+        domain.set_quantity('friction', 0.01)
+        domain.set_quantity('stage', expression='elevation + 0.2')
+        Br = Reflective_boundary(domain)
+        Bd = Dirichlet_boundary([-3.0, 0, 0])
+        domain.set_boundary({'left': Br, 'right': Bd, 'top': Br, 'bottom': Br})
+        Inlet_operator(domain, [[10.0, 20.0], [10.0, 80.0]], 5.0, verbose=False)
+        return domain
+
+    def run_mode(self, mode, change=None, setup=None, name='fric'):
+        domain = self.create_domain(f'{name}_{mode}')
+        if setup is not None:
+            setup(domain)
+        domain.set_multiprocessor_mode(mode)
+        for t in domain.evolve(yieldstep=0.5, finaltime=3.0):
+            if change is not None and abs(t - 1.0) < 1e-9:
+                change(domain)
+        if mode == 2:
+            domain.gpu_interface.sync_from_device()
+        return domain.quantities['stage'].centroid_values.copy()
+
+    def check(self, change=None, setup=None):
+        unchanged = self.run_mode(1, name='fric_ref')
+        cpu = self.run_mode(1, change, setup)
+        gpu = self.run_mode(2, change, setup)
+        self.assertGreater(np.abs(cpu - unchanged).max(), 1e-4,
+                           'the friction change should alter the flow')
+        self.assertLess(np.abs(cpu - gpu).max(), 1e-10,
+                        'mode 2 did not pick up the host friction change')
+
+
+@pytest.mark.skipif(not gpu_available(), reason=_gpu_skip_reason())
+class Test_GPU_FrictionSync_SetQuantity(_FrictionSyncCase, unittest.TestCase):
+
+    def test_set_quantity_friction_mid_run(self):
+        self.check(change=lambda d: d.set_quantity('friction', 0.1))
+
+
+@pytest.mark.skipif(not gpu_available(), reason=_gpu_skip_reason())
+class Test_GPU_FrictionSync_DirectWrite(_FrictionSyncCase, unittest.TestCase):
+
+    def test_direct_write_then_sync_friction_to_device(self):
+        def change(d):
+            d.quantities['friction'].centroid_values[:] = 0.1
+            d.sync_friction_to_device()
+        self.check(change=change)
+
+
+@pytest.mark.skipif(not gpu_available(), reason=_gpu_skip_reason())
+class Test_GPU_FrictionSync_DepthOperator(_FrictionSyncCase, unittest.TestCase):
+
+    def test_set_depth_friction_operator(self):
+        from anuga.operators.set_friction_operators import Set_depth_friction_operator
+        # n rises with depth, so it changes every step as the inflow arrives.
+        self.check(setup=lambda d: Set_depth_friction_operator(
+            d, friction=lambda h: 0.01 + 0.2 * min(h, 1.0)))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
