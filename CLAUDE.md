@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## This clone: subgrid terrain development
+
+This checkout (`~/Projects/anuga_core_subgrid`, branch `develop_subgrid`) is
+for developing subgrid terrain (#508). **Read `claude/SUBGRID_START_HERE.md`
+first**: setup, the conda env `anuga_subgrid_env_3.14`, remotes (here `origin`
+is the stoiver fork, `upstream` is anuga-community), confidentiality rules for
+the private Serna data, and the next steps. Then read `claude/SUBGRID_DESIGN.md`
+and `claude/SUBGRID_LITERATURE.md`. The rest of this file is the general
+ANUGA guide.
+
 ## Session Continuity
 
 The `claude/` directory contains documents to orient a new session quickly:
