@@ -9,12 +9,13 @@ Read `SUBGRID_START_HERE.md` for setup and rules, and `SUBGRID_DESIGN.md` for th
   storage tables, effective bed, conveyance friction, subface edge fluxes, a
   draining-time limiter and a conveyance-weighted subface velocity all run end to end
   on the synthetic benchmark.
-- **The best variant, `coarse2000_sub8EKLC`** (780 triangles):
-  - flood extent CSI 0.94;
-  - outlet peak 52.8 m³/s against 51.8 in the reference;
-  - peak timing within 4 minutes;
-  - mean peak-stage error 3 cm;
-  - 15 s on 8 CPU threads, against 1032 s for the 188 000-triangle reference on the GPU.
+- **The best variants are the EKLC runs.** Against the 569 000-triangle reference
+  (band025TU, 100 min on the GPU):
+  - `coarse500_sub8EKLC` (3082 triangles, 99 s on 8 CPU threads): flood extent CSI
+    0.96, outlet peak 52.3 m³/s against 52.1, mean |peak-stage error| 2.7 cm;
+  - `coarse2000_sub8EKLC` (780 triangles, 14 s): CSI 0.91 (0.93 with the switch on),
+    outlet peak 52.5–52.8, mean |peak-stage error| 2.7–3.7 cm;
+  - peak timing within 2 minutes of the reference for both.
 - **Reference correction:** the reference runs were biased. ANUGA's flux diffused
   momentum across the channel–bank shear, making resolved channels too resistive.
   That is now fixed upstream as an opt-in switch (#509, PR #510, merged), and the
@@ -91,29 +92,34 @@ All synthetic. Run outputs (`results/`, `*.npz`, logs, plots) stay local through
 
 ## Results
 
-The reference is `band1LF4`: a 1 m² channel band and 25 m² floodplain (188 198
-triangles), run with LF1 + tangential upwind on the GPU. It matches band025
-(0.25 m², old flux) to 8 mm mean peak stage.
+The reference is `band025TU`: a 0.25 m² channel band and 25 m² floodplain (569 004
+triangles), run with LF1 + tangential upwind on the GPU (5998 s). The references
+converge: band1LF4 (1 m², same flux) is within 1.8 cm mean peak stage and 0.3 m³/s
+outlet peak, and band025 (old flux) within 2.0 cm.
 
-| run | triangles | wall | CSI | outlet peak Q | peak time | mean |peak stage error| |
+| run | triangles | wall | CSI | outlet peak Q | peak time | mean peak stage error (mean abs) |
 |---|---|---|---|---|---|---|
-| reference band1LF4 | 188 198 | 1032 s GPU | 1 | 51.8 | 3.73 h | 0 |
-| band1 (old flux) | 188 198 | 1063 s GPU | 0.895 | 50.9 | 3.79 h | 0.036 m |
-| coarse500 centroid bed | 3082 | 3 s | 0.418 | 52.4 | 3.94 h | — |
-| coarse500 trench | 3082 | 3 s | 0.670 | 46.0 | 4.12 h | — |
-| coarse500_sub8 (storage only) | 3082 | 19 s | 0.467 | 52.5 | | |
-| coarse500_sub8EKL | 3082 | 61 s | 0.790 | 46.7 | 4.06 h | 0.105 m |
-| **coarse500_sub8EKLC** | 3082 | 99 s | **0.943** | 52.3 | 3.66 h | **0.040 m** |
-| **coarse2000_sub8EKLC** | 780 | 14 s | **0.936** | 52.8 | 3.66 h | **0.033 m** |
-| coarse500_sub8EKLC + TU | 3082 | 99 s | 0.923 | 52.3 | 3.66 h | 0.044 m |
-| coarse2000_sub8EKLC + TU | 780 | 15 s | 0.942 | 52.5 | 3.67 h | 0.032 m |
+| **reference band025TU** | 569 004 | 5998 s GPU | 1 | 52.1 | 3.69 h | 0 |
+| band1LF4 | 188 198 | 1032 s GPU | 0.944 | 51.8 | 3.73 h | +0.018 m |
+| band025 (old flux) | 569 004 | 5653 s GPU | 0.938 | 51.5 | 3.74 h | +0.020 m |
+| band1 (old flux) | 188 198 | 1063 s GPU | 0.845 | 50.9 | 3.79 h | +0.053 m |
+| coarse500 centroid bed | 3082 | 3 s | 0.395 | 52.4 | 3.94 h | +0.459 m |
+| coarse500 trench | 3082 | 3 s | 0.644 | 46.0 | 4.12 h | +0.093 (0.222) m |
+| coarse500_sub8 (storage only) | 3082 | 19 s | 0.441 | 52.5 | 3.91 h | +0.367 m |
+| coarse500_sub8EKL | 3082 | 61 s | 0.764 | 46.7 | 4.06 h | +0.035 (0.110) m |
+| **coarse500_sub8EKLC** | 3082 | 99 s | **0.957** | 52.3 | 3.66 h | −0.019 (**0.027**) m |
+| **coarse2000_sub8EKLC** | 780 | 14 s | **0.906** | 52.8 | 3.66 h | +0.010 (**0.037**) m |
+| coarse500_sub8EKLC + TU | 3082 | 99 s | 0.955 | 52.3 | 3.66 h | −0.026 (0.029) m |
+| coarse2000_sub8EKLC + TU | 780 | 15 s | 0.933 | 52.5 | 3.67 h | −0.004 (0.027) m |
 
 - Wall times are on 8 CPU threads unless marked GPU.
 - "+ TU" means the subgrid runs also use LF1 + tangential upwind. The switch barely
   changes them, because inside a coarse cell the channel conveyance comes from the
   tables.
-- band025 with the switch on (`band025TU`) is running; it will become the reference
-  once it finishes.
+- Arrival times (Q passing half the peak) of all EKLC runs are within 0.04 h of the
+  reference at every section; the storage-only and K-only variants arrive
+  0.6–0.9 h late at the outlet.
+- Score with `python evaluate_phase0.py band025TU`.
 
 Floodplain storage, in thousands of m³:
 
@@ -121,7 +127,9 @@ Floodplain storage, in thousands of m³:
 |---|---|---|---|
 | band1 (old flux) | 43.3 | 12.8 | 4.5 |
 | band1LF4 | 36.6 | 8.7 | 0.8 |
+| **band025TU (reference)** | **33.6** | **7.3** | **0.7** |
 | EKLC 500 / 2000 | 33.8 / 37.7 | 6.0 / 8.3 | 0.1 / 0.1 |
+| EKLC 500 / 2000 + TU | 32.4 / 35.2 | 5.4 / 6.8 | 0.1 / 0.0 |
 
 The earlier "floodplain drains too fast" finding was mostly error in the reference.
 
@@ -156,7 +164,7 @@ conveyance, so the Manning normal depth stays the cleanest steady check.
    variants. Fix: Kc = h^(5/3)/n_eff. This affects diagnostics only.
 2. **Rising limb:** there are small unsteady differences (for example, at Q = 20 the
    level is 1.28 against 1.46 on the 500 mesh), partly a loop-rating effect. The
-   residual near-floodplain storage at 4.5 h is 0.1 against 0.8 thousand m³.
+   residual near-floodplain storage at 4.5 h is 0.1 against 0.7 thousand m³.
 3. **Cap CFL:** 0.5 for the C variants costs about 1.5× the steps of 0.75. A wet-fraction
    cap also works but is slower.
 4. **Prototype limits:**
@@ -182,7 +190,7 @@ conda activate anuga_subgrid_env_3.14      # CPU build, has mpi4py
 cd subgrid_bench
 OMP_NUM_THREADS=8 python run_phase0.py coarse2000_sub8EKLC --diag
 SUBGRID_LOW_FROUDE=5 SUBGRID_TAG=_tu OMP_NUM_THREADS=8 python run_phase0.py coarse500_sub8EKLC --diag
-python evaluate_phase0.py band1LF4         # score everything in results/ against a reference
+python evaluate_phase0.py band025TU        # score everything in results/ against a reference
 PYTHONPATH=$PWD python test_phase2.py      # tests run as scripts
 python trap_conv.py 1 LF=5                 # straight trapezoid check
 ```
@@ -200,5 +208,6 @@ and run `ninja` in `build-gpu` with nvc on PATH.
 | 9feda8ac | bench code tracked (outputs ignored) |
 | 131d7fb5 | merge develop: tangential upwind flux (#510), breakline area limit (#512) |
 | b9f22192 | bench uses `set_low_froude` for the switch |
+| b52906f0 | this report; bench runs with the switch on |
 
 The branch is not pushed to origin.
