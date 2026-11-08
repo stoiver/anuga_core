@@ -125,6 +125,35 @@ double _openmp_compute_fluxes_central(const struct domain *__restrict D,
   return timestep;
 }
 
+// Subgrid edge flux (prototype, #508): same substep bookkeeping as
+// _openmp_compute_fluxes_central, with per-slot subface beds.
+double _openmp_compute_fluxes_subgrid(const struct domain *__restrict D,
+                                      double timestep,
+                                      const double *sub_z, anuga_int nsub,
+                                      double *slot_flux, double *cell_pres,
+                                      const double *sub_invn, const double *cell_neff)
+{
+  struct domain *Dm = (struct domain *)D;
+
+  Dm->flux_call_count++;
+
+  if (D->timestep_fluxcalls != D->flux_timestep_fluxcalls_seen) {
+    Dm->flux_timestep_fluxcalls_seen = D->timestep_fluxcalls;
+    Dm->flux_base_call = D->flux_call_count;
+  }
+
+  int substep_count = (D->flux_call_count - D->flux_base_call) % D->timestep_fluxcalls;
+
+  double local_timestep = core_compute_fluxes_subgrid((struct domain *)D, substep_count,
+                                                      D->timestep_fluxcalls, sub_z, nsub,
+                                                      slot_flux, cell_pres,
+                                                      sub_invn, cell_neff);
+  if (substep_count == 0) {
+    timestep = local_timestep;
+  }
+  return timestep;
+}
+
 // Protect against the water elevation falling below the triangle bed
 // Unified: calls core_protect from core_kernels.c
 double _openmp_protect(const struct domain *__restrict D)

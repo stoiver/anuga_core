@@ -107,6 +107,20 @@ void core_forcing_and_update_on(struct domain *D, double timestep,
 // timestep_fluxcalls: total number of flux calls per timestep (for boundary flux array indexing)
 double core_compute_fluxes_central(struct domain *D, int substep_count, int timestep_fluxcalls);
 
+#ifdef CPU_ONLY_MODE
+// Subgrid edge flux (prototype, #508): sub_z holds nsub subface beds per
+// cell-edge slot (3n x nsub). Replaces fluxes + gravity, like the central kernel.
+double core_compute_fluxes_subgrid(struct domain *D, int substep_count,
+                                   int timestep_fluxcalls,
+                                   const double *sub_z, anuga_int nsub,
+                                   double *slot_flux, double *cell_pres,
+                                   const double *sub_invn, const double *cell_neff);
+// Draining-time limiter for it (needs slot_flux / cell_pres from the kernel).
+anuga_int core_subgrid_drain_limit(struct domain *D, double dt,
+                                   const double *slot_flux, const double *cell_pres,
+                                   double *phi);
+#endif
+
 // Edge-based flux computation (opt-in; active when the driver allocates
 // D->edge_flux_work with 6*3n doubles).  Kernel A solves each unique edge's
 // Riemann problem once (half the solves of the cell-based kernel, exactly

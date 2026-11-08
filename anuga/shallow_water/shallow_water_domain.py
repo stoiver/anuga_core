@@ -5573,6 +5573,37 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
         nvtxRangePush("compute_fluxes")
         self._ensure_gpu_interface()
+
+        # Subgrid edge flux prototype (#508): a (3n, nsub) array of subface
+        # beds set by the subgrid storage operator. Legacy (mode 1) only.
+        sub_z = getattr(self, 'subgrid_edge_z', None)
+        if sub_z is not None:
+            if self.multiprocessor_mode != MULTIPROCESSOR_OPENMP:
+                raise NotImplementedError('subgrid edge flux needs compute mode legacy')
+            from .sw_domain_openmp_ext import compute_fluxes_ext_subgrid
+            # optional conveyance-weighted subface velocity: 1/n per subface
+            # (3n, nsub) and each cell's effective Manning h^(5/3) / Kc (n),
+            # kept current by the storage operator
+            sub_invn = getattr(self, 'subgrid_edge_invn', None)
+            cell_neff = getattr(self, 'subgrid_cell_neff', None) if sub_invn is not None else None
+            if getattr(self, 'subgrid_drain_limiter', False):
+                # per-slot fluxes for the draining-time limiter, applied in
+                # update_conserved_quantities once the step is known
+                n = self.number_of_elements
+                if getattr(self, '_subgrid_slot_flux', None) is None:
+                    self._subgrid_slot_flux = num.zeros((3 * n, 3))
+                    self._subgrid_cell_pres = num.zeros((n, 2))
+                    self._subgrid_phi = num.ones(n)
+                    self.subgrid_limited_cell_steps = 0
+                self.flux_timestep = compute_fluxes_ext_subgrid(
+                    self, self.evolve_max_timestep, sub_z,
+                    self._subgrid_slot_flux, self._subgrid_cell_pres, sub_invn, cell_neff)
+            else:
+                self.flux_timestep = compute_fluxes_ext_subgrid(
+                    self, self.evolve_max_timestep, sub_z, None, None, sub_invn, cell_neff)
+            nvtxRangePop()
+            return
+
         # Choose the correct extension module
         if self.multiprocessor_mode == MULTIPROCESSOR_OPENMP:
             from .sw_domain_openmp_ext import compute_fluxes_ext_central
@@ -6170,6 +6201,13 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
         if self.multiprocessor_mode == MULTIPROCESSOR_OPENMP:
             from .sw_domain_openmp_ext import update_conserved_quantities
+            # Subgrid prototype (#508): draining-time limiter on the edge fluxes
+            if getattr(self, 'subgrid_drain_limiter', False) and \
+                    getattr(self, '_subgrid_slot_flux', None) is not None:
+                from .sw_domain_openmp_ext import subgrid_drain_limit
+                self.subgrid_limited_cell_steps += subgrid_drain_limit(
+                    self, timestep, self._subgrid_slot_flux,
+                    self._subgrid_cell_pres, self._subgrid_phi)
         elif self.multiprocessor_mode == MULTIPROCESSOR_GPU:
             update_conserved_quantities = self.gpu_interface.update_conserved_quantities_kernel
         else:

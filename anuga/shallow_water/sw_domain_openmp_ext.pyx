@@ -206,6 +206,8 @@ cdef extern from "sw_domain_openmp.c" nogil:
 	anuga_int __rotate(double *q, double n1, double n2)
 	void _openmp_set_omp_num_threads(anuga_int num_threads)
 	double _openmp_compute_fluxes_central(domain* D, double timestep)
+	double _openmp_compute_fluxes_subgrid(domain* D, double timestep, double* sub_z, anuga_int nsub, double* slot_flux, double* cell_pres, double* sub_invn, double* cell_neff)
+	anuga_int core_subgrid_drain_limit(domain* D, double dt, double* slot_flux, double* cell_pres, double* phi)
 	double _openmp_protect(domain* D)
 	void _openmp_extrapolate_second_order_edge_sw(domain* D)
 	void _openmp_extrapolate_centroids_only(domain* D)
@@ -1347,6 +1349,66 @@ def compute_fluxes_ext_central(object domain_py_object,
 		timestep =  _openmp_compute_fluxes_central(D, timestep)
 
 	return timestep
+
+def compute_fluxes_ext_subgrid(object domain_py_object,
+                               double timestep,
+                               double[:, ::1] sub_z not None,
+                               double[:, ::1] slot_flux=None,
+                               double[:, ::1] cell_pres=None,
+                               double[:, ::1] sub_invn=None,
+                               double[::1] cell_neff=None,
+                               update_domain_c_struct=False):
+	"""Subgrid edge flux (prototype, #508): sub_z is (3 * number_of_elements, nsub),
+	the subface bed elevations of every cell-edge slot. Replaces
+	compute_fluxes_ext_central (fluxes and gravity) in legacy mode.
+	slot_flux (3n, 3) and cell_pres (n, 2), if given, receive what
+	subgrid_drain_limit needs. sub_invn (3n, nsub, 1/n per subface) and
+	cell_neff (n, effective Manning h^(5/3) / Kc per cell) switch on the
+	conveyance-weighted subface velocity."""
+
+	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=update_domain_c_struct)
+	if sub_z.shape[0] != 3 * D.number_of_elements:
+		raise ValueError('sub_z must have 3 * number_of_elements rows')
+	cdef anuga_int nsub = sub_z.shape[1]
+	cdef double* sf = NULL
+	cdef double* cp = NULL
+	if slot_flux is not None:
+		if slot_flux.shape[0] != 3 * D.number_of_elements or slot_flux.shape[1] != 3:
+			raise ValueError('slot_flux must be (3 * number_of_elements, 3)')
+		if cell_pres is None or cell_pres.shape[0] != D.number_of_elements or cell_pres.shape[1] != 2:
+			raise ValueError('cell_pres must be (number_of_elements, 2) with slot_flux')
+		sf = &slot_flux[0, 0]
+		cp = &cell_pres[0, 0]
+	cdef double* si = NULL
+	cdef double* kc = NULL
+	if sub_invn is not None:
+		if sub_invn.shape[0] != sub_z.shape[0] or sub_invn.shape[1] != nsub:
+			raise ValueError('sub_invn must have the shape of sub_z')
+		if cell_neff is None or cell_neff.shape[0] != D.number_of_elements:
+			raise ValueError('cell_neff must be (number_of_elements,) with sub_invn')
+		si = &sub_invn[0, 0]
+		kc = &cell_neff[0]
+
+	with nogil:
+		timestep = _openmp_compute_fluxes_subgrid(D, timestep, &sub_z[0, 0], nsub, sf, cp, si, kc)
+
+	return timestep
+
+
+def subgrid_drain_limit(object domain_py_object, double dt,
+                        double[:, ::1] slot_flux not None,
+                        double[:, ::1] cell_pres not None,
+                        double[::1] phi not None,
+                        update_domain_c_struct=False):
+	"""Draining-time limiter for the subgrid edge flux: rescale the explicit
+	updates so no cell loses more water than it holds over dt. phi (n) receives
+	each cell's outflow factor. Returns the number of cells limited."""
+
+	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=update_domain_c_struct)
+	cdef anuga_int limited
+	with nogil:
+		limited = core_subgrid_drain_limit(D, dt, &slot_flux[0, 0], &cell_pres[0, 0], &phi[0])
+	return limited
 
 def extrapolate_second_order_sw(object domain_py_object, update_domain_c_struct=False):
 

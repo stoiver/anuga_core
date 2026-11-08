@@ -4775,3 +4775,283 @@ void core_kinematic_viscosity_explicit(struct domain *D, double nu, double dt,
         ymom_cv[i] += dym[i];
     }
 }
+
+// ============================================================================
+// Subgrid edge flux (prototype, #508 Phase 2; CPU / mode 1 only)
+//
+// Each cell-edge slot ki carries nsub subface bed elevations sub_z[ki*nsub + j]
+// (equal lengths, length/nsub). The edge's two states are the reconstructed
+// edge stage eta and momentum of each side, as in core_compute_fluxes_central.
+// Every subface j gets the depths max(eta_L - z_j, 0) and max(eta_R - z_j, 0)
+// and the side's edge velocity u = uh_edge / h_edge (h_edge the mean-depth edge
+// height): gpu_flux_function_central computes exactly that when passed the
+// subface depths as h_left/h_right and the edge heights as hle/hre. The edge
+// flux is the sum over subfaces, so the flow area through the edge is the true
+// one, not edge length x mean depth.
+//
+// Pressure and bed source: with P_e = sum_j pf_j * dl (the subface pressure
+// fluxes) and the cell's own level eta_c,
+//     B_e = 1/2 g sum_j max(eta_c - z_j, 0)^2 * dl
+// is the hydrostatic force a still level eta_c exerts on that edge, and the
+// bed source of a level surface in the cell is sum_e n_e B_e (divergence
+// theorem). The momentum update is -sum_e n_e (P_e - B_e): at rest every
+// pf_j = 1/2 g h_j^2, so P_e = B_e edge by edge and the lake stays still to
+// round-off whatever the subface beds; in flow P_e - B_e ~ g A_e (eta_e - eta_c),
+// the pressure gradient on the true flow area.
+//
+// The cell storage (eta from mean depth, effective bed) is applied outside by
+// the subgrid storage operator. Not supported here: riverwalls, tracers,
+// reconstruct_edge_bed shortcuts, and the GPU build.
+//
+// Draining-time limiter (optional, Bollermann et al. 2013): if slot_flux
+// (3n x 3) and cell_pres (n x 2) are given, the kernel also stores each slot's
+// advective flux [F0, F1, F2] (length-scaled, this cell's sign) and each cell's
+// pressure/bed-source sum, so core_subgrid_drain_limit can rescale the fluxes
+// once the step is known.
+//
+// Momentum on nearly dry sides: a subgrid cell can have a mean depth of 1e-11 m
+// next to an edge carrying real flow through one deep subface. The side's
+// velocity is uh_edge / h_edge, so round-off momentum over that mean depth gives
+// speeds of ~1e9 m/s and collapses the step. A side whose mean edge depth is
+// below SUBGRID_H_DRY carries no momentum; its water still moves under the
+// pressure difference.
+//
+// Conveyance-weighted velocity (optional: sub_invn (3n x nsub) holds 1/n per
+// subface, cell_neff (n) each cell's effective Manning n_eff = h^(5/3) / Kc,
+// Kc(eta_c) = (1/m) sum_k h_k^(5/3) / n_k over its sub-triangles). Without
+// them every subface takes the side's mean velocity u = q / h. With them,
+// subface j of a side owned by cell c takes
+//     u_j = u * n_eff_c / n_j * (h_j / h)^(2/3)      (= q h_j^(2/3) / (n_j Kc))
+// the velocity of a strip of depth h_j under the cell's common energy slope
+// (q = Kc sqrt(S_f), Manning u = h^(2/3) sqrt(S_f) / n). It is normalised per
+// cell, not per edge: a channel cell's floodplain edge then carries
+// floodplain-speed flow instead of the cell's mean velocity. Written with
+// n_eff and the current edge depth h, a uniform cell gives u_j = u exactly
+// even when n_eff is a substep old. A boundary side mirrors the interior
+// side's weights (a reflective wall then passes no mass).
+// ============================================================================
+#define SUBGRID_H_DRY 1.0e-6
+#ifdef CPU_ONLY_MODE
+double core_compute_fluxes_subgrid(struct domain *D, int substep_count,
+                                   int timestep_fluxcalls,
+                                   const double * restrict sub_z, anuga_int nsub,
+                                   double * restrict slot_flux, double * restrict cell_pres,
+                                   const double * restrict sub_invn,
+                                   const double * restrict cell_neff) {
+    anuga_int n = D->number_of_elements;
+    int split = (sub_invn != NULL && cell_neff != NULL);
+    double g = D->g;
+    double epsilon = D->epsilon;
+    anuga_int low_froude = D->low_froude;
+
+    double * restrict stage_cv = D->stage_centroid_values;
+    double * restrict stage_ev = D->stage_edge_values;
+    double * restrict xmom_ev = D->xmom_edge_values;
+    double * restrict ymom_ev = D->ymom_edge_values;
+    double * restrict height_ev = D->height_edge_values;
+    double * restrict bed_ev = D->bed_edge_values;
+    double * restrict stage_bv = D->stage_boundary_values;
+    double * restrict xmom_bv = D->xmom_boundary_values;
+    double * restrict ymom_bv = D->ymom_boundary_values;
+    double * restrict stage_eu = D->stage_explicit_update;
+    double * restrict xmom_eu = D->xmom_explicit_update;
+    double * restrict ymom_eu = D->ymom_explicit_update;
+    anuga_int * restrict neighbours = D->neighbours;
+    anuga_int * restrict neighbour_edges = D->neighbour_edges;
+    anuga_geom_t * restrict normals = D->normals;
+    anuga_geom_t * restrict edgelengths = D->edgelengths;
+    anuga_geom_t * restrict radii = D->radii;
+    anuga_geom_t * restrict areas = D->areas;
+    double * restrict max_speed_array = D->max_speed;
+    anuga_int * restrict tri_full_flag = D->tri_full_flag;
+
+    double local_timestep = 1.0e+100;
+    double boundary_flux_sum_substep = 0.0;
+
+    #pragma omp parallel for reduction(min:local_timestep) reduction(+:boundary_flux_sum_substep)
+    for (anuga_int k = 0; k < n; k++) {
+        double ql[3], qr[3], ef[3];
+        double speed_max_cell = 0.0;
+        double seu = 0.0, xeu = 0.0, yeu = 0.0, xpr = 0.0, ypr = 0.0;
+        double eta_c = stage_cv[k];
+
+        for (int i = 0; i < 3; i++) {
+            anuga_int ki = 3 * k + i;
+            ql[0] = stage_ev[ki];
+            ql[1] = xmom_ev[ki];
+            ql[2] = ymom_ev[ki];
+            double hle = height_ev[ki];
+            if (hle < SUBGRID_H_DRY) { ql[1] = 0.0; ql[2] = 0.0; }
+            double n1 = normals[2 * ki];
+            double n2 = normals[2 * ki + 1];
+            double dl = edgelengths[ki] / (double)nsub;
+
+            anuga_int neighbour = neighbours[ki];
+            int is_boundary = (neighbour < 0);
+            double hre;
+            if (is_boundary) {
+                anuga_int m = -neighbour - 1;
+                qr[0] = stage_bv[m];
+                qr[1] = xmom_bv[m];
+                qr[2] = ymom_bv[m];
+                hre = fmax(qr[0] - bed_ev[ki], 0.0);
+            } else {
+                anuga_int nm = 3 * neighbour + neighbour_edges[ki];
+                qr[0] = stage_ev[nm];
+                qr[1] = xmom_ev[nm];
+                qr[2] = ymom_ev[nm];
+                hre = height_ev[nm];
+            }
+            if (hre < SUBGRID_H_DRY) { qr[1] = 0.0; qr[2] = 0.0; }
+
+            // conveyance split: scaling the side's momentum by w_j scales the
+            // kernel's velocity uh / h_edge to u_j
+            double aL = 0.0, aR = 0.0;
+            int splitL = 0, splitR = 0;
+            if (split) {
+                splitL = splitR = 1;
+                aL = (hle > 0.0) ? cell_neff[k] / cbrt(hle * hle) : 0.0;
+                if (!is_boundary) {
+                    aR = (hre > 0.0) ? cell_neff[neighbour] / cbrt(hre * hre) : 0.0;
+                }
+            }
+            double qlj[3], qrj[3];
+            qlj[0] = ql[0];
+            qrj[0] = qr[0];
+
+            double F0 = 0.0, F1 = 0.0, F2 = 0.0, P = 0.0, B = 0.0, smax = 0.0;
+            const double * restrict zs = sub_z + ki * nsub;
+            const double * restrict ins = split ? sub_invn + ki * nsub : NULL;
+            for (anuga_int j = 0; j < nsub; j++) {
+                double zj = zs[j];
+                double hc = fmax(eta_c - zj, 0.0);
+                B += hc * hc;
+                double hL = fmax(ql[0] - zj, 0.0);
+                double hR = fmax(qr[0] - zj, 0.0);
+                if (hL == 0.0 && hR == 0.0) continue;
+                double wL = 1.0, wR = 1.0;
+                if (splitL) wL = aL * cbrt(hL * hL) * ins[j];
+                if (splitR) wR = is_boundary ? wL : aR * cbrt(hR * hR) * ins[j];
+                qlj[1] = ql[1] * wL;
+                qlj[2] = ql[2] * wL;
+                qrj[1] = qr[1] * wR;
+                qrj[2] = qr[2] * wR;
+                double ms = 0.0, pf = 0.0;
+                gpu_flux_function_central(qlj, qrj, hL, hR, hle, hre, n1, n2,
+                                          epsilon, zj, g, ef, &ms, &pf, low_froude);
+                F0 += ef[0];
+                F1 += ef[1];
+                F2 += ef[2];
+                P += pf;
+                smax = fmax(smax, ms);
+            }
+            F0 *= -dl;
+            F1 *= -dl;
+            F2 *= -dl;
+            double work = (P - 0.5 * g * B) * dl;
+
+            seu += F0;
+            xeu += F1 - n1 * work;
+            yeu += F2 - n2 * work;
+            xpr -= n1 * work;
+            ypr -= n2 * work;
+            if (slot_flux != NULL) {
+                slot_flux[3 * ki] = F0;
+                slot_flux[3 * ki + 1] = F1;
+                slot_flux[3 * ki + 2] = F2;
+            }
+            speed_max_cell = fmax(speed_max_cell, smax);
+
+            if (tri_full_flag != NULL) {
+                int is_full = (tri_full_flag[k] == 1);
+                int nb_ghost = (!is_boundary && tri_full_flag[neighbour] == 0);
+                if ((is_boundary && is_full) || (is_full && nb_ghost)) {
+                    boundary_flux_sum_substep += F0;
+                }
+            }
+        }
+
+        if (substep_count == 0) {
+            if (tri_full_flag == NULL || tri_full_flag[k] == 1) {
+                if (speed_max_cell > epsilon) {
+                    local_timestep = fmin(local_timestep, radii[k] / speed_max_cell);
+                }
+            }
+            max_speed_array[k] = speed_max_cell;
+        }
+        double inv_area = 1.0 / areas[k];
+        stage_eu[k] = seu * inv_area;
+        xmom_eu[k] = xeu * inv_area;
+        ymom_eu[k] = yeu * inv_area;
+        if (cell_pres != NULL) {
+            cell_pres[2 * k] = xpr;
+            cell_pres[2 * k + 1] = ypr;
+        }
+    }
+
+    if (D->boundary_flux_sum != NULL && substep_count < timestep_fluxcalls) {
+        D->boundary_flux_sum[substep_count] = boundary_flux_sum_substep;
+    }
+    return local_timestep;
+}
+
+// Draining-time limiter for the subgrid edge flux (Bollermann, Chen, Kurganov
+// & Noelle 2013, J. Sci. Comput. 56:267). Called once the step dt is known,
+// before the conserved quantities are updated. For each cell the outflow
+// volume rate O_k = sum of max(-F0, 0) over its slots; if dt * O_k exceeds the
+// water it holds, V_k = h_k A_k, its outgoing fluxes are scaled by
+// phi_k = V_k / (dt O_k). Every interior edge's flux, mass and advective
+// momentum, is scaled by its DONOR's phi on both sides, so mass stays exactly
+// conserved; a cell's inflows can only shrink, so its depth stays >= 0 for any
+// dt. Inflow through a boundary edge is not limited. Pressure and bed source
+// (cell_pres) are forces, not transport, and are not scaled. Rewrites the
+// explicit updates. Returns the number of cells limited.
+anuga_int core_subgrid_drain_limit(struct domain *D, double dt,
+                                   const double * restrict slot_flux,
+                                   const double * restrict cell_pres,
+                                   double * restrict phi) {
+    anuga_int n = D->number_of_elements;
+    double * restrict stage_cv = D->stage_centroid_values;
+    double * restrict bed_cv = D->bed_centroid_values;
+    double * restrict stage_eu = D->stage_explicit_update;
+    double * restrict xmom_eu = D->xmom_explicit_update;
+    double * restrict ymom_eu = D->ymom_explicit_update;
+    anuga_int * restrict neighbours = D->neighbours;
+    anuga_geom_t * restrict areas = D->areas;
+    anuga_int limited = 0;
+
+    #pragma omp parallel for reduction(+:limited)
+    for (anuga_int k = 0; k < n; k++) {
+        double out = 0.0;
+        for (int i = 0; i < 3; i++) out += fmax(-slot_flux[3 * (3 * k + i)], 0.0);
+        double vol = fmax(stage_cv[k] - bed_cv[k], 0.0) * areas[k];
+        double p = 1.0;
+        if (dt * out > vol) {
+            p = vol / (dt * out);
+            limited++;
+        }
+        phi[k] = p;
+    }
+
+    #pragma omp parallel for
+    for (anuga_int k = 0; k < n; k++) {
+        double s0 = 0.0, s1 = 0.0, s2 = 0.0;
+        for (int i = 0; i < 3; i++) {
+            anuga_int ki = 3 * k + i;
+            const double *F = slot_flux + 3 * ki;
+            anuga_int nb = neighbours[ki];
+            double w;
+            if (F[0] < 0.0) w = phi[k];                 // outflow: this cell donates
+            else w = (nb >= 0) ? phi[nb] : 1.0;         // inflow: neighbour donates
+            s0 += w * F[0];
+            s1 += w * F[1];
+            s2 += w * F[2];
+        }
+        double inv_area = 1.0 / areas[k];
+        stage_eu[k] = s0 * inv_area;
+        xmom_eu[k] = (s1 + cell_pres[2 * k]) * inv_area;
+        ymom_eu[k] = (s2 + cell_pres[2 * k + 1]) * inv_area;
+    }
+    return limited;
+}
+#endif
