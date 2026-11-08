@@ -269,10 +269,11 @@ def main():
     domain, ncross = make_domain(args.variant)
     sub_n = SUBGRID_N.get(args.variant)
     domain.set_compute_mode('legacy' if sub_n else 'unified')
-    lf = int(os.environ.get('SUBGRID_LOW_FROUDE', 0))   # 3/4: experimental tangential upwind flux
+    # low_froude mode, optionally | LOW_FROUDE_TANGENTIAL_UPWIND (4), e.g. 5 = LF1 +
+    # tangential upwind (#510). Default 0, the standard central-upwind flux.
+    lf = int(os.environ.get('SUBGRID_LOW_FROUDE', 0))
     if lf:
-        domain.set_low_froude(min(lf, 2))
-        domain.low_froude = lf
+        domain.set_low_froude(lf)
     x, y = domain.centroid_coordinates.T
     z = domain.quantities['elevation'].centroid_values.copy()
 

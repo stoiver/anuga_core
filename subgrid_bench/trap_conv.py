@@ -41,7 +41,7 @@ else:
                                                    if brk else None))
 dom.set_store(False)
 LF = int(dict(a.split('=') for a in sys.argv if '=' in a).get('LF', 0))
-dom.set_low_froude(min(LF, 2)); dom.low_froude = LF
+dom.set_low_froude(LF)   # e.g. LF=5: LF1 + tangential upwind (#510)
 dom.set_compute_mode('unified' if gpu else 'legacy')
 if vertex:
     dom.set_quantity('elevation', bed)
