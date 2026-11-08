@@ -21,12 +21,13 @@ from matplotlib.tri import Triangulation
 
 import terrain as T
 
-ORDER = ['band1LF4', 'band025', 'fine', 'band1', 'resolved', 'coarse500_centroid', 'coarse500_trench',
+ORDER = ['band025TU', 'band1LF4', 'band025', 'fine', 'band1', 'resolved', 'coarse500_centroid', 'coarse500_trench',
          'coarse2000_centroid', 'coarse2000_trench',
          'coarse500_sub8', 'coarse500_sub16', 'coarse2000_sub8', 'coarse2000_sub16',
          'coarse500_sub8K', 'coarse500_sub16K', 'coarse2000_sub8K',
          'coarse500_sub8E', 'coarse500_sub8EK', 'coarse2000_sub8EK',
-         'coarse500_sub8EKL', 'coarse2000_sub8EKL', 'coarse500_sub8EKLC', 'coarse2000_sub8EKLC']
+         'coarse500_sub8EKL', 'coarse2000_sub8EKL', 'coarse500_sub8EKLC', 'coarse2000_sub8EKLC',
+         'coarse500_sub8EKLCtu', 'coarse2000_sub8EKLCtu']
 T_SPIN = 5400.0          # arrival times ignore the spin-up transient
 PROFILE_X = np.arange(25.0, 1975.0, 50.0)
 DRY = 0.01

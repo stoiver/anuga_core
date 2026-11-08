@@ -72,9 +72,9 @@ cd /tmp && OMP_NUM_THREADS=1 pytest --pyargs anuga -m 'not slow' -q   # fast sui
 - **Motivating issue:** [#453](https://github.com/anuga-community/anuga_core/issues/453),
   channels narrower than the cells. The public thread can be discussed; the
   reporter's data cannot (see below).
-- **Nothing is implemented yet.** The next step is **Phase 0**: a synthetic
-  narrow-channel benchmark with a resolved ANUGA reference (details in
-  `SUBGRID_DESIGN.md`).
+- **Status (2026-11-08):** Phases 0, 1 and most of 2 are built as a mode-1
+  prototype. **Read `claude/SUBGRID_STATUS.md`** for what exists, results, known
+  issues and how to run it.
 
 ## The real-world case
 
