@@ -1,0 +1,8 @@
+# Run outputs stay local (large): only code, launch scripts and text summaries are tracked
+results/
+results_spin30/
+baseline/
+__pycache__/
+*.npz
+*.log
+*.png
