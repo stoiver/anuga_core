@@ -199,7 +199,12 @@ class Diagnostics:
     def record(self, t, stage, elev, xmom):
         h_cell = stage - elev
         qch, qfp = [], []
-        kc = getattr(self.domain, 'subgrid_cell_kc', None)
+        # conveyance split: the operator sets n_eff = h^(5/3)/Kc, so Kc = h^(5/3)/n_eff
+        # (cells with no conveyance have no wet sub-triangle, so h_y = 0 there anyway)
+        neff = getattr(self.domain, 'subgrid_cell_neff', None)
+        kc = None
+        if neff is not None:
+            kc = np.where(neff > 0, np.maximum(h_cell, 0.0) ** (5 / 3) / np.maximum(neff, 1e-300), 0.0)
         for own, z, chan, invn in self.sections:
             if self.subgrid and kc is not None:
                 k = kc[own]
