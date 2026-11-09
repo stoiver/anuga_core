@@ -1,6 +1,6 @@
 # Subgrid terrain (#508): what we are building and where it stands
 
-State on 2026-11-08. Branch `develop_subgrid` at the commits listed at the end.
+State on 2026-11-09. Branch `develop_subgrid` at the commits listed at the end.
 Read `SUBGRID_START_HERE.md` for setup and rules, and `SUBGRID_DESIGN.md` for the plan.
 The figures are in `claude/figures/subgrid/`. Regenerate them from the bench results with
 `python subgrid_bench/report_figures.py`.
@@ -22,6 +22,9 @@ The figures are in `claude/figures/subgrid/`. Regenerate them from the bench res
   momentum across the channel–bank shear, making resolved channels too resistive.
   That is now fixed upstream as an opt-in switch (#509, PR #510, merged), and the
   references have been rerun with it.
+- **Outlet reach explained:** the low levels approaching the steep outlet reach come
+  from the coarse cells at the critical-depth control. Refining only those cells
+  removes the error, including upstream of the refined area (see *The outlet reach*).
 - **Still to do:** the production steps of Phase 3. The tables live in a Python
   operator in the bench, not in a flow algorithm. There is no GPU (mode 2) path, the
   operators (inlets, rain, culverts) haven't been audited, and there is no parallel
@@ -180,6 +183,7 @@ everywhere. CSI = both wet / either wet.*
 *EKLC stays within a few centimetres along most of the valley. All the coarse runs run
 low below x ≈ 1600 m, approaching the steep outlet reach that starts at x = 1900 m, where
 a coarse cell straddles the change of slope. EKLC 500 is 0.38 m low at x = 1925 m. The
+section on the outlet reach below traces this to the cells at the control. The
 centroid-bed model, not drawn, is 0.46 m high on average and up to 0.96 m.*
 
 ![Accuracy against cost](figures/subgrid/cost.png)
@@ -243,6 +247,57 @@ attenuates the peak.
   momentum balance holds: (q/Kc)/√S ≈ 1.
 - **Older variants are off:** EKL is 15 cm high at Q = 55, and band1 (old flux) is
   12 cm high at Q = 25.
+
+## The outlet reach
+
+At x = 1900 m the valley steepens from 1:1000 to 1:50, so the flow passes through
+critical depth there. Upstream, the level draws down from 2.26 m deep at x = 1000 to
+1.28 m at the break, over about 700 m. In the flood runs, every coarse model read low
+over the last 300 m before the break.
+
+**Steady runs separate the causes.** We ran a constant 50 m³/s for 5 h, close to the
+flood peak, on the straight channel and on the meander. The straight channel also has
+an independent check: a 1D standard-step profile computed upstream from critical depth
+at the break, using the same strips of bed and roughness (`gvf_1d.py`). Its critical
+depth, 1.28 m, matches the 1.26 m the flood reference shows at the break.
+
+![Steady level near the outlet](figures/subgrid/outlet.png)
+
+*Steady level at 50 m³/s on the channel centreline. Left: minus the 1D profile on the
+straight channel. Right: minus band1 on the meander. The shaded band is the only area
+refined in the yellow run. The curves stop at the break: below it, a flat cell level
+compared with a steep surface at one point is a sampling artefact.*
+
+| x (m) | 1D depth | band1 | EKLC 500 | EKLC 500, x > 1800 refined to 25 m² | EKL 500 |
+|---|---|---|---|---|---|
+| 1000–1650 | 2.26–2.06 | +0.04 to +0.06 | −0.02 to +0.02 | −0.01 to +0.02 | +0.00 to +0.19 |
+| 1700 | 2.01 | +0.047 | −0.065 | +0.012 | −0.049 |
+| 1800 | 1.86 | +0.041 | −0.070 | −0.002 | −0.063 |
+| 1850 | 1.73 | +0.032 | −0.122 | −0.032 | −0.128 |
+| 1875 | 1.63 | +0.020 | −0.188 | −0.040 | −0.193 |
+
+*Straight channel: level minus the 1D profile (m).*
+
+- **It isn't an unsteady effect.** EKLC 500 shows the same excess drawdown in steady
+  flow: 7 cm low at 1800 and 19 cm low at 1875.
+- **It isn't a general friction or momentum error.** Up to x = 1650, EKLC 500 is within
+  2 cm of the 1D profile.
+- **The source is the coarse cells at the control.** Refining only x > 1800 also fixes
+  x = 1700–1800, upstream of the refined area. On the meander, the refinement turns a
+  0.10–0.16 m deficit into 0.04–0.06 m, about the offset seen everywhere else. The
+  coarse cells straddling the break pass too much water for their level near critical
+  flow, and the low level carries upstream as backwater.
+- **The 2D reference sits slightly high.** band1 is 4–6 cm above the 1D profile along
+  the whole reach. That offset is part of what the flood comparison measured.
+- **The conveyance split still matters.** EKL 500 is up to 0.19 m high upstream and has
+  the same drawdown at the outlet.
+- **EKLC 2000 is too coarse to judge here.** Its 65 m cells scatter by ±0.1–0.18 m
+  against a 250 m drawdown, with no clear trend.
+
+**Remedy:** refine the coarse mesh at hydraulic controls (slope breaks, weirs, steep
+outlets), as is usual meshing practice. This works now. The alternative is a flux
+treatment for near-critical edges, so that a cell straddling the break passes the right
+discharge for its level. That would be new work in the edge-flux kernel.
 
 ## The reference bias (#509, fixed in #510)
 
@@ -308,13 +363,15 @@ All synthetic. Run outputs (`results/`, `*.npz`, logs, plots) stay local through
 | `test_phase1.py`, `test_phase2.py` | lake at rest with partly wet cells, mass conservation, dam breaks (run as scripts; all pass) |
 | `static_storage.py`, `static_conveyance.py`, `static_edges.py` | static checks of storage, conveyance and edge area/conveyance against the DTM |
 | `steady.py`, `trap_conv.py` | steady runs against Manning normal depth; the straight-trapezoid check that found the reference bias |
+| `steady_outlet.py`, `gvf_1d.py`, `compare_outlet.py` | the outlet-reach study: steady runs at a fixed Q (with `SUBGRID_OUTLET_AREA` refining x > `SUBGRID_OUTLET_X`), the 1D standard-step profile, and the comparison and figure |
+| `outlet_eq.py` | flood runs against the reference's volume-equivalent level in each coarse cell |
 | `launch_*.sh` | the tmux batch scripts used for each round of runs |
 
 ## Known issues and open items
 
-1. **Outlet reach:** every coarse run is low approaching the steep outlet reach
-   (x > 1600 m); EKLC 500 is 0.38 m low at x = 1925 m, where coarse cells straddle the
-   change of slope. Not yet investigated.
+1. **Outlet reach:** explained (see *The outlet reach*). The coarse cells at the
+   critical control draw the level down by up to 0.19 m. Refining them to 25 m² fixes
+   it. A flux treatment for near-critical edges is optional future work.
 2. **Unsteady differences:** on the rising limb the level at Q = 20 is 1.28 against
    1.46 m on the 500 mesh, partly a loop-rating effect. On the falling limb the near
    floodplain holds 0.1 against 0.7 thousand m³ at 4.5 h.
@@ -347,6 +404,9 @@ python evaluate_phase0.py band025TU        # score everything in results/ agains
 python report_figures.py                   # redraw claude/figures/subgrid/*.png
 PYTHONPATH=$PWD python test_phase2.py      # tests run as scripts
 python trap_conv.py 1 LF=5                 # straight trapezoid check
+bash launch_outlet.sh                      # outlet study: steady Q = 50 runs (about 3 h)
+SUBGRID_AMPLITUDE=0 python gvf_1d.py 50    # 1D profile for the straight channel
+python compare_outlet.py --fig ../claude/figures/subgrid   # tables and outlet.png
 ```
 
 `report_figures.py` needs the `--diag` results of band025 (TU), band1 (old flux and
@@ -367,5 +427,6 @@ and run `ninja` in `build-gpu` with nvc on PATH.
 | b9f22192 | bench uses `set_low_froude` for the switch |
 | b52906f0 | status report; bench runs with the switch on |
 | d9d8bbe3 | status rescored against band025TU |
+| f096cbc9 | status report with figures; `--diag` channel split fixed |
 
 The branch is not pushed to origin.

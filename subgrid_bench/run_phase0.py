@@ -236,6 +236,13 @@ class Diagnostics:
 def make_domain(variant):
     max_area, band, trench = VARIANTS[variant]
     regions = [[T.channel_band_polygon(), band]] if band else None
+    # SUBGRID_OUTLET_AREA: refine x > SUBGRID_OUTLET_X (default 1800) to that area
+    # (outlet-reach investigation: does the error follow the cells at the control?)
+    outlet_area = float(os.environ.get('SUBGRID_OUTLET_AREA', 0))
+    if outlet_area:
+        x0 = float(os.environ.get('SUBGRID_OUTLET_X', 1800.0))
+        poly = [[x0, 1.0], [T.LENGTH - 1.0, 1.0], [T.LENGTH - 1.0, T.WIDTH - 1.0], [x0, T.WIDTH - 1.0]]
+        regions = (regions or []) + [[poly, outlet_area]]
     domain = anuga.create_domain_from_regions(
         T.BOUNDING_POLYGON, T.BOUNDARY_TAGS, maximum_triangle_area=max_area,
         interior_regions=regions)
