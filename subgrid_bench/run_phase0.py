@@ -304,6 +304,15 @@ def main():
         tables = SubgridTables.from_cells(cells, sub_n, px, py, pz,
                                           manning=friction if args.variant in CONVEYANCE else None,
                                           hollows=os.environ.get('SUBGRID_HOLLOWS', '0') == '1')
+        if os.environ.get('SUBGRID_TENSOR', '0') == '1':
+            # experimental: cell-problem conveyance tensor in the friction
+            import time as _time
+            _t = _time.time()
+            ring = int(os.environ.get('SUBGRID_TENSOR_RING', 20))
+            tables.add_tensor(cells.owner, (int(round(T.WIDTH / T.PIXEL)), int(round(T.LENGTH / T.PIXEL))), pz,
+                              friction(px, py), dx=T.PIXEL, ring=ring,
+                              floor=float(os.environ.get('SUBGRID_TENSOR_FLOOR', 0.01)), workers=8)
+            print(f'tensor tables (ring {ring} px): {_time.time() - _t:.0f} s', flush=True)
         del px, py, pz
         z = tables.zmin.copy()        # lowest point per cell: wet/dry and extent tests
 
@@ -349,7 +358,9 @@ def main():
                                           edge_z=ez,
                                           cap_exponent=EDGE_CAP_P if args.variant in DRAIN_LIMITER else 1.0,
                                           drain_limiter=args.variant in DRAIN_LIMITER,
-                                          edge_invn=ein)
+                                          edge_invn=ein,
+                                          tensor=os.environ.get('SUBGRID_TENSOR', '0') == '1',
+                                          tensor_form=os.environ.get('SUBGRID_TENSOR_FORM', 'gradient'))
         if os.environ.get('SUBGRID_P1', '0') == '1':
             # experimental: sloping level in each cell from its connected neighbours
             beta = os.environ.get('SUBGRID_P1_BETA')

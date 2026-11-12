@@ -484,6 +484,57 @@ the DE0 baseline:
   gravity term, which uses the mean depth times the level slope.
 - Parked. Reproduce with `grad_probe.py` (see its docstring).
 
+### The conveyance tensor: first results (2026-11-12)
+
+`SubgridTables.add_tensor()` solves the two cell problems on the DTM pixels of each
+cell at 20 levels (`cell_tensor()`: two-point fluxes, harmonic face conveyance, sparse
+direct solve) and stores R = K*/mean(k), symmetric with eigenvalues in [0.01, 1]. The
+friction uses n_eff = h^(5/3) / (Kc · q̂·R q̂), where q̂ is the direction of the cell's
+discharge. Off by default: `flat_plain.py --tensor --tring 20`, or `SUBGRID_TENSOR=1`
+for `run_phase0.py`. Building the tables takes 1–9 s on the flat-plain bench and about
+45 s on the valley (8 processes).
+
+**The boundary condition matters more than expected.** With φ = 0 on the cell's own
+boundary, the tensor is far too conductive on the rough ground: at the mean ground
+level, the cells give 0.65 of the side-by-side conveyance where a 600 × 150 m window
+gives 0.01 (the water is barely connected). A ring of 20 pixels around each cell
+(oversampling) brings the cells down to 0.16. A 40-pixel ring changes the bench result
+by 10 m at most.
+
+Flat-plain bench, 1000 m² cells: distance to which 90% of the water has spread (m):
+
+| ground | time | fine 4 m² | subgrid | + strips | + tensor, no ring | + tensor, ring 20 |
+|---|---|---|---|---|---|---|
+| flat | 2 h | 840 | 850 | 850 | 850 | 850 |
+| ridged | 2 h | 730 | 870 | 840 | 840 | 830 |
+| rough | 2 h | 720 | 840 | 720 | 810 | 760 |
+| rough | 3 h | 1030 | 1160 | 1010 | 1120 | 1080 |
+
+Valley flood against band025TU (the case with a channel crossing the cells):
+
+| run | CSI | outlet peak | peak stage err. (m) |
+|---|---|---|---|
+| coarse500 EKLC | 0.957 | 52.3 | −0.019 (0.027) |
+| coarse500 EKLC + tensor | 0.947 | 52.1 | −0.011 (0.027) |
+| coarse2000 EKLC | 0.906 | 52.8 | +0.010 (0.037) |
+| coarse2000 EKLC + tensor | 0.888 | 52.6 | +0.020 (0.039) |
+
+- Flat ground is unchanged, as it must be.
+- On the rough ground the tensor with a ring removes about two thirds of the excess
+  spread at 2 h. The strips still match the fine run more closely there.
+- The channel is not choked: peak discharge, timing and channel levels stay as they
+  were. The flood extent score drops by 0.01–0.02; not yet looked into.
+- The ridges barely respond (870 → 830, fine 730). A ridge inside a cell blocks that
+  cell's momentum, but the edge fluxes still pass water through it, and the ponding
+  behind a ridge is a storage effect. That is a job for the edge transmissibility or
+  the two-compartment storage.
+- The along-flow form of the friction, (|R⁻¹q̂| (q̂·R⁻¹q̂))^(−1/2), scores worse on the
+  valley (CSI 0.916): it penalises a discharge that is slightly off the channel axis.
+  With scalar friction the discharge follows the level gradient, so q̂·R q̂ is the
+  consistent choice.
+- Not done: the strips on the valley for a like-for-like comparison, the full tensor
+  friction with its transverse part, and the nonlinear cell problem.
+
 ### Plan
 
 1. Build the cell-problem tensor in `subgrid_tables.py` and test it on the flat-plain
@@ -522,7 +573,7 @@ All synthetic. Run outputs (`results/`, `*.npz`, logs, plots) stay local through
 | File | Role |
 |---|---|
 | `terrain.py` | analytic valley: 2000 × 500 m, slope 1:1000, a meandering trapezoidal channel (10 m base, 2 m deep, 1:2 banks), a floodplain with hollows, and an outlet control at x = 1900. `SUBGRID_AMPLITUDE=0` straightens the channel |
-| `subgrid_tables.py` | the method: `SubgridTables` (sorted sub-triangle beds, h(η), η(h), f(η), Kc(η)), `edge_subface_beds` (subface beds and 1/n), and `Subgrid_storage_operator` (the per-step update). Experimental, off by default: hollow sills (`SUBGRID_HOLLOWS=1`), the connectivity rule (`connectivity=True`), direction-dependent strips (`directional=True`), and series or geometric conveyance averaging (`SUBGRID_KMEAN`) |
+| `subgrid_tables.py` | the method: `SubgridTables` (sorted sub-triangle beds, h(η), η(h), f(η), Kc(η)), `edge_subface_beds` (subface beds and 1/n), and `Subgrid_storage_operator` (the per-step update). Experimental, off by default: hollow sills (`SUBGRID_HOLLOWS=1`), the connectivity rule (`connectivity=True`), direction-dependent strips (`directional=True`), series or geometric conveyance averaging (`SUBGRID_KMEAN`), and the cell-problem conveyance tensor (`add_tensor`, `cell_tensor`, `tensor=True`) |
 | `run_phase0.py` | hydrograph runs (5 → 60 → 5 m³/s, 5.5 h) for every variant; `--gpu`, `--diag`; environment switches `SUBGRID_TAG` and `SUBGRID_LOW_FROUDE` |
 | `evaluate_phase0.py` | scores the runs against a reference: flood-extent CSI, peak Q and its timing, arrival time, peak stage |
 | `report_figures.py` | the figures in this report, from the `results/*_diag*.npz` files |
@@ -531,7 +582,7 @@ All synthetic. Run outputs (`results/`, `*.npz`, logs, plots) stay local through
 | `steady.py`, `trap_conv.py` | steady runs against Manning normal depth; the straight-trapezoid check that found the reference bias |
 | `steady_outlet.py`, `gvf_1d.py`, `compare_outlet.py` | the outlet-reach study: steady runs at a fixed Q (with `SUBGRID_OUTLET_AREA` refining x > `SUBGRID_OUTLET_X`), the 1D standard-step profile, and the comparison and figure |
 | `outlet_eq.py` | flood runs against the reference's volume-equivalent level in each coarse cell |
-| `flat_plain.py`, `flat_summary.py`, `flat_profile.py` | the flat-plain front-speed bench (flat, ridged, rough ground; `--conn`, `--dir`, `--pond`, `--no-conv`) and its summaries |
+| `flat_plain.py`, `flat_summary.py`, `flat_profile.py` | the flat-plain front-speed bench (flat, ridged, rough ground; `--conn`, `--dir`, `--tensor`, `--pond`, `--no-conv`) and its summaries |
 | `pond_storage.py` | two-compartment storage: `PondStore` and `Pond_exchange_operator` (weir exchange between the connected store and ponds behind sills) |
 | `grad_probe.py` | limited against unlimited stage gradient near the slope break, for DE0, `PROBE_ALG=DE_ader2` and the `SUBGRID_P1=1` level |
 | `launch_*.sh` | the tmux batch scripts used for each round of runs |
@@ -600,6 +651,7 @@ and run `ninja` in `build-gpu` with nvc on PATH.
 | b9b3c0a3 | outlet-reach study |
 | d8499d6a | flat-plain bench; experimental closures (hollows, connectivity, strips, two-compartment storage); closures plan |
 | 121a38f0 | limited stage gradient measured: near zero in subgrid cells |
-| (this commit) | P1 level from connected neighbours (off by default), a negative result; `grad_probe.py`; `SUBGRID_ALG` switch |
+| 38698114 | P1 level from connected neighbours (off by default), a negative result; `grad_probe.py`; `SUBGRID_ALG` switch |
+| (this commit) | cell-problem conveyance tensor (off by default) with oversampling; first results |
 
 The branch is pushed to `origin` (the stoiver fork).

@@ -354,6 +354,98 @@ class SubgridTables:
         Rt = (1 - w) * R[i0, rows] + w * R[(i0 + 1) % self.ndir, rows]
         return np.where(wet, kpar * np.minimum(Rt ** -0.5, 1.0), 0.0)   # for the cells dcells
 
+    def add_tensor(self, owner, shape, pz, pn, dx=1.0, nlev=20, floor=0.01, cells=None, ring=0, workers=1):
+        """Conveyance tensor from a cell problem on the DTM pixels (numerical
+        homogenisation; see cell_tensor). owner, pz, pn: owning cell, bed and
+        Manning n of each pixel of a regular grid of shape (ny, nx), raveled
+        row-major, spacing dx. ring: solve on the cell plus this many pixels
+        around it (oversampling), averaging over the cell only.
+
+        Stored as the ratio R = K* / mean(k) (symmetric, eigenvalues clipped to
+        [floor, 1]; identity over a level bed) at nlev levels per cell:
+        tlev (ncell, nlev) and tR (ncell, nlev, 3) = (xx, xy, yy). cells: only
+        these (default all); the others keep R = 1."""
+        from scipy.ndimage import binary_dilation
+        ny, nx = shape
+        ncell = len(self.z)
+        own2 = np.asarray(owner).reshape(ny, nx)
+        z2 = np.asarray(pz, float).reshape(ny, nx)
+        in2 = 1.0 / np.asarray(pn, float).reshape(ny, nx)
+        order = np.argsort(owner, kind='stable')
+        start = np.searchsorted(np.asarray(owner)[order], np.arange(ncell + 1))
+        above = np.array([0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0])
+        nin = max(nlev - len(above), 2)
+        self.tlev = np.zeros((ncell, nlev))
+        self.tR = np.zeros((ncell, nlev, 3))
+        self.tR[:, :, 0] = self.tR[:, :, 2] = 1.0
+        self.tfloor = floor
+        todo = np.arange(ncell) if cells is None else np.arange(ncell)[cells]
+        def one(c):
+            pix = order[start[c]:start[c + 1]]
+            if len(pix) < 9:
+                return None
+            iy, ix = pix // nx, pix % nx
+            y0, y1 = max(iy.min() - ring, 0), min(iy.max() + 1 + ring, ny)
+            x0, x1 = max(ix.min() - ring, 0), min(ix.max() + 1 + ring, nx)
+            cell = own2[y0:y1, x0:x1] == c
+            z = z2[y0:y1, x0:x1]
+            lo, hi = z[cell].min(), z[cell].max()
+            lev = np.concatenate([lo + (hi - lo) * (np.arange(1, nin + 1) / nin), hi + above])[:nlev]
+            R = np.zeros((nlev, 3))
+            R[:, 0] = R[:, 2] = 1.0
+            if hi - lo < 1e-9:
+                return lev, R
+            region = binary_dilation(cell, iterations=ring) if ring else cell
+            K, kmean = cell_tensor(region, z, in2[y0:y1, x0:x1], lev, dx, avg=cell)
+            for l in range(nlev):
+                if kmean[l] <= 0.0:
+                    R[l] = (floor, 0.0, floor)
+                    continue
+                w, v = np.linalg.eigh(K[l] / kmean[l])
+                Rl = (v * np.clip(w, floor, 1.0)) @ v.T
+                R[l] = (Rl[0, 0], Rl[0, 1], Rl[1, 1])
+            return lev, R
+
+        if workers > 1:
+            import multiprocessing as mp
+            global _tensor_job
+            _tensor_job = one                    # forked children inherit the closure
+            with mp.get_context('fork').Pool(workers) as pool:
+                out = pool.map(_tensor_call, todo, chunksize=max(len(todo) // (8 * workers), 1))
+        else:
+            out = [one(c) for c in todo]
+        for c, r in zip(todo, out):
+            if r is not None:
+                self.tlev[c], self.tR[c] = r
+
+    def tensor_ratio(self, eta, theta, form='gradient'):
+        """K_theta / Kc for a cell whose discharge points along theta, with
+        R = K*/Kc interpolated linearly in the level (held constant outside the
+        table).
+
+        form='gradient' (default): q^ . R q^. With a scalar friction the cell's
+        discharge follows the level gradient, so theta is the gradient direction
+        and this is the conveyance down the gradient.
+        form='flow': (|R^-1 q^| (q^ . R^-1 q^))^-1/2, the along-flow part of the
+        tensor friction taking theta as the true flux direction. In a strongly
+        anisotropic cell (a channel) a discharge 10 degrees off the axis cuts it
+        to about 0.1. On the valley bench it scored worse (CSI 0.916 against
+        0.947 on coarse500)."""
+        eta = np.asarray(eta, dtype=float)
+        L = self.tlev.shape[1]
+        j = np.clip((self.tlev <= eta[:, None]).sum(axis=1) - 1, 0, L - 2)
+        rows = np.arange(len(eta))
+        l0, l1 = self.tlev[rows, j], self.tlev[rows, j + 1]
+        w = np.clip((eta - l0) / np.maximum(l1 - l0, 1e-12), 0.0, 1.0)[:, None]
+        R = (1 - w) * self.tR[rows, j] + w * self.tR[rows, j + 1]
+        a, b, d = R[:, 0], R[:, 1], R[:, 2]
+        c, s = np.cos(np.nan_to_num(theta)), np.sin(np.nan_to_num(theta))
+        if form == 'gradient':
+            return a * c * c + 2 * b * c * s + d * s * s
+        det = a * d - b * b
+        ux, uy = (d * c - b * s) / det, (-b * c + a * s) / det            # R^-1 q^
+        return (np.hypot(ux, uy) * (c * ux + s * uy)) ** -0.5
+
     def effective_manning(self, eta, h, n_dry, kc=None):
         """n_eff = h^(5/3) / Kc(eta), so ANUGA's Manning term becomes -g h |q| q / Kc^2.
         Cells with no conveyance keep n_dry. kc: Kc(eta) if already computed."""
@@ -363,6 +455,86 @@ class SubgridTables:
         out = np.array(n_dry, dtype=float, copy=True)
         out[ok] = h[ok] ** (5.0 / 3.0) / kc[ok]
         return out
+
+
+_tensor_job = None
+
+
+def _tensor_call(c):
+    return _tensor_job(c)
+
+
+def cell_tensor(region, z, inv_n, levels, dx=1.0, avg=None):
+    """Cell problem for the conveyance tensor on a pixel grid.
+
+    region: bool (ny, nx), the pixels solved on; z, inv_n: bed and 1/n on the same
+    grid; avg: bool sub-mask to average over (default the region). With the level
+    frozen at eta, pixel conveyance k = (eta - z)_+^(5/3) / n and two-point fluxes
+    with harmonic face conveyance, solve for j = x, y
+
+        div( k grad(x_j + phi_j) ) = 0,   phi_j = 0 on the region's boundary pixels
+
+    and take K*_ij = the mean over the i-faces inside avg of the face flux.
+    Returns K (nlev, 2, 2), symmetrised, and the mean of k over avg (nlev,)."""
+    from scipy.sparse import coo_matrix, identity
+    from scipy.sparse.linalg import splu
+    avg = region if avg is None else avg
+    nlev = len(levels)
+    K = np.zeros((nlev, 2, 2))
+    kmean = np.zeros(nlev)
+    idx = np.full(region.shape, -1)
+    P = int(region.sum())
+    idx[region] = np.arange(P)
+    fx = region[:, :-1] & region[:, 1:]              # x-faces: (a) left, (b) right
+    fy = region[:-1, :] & region[1:, :]
+    fa = np.concatenate([idx[:, :-1][fx], idx[:-1, :][fy]])
+    fb = np.concatenate([idx[:, 1:][fx], idx[1:, :][fy]])
+    nfx = int(fx.sum())
+    inavg = avg[region]
+    use = inavg[fa] & inavg[fb]
+    ux, uy = use[:nfx], use[nfx:]
+    pad = np.pad(region, 1)
+    inner = (pad[1:-1, :-2] & pad[1:-1, 2:] & pad[:-2, 1:-1] & pad[2:, 1:-1])[region]
+    I = np.nonzero(inner)[0]
+    zc, inn = z[region], inv_n[region]
+    for l, eta in enumerate(levels):
+        k = np.maximum(eta - zc, 0.0) ** (5.0 / 3.0) * inn
+        kmean[l] = k[inavg].mean()
+    if len(I) == 0 or not ux.any() or not uy.any():
+        K[:, 0, 0] = K[:, 1, 1] = kmean
+        return K, kmean
+    loc = np.full(P, -1)
+    loc[I] = np.arange(len(I))
+    yy, xx = np.nonzero(region)
+    X = np.stack([xx * dx, yy * dx], axis=1).astype(float)
+    la, lb = loc[fa], loc[fb]
+    rows = np.concatenate([la, lb, la, lb])
+    cols = np.concatenate([la, lb, lb, la])
+    ok = (rows >= 0) & (cols >= 0)
+    eye = identity(len(I), format='csc')
+    for l, eta in enumerate(levels):
+        if kmean[l] <= 0.0:
+            continue
+        k = np.maximum(eta - zc, 0.0) ** (5.0 / 3.0) * inn
+        ka, kb = k[fa], k[fb]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            cf = np.where(ka + kb > 0, 2 * ka * kb / (ka + kb), 0.0)
+        # A = sum_f cf (e_a - e_b)(e_a - e_b)^T on the interior rows and columns
+        vals = np.concatenate([cf, cf, -cf, -cf])
+        A = coo_matrix((vals[ok], (rows[ok], cols[ok])), shape=(len(I), len(I))).tocsc()
+        A = A + 1e-10 * k.max() * eye        # isolated wet pixels and dry ones stay solvable
+        d = cf[:, None] * (X[fa] - X[fb])
+        rhs = np.zeros((len(I), 2))          # -(A x) on the interior
+        np.add.at(rhs, la[la >= 0], -d[la >= 0])
+        np.add.at(rhs, lb[lb >= 0], d[lb >= 0])
+        phi = np.zeros((P, 2))
+        phi[I] = splu(A).solve(rhs)
+        e = X + phi
+        g = cf[:, None] * (e[fb] - e[fa]) / dx   # face flux for unit gradients along x and y
+        Kx, Ky = g[:nfx][ux].mean(axis=0), g[nfx:][uy].mean(axis=0)
+        off = 0.5 * (Kx[1] + Ky[0])
+        K[l] = [[Kx[0], off], [off, Ky[1]]]
+    return K, kmean
 
 
 def edge_subface_beds(domain, tables, nsub, bed, ds=0.1, manning=None):
@@ -419,7 +591,7 @@ class Subgrid_storage_operator(Operator):
     def __init__(self, domain, tables, limit_timestep=True, cfl=1.0,
                  cap_min_depth=0.0, cap_min_fraction=0.0, conveyance_friction=False,
                  edge_z=None, cap_exponent=1.0, drain_limiter=False, edge_invn=None,
-                 connectivity=False, directional=False, description='subgrid storage', label=None):
+                 connectivity=False, directional=False, tensor=False, tensor_form='gradient', description='subgrid storage', label=None):
         Operator.__init__(self, domain, description=description, label=label)
         self.tables = tables
         self.stage = domain.quantities['stage']
@@ -454,6 +626,10 @@ class Subgrid_storage_operator(Operator):
         self.directional = directional
         if directional and getattr(tables, 'dkey', None) is None:
             raise ValueError('directional needs tables.add_directional')
+        self.tensor = tensor
+        self.tensor_form = tensor_form
+        if tensor and getattr(tables, 'tR', None) is None:
+            raise ValueError('tensor needs tables.add_tensor')
         self.connectivity = connectivity
         if connectivity:
             # a sub-triangle holds water once reached: the cell level has passed
@@ -628,6 +804,11 @@ class Subgrid_storage_operator(Operator):
             th = np.arctan2(self.ymom.centroid_values, self.xmom.centroid_values)
             kc = self.tables.conveyance(eta) if kc is None else np.array(kc, dtype=float)
             kc[self.tables.dcells] = self.tables.directional_conveyance(eta, th)
+        if self.tensor:
+            # along-flow part of the cell-problem tensor friction
+            th = np.arctan2(self.ymom.centroid_values, self.xmom.centroid_values)
+            kc = self.tables.conveyance(eta) if kc is None else np.array(kc, dtype=float)
+            kc = kc * self.tables.tensor_ratio(eta, th, self.tensor_form)
         self.friction.centroid_values[:] = self.tables.effective_manning(eta, h, self.n_base, kc)
 
     def _limit_timestep(self, eta, h):

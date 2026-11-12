@@ -69,13 +69,16 @@ def main():
     ap.add_argument('--no-conv', action='store_true', help='subgrid without conveyance friction or split (Manning on the mean depth)')
     ap.add_argument('--conn', action='store_true', help='subgrid with the edge-connectivity rule')
     ap.add_argument('--dir', action='store_true', help='subgrid with direction-dependent friction')
+    ap.add_argument('--tensor', action='store_true', help='subgrid with the cell-problem conveyance tensor in the friction')
+    ap.add_argument('--tring', type=int, default=0, help='oversampling ring for the cell problem, pixels')
+    ap.add_argument('--tfloor', type=float, default=0.01, help='lowest eigenvalue of K*/Kc')
     ap.add_argument('--pond', action='store_true', help='subgrid with two-compartment storage (ponds behind sills fill through a weir)')
     ap.add_argument('--nsub', type=int, default=8, help='sub-triangle split n (n^2 per cell)')
     ap.add_argument('--q', type=float, default=5.0)
     ap.add_argument('--hours', type=float, default=4.0)
     args = ap.parse_args()
     bed = ground(args.terrain)
-    tag = f'flat_{args.terrain}_{args.area:g}_{"sub" if args.subgrid else "plain"}' + ('nc' if args.no_conv else '') + ('C' if args.conn else '') + ('D' if args.dir else '') + ('P' if args.pond else '') + (f'n{args.nsub}' if args.nsub != 8 else '') + {'parallel': '', 'geometric': 'G', 'series': 'S'}[os.environ.get('SUBGRID_KMEAN', 'parallel')]
+    tag = f'flat_{args.terrain}_{args.area:g}_{"sub" if args.subgrid else "plain"}' + ('nc' if args.no_conv else '') + ('C' if args.conn else '') + ('D' if args.dir else '') + ('T' if args.tensor else '') + (f'r{args.tring}' if args.tensor and args.tring else '') + (f'f{args.tfloor:g}' if args.tensor and args.tfloor != 0.01 else '') + ('P' if args.pond else '') + (f'n{args.nsub}' if args.nsub != 8 else '') + {'parallel': '', 'geometric': 'G', 'series': 'S'}[os.environ.get('SUBGRID_KMEAN', 'parallel')]
 
     domain = anuga.create_domain_from_regions([[0, 0], [L, 0], [L, W], [0, W]],
                                               {'bottom': [0], 'right': [1], 'top': [2], 'left': [3]},
@@ -129,6 +132,12 @@ def main():
             zs, _, _, sx, sy = cells.subgrid(args.nsub, px, py, pz, return_centroids=True)
             u = ~np.isnan(zs[0])
             tables.add_directional(sx[:, u], sy[:, u])
+        if args.tensor:
+            t1 = time.time()
+            tables.add_tensor(own, (int(W), int(L)), pz, np.full(pz.shape, N), dx=1.0, floor=args.tfloor, ring=args.tring, workers=8)
+            print(f'tensor tables: {time.time() - t1:.0f} s; R_xx at the top inner level, quartiles '
+                  f'{np.round(np.percentile(tables.tR[:, 11, 0], [25, 50, 75]), 2)}, R_yy '
+                  f'{np.round(np.percentile(tables.tR[:, 11, 2], [25, 50, 75]), 2)}', flush=True)
         if args.conn:
             zs, _, _ = cells.subgrid(args.nsub, px, py, pz)
             tables.add_connectivity(zs[:, ~np.isnan(zs[0])], args.nsub, domain)
@@ -151,7 +160,7 @@ def main():
         op = Subgrid_storage_operator(domain, tables, cap_min_fraction=0.0, cfl=0.75 if args.no_conv else 0.5,
                                       conveyance_friction=not args.no_conv, edge_z=ez, cap_exponent=0.0,
                                       drain_limiter=True, edge_invn=ein,
-                                      connectivity=args.conn, directional=args.dir)
+                                      connectivity=args.conn, directional=args.dir, tensor=args.tensor)
         op.set_initial_level(tables.zmin)
 
     stage = domain.quantities['stage']
