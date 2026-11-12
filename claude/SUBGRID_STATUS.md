@@ -1,6 +1,6 @@
 # Subgrid terrain (#508): what we are building and where it stands
 
-State on 2026-11-09. Branch `develop_subgrid` at the commits listed at the end.
+State on 2026-11-12. Branch `develop_subgrid` at the commits listed at the end.
 Read `SUBGRID_START_HERE.md` for setup and rules, and `SUBGRID_DESIGN.md` for the plan.
 The figures are in `claude/figures/subgrid/`. Regenerate them from the bench results with
 `python subgrid_bench/report_figures.py`.
@@ -25,6 +25,10 @@ The figures are in `claude/figures/subgrid/`. Regenerate them from the bench res
 - **Outlet reach explained:** the low levels approaching the steep outlet reach come
   from the coarse cells at the critical-depth control. Refining only those cells
   removes the error, including upstream of the refined area (see *The outlet reach*).
+- **The conveyance closure is the weak spot.** On a flat-plain bench with relief the
+  subgrid front spreads 120–140 m too far in 2 h, because Kc adds the sub-triangles
+  side by side. Experimental fixes (strips, hollows, connectivity, two-compartment
+  storage) are in the bench, off by default (see *Next: better closures*).
 - **Still to do:** the production steps of Phase 3. The tables live in a Python
   operator in the bench, not in a flow algorithm. There is no GPU (mode 2) path, the
   operators (inlets, rain, culverts) haven't been audited, and there is no parallel
@@ -327,6 +331,122 @@ bench, use `SUBGRID_LOW_FROUDE=5`. Even the corrected references are about 7% sh
 true conveyance, so the Manning normal depth stays the cleanest steady check. A side fix
 for breakline meshes ignoring the maximum triangle area is in PR #512 (issue #511).
 
+## Next: better closures from the fine terrain
+
+The tables answer two questions for each cell: how much water it holds at level η, and
+how easily that water flows. Storage is exact. The flow part is a guess at how the
+sub-triangles combine, and the flat-plain bench shows where the guess fails.
+
+### Where the current closure falls short
+
+`flat_plain.py` feeds 5 m³/s onto a 1500 × 150 m plain (n = 0.05) and tracks the wet
+front. A fine 4 m² mesh is the reference; the subgrid runs use 1000 m² cells. Distance
+(m) to which 90% of the water has spread after 2 h:
+
+| ground | fine 4 m² | subgrid | + strips |
+|---|---|---|---|
+| flat | 830 | 840 | 840 |
+| 0.15 m ridges, every 100 m | 720 | 860 | 830 |
+| random relief, σ = 0.1 m | 710 | 830 | 710 |
+
+- **The conveyance is an upper bound.** Kc adds the sub-triangles' conveyance as if they
+  all flowed side by side. That is right for flow along a ridge and too fast across it.
+- **The strips are a heuristic.** They cut the cell into strips across the flow and
+  treat the strips as being in series (`--dir`, `add_directional`). On the random relief
+  that matches the fine run. But a channel that enters a cell partway along leaves
+  strips with only bank in them; those hit the floor and choke the channel. A private
+  real-river check showed the same fault.
+- **Storage is instant.** The tables assume the water in a cell is level, so ground
+  behind a low sill fills as soon as the cell level reaches the sill, not over the time
+  a flood takes to get through the gap.
+
+### 1 · A conveyance tensor from a cell problem
+
+Numerical homogenisation, as reservoir models turn fine-scale permeability into
+grid-block tensors (Durlofsky 1991). For slow, friction-dominated flow in a cell,
+Manning gives the local discharge per unit width:
+
+$$\mathbf q = -k(\mathbf x)\,|\nabla\eta|^{-1/2}\,\nabla\eta,\qquad k = \frac{(\eta - z)_+^{5/3}}{n},\qquad \nabla\cdot\mathbf q = 0 \ \text{in } \Omega_c$$
+
+Freeze the depth at the cell level and the slope magnitude at a reference value, so the
+problem is linear. For each unit direction $\mathbf e_j$ solve for a correction $\phi_j$:
+
+$$\nabla\cdot\big(k\,(\mathbf e_j + \nabla\phi_j)\big) = 0 \ \text{in } \Omega_c,\qquad \phi_j = 0 \ \text{on } \partial\Omega_c$$
+
+$$K^*_{ij}(\bar\eta) = \frac{1}{|\Omega_c|}\int_{\Omega_c} k\,(\delta_{ij} + \partial_i\phi_j)\,dA,\qquad \langle\mathbf q\rangle = -|\mathbf G|^{-1/2}\,K^*\,\mathbf G$$
+
+$K^*$ is symmetric, 3 numbers per level, and goes in the tables beside h(η) and Kc(η).
+It lies between the series and parallel averages:
+
+$$K_s = \Big(\tfrac1m\sum_j k_j^{-2}\Big)^{-1/2} \le \hat{\mathbf G}\cdot K^*\hat{\mathbf G} \le K_c = \tfrac1m\sum_j k_j$$
+
+Today's Kc is the upper bound. On flat ground all three are equal.
+
+- **Friction with a tensor.** $\mathbf S_f = |K^{*-1}\mathbf q|\,K^{*-1}\mathbf q$, source
+  $= -g h\,\mathbf S_f$. With $K^* = K_c I$ this is today's friction. The exact form has
+  a component across **q**, which needs a change to the friction kernel. Keeping only
+  the part along **q** fits the scalar n_eff:
+  $K_\theta^{-2} = |K^{*-1}\hat{\mathbf q}|\,(\hat{\mathbf q}\cdot K^{*-1}\hat{\mathbf q})$,
+  $n_\text{eff} = h^{5/3}/K_\theta$.
+- **Where to solve it.** On the DEM pixels in the cell, with a two-point flux and face
+  conductance 2k_a k_b/(k_a + k_b). The 64 sub-triangles are too coarse to carry a 2 m
+  channel through the cell.
+- **Cost.** Cells × levels × 2 small sparse SPD solves: 10⁴ cells at 20 levels is
+  4 × 10⁵ solves, minutes in parallel, once per mesh.
+- **Boundary condition.** φ = 0 on the cell edge overstates connections; solving on the
+  cell plus a ring of pixels and averaging over the cell only (oversampling) reduces it.
+- **Nonlinearity.** Check the frozen-slope tensor against the nonlinear (p-Laplacian,
+  p = 3/2) cell problem at two slopes.
+- **Edge version.** The same solve on the union of two neighbouring cells, with η = 1
+  and 0 on their outer boundaries, gives a transmissibility $T_{AB}(\bar\eta)$. In the
+  friction-dominated limit the edge discharge should approach
+  $T_{AB}\,\mathrm{sgn}(\eta_A-\eta_B)\,|\eta_A-\eta_B|^{1/2}$, and the subface weights
+  could be scaled to meet it. A ridge on the edge shows up as a small $T_{AB}$ until
+  the level clears it, which is the principled form of the connectivity rule.
+
+### 2 · Two storage compartments per cell
+
+Early filling is a matter of timing, which no table of level against volume can fix.
+Give each cell a second store for ground behind a sill:
+
+$$V = V_c(\eta_c) + V_p(\eta_p),\qquad \frac{dV_p}{dt} = Q_w$$
+
+$$Q_w = C_w\,w_s\sqrt g\;\mathrm{sgn}(\eta_c-\eta_p)\,H^{3/2}\,\psi,\qquad H = \max(\eta_c,\eta_p) - z_s,\qquad \psi = \Big(1 - \big(\tfrac{H_d}{H}\big)^{3/2}\Big)^{0.385}$$
+
+- The coarse scheme sees only the connected level η_c. The operator moves Q_w Δt
+  between the stores, so mass stays exact. ψ is Villemonte's drowned-weir correction.
+- The sill level z_s is the spill level from the minimax search; V_p comes from the
+  sub-triangles behind the sill; w_s is the length of sill at z_s plus a few centimetres.
+- The exchange is stiff when w_s is wide and V_p small: integrate it implicitly or limit
+  it to the level difference.
+- Close to dual integral porosity (Guinot, Sanders & Schubert 2017), applied to terrain.
+- A first version is in `pond_storage.py` (`flat_plain.py --pond`). Not yet scored.
+
+### 3 · A learned closure, last and as a correction
+
+A learned antisymmetric correction to the edge flux that vanishes at rest, trained on
+fine runs over synthetic terrain. Only once items 1 and 2 have run out of improvement.
+
+### Consistency with the P1 reconstruction (noted 2026-11-12)
+
+The bench runs on the default `DE_ader2`, so stage is already P1 (reconstructed and
+limited) where the fluxes are computed. The subgrid pieces still assume a level
+surface: η(h) inverts the table for a flat level, the kernel's bed source uses the
+centroid level on every subface, each edge side has one stage for all 16 subfaces, and
+the conveyance split uses one friction slope per cell. Making these consistent with the
+gradient the scheme already carries (tabulated wet-area first moments; stage varying
+linearly along the edge) is a candidate fix for the outlet reach. First check: the
+limited stage gradient in the cells straddling the slope break.
+
+### Plan
+
+1. Build the cell-problem tensor in `subgrid_tables.py` and test it on the flat-plain
+   bench. Add a meandering-channel plain, the case that broke the strips.
+2. Compare the full tensor friction with the along-flow version, and check the slope
+   dependence with the nonlinear cell problem.
+3. If it holds up, re-run the private real-river case against its fine reference.
+4. Then the two-compartment storage, aimed at the floodplain onset.
+
 ## Where the code is
 
 ### In ANUGA (`anuga/shallow_water`), committed in 18c1c851
@@ -356,7 +476,7 @@ All synthetic. Run outputs (`results/`, `*.npz`, logs, plots) stay local through
 | File | Role |
 |---|---|
 | `terrain.py` | analytic valley: 2000 × 500 m, slope 1:1000, a meandering trapezoidal channel (10 m base, 2 m deep, 1:2 banks), a floodplain with hollows, and an outlet control at x = 1900. `SUBGRID_AMPLITUDE=0` straightens the channel |
-| `subgrid_tables.py` | the method: `SubgridTables` (sorted sub-triangle beds, h(η), η(h), f(η), Kc(η)), `edge_subface_beds` (subface beds and 1/n), and `Subgrid_storage_operator` (the per-step update) |
+| `subgrid_tables.py` | the method: `SubgridTables` (sorted sub-triangle beds, h(η), η(h), f(η), Kc(η)), `edge_subface_beds` (subface beds and 1/n), and `Subgrid_storage_operator` (the per-step update). Experimental, off by default: hollow sills (`SUBGRID_HOLLOWS=1`), the connectivity rule (`connectivity=True`), direction-dependent strips (`directional=True`), and series or geometric conveyance averaging (`SUBGRID_KMEAN`) |
 | `run_phase0.py` | hydrograph runs (5 → 60 → 5 m³/s, 5.5 h) for every variant; `--gpu`, `--diag`; environment switches `SUBGRID_TAG` and `SUBGRID_LOW_FROUDE` |
 | `evaluate_phase0.py` | scores the runs against a reference: flood-extent CSI, peak Q and its timing, arrival time, peak stage |
 | `report_figures.py` | the figures in this report, from the `results/*_diag*.npz` files |
@@ -365,6 +485,8 @@ All synthetic. Run outputs (`results/`, `*.npz`, logs, plots) stay local through
 | `steady.py`, `trap_conv.py` | steady runs against Manning normal depth; the straight-trapezoid check that found the reference bias |
 | `steady_outlet.py`, `gvf_1d.py`, `compare_outlet.py` | the outlet-reach study: steady runs at a fixed Q (with `SUBGRID_OUTLET_AREA` refining x > `SUBGRID_OUTLET_X`), the 1D standard-step profile, and the comparison and figure |
 | `outlet_eq.py` | flood runs against the reference's volume-equivalent level in each coarse cell |
+| `flat_plain.py`, `flat_summary.py`, `flat_profile.py` | the flat-plain front-speed bench (flat, ridged, rough ground; `--conn`, `--dir`, `--pond`, `--no-conv`) and its summaries |
+| `pond_storage.py` | two-compartment storage: `PondStore` and `Pond_exchange_operator` (weir exchange between the connected store and ponds behind sills) |
 | `launch_*.sh` | the tmux batch scripts used for each round of runs |
 
 ## Known issues and open items
@@ -390,8 +512,8 @@ All synthetic. Run outputs (`results/`, `*.npz`, logs, plots) stay local through
    - parallel partitioning of the tables;
    - SWW output with downscaled depth;
    - a DEM-based builder.
-6. **Private real-world check:** the Serna case (#453) hasn't been re-scored yet. Its
-   data and results stay outside the repo.
+6. **Private real-world check:** the Serna case (#453) was re-scored on 2026-11-09.
+   Its data and results stay outside the repo.
 
 ## How to run
 
@@ -428,5 +550,7 @@ and run `ninja` in `build-gpu` with nvc on PATH.
 | b52906f0 | status report; bench runs with the switch on |
 | d9d8bbe3 | status rescored against band025TU |
 | f096cbc9 | status report with figures; `--diag` channel split fixed |
+| b9b3c0a3 | outlet-reach study |
+| (this commit) | flat-plain bench; experimental closures (hollows, connectivity, strips, two-compartment storage); closures plan |
 
-The branch is not pushed to origin.
+The branch is pushed to `origin` (the stoiver fork).

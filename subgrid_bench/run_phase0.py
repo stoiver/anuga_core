@@ -298,8 +298,10 @@ def main():
         from subgrid_tables import SubgridTables
         px, py, pz = T.dtm()
         cells = Cells(domain.nodes, domain.triangles, px, py)
+        # SUBGRID_HOLLOWS=1: closed depressions in a cell fill only from their sills
         tables = SubgridTables.from_cells(cells, sub_n, px, py, pz,
-                                          manning=friction if args.variant in CONVEYANCE else None)
+                                          manning=friction if args.variant in CONVEYANCE else None,
+                                          hollows=os.environ.get('SUBGRID_HOLLOWS', '0') == '1')
         del px, py, pz
         z = tables.zmin.copy()        # lowest point per cell: wet/dry and extent tests
 
