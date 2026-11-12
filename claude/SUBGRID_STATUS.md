@@ -427,16 +427,33 @@ $$Q_w = C_w\,w_s\sqrt g\;\mathrm{sgn}(\eta_c-\eta_p)\,H^{3/2}\,\psi,\qquad H = \
 A learned antisymmetric correction to the edge flux that vanishes at rest, trained on
 fine runs over synthetic terrain. Only once items 1 and 2 have run out of improvement.
 
-### Consistency with the P1 reconstruction (noted 2026-11-12)
+### The reconstruction is effectively first order in subgrid cells (measured 2026-11-12)
 
-The bench runs on the default `DE_ader2`, so stage is already P1 (reconstructed and
-limited) where the fluxes are computed. The subgrid pieces still assume a level
-surface: η(h) inverts the table for a flat level, the kernel's bed source uses the
-centroid level on every subface, each edge side has one stage for all 16 subfaces, and
-the conveyance split uses one friction slope per cell. Making these consistent with the
-gradient the scheme already carries (tabulated wet-area first moments; stage varying
-linearly along the edge) is a candidate fix for the outlet reach. First check: the
-limited stage gradient in the cells straddling the slope break.
+The bench runs on this checkout's default, `DE0`: Euler in time, a limited P1
+reconstruction in space (`beta_w = 0.5`, `beta_w_dry = 0`). In the steady straight-channel
+run (EKLC 500, Q = 50 m³/s) the limited stage gradient the flux kernel reads is close
+to zero in the channel cells:
+
+| reach (m) | channel cells | limited dη/dx | unlimited dη/dx | ratio |
+|---|---|---|---|---|
+| 1600–1800 | 17 | −0.00004 | −0.0028 | 0.01 |
+| 1800–1900 | 8 | −0.0005 | −0.0090 | 0.06 |
+| 1900–1980 | 7 | 0 | −0.021 | 0 |
+
+The unlimited gradient is the plane through the three neighbour centroids. The cause is
+the wet/dry factor in the edge extrapolation: it scales beta from `beta_w_dry` to
+`beta_w` as the smaller of hmin/hc and hc/hmax over the cell and its neighbours goes
+from 0.1 to 0.3 (`ANUGA_HFACTOR_B`, `ANUGA_HFACTOR_A`). It reads the *mean* depths. A
+channel cell next to a bank cell has a depth ratio near 0.1 although both share one
+level: the median over the wet cells at x = 1000–1900 is 0.12, and every cell below
+0.1 (33 of 89) has a zero gradient.
+
+So the subgrid scheme is P0 in the level almost everywhere, and the level-surface
+pieces (η(h), the bed source on the centroid level, one stage per edge side, one
+friction slope per cell) are consistent with what the reconstruction delivers. To use a
+P1 level, the limiter first needs a subgrid-aware wet/dry test (for example on the level
+against the neighbours' lowest beds, or on the wet fraction), and then the tables need
+the tilted-surface terms (wet-area first moments; stage varying along the edge).
 
 ### Plan
 
