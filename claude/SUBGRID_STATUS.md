@@ -450,10 +450,39 @@ level: the median over the wet cells at x = 1000–1900 is 0.12, and every cell 
 
 So the subgrid scheme is P0 in the level almost everywhere, and the level-surface
 pieces (η(h), the bed source on the centroid level, one stage per edge side, one
-friction slope per cell) are consistent with what the reconstruction delivers. To use a
-P1 level, the limiter first needs a subgrid-aware wet/dry test (for example on the level
-against the neighbours' lowest beds, or on the wet fraction), and then the tables need
-the tilted-surface terms (wet-area first moments; stage varying along the edge).
+friction slope per cell) are consistent with what the reconstruction delivers.
+`DE_ader2` (beta 1.0, half-step predictor) zeroes the same cells, and its level is within
+4–6 mm of DE0 at x = 1550–1850.
+
+### A P1 level from connected neighbours: tried, parked (2026-11-12)
+
+`Subgrid_storage_operator.enable_p1_level()` (`SUBGRID_P1=1`, off by default) rebuilds
+the edge levels after each extrapolation. A neighbour counts if both cells are wet and
+the lower of the two levels is more than 2 cm above the lowest subface bed of the shared
+edge. The gradient is a least-squares fit over those neighbours, limited as ANUGA does.
+Edge mean depth and momentum are set to the cell's own (P1 level, P0 discharge).
+
+Same steady run; slope is the share of the unlimited slope recovered, level is against
+the DE0 baseline:
+
+| run | slope 1600–1800 | slope 1800–1900 | level, x = 1050–1700 | level, x = 1800–1850 |
+|---|---|---|---|---|
+| DE0 baseline | 0.01 | 0.06 | 0 | 0 |
+| DE0 + P1, beta 0.5 | 0.54 | 0.40 | −2 to −3 cm | −0.3 cm |
+| DE0 + P1, beta 1.0 | 0.72 | 0.55 | −2 to −3 cm | +1.4 cm |
+| DE_ader2 + P1, beta 1.0 | 0.68 | 0.55 | −7 to −8 cm | −2.8 cm |
+
+- It works mechanically: 95% of the wet cells get a gradient, the runs are stable and
+  the step count is unchanged.
+- **It does not fix the outlet reach.** The baseline is 7–12 cm low against the 1D
+  profile at x = 1800–1850 and the P1 level moves that by at most 1.4 cm. The flat level
+  in the control cells is not the cause.
+- **It biases the uniform reach low**, where the baseline was within 2 cm of the 1D
+  profile. Causes not verified. Suspects: the kernel scales each subface velocity by
+  its depth at the edge level, so a tilted level changes the edge discharge although the
+  cell's discharge is constant; and for the extra 5 cm on DE_ader2, the predictor's
+  gravity term, which uses the mean depth times the level slope.
+- Parked. Reproduce with `grad_probe.py` (see its docstring).
 
 ### Plan
 
@@ -504,6 +533,7 @@ All synthetic. Run outputs (`results/`, `*.npz`, logs, plots) stay local through
 | `outlet_eq.py` | flood runs against the reference's volume-equivalent level in each coarse cell |
 | `flat_plain.py`, `flat_summary.py`, `flat_profile.py` | the flat-plain front-speed bench (flat, ridged, rough ground; `--conn`, `--dir`, `--pond`, `--no-conv`) and its summaries |
 | `pond_storage.py` | two-compartment storage: `PondStore` and `Pond_exchange_operator` (weir exchange between the connected store and ponds behind sills) |
+| `grad_probe.py` | limited against unlimited stage gradient near the slope break, for DE0, `PROBE_ALG=DE_ader2` and the `SUBGRID_P1=1` level |
 | `launch_*.sh` | the tmux batch scripts used for each round of runs |
 
 ## Known issues and open items
@@ -568,6 +598,8 @@ and run `ninja` in `build-gpu` with nvc on PATH.
 | d9d8bbe3 | status rescored against band025TU |
 | f096cbc9 | status report with figures; `--diag` channel split fixed |
 | b9b3c0a3 | outlet-reach study |
-| (this commit) | flat-plain bench; experimental closures (hollows, connectivity, strips, two-compartment storage); closures plan |
+| d8499d6a | flat-plain bench; experimental closures (hollows, connectivity, strips, two-compartment storage); closures plan |
+| 121a38f0 | limited stage gradient measured: near zero in subgrid cells |
+| (this commit) | P1 level from connected neighbours (off by default), a negative result; `grad_probe.py`; `SUBGRID_ALG` switch |
 
 The branch is pushed to `origin` (the stoiver fork).

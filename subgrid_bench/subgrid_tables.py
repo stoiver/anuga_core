@@ -477,6 +477,83 @@ class Subgrid_storage_operator(Operator):
             self.friction = domain.quantities['friction']
             self.n_base = self.friction.centroid_values.copy()   # used where Kc = 0
 
+    def enable_p1_level(self, beta=None, min_sub=0.02, h_dry=1.0e-3):
+        """Experimental (#508): a sloping level in each cell for the edge fluxes.
+
+        ANUGA's edge extrapolation drops the gradient where the mean depths of a
+        cell and its neighbours differ by more than about 10:1, which it reads as
+        a wet/dry front. Between subgrid cells that ratio says nothing: a channel
+        cell and a bank cell share one level. So after every extrapolation this
+        rebuilds the edge levels from the neighbours the cell is connected to:
+
+          connected   both cells wet and min(eta_k, eta_j) more than min_sub above
+                      the lowest subface bed of their shared edge
+          gradient    least squares over the connected neighbours (a plane for
+                      three, along the line of centroids for one, none for zero)
+          limiter     ANUGA's: the edge levels stay within beta times the range
+                      of the connected neighbours' levels
+
+        The edge mean depth and momentum are set to the cell's own (a P1 level
+        with a P0 discharge): mean depth and mean velocity jump between subgrid
+        cells for geometric reasons, so their gradients mean nothing. Needs the
+        edge flux kernel (edge_z)."""
+        if not self.edge_flux:
+            raise ValueError('p1 level needs edge_z')
+        d = self.domain
+        n = len(self.tables.area)
+        nb = d.neighbours
+        self.p1_beta = d.beta_w if beta is None else beta
+        self.p1_min_sub, self.p1_h_dry = min_sub, h_dry
+        self.p1_nb = np.where(nb >= 0, nb, np.arange(n)[:, None])
+        self.p1_interior = nb >= 0
+        c = d.centroid_coordinates
+        self.p1_dxn = c[self.p1_nb] - c[:, None, :]
+        self.p1_dxe = d.get_edge_midpoint_coordinates().reshape(n, 3, 2) - c[:, None, :]
+        self.p1_ezmin = d.subgrid_edge_z.reshape(n, 3, -1).min(axis=2)
+        self.p1_height = d.quantities['height']
+        self.p1_cells = 0          # cell-steps with a nonzero gradient
+        self.p1_calls = 0
+        orig = d.distribute_to_vertices_and_edges
+
+        def distribute(*args, **kwargs):
+            orig(*args, **kwargs)
+            self._p1_edges()
+        d.distribute_to_vertices_and_edges = distribute
+
+    def _p1_edges(self):
+        w = self.stage.centroid_values
+        h = np.maximum(w - self.elev.centroid_values, 0.0)
+        wn = w[self.p1_nb]
+        wet = h > self.p1_h_dry
+        conn = (self.p1_interior & wet[:, None] & wet[self.p1_nb]
+                & (np.minimum(w[:, None], wn) - self.p1_ezmin > self.p1_min_sub))
+        dw = np.where(conn, wn - w[:, None], 0.0)
+        dx = self.p1_dxn * conn[:, :, None]
+        m11 = (dx[:, :, 0] ** 2).sum(axis=1)
+        m22 = (dx[:, :, 1] ** 2).sum(axis=1)
+        m12 = (dx[:, :, 0] * dx[:, :, 1]).sum(axis=1)
+        b1 = (dx[:, :, 0] * dw).sum(axis=1)
+        b2 = (dx[:, :, 1] * dw).sum(axis=1)
+        det = m11 * m22 - m12 ** 2
+        tr = m11 + m22
+        full = det > 1.0e-6 * tr ** 2
+        sd = np.where(full, det, 1.0)
+        st = np.where(tr > 0.0, tr, 1.0)
+        gx = np.where(full, (m22 * b1 - m12 * b2) / sd, b1 / st)   # rank 1: along the neighbours
+        gy = np.where(full, (m11 * b2 - m12 * b1) / sd, b2 / st)
+        dq = self.p1_dxe[:, :, 0] * gx[:, None] + self.p1_dxe[:, :, 1] * gy[:, None]
+        qmax = self.p1_beta * np.maximum(dw.max(axis=1), 0.0)[:, None]
+        qmin = self.p1_beta * np.minimum(dw.min(axis=1), 0.0)[:, None]
+        with np.errstate(divide='ignore', invalid='ignore'):
+            r = np.where(dq > qmax, qmax / dq, np.where(dq < qmin, qmin / dq, 1.0))
+        phi = r.min(axis=1)
+        self.stage.edge_values[:] = w[:, None] + phi[:, None] * dq
+        self.p1_height.edge_values[:] = h[:, None]
+        self.xmom.edge_values[:] = self.xmom.centroid_values[:, None]
+        self.ymom.edge_values[:] = self.ymom.centroid_values[:, None]
+        self.p1_cells += int((np.abs(phi[:, None] * dq).max(axis=1) > 1.0e-12).sum())
+        self.p1_calls += 1
+
     def set_initial_level(self, eta):
         eta = np.maximum(np.asarray(eta, dtype=float), self.tables.zmin)
         # at the dry bed the cell is empty (a hollow whose sill is the dry bed counts

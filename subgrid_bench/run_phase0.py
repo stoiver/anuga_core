@@ -248,6 +248,8 @@ def make_domain(variant):
         interior_regions=regions)
     domain.set_name(variant)
     domain.set_store(False)
+    if os.environ.get('SUBGRID_ALG'):          # e.g. DE_ader2 (default: config, DE0)
+        domain.set_flow_algorithm(os.environ['SUBGRID_ALG'])
     x, y = domain.centroid_coordinates.T
     z = T.bed(x, y)
     n = friction(x, y)
@@ -348,6 +350,11 @@ def main():
                                           cap_exponent=EDGE_CAP_P if args.variant in DRAIN_LIMITER else 1.0,
                                           drain_limiter=args.variant in DRAIN_LIMITER,
                                           edge_invn=ein)
+        if os.environ.get('SUBGRID_P1', '0') == '1':
+            # experimental: sloping level in each cell from its connected neighbours
+            beta = os.environ.get('SUBGRID_P1_BETA')
+            sub_op.enable_p1_level(beta=float(beta) if beta else None,
+                                   min_sub=float(os.environ.get('SUBGRID_P1_MINSUB', 0.02)))
         sub_op.set_initial_level(T.water_surface(x, h0))
     elev_q = domain.quantities['elevation']
 
