@@ -535,6 +535,60 @@ Valley flood against band025TU (the case with a channel crossing the cells):
 - Not done: the strips on the valley for a like-for-like comparison, the full tensor
   friction with its transverse part, and the nonlinear cell problem.
 
+### Ridges: put mesh edges on the crests (2026-11-12)
+
+`flat_plain.py --breaklines` meshes the ridged plain with a breakline along each crest.
+No riverwall: the edge subfaces sample the crest, so an edge passes nothing until the
+level clears it, and each side of a ridge is its own cell. Distance to which 90% of the
+water has spread (m):
+
+| run | cells | 1 h | 2 h | 3 h |
+|---|---|---|---|---|
+| fine 4 m² | 86 733 | 410 | 730 | 1030 |
+| subgrid 1000 m² | 340 | 500 | 870 | 1190 |
+| subgrid 1000 m² + tensor | 340 | 470 | 830 | 1140 |
+| subgrid 1000 m², edges on crests | 388 | 410 | 710 | 980 |
+| subgrid 6000 m², edges on crests | 64 | 410 | 700 | 970 |
+| plain 1000 m², edges on crests | 388 | 490 | 860 | 1180 |
+
+- Alignment removes the error: 140 m too far at 2 h becomes 20–30 m short, even on 64
+  cells. It runs 50–60 m short by 3 h; a weir formula on those edges (a riverwall) is
+  the candidate refinement. Whether the subgrid flux kernel honours riverwalls has not
+  been checked.
+- It needs the subgrid edge beds: a plain mesh with the same breaklines gains nothing.
+- The tensor adds nothing once the edges are aligned (700 against 710 m at 2 h).
+- Ridges plus the random relief together (`--terrain mixed`), same measure at
+  1 / 2 / 3 h: fine 380 / 690 / 960; subgrid 490 / 850 / 1170; + tensor 420 / 750 / 1050;
+  edges on crests 390 / 690 / 950; edges on crests + tensor 380 / 670 / 920 (6000 m²:
+  400 / 690 / 930); edges on crests + strips 360 / 660 / 900. Alignment alone matches
+  the fine run here; the tensor on top makes it 20–40 m slow.
+- So continuous ridges longer than a cell belong in the mesh, as HEC-RAS guidance says
+  for its subgrid method.
+
+**Finding the crests automatically.** `crest_lines.py` takes the DTM raster and
+returns polylines for the mesher's `breaklines`: a white top-hat (z minus its grey
+opening over a 10 m window) above 0.05 m picks out narrow raised features, local maxima
+thin them to lines, each connected group gives its longest path plus side branches, and
+ends near the boundary are moved onto it. `flat_plain.py --auto-breaklines 80` uses
+lines at least 80 m long. Same measure at 1 / 2 / 3 h, 1000 m² cells:
+
+| ground | fine | subgrid | hand-placed edges | detected edges | cells: plain / hand / detected |
+|---|---|---|---|---|---|
+| ridged | 410 / 730 / 1030 | 500 / 870 / 1190 | 410 / 710 / 980 | 430 / 740 / 1030 | 340 / 388 / 384 |
+| mixed | 380 / 690 / 960 | 490 / 850 / 1170 | 390 / 690 / 950 | 400 / 710 / 1000 | 340 / 388 / 580 |
+
+- Flat ground gives no lines; the ridged ground gives the 15 ridges; the mixed ground
+  gives 15 main lines and 9 branches; the rough ground alone gives 2 short lines.
+- Detected edges recover most of the gain. On the mixed ground they are 20–40 m fast
+  where the hand-placed ones are within 10 m: some ridge ends are missed where the
+  relief breaks the crest mask.
+- **Mesh cost is the weak point.** Wiggly lines and branches make small triangles. With a
+  2 m simplification tolerance the mixed run needed 351 000 steps (222 s); with 3 m (now
+  the default) 39 600 steps (17 s), against 11 900 (5 s) for the hand-placed edges. The
+  rough ground with its 2 short lines went from 10 000 to 48 500 steps (2 m tolerance).
+- Not done: a minimum angle or spacing rule where lines meet, a test on the valley
+  (banks and hollows), and thresholds tied to the cell size and flow depth.
+
 ### Plan
 
 1. Build the cell-problem tensor in `subgrid_tables.py` and test it on the flat-plain
@@ -582,9 +636,10 @@ All synthetic. Run outputs (`results/`, `*.npz`, logs, plots) stay local through
 | `steady.py`, `trap_conv.py` | steady runs against Manning normal depth; the straight-trapezoid check that found the reference bias |
 | `steady_outlet.py`, `gvf_1d.py`, `compare_outlet.py` | the outlet-reach study: steady runs at a fixed Q (with `SUBGRID_OUTLET_AREA` refining x > `SUBGRID_OUTLET_X`), the 1D standard-step profile, and the comparison and figure |
 | `outlet_eq.py` | flood runs against the reference's volume-equivalent level in each coarse cell |
-| `flat_plain.py`, `flat_summary.py`, `flat_profile.py` | the flat-plain front-speed bench (flat, ridged, rough ground; `--conn`, `--dir`, `--tensor`, `--pond`, `--no-conv`) and its summaries |
+| `flat_plain.py`, `flat_summary.py`, `flat_profile.py` | the flat-plain front-speed bench (flat, ridged, rough and mixed ground; `--conn`, `--dir`, `--tensor`, `--breaklines`, `--auto-breaklines`, `--pond`, `--no-conv`) and its summaries |
 | `pond_storage.py` | two-compartment storage: `PondStore` and `Pond_exchange_operator` (weir exchange between the connected store and ponds behind sills) |
 | `grad_probe.py` | limited against unlimited stage gradient near the slope break, for DE0, `PROBE_ALG=DE_ader2` and the `SUBGRID_P1=1` level |
+| `crest_lines.py` | finds narrow ridge crests in the DTM raster and returns them as breaklines (`flat_plain.py --auto-breaklines`) |
 | `launch_*.sh` | the tmux batch scripts used for each round of runs |
 
 ## Known issues and open items
@@ -652,6 +707,7 @@ and run `ninja` in `build-gpu` with nvc on PATH.
 | d8499d6a | flat-plain bench; experimental closures (hollows, connectivity, strips, two-compartment storage); closures plan |
 | 121a38f0 | limited stage gradient measured: near zero in subgrid cells |
 | 38698114 | P1 level from connected neighbours (off by default), a negative result; `grad_probe.py`; `SUBGRID_ALG` switch |
-| (this commit) | cell-problem conveyance tensor (off by default) with oversampling; first results |
+| ddb3d4a5 | cell-problem conveyance tensor (off by default) with oversampling; first results |
+| (this commit) | mesh edges on ridge crests (`--breaklines`), automatic crest detection (`crest_lines.py`, `--auto-breaklines`), mixed ground |
 
 The branch is pushed to `origin` (the stoiver fork).

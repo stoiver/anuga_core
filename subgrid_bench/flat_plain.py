@@ -9,6 +9,7 @@ of width). Ground:
            across the full width: the sheet flow must pond and spill over each
   rough    random micro-relief, 0.1 m standard deviation, about 15 m correlation
            length (fixed seed)
+  mixed    the ridges plus the random micro-relief
 
 Meshes: plain ANUGA at --area (fine: the reference) or the subgrid EKLC
 operator (8x8 sub-triangle tables, 16 subfaces per edge, conveyance friction,
@@ -58,12 +59,15 @@ def ground(terrain):
             x, y = np.asarray(x, float), np.asarray(y, float)
             return f(np.stack([y.ravel(), x.ravel()], -1)).reshape(x.shape)
         return z
+    if terrain == 'mixed':
+        zr, zo = ground('ridged'), ground('rough')
+        return lambda x, y: zr(x, y) + zo(x, y)
     raise ValueError(terrain)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--terrain', default='flat', choices=['flat', 'ridged', 'rough'])
+    ap.add_argument('--terrain', default='flat', choices=['flat', 'ridged', 'rough', 'mixed'])
     ap.add_argument('--area', type=float, default=1000.0)
     ap.add_argument('--subgrid', action='store_true')
     ap.add_argument('--no-conv', action='store_true', help='subgrid without conveyance friction or split (Manning on the mean depth)')
@@ -72,17 +76,30 @@ def main():
     ap.add_argument('--tensor', action='store_true', help='subgrid with the cell-problem conveyance tensor in the friction')
     ap.add_argument('--tring', type=int, default=0, help='oversampling ring for the cell problem, pixels')
     ap.add_argument('--tfloor', type=float, default=0.01, help='lowest eigenvalue of K*/Kc')
+    ap.add_argument('--breaklines', action='store_true', help='mesh edges along the ridge crests (ridged ground)')
+    ap.add_argument('--auto-breaklines', type=float, default=0.0, metavar='MIN_LENGTH',
+                    help='mesh edges along crests found in the 1 m DTM (crest_lines.py), at least this long (m)')
+    ap.add_argument('--crest-tol', type=float, default=3.0, help='simplification tolerance of the detected crest lines (m)')
+    ap.add_argument('--crest-branch', type=float, default=None, help='shortest side branch kept (m; default a quarter of MIN_LENGTH)')
     ap.add_argument('--pond', action='store_true', help='subgrid with two-compartment storage (ponds behind sills fill through a weir)')
     ap.add_argument('--nsub', type=int, default=8, help='sub-triangle split n (n^2 per cell)')
     ap.add_argument('--q', type=float, default=5.0)
     ap.add_argument('--hours', type=float, default=4.0)
     args = ap.parse_args()
     bed = ground(args.terrain)
-    tag = f'flat_{args.terrain}_{args.area:g}_{"sub" if args.subgrid else "plain"}' + ('nc' if args.no_conv else '') + ('C' if args.conn else '') + ('D' if args.dir else '') + ('T' if args.tensor else '') + (f'r{args.tring}' if args.tensor and args.tring else '') + (f'f{args.tfloor:g}' if args.tensor and args.tfloor != 0.01 else '') + ('P' if args.pond else '') + (f'n{args.nsub}' if args.nsub != 8 else '') + {'parallel': '', 'geometric': 'G', 'series': 'S'}[os.environ.get('SUBGRID_KMEAN', 'parallel')]
+    tag = f'flat_{args.terrain}_{args.area:g}_{"sub" if args.subgrid else "plain"}' + ('nc' if args.no_conv else '') + ('C' if args.conn else '') + ('D' if args.dir else '') + ('T' if args.tensor else '') + (f'r{args.tring}' if args.tensor and args.tring else '') + (f'f{args.tfloor:g}' if args.tensor and args.tfloor != 0.01 else '') + ('P' if args.pond else '') + ('B' if args.breaklines else '') + (f'A{args.auto_breaklines:g}' if args.auto_breaklines else '') + (f't{args.crest_tol:g}' if args.crest_tol != 3.0 else '') + (f'b{args.crest_branch:g}' if args.crest_branch is not None else '') + (f'n{args.nsub}' if args.nsub != 8 else '') + {'parallel': '', 'geometric': 'G', 'series': 'S'}[os.environ.get('SUBGRID_KMEAN', 'parallel')]
 
+    brk = [[[xr, 0.0], [xr, W]] for xr in np.arange(50.0, L, 100.0)] if args.breaklines else None
+    if args.auto_breaklines:
+        from crest_lines import crest_lines
+        gx, gy = np.meshgrid(np.arange(0.5, L), np.arange(0.5, W))
+        brk = [ln.tolist() for ln in crest_lines(bed(gx, gy), 1.0, min_length=args.auto_breaklines, tol=args.crest_tol, min_branch=args.crest_branch,
+                                                 boundary=[[0, 0], [L, 0], [L, W], [0, W]])]
+        print(f'crest lines: {len(brk)}, total length {sum(np.hypot(*np.diff(np.array(b), axis=0).T).sum() for b in brk):.0f} m', flush=True)
     domain = anuga.create_domain_from_regions([[0, 0], [L, 0], [L, W], [0, W]],
                                               {'bottom': [0], 'right': [1], 'top': [2], 'left': [3]},
-                                              maximum_triangle_area=args.area)
+                                              maximum_triangle_area=args.area,
+                                              breaklines=brk or None)
     domain.set_name(tag)
     domain.set_store(False)
     domain.set_compute_mode('legacy' if args.subgrid else 'unified')
