@@ -455,18 +455,17 @@ def fig_cost(out):
 def fig_bias(out):
     fig, ax = plt.subplots(figsize=(5, 3))
     x = np.arange(3)
-    old, tu = [0.63, 0.83, 0.92], [0.79, 0.93, np.nan]
+    old, tu = [0.63, 0.83, 0.92], [0.79, 0.93, 0.97]
     ax.bar(x - 0.18, old, 0.34, color=OLD, label='old flux')
     ax.bar(x + 0.18, tu, 0.34, color=C1, label='LF1 + tangential upwind')
-    for i in range(3):
-        ax.text(x[i] - 0.18, old[i] + 0.02, f'{old[i]:.2f}', ha='center', fontsize=8)
-        if not np.isnan(tu[i]):
-            ax.text(x[i] + 0.18, tu[i] + 0.02, f'{tu[i]:.2f}', ha='center', fontsize=8)
+    for i in range(3):      # labels inside the bars: the tall ones would sit on the dashed line
+        ax.text(x[i] - 0.18, old[i] - 0.1, f'{old[i]:.2f}', ha='center', fontsize=8, color='white')
+        ax.text(x[i] + 0.18, tu[i] - 0.1, f'{tu[i]:.2f}', ha='center', fontsize=8, color='white')
     ax.axhline(1, color=MUTED, ls='--', lw=1)
     ax.set_xticks(x, ['4 m² cells', '1 m² cells', '0.25 m² cells'])
-    ax.set_ylim(0, 1.12)
+    ax.set_ylim(0, 1.25)
     ax.set_ylabel('share of true conveyance')
-    ax.legend(fontsize=8, loc='lower right')
+    ax.legend(fontsize=8, loc='upper left', ncol=2, frameon=False)
     ax.grid(axis='x', visible=False)
     fig.tight_layout()
     fig.savefig(f'{out}/bias.png')

@@ -323,12 +323,13 @@ straight trapezoid the resolved channel carries this share of its true conveyanc
 |---|---|---|
 | 4 m² | 0.63 | 0.79 |
 | 1 m² | 0.83 | 0.93 |
-| 0.25 m² | 0.92 | — |
+| 0.25 m² | 0.92 | 0.97 |
 
 Breaklines and flow-aligned meshes don't fix it. Turn the switch on with
 `domain.set_tangential_upwind()` after `set_low_froude`, or `set_low_froude(5)`; in the
-bench, use `SUBGRID_LOW_FROUDE=5`. Even the corrected references are about 7% short of
-true conveyance, so the Manning normal depth stays the cleanest steady check. A side fix
+bench, use `SUBGRID_LOW_FROUDE=5`. Even with the switch a resolved channel is short of
+true conveyance, by about 7% at 1 m² and 3% at 0.25 m² (the reference's resolution), so the Manning normal depth stays the
+cleanest steady check. A side fix
 for breakline meshes ignoring the maximum triangle area is in PR #512 (issue #511).
 
 ## Next: better closures from the fine terrain
@@ -755,6 +756,7 @@ and run `ninja` in `build-gpu` with nvc on PATH.
 | 38698114 | P1 level from connected neighbours (off by default), a negative result; `grad_probe.py`; `SUBGRID_ALG` switch |
 | ddb3d4a5 | cell-problem conveyance tensor (off by default) with oversampling; first results |
 | 888a3522 | mesh edges on ridge crests (`--breaklines`), automatic crest detection (`crest_lines.py`, `--auto-breaklines`), mixed ground |
-| (this commit) | meandering-channel plain (`meander`, `mrough`, `--band`), `flat_channel.py`: the strips choke the channel, the tensor does not |
+| 24696516 | meandering-channel plain (`meander`, `mrough`, `--band`), `flat_channel.py`: the strips choke the channel, the tensor does not |
+| (this commit) | straight-channel conveyance at 0.25 m² with tangential upwind (0.97); bias figure updated |
 
 The branch is pushed to `origin` (the stoiver fork).
