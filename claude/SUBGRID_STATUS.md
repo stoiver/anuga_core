@@ -1,6 +1,6 @@
 # Subgrid terrain (#508): what we are building and where it stands
 
-State on 2026-11-12. Branch `develop_subgrid` at the commits listed at the end.
+State on 2026-11-13. Branch `develop_subgrid` at the commits listed at the end.
 Read `SUBGRID_START_HERE.md` for setup and rules, and `SUBGRID_DESIGN.md` for the plan.
 The figures are in `claude/figures/subgrid/`. Regenerate them from the bench results with
 `python subgrid_bench/report_figures.py`.
@@ -589,10 +589,55 @@ lines at least 80 m long. Same measure at 1 / 2 / 3 h, 1000 m² cells:
 - Not done: a minimum angle or spacing rule where lines meet, a test on the valley
   (banks and hollows), and thresholds tied to the cell size and flow depth.
 
+### A meandering channel on the plain: the strips choke it, the tensor does not (2026-11-13)
+
+`flat_plain.py --terrain meander` cuts a trapezoidal channel into the level plain: base
+6 m, 1 m deep, banks 1:2, centreline y = 75 + 40 sin(2πx/300). It crosses the 1000 m²
+cells at up to 40° and enters most of them partway along a side. `mrough` cuts the same
+channel into the random relief. The inflow is still 5 m³/s across the full width at
+x = 0. The reference is a 4 m² mesh with a 30 m band of 0.5 m² triangles along the
+channel (`--band 0.5`, 233 268 triangles, 940 s on the GPU). All runs use LF1 +
+tangential upwind (`SUBGRID_LOW_FROUDE=5`). A reference with a 1 m² band is within
+10–40 m on every figure below.
+
+Two measures, in metres at 0.25 / 0.5 / 1 h: how far the water has got along the
+channel (furthest 10 m band whose centreline pixels are more than half wet), and the
+distance to which 90% of the water has spread. The channel front reaches the far end
+(1500 m) at about 1 h. `python flat_channel.py` prints them.
+
+| run (1000 m² cells) | channel front, meander | 90% of water, meander | channel front, mrough | 90% of water, mrough |
+|---|---|---|---|---|
+| fine reference | 560 / 950 / 1500 | 430 / 720 / 1150 | 510 / 870 / 1470 | 390 / 650 / 1060 |
+| plain mesh, centroid bed | 230 / 360 / 550 | 130 / 250 / 410 | 150 / 260 / 460 | 110 / 200 / 350 |
+| subgrid | 740 / 1170 / 1500 | 500 / 810 / 1220 | 600 / 980 / 1500 | 420 / 680 / 1090 |
+| subgrid + strips | 460 / 740 / 1080 | 290 / 410 / 600 | 440 / 620 / 980 | 270 / 370 / 540 |
+| subgrid + tensor, ring 20 | 710 / 1110 / 1500 | 470 / 760 / 1190 | 560 / 910 / 1440 | 400 / 620 / 990 |
+
+- **The strips choke the channel**, as on the private river: at 1 h the channel front is
+  at 1080 m where the fine run has reached the end, and 90% of the water is within
+  600 m against 1150 m. That is little better than the plain mesh that has no channel
+  at all (410 m). The strips are not a usable closure where a channel crosses cells.
+- **The tensor does not choke it.** It stays within 70 m of the reference on the 90%
+  measure on both grounds, and is closer than the side-by-side conveyance on the level
+  ground (40 m against 70–90 m too far).
+- **The side-by-side conveyance runs the channel front 90–220 m ahead** in the first
+  half hour. Part of that is the measure: a coarse cell counts all its channel pixels
+  as wet once its level is above them, and a cell is about 50 m across. The tensor
+  takes 30–70 m off.
+- On the channel plus rough ground the tensor is 30–70 m slow on the 90% measure where
+  the side-by-side conveyance is 30 m fast, so the two are about equally close there.
+- 6000 m² cells (59 cells) show the same ordering. The side-by-side and tensor runs
+  are 100–230 m slow on the 90% measure at 1 h (980 and 920 against 1150 m on the
+  level ground); the strips are at 590 m.
+
+So the tensor is the candidate to replace the strips: it helps on rough ground (two
+thirds of the excess spread) and leaves a channel alone. It has not been re-run on
+the private river.
+
 ### Plan
 
-1. Build the cell-problem tensor in `subgrid_tables.py` and test it on the flat-plain
-   bench. Add a meandering-channel plain, the case that broke the strips.
+1. Done: the cell-problem tensor in `subgrid_tables.py`, tested on the flat-plain bench
+   and on a meandering-channel plain, the case that broke the strips.
 2. Compare the full tensor friction with the along-flow version, and check the slope
    dependence with the nonlinear cell problem.
 3. If it holds up, re-run the private real-river case against its fine reference.
@@ -636,9 +681,10 @@ All synthetic. Run outputs (`results/`, `*.npz`, logs, plots) stay local through
 | `steady.py`, `trap_conv.py` | steady runs against Manning normal depth; the straight-trapezoid check that found the reference bias |
 | `steady_outlet.py`, `gvf_1d.py`, `compare_outlet.py` | the outlet-reach study: steady runs at a fixed Q (with `SUBGRID_OUTLET_AREA` refining x > `SUBGRID_OUTLET_X`), the 1D standard-step profile, and the comparison and figure |
 | `outlet_eq.py` | flood runs against the reference's volume-equivalent level in each coarse cell |
-| `flat_plain.py`, `flat_summary.py`, `flat_profile.py` | the flat-plain front-speed bench (flat, ridged, rough and mixed ground; `--conn`, `--dir`, `--tensor`, `--breaklines`, `--auto-breaklines`, `--pond`, `--no-conv`) and its summaries |
+| `flat_plain.py`, `flat_summary.py`, `flat_profile.py` | the flat-plain front-speed bench (flat, ridged, rough and mixed ground, and the `meander` and `mrough` channel grounds with `--band`; `--conn`, `--dir`, `--tensor`, `--breaklines`, `--auto-breaklines`, `--pond`, `--no-conv`) and its summaries |
 | `pond_storage.py` | two-compartment storage: `PondStore` and `Pond_exchange_operator` (weir exchange between the connected store and ponds behind sills) |
 | `grad_probe.py` | limited against unlimited stage gradient near the slope break, for DE0, `PROBE_ALG=DE_ader2` and the `SUBGRID_P1=1` level |
+| `flat_channel.py`, `launch_meander.sh` | summary of the channel grounds (channel front, plain front, where the volume is); the runs behind it |
 | `crest_lines.py` | finds narrow ridge crests in the DTM raster and returns them as breaklines (`flat_plain.py --auto-breaklines`) |
 | `launch_*.sh` | the tmux batch scripts used for each round of runs |
 
@@ -708,6 +754,7 @@ and run `ninja` in `build-gpu` with nvc on PATH.
 | 121a38f0 | limited stage gradient measured: near zero in subgrid cells |
 | 38698114 | P1 level from connected neighbours (off by default), a negative result; `grad_probe.py`; `SUBGRID_ALG` switch |
 | ddb3d4a5 | cell-problem conveyance tensor (off by default) with oversampling; first results |
-| (this commit) | mesh edges on ridge crests (`--breaklines`), automatic crest detection (`crest_lines.py`, `--auto-breaklines`), mixed ground |
+| 888a3522 | mesh edges on ridge crests (`--breaklines`), automatic crest detection (`crest_lines.py`, `--auto-breaklines`), mixed ground |
+| (this commit) | meandering-channel plain (`meander`, `mrough`, `--band`), `flat_channel.py`: the strips choke the channel, the tensor does not |
 
 The branch is pushed to `origin` (the stoiver fork).

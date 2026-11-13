@@ -10,6 +10,16 @@ of width). Ground:
   rough    random micro-relief, 0.1 m standard deviation, about 15 m correlation
            length (fixed seed)
   mixed    the ridges plus the random micro-relief
+  meander  z = 0 with a meandering trapezoidal channel cut into it: base 6 m,
+           1 m deep, banks 1:2 (10 m across the top), centreline
+           y = 75 + 40 sin(2 pi x / 300). The channel crosses the coarse cells
+           at up to 40 degrees and enters most of them partway along a side
+  mrough   the same channel cut into the random micro-relief
+
+On the channel grounds --band AREA refines a 30 m band along the channel (the
+fine reference resolves the channel with it), and the results also hold cfrac,
+the wet fraction of the pixels within 1 m of the centreline in each 10 m band.
+SUBGRID_LOW_FROUDE sets the flux as in run_phase0.py (5 = LF1 + tangential upwind).
 
 Meshes: plain ANUGA at --area (fine: the reference) or the subgrid EKLC
 operator (8x8 sub-triangle tables, 16 subfaces per edge, conveyance friction,
@@ -34,6 +44,36 @@ import anuga
 
 L, W, N = 1500.0, 150.0, float(os.environ.get("FLAT_N", 0.05))
 BAND = 10.0
+CH_BASE, CH_DEPTH, CH_BANK, CH_AMP, CH_WAVE = 6.0, 1.0, 2.0, 40.0, 300.0
+
+
+def centreline(x):
+    return W / 2 + CH_AMP * np.sin(2 * np.pi * np.asarray(x, float) / CH_WAVE)
+
+
+def channel_distance(x, y):
+    """Approximate perpendicular distance to the channel centreline."""
+    x = np.asarray(x, float)
+    dydx = CH_AMP * 2 * np.pi / CH_WAVE * np.cos(2 * np.pi * x / CH_WAVE)
+    return np.abs(np.asarray(y, float) - centreline(x)) / np.sqrt(1.0 + dydx ** 2)
+
+
+def channel_cut(x, y):
+    """Depth of the trapezoidal channel below the ground, 0 outside it."""
+    return np.clip((CH_BASE / 2 + CH_BANK * CH_DEPTH - channel_distance(x, y)) / CH_BANK, 0.0, CH_DEPTH)
+
+
+def channel_band(half=15.0, x0=3.0, x1=L - 3.0, step=5.0):
+    """Polygon `half` wide each side of the centreline, strictly inside the plain."""
+    xs = np.arange(x0, x1 + 0.5 * step, step)
+    yc = centreline(xs)
+    dydx = CH_AMP * 2 * np.pi / CH_WAVE * np.cos(2 * np.pi * xs / CH_WAVE)
+    nx, ny = -dydx / np.hypot(1.0, dydx), 1.0 / np.hypot(1.0, dydx)
+    up = np.stack([xs + half * nx, yc + half * ny], 1)
+    dn = np.stack([xs - half * nx, yc - half * ny], 1)
+    poly = np.vstack([dn, up[::-1]])
+    poly[:, 0] = np.clip(poly[:, 0], x0, x1)
+    return poly.tolist()
 
 
 def ground(terrain):
@@ -62,12 +102,15 @@ def ground(terrain):
     if terrain == 'mixed':
         zr, zo = ground('ridged'), ground('rough')
         return lambda x, y: zr(x, y) + zo(x, y)
+    if terrain in ('meander', 'mrough'):
+        z0 = ground('rough' if terrain == 'mrough' else 'flat')
+        return lambda x, y: z0(x, y) - channel_cut(x, y)
     raise ValueError(terrain)
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument('--terrain', default='flat', choices=['flat', 'ridged', 'rough', 'mixed'])
+    ap.add_argument('--terrain', default='flat', choices=['flat', 'ridged', 'rough', 'mixed', 'meander', 'mrough'])
     ap.add_argument('--area', type=float, default=1000.0)
     ap.add_argument('--subgrid', action='store_true')
     ap.add_argument('--no-conv', action='store_true', help='subgrid without conveyance friction or split (Manning on the mean depth)')
@@ -81,13 +124,14 @@ def main():
                     help='mesh edges along crests found in the 1 m DTM (crest_lines.py), at least this long (m)')
     ap.add_argument('--crest-tol', type=float, default=3.0, help='simplification tolerance of the detected crest lines (m)')
     ap.add_argument('--crest-branch', type=float, default=None, help='shortest side branch kept (m; default a quarter of MIN_LENGTH)')
+    ap.add_argument('--band', type=float, default=0.0, metavar='AREA', help='channel grounds: triangle area in a 30 m band along the channel')
     ap.add_argument('--pond', action='store_true', help='subgrid with two-compartment storage (ponds behind sills fill through a weir)')
     ap.add_argument('--nsub', type=int, default=8, help='sub-triangle split n (n^2 per cell)')
     ap.add_argument('--q', type=float, default=5.0)
     ap.add_argument('--hours', type=float, default=4.0)
     args = ap.parse_args()
     bed = ground(args.terrain)
-    tag = f'flat_{args.terrain}_{args.area:g}_{"sub" if args.subgrid else "plain"}' + ('nc' if args.no_conv else '') + ('C' if args.conn else '') + ('D' if args.dir else '') + ('T' if args.tensor else '') + (f'r{args.tring}' if args.tensor and args.tring else '') + (f'f{args.tfloor:g}' if args.tensor and args.tfloor != 0.01 else '') + ('P' if args.pond else '') + ('B' if args.breaklines else '') + (f'A{args.auto_breaklines:g}' if args.auto_breaklines else '') + (f't{args.crest_tol:g}' if args.crest_tol != 3.0 else '') + (f'b{args.crest_branch:g}' if args.crest_branch is not None else '') + (f'n{args.nsub}' if args.nsub != 8 else '') + {'parallel': '', 'geometric': 'G', 'series': 'S'}[os.environ.get('SUBGRID_KMEAN', 'parallel')]
+    tag = f'flat_{args.terrain}_{args.area:g}_{"sub" if args.subgrid else "plain"}' + ('nc' if args.no_conv else '') + ('C' if args.conn else '') + ('D' if args.dir else '') + ('T' if args.tensor else '') + (f'r{args.tring}' if args.tensor and args.tring else '') + (f'f{args.tfloor:g}' if args.tensor and args.tfloor != 0.01 else '') + ('P' if args.pond else '') + (f'R{args.band:g}' if args.band else '') + (f'L{os.environ["SUBGRID_LOW_FROUDE"]}' if os.environ.get('SUBGRID_LOW_FROUDE') else '') + ('B' if args.breaklines else '') + (f'A{args.auto_breaklines:g}' if args.auto_breaklines else '') + (f't{args.crest_tol:g}' if args.crest_tol != 3.0 else '') + (f'b{args.crest_branch:g}' if args.crest_branch is not None else '') + (f'n{args.nsub}' if args.nsub != 8 else '') + {'parallel': '', 'geometric': 'G', 'series': 'S'}[os.environ.get('SUBGRID_KMEAN', 'parallel')]
 
     brk = [[[xr, 0.0], [xr, W]] for xr in np.arange(50.0, L, 100.0)] if args.breaklines else None
     if args.auto_breaklines:
@@ -99,10 +143,14 @@ def main():
     domain = anuga.create_domain_from_regions([[0, 0], [L, 0], [L, W], [0, W]],
                                               {'bottom': [0], 'right': [1], 'top': [2], 'left': [3]},
                                               maximum_triangle_area=args.area,
-                                              breaklines=brk or None)
+                                              breaklines=brk or None,
+                                              interior_regions=[[channel_band(), args.band]] if args.band else None)
     domain.set_name(tag)
     domain.set_store(False)
     domain.set_compute_mode('legacy' if args.subgrid else 'unified')
+    lf = int(os.environ.get('SUBGRID_LOW_FROUDE', 0))
+    if lf:
+        domain.set_low_froude(lf)
     x, y = domain.centroid_coordinates.T
     domain.set_quantity('friction', N, location='centroids')
 
@@ -115,6 +163,8 @@ def main():
     band = (px // BAND).astype(int)
     nb = int(L // BAND)
     per_band = np.bincount(band, minlength=nb)
+    chan = channel_distance(px, py) < 1.0 if args.terrain in ('meander', 'mrough') else np.zeros(len(px), bool)
+    chan_band = np.maximum(np.bincount(band[chan], minlength=nb), 1)
 
     op = None
     pond = None
@@ -182,7 +232,7 @@ def main():
 
     stage = domain.quantities['stage']
     elev = domain.quantities['elevation']
-    times, frac, vol, dprof = [], [], [], []
+    times, frac, vol, dprof, cfrac = [], [], [], [], []
     t0 = time.time()
     steps = 0
     print(f'{tag}: {len(domain)} triangles, median area {np.median(domain.areas):.1f} m2', flush=True)
@@ -201,6 +251,7 @@ def main():
         dprof.append(np.bincount(band, weights=pd, minlength=nb) / per_band)
         times.append(t)
         frac.append(np.bincount(band[wet], minlength=nb) / per_band)
+        cfrac.append(np.bincount(band[wet & chan], minlength=nb) / chan_band)
         vol.append(np.sum(np.maximum(h, 0) * domain.areas) + (pond.V.sum() if pond is not None else 0.0))
         if t % 1800 == 0:
             f = frac[-1]
@@ -208,7 +259,7 @@ def main():
             print(f't {t / 3600:4.2f} h  front {front:6.0f} m  volume {vol[-1]:9.0f} (in {args.q * t:9.0f})  '
                   f'steps {steps}  wall {time.time() - t0:5.0f} s', flush=True)
     os.makedirs('results', exist_ok=True)
-    np.savez_compressed(f'results/{tag}.npz', t=np.array(times), frac=np.array(frac), vol=np.array(vol), dprof=np.array(dprof),
+    np.savez_compressed(f'results/{tag}.npz', t=np.array(times), frac=np.array(frac), vol=np.array(vol), dprof=np.array(dprof), cfrac=np.array(cfrac),
                         q=args.q, ntri=len(domain), steps=steps, wall=time.time() - t0)
     if op is not None and args.conn:
         print(f'connectivity: {op.reach_events} cell-steps reached new ground', flush=True)
