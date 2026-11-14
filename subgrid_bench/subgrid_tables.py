@@ -118,6 +118,9 @@ def hollow_sills(zsub, n, edge=None):
     return s
 
 
+EXTRA_RAMP = 10.0     # drowned-pond depth comes in at this multiple of the depth above the sill
+
+
 class SubgridTables:
 
     def __init__(self, zsub, area, nsub=None, sill=None):
@@ -131,6 +134,9 @@ class SubgridTables:
         self.z = z
         self.zslot = None
         self.inv_n = None
+        # extra flow depth per sub-triangle (sorted order), set by the pond exchange:
+        # the pond water under a drowned sill (pond_storage.py). Conveyance only.
+        self.extra = None
         if nsub is not None:
             self.inv_n = 1.0 / np.take_along_axis(np.asarray(nsub, dtype=float), order, axis=1)
         self.area = np.asarray(area, dtype=float)
@@ -282,6 +288,10 @@ class SubgridTables:
         """Kc(eta): conveyance per unit width, (1/m) sum_k max(eta - z_k, 0)^(5/3) / n_k."""
         eta = np.asarray(eta, dtype=float)
         hk = self._active_depth(eta)
+        if self.extra is not None:
+            # ramped in over the first extra / EXTRA_RAMP of depth above the sill
+            hk = hk + np.minimum(self.extra, EXTRA_RAMP * hk)
+            self.hflow = hk.sum(axis=1) / self.m          # mean flow depth, for the friction
         k = hk ** (5.0 / 3.0) * self.inv_n
         mode = KMEAN
         if mode == 'parallel':
@@ -537,7 +547,7 @@ def cell_tensor(region, z, inv_n, levels, dx=1.0, avg=None):
     return K, kmean
 
 
-def edge_subface_beds(domain, tables, nsub, bed, ds=0.1, manning=None):
+def edge_subface_beds(domain, tables, nsub, bed, ds=0.1, manning=None, sort=True, zmin=None):
     """Subface beds for the subgrid edge flux: (3n, nsub), row 3k+i is edge i of
     triangle k (opposite vertex i), split into nsub equal subfaces, each the mean
     of bed(x, y) sampled every <= ds along it.
@@ -550,6 +560,10 @@ def edge_subface_beds(domain, tables, nsub, bed, ds=0.1, manning=None):
     manning: optional function (x, y) -> n. Then returns (z, inv_n), inv_n the
     mean of 1/n along each subface, in the same order as z, for the
     conveyance-weighted subface velocity.
+
+    sort=False leaves the subfaces in their order along the edge (vertex i+1 to
+    i+2; the neighbour's row is the same edge reversed). zmin: per-cell floor
+    to clip at, in place of tables.zmin.
     """
     nodes, tris = domain.nodes, domain.triangles
     n = len(tris)
@@ -571,10 +585,13 @@ def edge_subface_beds(domain, tables, nsub, bed, ds=0.1, manning=None):
             inv_n[c0:c0 + chunk] = (1.0 / manning(x, y)).reshape(len(aa), nsub, per).mean(axis=2)
     own = np.repeat(np.arange(n), 3)
     nb = domain.neighbours.reshape(-1)
-    floor = tables.zmin[own].copy()
+    zmin = tables.zmin if zmin is None else zmin
+    floor = zmin[own].copy()
     inner = nb >= 0
-    floor[inner] = np.maximum(floor[inner], tables.zmin[nb[inner]])
+    floor[inner] = np.maximum(floor[inner], zmin[nb[inner]])
     z = np.maximum(z, floor[:, None])
+    if not sort:
+        return z if manning is None else (z, inv_n)
     order = np.argsort(z, axis=1)
     z = np.ascontiguousarray(np.take_along_axis(z, order, axis=1))
     if manning is None:
@@ -809,7 +826,17 @@ class Subgrid_storage_operator(Operator):
             th = np.arctan2(self.ymom.centroid_values, self.xmom.centroid_values)
             kc = self.tables.conveyance(eta) if kc is None else np.array(kc, dtype=float)
             kc = kc * self.tables.tensor_ratio(eta, th, self.tensor_form)
-        self.friction.centroid_values[:] = self.tables.effective_manning(eta, h, self.n_base, kc)
+        n = self.tables.effective_manning(eta, h, self.n_base, kc)
+        if self.tables.extra is not None:
+            # drowned ponds: the edge pressure acts on the whole flow depth, the
+            # Manning term on the connected depth h only. Scaling n by
+            # sqrt(flow depth / h) makes the friction -g h_flow |q| q / Kc^2,
+            # so a uniform slope still gives q = Kc sqrt(S).
+            if kc is None:
+                self.tables.conveyance(eta)
+            ok = h > 0
+            n[ok] *= np.sqrt(np.maximum(self.tables.hflow[ok] / h[ok], 1.0))
+        self.friction.centroid_values[:] = n
 
     def _limit_timestep(self, eta, h):
         f_all = self.tables.wet_area(eta) / self.tables.area

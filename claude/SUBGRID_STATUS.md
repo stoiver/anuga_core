@@ -1,6 +1,6 @@
 # Subgrid terrain (#508): what we are building and where it stands
 
-State on 2026-11-13. Branch `develop_subgrid` at the commits listed at the end.
+State on 2026-11-14. Branch `develop_subgrid` at the commits listed at the end.
 Read `SUBGRID_START_HERE.md` for setup and rules, and `SUBGRID_DESIGN.md` for the plan.
 The figures are in `claude/figures/subgrid/`. Regenerate them from the bench results with
 `python subgrid_bench/report_figures.py`.
@@ -635,6 +635,51 @@ So the tensor is the candidate to replace the strips: it helps on rough ground (
 thirds of the excess spread) and leaves a channel alone. It has not been re-run on
 the private river.
 
+### Ponds: letting the water under a drowned sill flow (2026-11-14)
+
+The two-compartment storage builds the connected tables and the edge subfaces on beds
+raised to their spill level. Once a pond is full and the level is above its sill, the
+water under the sill should move with the rest, but the raised beds let only the layer
+above the sills flow. `flat_plain.py --pond-deep` (`PondEdges`,
+`Pond_exchange_operator(deep=True)`) lets it flow:
+
+- **Cell conveyance.** Each pond sub-triangle adds the pond water under it to its
+  flow depth, min(η_p, s_k) − z_k, which is the depth to the real bed once the pond is
+  full. It comes in over the first tenth of that depth above the sill, so Kc is
+  continuous.
+- **Edge subfaces.** A subface over pond ground drops from the raised bed towards the
+  real one by the same amount, limited by the lower of the two cells' levels above the
+  raised bed and by the less full of the two sides' ponds. Both sides of an edge keep
+  the same beds, so mass is conserved (volume error 10⁻¹⁰ m³ on the bench).
+- **Friction.** The edge pressure then acts on the whole flow depth, while ANUGA's
+  Manning term acts on the connected depth h. The operator scales n by
+  √(flow depth / h), which makes the friction −g h_flow |q| q / Kc². Without it the
+  front ran faster than with no ponds at all.
+
+Distance to which 90% of the water has spread at 2 h (m), 1000 m² cells:
+
+| ground | fine 4 m² | subgrid | + tensor | + ponds | + ponds, deep | + ponds, deep + tensor |
+|---|---|---|---|---|---|---|
+| flat | 830 | 840 | 840 | 840 | 840 | 840 |
+| ridged | 720 | 860 | 820 | 570 | 800 | 780 |
+| rough | 710 | 830 | 750 | 690 | 810 | 740 |
+| mixed | 680 | 840 | 740 | 640 | 800 | 720 |
+
+- **The two pond variants bracket the fine run.** With the pond water held still the
+  front is 20–40 m slow on the rough and mixed ground and 150 m slow on the ridges.
+  With it flowing on the real bed the front is 80–120 m fast, close to the run with no
+  ponds: once the ponds are full the conveyance is the side-by-side sum again, and the
+  ponds only delay the filling (20–60 m).
+- **What is missing is the resistance of the sills themselves**, which is what the
+  tensor measures. Deep ponds with the tensor are 30–60 m fast, the closest of the
+  variants that are not far wrong on some ground. The ponds add 10–40 m to the tensor
+  alone.
+- Flat ground is unchanged by every variant.
+- 6000 m² cells, deep ponds: ridged 820, rough 900 (810 with the tensor), mixed 780
+  with the tensor.
+- The deep option costs about twice the wall time per step in the Python operator (the
+  edge beds are re-sorted every step).
+
 ### Plan
 
 1. Done: the cell-problem tensor in `subgrid_tables.py`, tested on the flat-plain bench
@@ -682,8 +727,8 @@ All synthetic. Run outputs (`results/`, `*.npz`, logs, plots) stay local through
 | `steady.py`, `trap_conv.py` | steady runs against Manning normal depth; the straight-trapezoid check that found the reference bias |
 | `steady_outlet.py`, `gvf_1d.py`, `compare_outlet.py` | the outlet-reach study: steady runs at a fixed Q (with `SUBGRID_OUTLET_AREA` refining x > `SUBGRID_OUTLET_X`), the 1D standard-step profile, and the comparison and figure |
 | `outlet_eq.py` | flood runs against the reference's volume-equivalent level in each coarse cell |
-| `flat_plain.py`, `flat_summary.py`, `flat_profile.py` | the flat-plain front-speed bench (flat, ridged, rough and mixed ground, and the `meander` and `mrough` channel grounds with `--band`; `--conn`, `--dir`, `--tensor`, `--breaklines`, `--auto-breaklines`, `--pond`, `--no-conv`) and its summaries |
-| `pond_storage.py` | two-compartment storage: `PondStore` and `Pond_exchange_operator` (weir exchange between the connected store and ponds behind sills) |
+| `flat_plain.py`, `flat_summary.py`, `flat_profile.py` | the flat-plain front-speed bench (flat, ridged, rough and mixed ground, and the `meander` and `mrough` channel grounds with `--band`; `--conn`, `--dir`, `--tensor`, `--breaklines`, `--auto-breaklines`, `--pond`, `--pond-deep`, `--no-conv`) and its summaries |
+| `pond_storage.py` | two-compartment storage: `PondStore` and `Pond_exchange_operator` (weir exchange between the connected store and ponds behind sills), and `PondEdges` (edge subfaces that drop to the real bed over drowned ponds; `--pond-deep`) |
 | `grad_probe.py` | limited against unlimited stage gradient near the slope break, for DE0, `PROBE_ALG=DE_ader2` and the `SUBGRID_P1=1` level |
 | `flat_channel.py`, `launch_meander.sh` | summary of the channel grounds (channel front, plain front, where the volume is); the runs behind it |
 | `crest_lines.py` | finds narrow ridge crests in the DTM raster and returns them as breaklines (`flat_plain.py --auto-breaklines`) |
@@ -757,6 +802,7 @@ and run `ninja` in `build-gpu` with nvc on PATH.
 | ddb3d4a5 | cell-problem conveyance tensor (off by default) with oversampling; first results |
 | 888a3522 | mesh edges on ridge crests (`--breaklines`), automatic crest detection (`crest_lines.py`, `--auto-breaklines`), mixed ground |
 | 24696516 | meandering-channel plain (`meander`, `mrough`, `--band`), `flat_channel.py`: the strips choke the channel, the tensor does not |
-| (this commit) | straight-channel conveyance at 0.25 m² with tangential upwind (0.97); bias figure updated |
+| eebe9d09 | straight-channel conveyance at 0.25 m² with tangential upwind (0.97); bias figure updated |
+| (this commit) | ponds: water under a drowned sill flows (`--pond-deep`, `PondEdges`); still and deep ponds bracket the fine run |
 
 The branch is pushed to `origin` (the stoiver fork).

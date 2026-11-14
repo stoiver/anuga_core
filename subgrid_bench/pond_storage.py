@@ -14,6 +14,14 @@ crest z_s (the group's lowest sill), through a broad-crested weir:
     Q = C_w w sqrt(g) sgn(eta_c - eta_p) H^(3/2) psi,   H = max(eta_c, eta_p) - z_s
     psi = (1 - (H_d / H)^(3/2))^0.385                   (Villemonte, drowned weir)
 
+Conveyance over a drowned pond (deep=True, with PondEdges): the connected tables
+and the edge subfaces are built on the raised beds, so on their own they let
+water flow only in the layer above the sills. Once a pond holds water and the
+connected level is above a sill, the water under it flows too: the cell
+conveyance and the edge subfaces then use the depth down to the pond's own
+level over the real bed (the real bed once the pond is full), ramped in over
+the first tenth of that depth above the sill. Storage and mass are unchanged.
+
 At equal levels the two stores together hold exactly the single-store volume.
 Mass is exact: the operator moves Q dt between stage (connected) and V_p.
 Create the Pond_exchange_operator before the Subgrid_storage_operator so it
@@ -26,7 +34,7 @@ import numpy as np
 import anuga
 from anuga.operators.base_operator import Operator
 
-from subgrid_tables import subtriangle_graph
+from subgrid_tables import EXTRA_RAMP, edge_subface_beds, subtriangle_graph
 
 
 def spill_levels(z, seed):
@@ -108,15 +116,31 @@ class PondStore:
 
     def level(self, rows):
         """Pond level for its volume (bisection; the pond's lowest bed when empty)."""
-        lo = self.zlow[rows].copy()
-        hi = self.shigh[rows].copy()
+        rows = np.asarray(rows)
         V = self.V[rows]
-        for _ in range(30):
-            mid = 0.5 * (lo + hi)
-            big = self.volume(mid, rows) > V
-            hi = np.where(big, mid, hi)
-            lo = np.where(big, lo, mid)
-        return np.where(V > 0, 0.5 * (lo + hi), self.zlow[rows])
+        out = np.where(V > 0, self.shigh[rows], self.zlow[rows])     # full or empty: no search
+        part = np.nonzero((V > 0) & (V < self.vmax[rows] * (1.0 - 1e-12)))[0]
+        if len(part):
+            r = rows[part]
+            lo = self.zlow[r].copy()
+            hi = self.shigh[r].copy()
+            for _ in range(30):
+                mid = 0.5 * (lo + hi)
+                big = self.volume(mid, r) > V[part]
+                hi = np.where(big, mid, hi)
+                lo = np.where(big, lo, mid)
+            out[part] = 0.5 * (lo + hi)
+        return out
+
+    def fill_depth(self, lev, ncell):
+        """(ncell, m), used-slot order: depth of pond water over each pond
+        sub-triangle for pond levels lev, min(lev, s_k) - z_k, 0 elsewhere."""
+        if not hasattr(self, '_mr'):
+            self._mr, self._mc = np.nonzero(self.mem)
+        f = np.maximum(np.minimum(lev[self._mr], self.s[self._mr, self._mc]) - self.z[self._mr, self._mc], 0.0)
+        out = np.zeros((ncell, self.m))
+        out[self.pc[self._mr], self._mc] = f
+        return out
 
     def surface(self, eta, rows):
         """Free-surface area of the pond at level eta."""
@@ -141,16 +165,89 @@ class PondStore:
         return np.where(np.isfinite(cr[np.arange(len(own)), g]) & ~np.isnan(out), out, -np.inf)
 
 
+class PondEdges:
+    """Edge subface beds that drop from the raised bed to the real one where the
+    ground under a subface is drowned pond.
+
+    raised, real: bed functions (x, y) with and without the spill levels. Build
+    it before the Subgrid_storage_operator, give that operator .z and .inv_n as
+    edge_z and edge_invn, and pass this object to the Pond_exchange_operator,
+    which calls update() every step. A subface is lowered by
+        min(pond fill under it, EXTRA_RAMP x (lower of the two cell levels - raised bed))
+    with the pond fill the smaller of the two sides', so both sides of an edge
+    keep the same beds and the flux stays conservative."""
+
+    def __init__(self, domain, tables, pond, nsub, raised, real, ds=0.5, manning=None, delta=0.01):
+        self.domain, self.pond = domain, pond
+        n = len(tables.area)
+        zr, inv_n = edge_subface_beds(domain, tables, nsub, raised, ds=ds, manning=manning, sort=False) if manning is not None \
+            else (edge_subface_beds(domain, tables, nsub, raised, ds=ds, sort=False), None)
+        zlow = tables.zmin.copy()
+        np.minimum.at(zlow, pond.pc, pond.zlow)                   # lowest real bed of each cell
+        zb = np.minimum(edge_subface_beds(domain, tables, nsub, real, ds=ds, sort=False, zmin=zlow), zr)
+        order = np.argsort(zr, axis=1)
+        self.z = np.ascontiguousarray(np.take_along_axis(zr, order, axis=1))
+        self.inv_n = None if inv_n is None else np.ascontiguousarray(np.take_along_axis(inv_n, order, axis=1))
+        own = np.repeat(np.arange(n), 3)
+        nb = domain.neighbours.reshape(-1)
+        mate = np.where(nb >= 0, 3 * nb + domain.neighbour_edges.reshape(-1), -1)
+        low = (zr - zb > delta).any(axis=1)
+        low[mate[low & (mate >= 0)]] = True
+        R = np.nonzero(low)[0]
+        pos = np.full(3 * n, -1)
+        pos[R] = np.arange(len(R))
+        self.R, self.zr, self.zb = R, zr[R], zb[R]
+        self.inv_u = None if inv_n is None else inv_n[R]
+        self.own, self.nb = own[R], nb[R]
+        self.mate = np.where(mate[R] >= 0, pos[np.maximum(mate[R], 0)], -1)
+        # the pond under each subface, on its own cell's side: the cell's pond whose crest is nearest the raised bed
+        gid = np.full(pond.crest.shape, -1)
+        gid[pond.pc, pond.slot] = np.arange(len(pond.pc))
+        cr = pond.crest[self.own]                                  # (nR, G)
+        g = np.argmin(np.abs(np.where(np.isfinite(cr), cr, 1e9)[:, None, :] - self.zr[:, :, None]), axis=2)
+        self.g = np.where(np.isfinite(np.take_along_axis(cr, g, axis=1)), gid[self.own[:, None], g], -1)
+
+    def update(self, lev, eta):
+        """lev: level of every pond; eta: connected level per cell, -inf where dry."""
+        if len(self.R) == 0:
+            return
+        fill = np.where(self.g >= 0, np.maximum(np.minimum(lev[np.maximum(self.g, 0)], self.zr) - self.zb, 0.0), np.inf)
+        inner = self.mate >= 0
+        fill[inner] = np.minimum(fill[inner], fill[self.mate[inner]][:, ::-1])
+        e = eta[self.own]
+        e[inner] = np.minimum(e[inner], eta[self.nb[inner]])
+        drop = np.minimum(fill, EXTRA_RAMP * np.maximum(e[:, None] - self.zr, 0.0))
+        z = np.maximum(self.zr - drop, self.zb)
+        order = np.argsort(z, axis=1)
+        self.domain.subgrid_edge_z[self.R] = np.take_along_axis(z, order, axis=1)
+        if self.inv_u is not None:
+            self.domain.subgrid_edge_invn[self.R] = np.take_along_axis(self.inv_u, order, axis=1)
+        self.lowered = float(drop.max()) if drop.size else 0.0
+
+
 class Pond_exchange_operator(Operator):
 
-    def __init__(self, domain, tables, pond, description='pond exchange', label=None):
+    def __init__(self, domain, tables, pond, edges=None, deep=False, description='pond exchange', label=None):
+        """deep: water under a drowned sill conveys (see the module docstring);
+        edges: the PondEdges that does the same for the edge subfaces."""
         Operator.__init__(self, domain, description=description, label=label)
         self.tables, self.pond = tables, pond
+        self.deep, self.edges = deep, edges
         self.stage = domain.quantities['stage']
         self.elev = domain.quantities['elevation']
         self.moved = 0.0
 
     def __call__(self):
+        self._exchange()
+        if self.deep and len(self.pond.pc):
+            P, T = self.pond, self.tables
+            h = np.maximum(self.stage.centroid_values - self.elev.centroid_values, 0.0)
+            lev = P.level(np.arange(len(P.pc)))
+            T.extra = np.take_along_axis(P.fill_depth(lev, len(h)), T.order, axis=1)
+            if self.edges is not None and getattr(self.domain, 'subgrid_edge_z', None) is not None:
+                self.edges.update(lev, np.where(h > 0, T.eta(h), -np.inf))
+
+    def _exchange(self):
         P, T = self.pond, self.tables
         if len(P.pc) == 0:
             return

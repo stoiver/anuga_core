@@ -126,12 +126,14 @@ def main():
     ap.add_argument('--crest-branch', type=float, default=None, help='shortest side branch kept (m; default a quarter of MIN_LENGTH)')
     ap.add_argument('--band', type=float, default=0.0, metavar='AREA', help='channel grounds: triangle area in a 30 m band along the channel')
     ap.add_argument('--pond', action='store_true', help='subgrid with two-compartment storage (ponds behind sills fill through a weir)')
+    ap.add_argument('--pond-deep', action='store_true', help='--pond, and the water under a drowned sill conveys (cell conveyance and edge subfaces on the real bed)')
     ap.add_argument('--nsub', type=int, default=8, help='sub-triangle split n (n^2 per cell)')
     ap.add_argument('--q', type=float, default=5.0)
     ap.add_argument('--hours', type=float, default=4.0)
     args = ap.parse_args()
+    args.pond = args.pond or args.pond_deep
     bed = ground(args.terrain)
-    tag = f'flat_{args.terrain}_{args.area:g}_{"sub" if args.subgrid else "plain"}' + ('nc' if args.no_conv else '') + ('C' if args.conn else '') + ('D' if args.dir else '') + ('T' if args.tensor else '') + (f'r{args.tring}' if args.tensor and args.tring else '') + (f'f{args.tfloor:g}' if args.tensor and args.tfloor != 0.01 else '') + ('P' if args.pond else '') + (f'R{args.band:g}' if args.band else '') + (f'L{os.environ["SUBGRID_LOW_FROUDE"]}' if os.environ.get('SUBGRID_LOW_FROUDE') else '') + ('B' if args.breaklines else '') + (f'A{args.auto_breaklines:g}' if args.auto_breaklines else '') + (f't{args.crest_tol:g}' if args.crest_tol != 3.0 else '') + (f'b{args.crest_branch:g}' if args.crest_branch is not None else '') + (f'n{args.nsub}' if args.nsub != 8 else '') + {'parallel': '', 'geometric': 'G', 'series': 'S'}[os.environ.get('SUBGRID_KMEAN', 'parallel')]
+    tag = f'flat_{args.terrain}_{args.area:g}_{"sub" if args.subgrid else "plain"}' + ('nc' if args.no_conv else '') + ('C' if args.conn else '') + ('D' if args.dir else '') + ('T' if args.tensor else '') + (f'r{args.tring}' if args.tensor and args.tring else '') + (f'f{args.tfloor:g}' if args.tensor and args.tfloor != 0.01 else '') + ('P' if args.pond else '') + ('d' if args.pond_deep else '') + (f'R{args.band:g}' if args.band else '') + (f'L{os.environ["SUBGRID_LOW_FROUDE"]}' if os.environ.get('SUBGRID_LOW_FROUDE') else '') + ('B' if args.breaklines else '') + (f'A{args.auto_breaklines:g}' if args.auto_breaklines else '') + (f't{args.crest_tol:g}' if args.crest_tol != 3.0 else '') + (f'b{args.crest_branch:g}' if args.crest_branch is not None else '') + (f'n{args.nsub}' if args.nsub != 8 else '') + {'parallel': '', 'geometric': 'G', 'series': 'S'}[os.environ.get('SUBGRID_KMEAN', 'parallel')]
 
     brk = [[[xr, 0.0], [xr, W]] for xr in np.arange(50.0, L, 100.0)] if args.breaklines else None
     if args.auto_breaklines:
@@ -218,12 +220,18 @@ def main():
     domain.set_boundary({'left': br, 'right': br, 'top': br, 'bottom': br})
     anuga.Inlet_operator(domain, [[1.0, 1.0], [1.0, W - 1.0]], Q=args.q)
     if args.subgrid:
-        if args.no_conv:
+        pe = None
+        if args.pond_deep:
+            from pond_storage import PondEdges
+            pe = PondEdges(domain, tables, pond, 16, ebed, bed, ds=0.5, manning=None if args.no_conv else man)
+            ez, ein = pe.z, pe.inv_n
+            print(f'pond edges: {len(pe.R)} of {3 * len(domain)} edge rows can drop', flush=True)
+        elif args.no_conv:
             ez, ein = edge_subface_beds(domain, tables, 16, ebed, ds=0.5), None
         else:
             ez, ein = edge_subface_beds(domain, tables, 16, ebed, ds=0.5, manning=man)
         if pond is not None:
-            pop = Pond_exchange_operator(domain, tables, pond)    # before the storage operator: runs first
+            pop = Pond_exchange_operator(domain, tables, pond, edges=pe, deep=args.pond_deep)    # before the storage operator: runs first
         op = Subgrid_storage_operator(domain, tables, cap_min_fraction=0.0, cfl=0.75 if args.no_conv else 0.5,
                                       conveyance_friction=not args.no_conv, edge_z=ez, cap_exponent=0.0,
                                       drain_limiter=True, edge_invn=ein,
