@@ -308,6 +308,7 @@ GPU_BOUNDARY_TYPES = frozenset({
     'Time_boundary', 'File_boundary', 'Field_boundary',
     'Absorbing_wave_boundary', 'Characteristic_wave_boundary',
     'Flather_external_stage_zero_velocity_boundary',
+    'Normal_depth_boundary',
 })
 
 
@@ -3499,6 +3500,25 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                 and self.relative_time == self.evolve_starttime):
             self._tracer_initial_mass[s] = self._local_tracer_mass(s)
 
+    def set_timestepping_method(self, timestepping_method):
+        """Set the timestepping method: 'euler', 'rk2', 'rk3' or 'ader2'.
+
+        The C domain structure of the legacy compute mode holds the number
+        of flux calls in a step, which this changes, so it is brought up to
+        date here. Without that, a change made after the first evolve (the
+        Euler start-up of a Runge-Kutta run makes one, see
+        set_euler_startup_steps) would leave the kernels counting the stages
+        of the old method.
+        """
+
+        super().set_timestepping_method(timestepping_method)
+
+        # Legacy mode only: the unified mode has its own structure, and the
+        # update reads host arrays that it leaves stale between yields.
+        if getattr(self, '_Domain_C_struct', None) is not None \
+                and self.multiprocessor_mode == MULTIPROCESSOR_OPENMP:
+            self.update_domain_c_struct()
+
     def update_domain_c_struct(self):
         """Update the C domain structure from the Python Domain object.
         """
@@ -5752,6 +5772,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                 evaluate_characteristic_wave_boundary_gpu,
                 set_flather_value,
                 evaluate_flather_boundary_gpu,
+                evaluate_normal_depth_boundary_gpu,
                 boundary_edge_sync,
                 sync_boundary_values,
                 init_boundary_edge_sync,
@@ -5814,6 +5835,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                         stage_val = float(value[0])
                     set_flather_value(gpu_dom, stage_val)
                 evaluate_flather_boundary_gpu(gpu_dom)
+                evaluate_normal_depth_boundary_gpu(gpu_dom)
             else:
                 # Some boundaries need CPU - sync edge values, evaluate on CPU, sync back.
                 # The boundary cells' edges come from the device, and they
@@ -5992,6 +6014,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                                                extrapolate_second_order_edge_sw)
             protect_new(self)
             self._host_values_stale = False
+            self._pull_gpu_boundary_values()
             extrapolate_second_order_edge_sw(self, distribute_to_vertices=distribute_to_vertices)
             nvtxRangePop()
             return
@@ -6009,6 +6032,19 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         extrapolate_second_order_edge_sw(self, distribute_to_vertices=distribute_to_vertices)
 
         nvtxRangePop()
+
+    def _pull_gpu_boundary_values(self):
+        """Bring the boundary values to the host for the host extrapolation.
+
+        The edge limiter reads the boundary values on prescribed edges. When
+        every boundary is evaluated on the device, the host copy is never
+        written and stays at zero, which bounds those edges by zero: the cells
+        on them come out flat (edge = centroid). When some boundary is
+        evaluated on the host, the host copy is the one that is current, and
+        it is pushed to the device after it, so there is nothing to pull.
+        """
+        if self.gpu_interface is not None and getattr(self, '_gpu_all_on_gpu', False):
+            self.gpu_interface.sync_boundary_values_from_device()
 
     def _prepare_yield(self):
         """Make the domain's values readable before evolve() yields.
@@ -6044,6 +6080,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         self._host_values_stale = False     # first: the extension reads them
         if self.multiprocessor_mode == MULTIPROCESSOR_GPU:
             from .sw_domain_openmp_ext import extrapolate_second_order_edge_sw
+            self._pull_gpu_boundary_values()
             extrapolate_second_order_edge_sw(self, distribute_to_vertices=True)
         else:
             self.distribute_to_vertices_and_edges()
@@ -6217,9 +6254,18 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                     d += 1
 
 
-    def update_conserved_quantities(self):
+    def update_conserved_quantities(self, fix_negative_cells=True):
         """Update vectors of conserved quantities using previously
         computed fluxes and specified forcing functions.
+
+        A cell whose depth has gone negative is then set to zero depth, which
+        adds water. ``fix_negative_cells=False`` leaves such cells alone: a
+        Runge-Kutta step passes it for a stage that it is about to average
+        with the values at the start of the step, and calls
+        :meth:`fix_negative_cells` after the average instead. Setting the
+        stage to zero depth first would add water that the average was about
+        to cancel. Only the legacy compute mode takes notice; the unified
+        mode already averages first.
         """
 
         nvtxRangePush('update_conserved_quantities')
@@ -6248,7 +6294,34 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         else:
             raise Exception('Not implemented')
 
-        num_negative_ids, negative_volume = update_conserved_quantities(self, timestep)
+        if self.multiprocessor_mode == MULTIPROCESSOR_OPENMP:
+            num_negative_ids, negative_volume = update_conserved_quantities(
+                self, timestep, fix_negative_cells=fix_negative_cells)
+        else:
+            num_negative_ids, negative_volume = update_conserved_quantities(self, timestep)
+
+        self._warn_of_negative_volume(num_negative_ids, negative_volume)
+
+        nvtxRangePop()
+
+    def fix_negative_cells(self):
+        """Set cells of negative depth to zero depth, with zero momentum.
+
+        For use after ``update_conserved_quantities(fix_negative_cells=False)``
+        and the Runge-Kutta average that follows it. Does nothing in the
+        unified compute mode, which protects against negative depths at the
+        start of the next stage.
+        """
+
+        if self.multiprocessor_mode != MULTIPROCESSOR_OPENMP:
+            return
+
+        from .sw_domain_openmp_ext import fix_negative_cells_volume
+        num_negative_ids, negative_volume = fix_negative_cells_volume(self)
+        self._warn_of_negative_volume(num_negative_ids, negative_volume)
+
+    def _warn_of_negative_volume(self, num_negative_ids, negative_volume):
+        """Warn when setting negative cells to zero depth added much water."""
 
         # Clamping negative-depth cells to zero depth adds water (a conservation
         # error). A few cells clamped by a near-zero depth is normal in
@@ -6286,8 +6359,6 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                     'of the problem'
                 )
                 warnings.warn(msg)
-
-        nvtxRangePop()
 
     def update_other_quantities(self):
         """ There may be a need to calculate some of the other quantities
@@ -6573,6 +6644,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                         save_checkpoint = True
 
                 if save_checkpoint:
+                    self._sync_max_quantities_to_host()
                     pickle_name = os.path.join(self.checkpoint_dir,self.get_name())+'_'+str(self.get_time())+'.pickle'
                     pickle.dump(self, open(pickle_name, 'wb'))
 
@@ -6637,8 +6709,22 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         """
 
         nvtxRangePush('store_timestep')
+        self._sync_max_quantities_to_host()
         self.writer.store_timestep()
         nvtxRangePop()
+
+    def _sync_max_quantities_to_host(self) -> None:
+        """Bring every Collect_max_quantities_operator's host maxima up to date.
+
+        In GPU mode the running maxima live on the device and are only copied
+        to the host here, so each stored SWW frame (and a checkpoint) carries
+        the current per-step peaks without a per-timestep transfer.
+        """
+        from anuga.operators.collect_max_quantities_operator import \
+            Collect_max_quantities_operator
+        for op in self.fractional_step_operators:
+            if isinstance(op, Collect_max_quantities_operator):
+                op.sync_to_host()
 
 
     def sww_merge(self, *args, **kwargs) -> None:
@@ -6837,8 +6923,9 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         # Compute forcing terms (friction)
         self.compute_forcing_terms()
 
-        # Update conserved quantities using timestep from first step
-        self.update_conserved_quantities()
+        # Update conserved quantities using timestep from first step.
+        # Negative depths are left for the average below to deal with.
+        self.update_conserved_quantities(fix_negative_cells=False)
 
         #========================================
         # Combine initial and final values
@@ -6847,6 +6934,9 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
         # Combine steps
         self.saxpy_conserved_quantities(0.5, 0.5) # has C, not ported
+
+        # Only now set any depth that is still negative to zero
+        self.fix_negative_cells()
 
         # Restore the pre-step time so fractional-step operators evaluate forcing
         # at t (not t+dt); the evolve loop advances relative_time to t+dt after
@@ -6949,6 +7039,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             evaluate_characteristic_wave_boundary_gpu,
             set_flather_value,
             evaluate_flather_boundary_gpu,
+            evaluate_normal_depth_boundary_gpu,
         )
         import numpy as np
 
@@ -7003,6 +7094,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                         stage_val = float(value[0])
                     set_flather_value(gpu_dom, stage_val)
                 evaluate_flather_boundary_gpu(gpu_dom)
+                evaluate_normal_depth_boundary_gpu(gpu_dom)
             else:
                 boundary_edge_sync(gpu_dom)
                 for tag in self.tag_boundary_cells:
@@ -7166,6 +7258,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             evaluate_characteristic_wave_boundary_gpu,
             set_flather_value,
             evaluate_flather_boundary_gpu,
+            evaluate_normal_depth_boundary_gpu,
         )
         import numpy as np
 
@@ -7226,6 +7319,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                     stage_val = float(value[0])
                 set_flather_value(gpu_dom, stage_val)
             evaluate_flather_boundary_gpu(gpu_dom)
+            evaluate_normal_depth_boundary_gpu(gpu_dom)
         else:
             boundary_edge_sync(gpu_dom)
             for tag in self.tag_boundary_cells:
@@ -7302,6 +7396,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                     stage_val = float(value[0])
                 set_flather_value(gpu_dom, stage_val)
             evaluate_flather_boundary_gpu(gpu_dom)
+            evaluate_normal_depth_boundary_gpu(gpu_dom)
         else:
             boundary_edge_sync(gpu_dom)
             for tag in self.tag_boundary_cells:
@@ -7362,6 +7457,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             evaluate_characteristic_wave_boundary_gpu,
             set_flather_value,
             evaluate_flather_boundary_gpu,
+            evaluate_normal_depth_boundary_gpu,
         )
         import numpy as np
 
@@ -7412,6 +7508,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                     stage_val = float(value[0])
                 set_flather_value(gpu_dom, stage_val)
             evaluate_flather_boundary_gpu(gpu_dom)
+            evaluate_normal_depth_boundary_gpu(gpu_dom)
         else:
             # Host evaluation of any non-GPU boundary type (e.g.
             # Transmissive_momentum_set_stage_boundary), then sync edge values
@@ -7676,6 +7773,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             evaluate_characteristic_wave_boundary_gpu,
             set_flather_value,
             evaluate_flather_boundary_gpu,
+            evaluate_normal_depth_boundary_gpu,
         )
         import numpy as np
 
@@ -7727,6 +7825,7 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
                         stage_val = float(value[0])
                     set_flather_value(gpu_dom, stage_val)
                 evaluate_flather_boundary_gpu(gpu_dom)
+                evaluate_normal_depth_boundary_gpu(gpu_dom)
             else:
                 boundary_edge_sync(gpu_dom)
                 for tag in self.tag_boundary_cells:
@@ -7985,8 +8084,9 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         # Compute forcing terms (friction)
         self.compute_forcing_terms()
 
-        # Update conserved quantities using timestep from first step
-        self.update_conserved_quantities()
+        # Update conserved quantities using timestep from first step.
+        # Negative depths are left for the average below to deal with.
+        self.update_conserved_quantities(fix_negative_cells=False)
 
         #============================================
         # End of second euler step
@@ -7999,6 +8099,9 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
         # Combine steps
         self.saxpy_conserved_quantities(0.25, 0.75)
+
+        # Only now set any depth that is still negative to zero
+        self.fix_negative_cells()
 
         # Set substep time
         self.set_relative_time(initial_relative_time + self.timestep * 0.5)
@@ -8023,8 +8126,9 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
         # Compute forcing terms (friction)
         self.compute_forcing_terms()
 
-        # Update conserved quantities using timestep from first step
-        self.update_conserved_quantities()
+        # Update conserved quantities using timestep from first step.
+        # Negative depths are left for the average below to deal with.
+        self.update_conserved_quantities(fix_negative_cells=False)
 
         #=======================================
         # Combine final and initial values
@@ -8036,6 +8140,9 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
         # So do this instead!
         self.saxpy_conserved_quantities(2.0, 1.0, 3.0)
+
+        # Only now set any depth that is still negative to zero
+        self.fix_negative_cells()
 
         # Restore the pre-step time so fractional-step operators (applied by the
         # evolve loop before it advances relative_time to t+dt) evaluate forcing

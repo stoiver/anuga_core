@@ -234,6 +234,8 @@ from anuga.shallow_water.boundaries import \
 from anuga.shallow_water.boundaries import \
                     Flather_external_stage_zero_velocity_boundary
 from anuga.shallow_water.boundaries import \
+                    Normal_depth_boundary
+from anuga.shallow_water.boundaries import \
                     Absorbing_wave_boundary, \
                     Characteristic_wave_boundary
 from anuga.abstract_2d_finite_volumes.generic_boundary_conditions import \
@@ -323,8 +325,11 @@ from anuga.operators.kinematic_viscosity_operator import Kinematic_viscosity_ope
 
 from anuga.operators.rate_operators import Rate_operator
 from anuga.rain.raster_rate_operator import Raster_rate_operator, ARR_rate_operator
+from anuga.rain.raster_rate_operator import Hyetograph_rate_operator
 from anuga.rain.arr_hub_rain import Arr_hub_rain, ARR_point_rainfall_patterns, Single_pattern
 from anuga.rain.arr_ifd_rain import Arr_ifd_rain, Arr_grd
+from anuga.rain.losses import (SCS_curve_number, Initial_continuing_loss,
+                               Initial_proportional_loss)
 from anuga.operators.wind_stress_operator import Wind_stress_operator
 from anuga.operators.barometric_pressure import Barometric_pressure_operator
 from anuga.operators.set_friction_operators import Set_depth_friction_operator
@@ -460,6 +465,7 @@ __all__ = [
     'Absorbing_wave_boundary',
     'Characteristic_wave_boundary',
     'Flather_external_stage_zero_velocity_boundary',
+    'Normal_depth_boundary',
     'Reflective_boundary',
     'Time_boundary',
     'Time_space_boundary',
@@ -476,6 +482,10 @@ __all__ = [
     'Rate_operator',
     'Raster_rate_operator',
     'ARR_rate_operator',
+    'SCS_curve_number',
+    'Initial_continuing_loss',
+    'Initial_proportional_loss',
+    'Hyetograph_rate_operator',
     'Arr_hub_rain',
     'ARR_point_rainfall_patterns',
     'Single_pattern',

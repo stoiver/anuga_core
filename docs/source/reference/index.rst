@@ -187,6 +187,7 @@ use it; the full API of each class is below.
    Time_boundary
    Transmissive_n_momentum_zero_t_momentum_set_stage_boundary
    Flather_external_stage_zero_velocity_boundary
+   Normal_depth_boundary
    File_boundary
    Field_boundary
    Absorbing_wave_boundary
@@ -236,6 +237,7 @@ that data. See :doc:`../setup_anuga_script/rainfall` for usage and
    :toctree: generated
    :nosignatures:
 
+   Hyetograph_rate_operator
    Raster_rate_operator
    ARR_rate_operator
    Arr_ifd_rain
@@ -243,6 +245,9 @@ that data. See :doc:`../setup_anuga_script/rainfall` for usage and
    Arr_hub_rain
    ARR_point_rainfall_patterns
    Single_pattern
+   SCS_curve_number
+   Initial_continuing_loss
+   Initial_proportional_loss
 
 
 .. _api_logging:
