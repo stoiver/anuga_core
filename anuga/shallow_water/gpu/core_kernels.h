@@ -119,6 +119,17 @@ double core_compute_fluxes_subgrid(struct domain *D, int substep_count,
 anuga_int core_subgrid_drain_limit(struct domain *D, double dt,
                                    const double *slot_flux, const double *cell_pres,
                                    double *phi);
+// Subgrid storage tables, per cell over its m sub-triangles (see
+// subgrid_bench/subgrid_tables.py). Level from mean depth, and conveyance /
+// wet count / mean flow depth from level.
+void core_subgrid_table_eta(anuga_int n, anuga_int m, const double *h,
+                            const double *V, const double *S, const double *ssort,
+                            double *eta);
+void core_subgrid_table_conveyance(anuga_int n, anuga_int m, const double *eta,
+                                   const double *z, const double *sill,
+                                   const double *inv_n, const double *extra,
+                                   double extra_ramp, double *kc, double *nwet,
+                                   double *hflow);
 #endif
 
 // Edge-based flux computation (opt-in; active when the driver allocates

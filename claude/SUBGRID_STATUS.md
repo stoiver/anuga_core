@@ -164,6 +164,25 @@ limiter keeps every depth non-negative for any step, so the cap can drop the f f
 
 ![Time steps per variant](figures/subgrid/steps.png)
 
+**Cost of a step (profiled 2026-11-15).** The table update was numpy on every cell, wet
+or dry, on one thread: on a mostly dry domain it took most of the run, and roughly
+half on a fully wet one (the rest is the flux kernel, which skips dry edges). Two changes:
+
+- The numpy tables work on wet cells only and count the wet sub-triangles once per step.
+  Results are bit for bit unchanged.
+- `SubgridTables.eta` and `.conveyance` call C functions threaded over cells when the build
+  has them (side-by-side conveyance only; the experimental averages stay in numpy).
+  `SUBGRID_TABLES=numpy` forces the numpy code, which remains the reference. The C `pow`
+  and numpy's differ in the last digit for a few percent of values, so runs are no longer
+  bit-identical to earlier ones: level and wet area match exactly on a given input,
+  conveyance to 6e-16 relative, and over a run the difference grows only at wetting fronts
+  (step count 55,178 against 55,293 on `coarse500_sub8EKLC`).
+
+`coarse500_sub8EKLC` on 8 threads: 51 s with the numpy tables, 28 s compiled. On a fully
+wet domain the flux kernel is now the larger part of the time, so the next gains are in the
+kernel (fewer subfaces), the time-step rule, or local time stepping. Writing h^(5/3) as
+h·cbrt(h)² is not one of them: glibc's `cbrt` is slower than its `pow`.
+
 ## Results
 
 The reference is `band025TU`: *band* is a refined band along the channel, *025* means
@@ -701,7 +720,8 @@ default runs are unchanged. The full suite passes: 4062 passed, 6 skipped, with 
 | `core_compute_fluxes_subgrid` | `gpu/core_kernels.c` (CPU-only build branch) | splits each edge into `nsub` subfaces with their own bed; sums the central flux and hydrostatic pressure over the subfaces; replaces the flux + gravity terms, like the central kernel |
 | conveyance split | inside the same kernel | with `subgrid_edge_invn` and `subgrid_cell_neff`, the subface velocity is u·n_eff/n_j·(h_j/h_edge)^(2/3); a uniform cell gives weight 1 exactly, and boundary sides mirror the interior weights |
 | `core_subgrid_drain_limit` | `gpu/core_kernels.c` | draining-time limiter: scales a cell's outgoing fluxes so it can't go below dry within the step; uses per-slot fluxes the kernel records |
-| Cython wrappers | `sw_domain_openmp_ext.pyx`: `compute_fluxes_ext_subgrid`, `subgrid_drain_limit` | shape checks, pass-through |
+| `core_subgrid_table_eta`, `core_subgrid_table_conveyance` | `gpu/core_kernels.c` (CPU-only build branch) | the storage operator's per-step table work, threaded over cells: level from mean depth; conveyance, wet sub-triangle count and mean flow depth from level. Plain functions of the table arrays, no domain needed |
+| Cython wrappers | `sw_domain_openmp_ext.pyx`: `compute_fluxes_ext_subgrid`, `subgrid_drain_limit`, `subgrid_table_eta`, `subgrid_table_conveyance` | shape checks, pass-through |
 | Domain hooks | `shallow_water_domain.py`: `compute_fluxes`, `update_conserved_quantities` | switch to the subgrid kernel when `domain.subgrid_edge_z` is set (mode 1 only, otherwise `NotImplementedError`); apply the limiter when `domain.subgrid_drain_limiter` is set |
 
 The domain attributes are set by the bench operator:
@@ -803,6 +823,7 @@ and run `ninja` in `build-gpu` with nvc on PATH.
 | 888a3522 | mesh edges on ridge crests (`--breaklines`), automatic crest detection (`crest_lines.py`, `--auto-breaklines`), mixed ground |
 | 24696516 | meandering-channel plain (`meander`, `mrough`, `--band`), `flat_channel.py`: the strips choke the channel, the tensor does not |
 | eebe9d09 | straight-channel conveyance at 0.25 m² with tangential upwind (0.97); bias figure updated |
-| (this commit) | ponds: water under a drowned sill flows (`--pond-deep`, `PondEdges`); still and deep ponds bracket the fine run |
+| 12d42f57 | ponds: water under a drowned sill flows (`--pond-deep`, `PondEdges`); still and deep ponds bracket the fine run |
+| (this commit) | table update in C with OpenMP (`core_subgrid_table_eta`, `core_subgrid_table_conveyance`); numpy tables skip dry cells; `SUBGRID_TABLES=numpy` switch |
 
 The branch is pushed to `origin` (the stoiver fork).

@@ -208,6 +208,8 @@ cdef extern from "sw_domain_openmp.c" nogil:
 	double _openmp_compute_fluxes_central(domain* D, double timestep)
 	double _openmp_compute_fluxes_subgrid(domain* D, double timestep, double* sub_z, anuga_int nsub, double* slot_flux, double* cell_pres, double* sub_invn, double* cell_neff)
 	anuga_int core_subgrid_drain_limit(domain* D, double dt, double* slot_flux, double* cell_pres, double* phi)
+	void core_subgrid_table_eta(anuga_int n, anuga_int m, double* h, double* V, double* S, double* ssort, double* eta) nogil
+	void core_subgrid_table_conveyance(anuga_int n, anuga_int m, double* eta, double* z, double* sill, double* inv_n, double* extra, double extra_ramp, double* kc, double* nwet, double* hflow) nogil
 	double _openmp_protect(domain* D)
 	void _openmp_extrapolate_second_order_edge_sw(domain* D)
 	void _openmp_extrapolate_centroids_only(domain* D)
@@ -1409,6 +1411,59 @@ def subgrid_drain_limit(object domain_py_object, double dt,
 	with nogil:
 		limited = core_subgrid_drain_limit(D, dt, &slot_flux[0, 0], &cell_pres[0, 0], &phi[0])
 	return limited
+
+def subgrid_table_eta(double[::1] h not None,
+                      double[:, ::1] V not None,
+                      double[:, ::1] S not None,
+                      double[:, ::1] ssort,
+                      double[::1] eta not None):
+	"""Subgrid storage tables: level eta (n) for mean depth h (n). V, S (n, m):
+	breakpoint volumes and prefix sums; ssort (n, m) sorted sills, or None."""
+	cdef anuga_int n = V.shape[0], m = V.shape[1]
+	cdef double* sp = NULL
+	if h.shape[0] != n or eta.shape[0] != n or S.shape[0] != n or S.shape[1] != m:
+		raise ValueError('subgrid_table_eta: array shapes do not match')
+	if ssort is not None:
+		if ssort.shape[0] != n or ssort.shape[1] != m:
+			raise ValueError('subgrid_table_eta: ssort shape does not match')
+		sp = &ssort[0, 0]
+	if n == 0:
+		return
+	with nogil:
+		core_subgrid_table_eta(n, m, &h[0], &V[0, 0], &S[0, 0], sp, &eta[0])
+
+def subgrid_table_conveyance(double[::1] eta not None,
+                             double[:, ::1] z not None,
+                             double[:, ::1] sill,
+                             double[:, ::1] inv_n not None,
+                             double[:, ::1] extra,
+                             double extra_ramp,
+                             double[::1] kc not None,
+                             double[::1] nwet not None,
+                             double[::1] hflow):
+	"""Subgrid storage tables: conveyance kc (n), wet sub-triangle count nwet (n)
+	and, with extra, mean flow depth hflow (n) for level eta (n). z, inv_n
+	(n, m); sill, extra (n, m) or None."""
+	cdef anuga_int n = z.shape[0], m = z.shape[1]
+	cdef double* sp = NULL
+	cdef double* xp = NULL
+	cdef double* hp = NULL
+	if (eta.shape[0] != n or kc.shape[0] != n or nwet.shape[0] != n
+			or inv_n.shape[0] != n or inv_n.shape[1] != m):
+		raise ValueError('subgrid_table_conveyance: array shapes do not match')
+	if n == 0:
+		return
+	if sill is not None:
+		if sill.shape[0] != n or sill.shape[1] != m:
+			raise ValueError('subgrid_table_conveyance: sill shape does not match')
+		sp = &sill[0, 0]
+	if extra is not None:
+		if extra.shape[0] != n or extra.shape[1] != m or hflow is None or hflow.shape[0] != n:
+			raise ValueError('subgrid_table_conveyance: extra needs matching extra and hflow')
+		xp = &extra[0, 0]
+		hp = &hflow[0]
+	with nogil:
+		core_subgrid_table_conveyance(n, m, &eta[0], &z[0, 0], sp, &inv_n[0, 0], xp, extra_ramp, &kc[0], &nwet[0], hp)
 
 def extrapolate_second_order_sw(object domain_py_object, update_domain_c_struct=False):
 

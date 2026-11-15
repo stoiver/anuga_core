@@ -5054,4 +5054,76 @@ anuga_int core_subgrid_drain_limit(struct domain *D, double dt,
     }
     return limited;
 }
+
+// ----------------------------------------------------------------------------
+// Subgrid storage tables (the per-step table work of the storage operator,
+// subgrid_bench/subgrid_tables.py, moved here so it runs in parallel).
+// All arrays are (n, m) row-major, one row per cell, m sub-triangles of equal
+// area. Rows are independent, so the results do not depend on the thread count.
+// ----------------------------------------------------------------------------
+
+// Level eta for mean depth h (inverse of the storage curve).
+//   V (n, m): m * (mean depth) at each breakpoint, V[.,0] = 0, non-decreasing.
+//   S (n, m): prefix sums of the beds in breakpoint order.
+//   ssort   : NULL, or (n, m) the sills in ascending order (hollows): the level
+//             holds at a sill while its hollow fills.
+// With j the last breakpoint with V_j <= m h:  eta = (m h + S_j) / (j + 1),
+// and with sills eta = max(ssort_j, that).
+void core_subgrid_table_eta(anuga_int n, anuga_int m, const double * restrict h,
+                            const double * restrict V, const double * restrict S,
+                            const double * restrict ssort, double * restrict eta) {
+    #pragma omp parallel for schedule(static)
+    for (anuga_int i = 0; i < n; i++) {
+        const double hi = h[i] > 0.0 ? h[i] : 0.0;
+        const double target = (double) m * hi;
+        const double *Vi = V + i * m;
+        anuga_int cnt = 0;
+        for (anuga_int k = 0; k < m; k++) {
+            cnt += (Vi[k] <= target);
+        }
+        anuga_int j = cnt - 1;
+        if (j < 0) j = 0;
+        double e = (target + S[i * m + j]) / (double) (j + 1);
+        if (ssort != NULL && ssort[i * m + j] > e) e = ssort[i * m + j];
+        eta[i] = e;
+    }
+}
+
+// Conveyance per unit width Kc(eta) = (1/m) sum_k hk^(5/3) inv_n_k, with
+// hk = max(eta - z_k, 0), zero where eta is below the sub-triangle's sill
+// (sill may be NULL). nwet (n): number of sub-triangles holding water.
+// extra (may be NULL): additional flow depth per sub-triangle (drowned ponds),
+// ramped in as min(extra, extra_ramp * hk); hflow (n, may be NULL unless extra
+// is given) then receives the mean flow depth.
+void core_subgrid_table_conveyance(anuga_int n, anuga_int m, const double * restrict eta,
+                                   const double * restrict z, const double * restrict sill,
+                                   const double * restrict inv_n, const double * restrict extra,
+                                   double extra_ramp, double * restrict kc,
+                                   double * restrict nwet, double * restrict hflow) {
+    const double p = 5.0 / 3.0;
+    #pragma omp parallel for schedule(static)
+    for (anuga_int i = 0; i < n; i++) {
+        const double e = eta[i];
+        const double *zi = z + i * m;
+        double acc = 0.0, hsum = 0.0;
+        anuga_int wet = 0;
+        if (e > zi[0]) {                      // z is sorted along the row: below z[0] the cell is dry
+            for (anuga_int k = 0; k < m; k++) {
+                double hk = e - zi[k];
+                if (hk <= 0.0) continue;
+                if (sill != NULL && e < sill[i * m + k]) continue;
+                wet++;
+                if (extra != NULL) {
+                    const double x = extra[i * m + k], r = extra_ramp * hk;
+                    hk += (x < r ? x : r);
+                }
+                hsum += hk;
+                acc += pow(hk, p) * inv_n[i * m + k];
+            }
+        }
+        kc[i] = acc / (double) m;
+        nwet[i] = (double) wet;
+        if (hflow != NULL) hflow[i] = hsum / (double) m;
+    }
+}
 #endif

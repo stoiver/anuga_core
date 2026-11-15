@@ -64,6 +64,18 @@ import anuga
 
 # conveyance averaging over the wet sub-triangles: parallel (default), geometric, series
 KMEAN = os.environ.get('SUBGRID_KMEAN', 'parallel')
+# The per-step table work (level from depth, conveyance from level) runs in the
+# compiled kernel when the build has it. SUBGRID_TABLES=numpy forces the numpy
+# versions below: they are the reference, and reproduce runs made before the
+# compiled ones existed bit for bit (the compiled power differs in the last digit).
+try:
+    if os.environ.get('SUBGRID_TABLES', 'c') == 'numpy':
+        raise ImportError
+    from anuga.shallow_water.sw_domain_openmp_ext import subgrid_table_conveyance as _c_conveyance
+    from anuga.shallow_water.sw_domain_openmp_ext import subgrid_table_eta as _c_eta
+    _C_TABLES = True
+except ImportError:
+    _C_TABLES = False
 from anuga.operators.base_operator import Operator
 
 
@@ -260,14 +272,40 @@ class SubgridTables:
     def volume(self, eta):
         return self.depth(eta) * self.area
 
+    def _wet_rows(self, eta):
+        """Cells with any water: eta above the lowest sub-triangle bed (z is sorted
+        along each row). The per-step work is done on these rows only."""
+        return np.nonzero(eta > self.z[:, 0])[0]
+
+    def _active_depth_rows(self, eta, rows):
+        """_active_depth for the cells rows only."""
+        hk = np.maximum(eta[rows, None] - self.z[rows], 0.0)
+        if self.sill is not None:
+            hk = np.where(eta[rows, None] >= self.sill[rows], hk, 0.0)
+        return hk
+
     def wet_area(self, eta):
         eta = np.asarray(eta, dtype=float)
-        return (self._active_depth(eta) > 0.0).sum(axis=1) * self.area / self.m
+        c = getattr(self, '_wet_cache', None)
+        if c is not None and c[0] is eta and c[1] == eta.sum() and c[2] is self.sill:
+            nwet = c[3]                    # counted by conveyance(eta) in this step
+        else:
+            rows = self._wet_rows(eta)
+            nwet = np.zeros(len(eta))
+            nwet[rows] = (self._active_depth_rows(eta, rows) > 0.0).sum(axis=1)
+        return nwet * self.area / self.m
 
     # --- storage -> level ---------------------------------------------------
     def eta(self, h):
         """Level eta for mean depth h (inverse of depth); h <= 0 gives zmin."""
         h = np.maximum(np.asarray(h, dtype=float), 0.0)
+        if _C_TABLES and h.ndim == 1:
+            out = np.empty(len(h))
+            if self.sill is not None:
+                _c_eta(np.ascontiguousarray(h), self.Vm, self.Zp, self.s_sorted, out)
+            else:
+                _c_eta(np.ascontiguousarray(h), self.Vb, self.S, None, out)
+            return out
         target = self.m * h
         if self.sill is not None:
             # j = last sill with V just below it <= target; eta is that sill while
@@ -287,15 +325,35 @@ class SubgridTables:
     def conveyance(self, eta):
         """Kc(eta): conveyance per unit width, (1/m) sum_k max(eta - z_k, 0)^(5/3) / n_k."""
         eta = np.asarray(eta, dtype=float)
-        hk = self._active_depth(eta)
+        if _C_TABLES and KMEAN == 'parallel' and eta.ndim == 1:
+            # compiled, threaded (core_subgrid_table_conveyance); same sums as below
+            n = len(eta)
+            out, nwet = np.empty(n), np.empty(n)
+            hflow = np.empty(n) if self.extra is not None else None
+            extra = None if self.extra is None else np.ascontiguousarray(self.extra, dtype=float)
+            _c_conveyance(np.ascontiguousarray(eta), self.z, self.sill, self.inv_n, extra,
+                          EXTRA_RAMP, out, nwet, hflow)
+            self._wet_cache = (eta, eta.sum(), self.sill, nwet)   # reused by wet_area(eta)
+            if hflow is not None:
+                self.hflow = hflow
+            return out
+        # only the wet cells are worked on: a dry cell has no conveyance
+        rows = self._wet_rows(eta)
+        out = np.zeros(len(eta))
+        hk = self._active_depth_rows(eta, rows)
+        nwet = np.zeros(len(eta))
+        nwet[rows] = (hk > 0.0).sum(axis=1)
+        self._wet_cache = (eta, eta.sum(), self.sill, nwet)   # reused by wet_area(eta)
         if self.extra is not None:
             # ramped in over the first extra / EXTRA_RAMP of depth above the sill
-            hk = hk + np.minimum(self.extra, EXTRA_RAMP * hk)
-            self.hflow = hk.sum(axis=1) / self.m          # mean flow depth, for the friction
-        k = hk ** (5.0 / 3.0) * self.inv_n
+            hk = hk + np.minimum(self.extra[rows], EXTRA_RAMP * hk)
+            self.hflow = np.zeros(len(eta))
+            self.hflow[rows] = hk.sum(axis=1) / self.m    # mean flow depth, for the friction
+        k = hk ** (5.0 / 3.0) * self.inv_n[rows]
         mode = KMEAN
         if mode == 'parallel':
-            return k.sum(axis=1) / self.m
+            out[rows] = k.sum(axis=1) / self.m
+            return out
         # experimental (#508 flat-plain bench): average the wet sub-triangles'
         # conveyance as if partly in series, times the wet fraction
         wet = hk > 1e-6
@@ -308,7 +366,8 @@ class SubgridTables:
                 km = (np.where(wet, np.where(wet, k, 1.0) ** -2.0, 0.0).sum(axis=1) / np.maximum(nw, 1)) ** -0.5
             else:
                 raise ValueError(mode)
-        return np.where(nw > 0, f * km, 0.0)
+        out[rows] = np.where(nw > 0, f * km, 0.0)
+        return out
 
     def add_directional(self, sx, sy, ndir=6, nstrip=None, cells=None):
         """Data for direction-dependent conveyance: sx, sy (ncell, m) sub-centroids in
