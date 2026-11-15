@@ -825,6 +825,7 @@ and run `ninja` in `build-gpu` with nvc on PATH.
 | eebe9d09 | straight-channel conveyance at 0.25 m² with tangential upwind (0.97); bias figure updated |
 | 12d42f57 | ponds: water under a drowned sill flows (`--pond-deep`, `PondEdges`); still and deep ponds bracket the fine run |
 | ab642fe7 | table update in C with OpenMP (`core_subgrid_table_eta`, `core_subgrid_table_conveyance`); numpy tables skip dry cells; `SUBGRID_TABLES=numpy` switch |
-| (this commit) | merge develop (to 8185b1f1): `Normal_depth_boundary` (#531) and 54 other commits; no conflicts |
+| fa066cf8 | merge develop (to 8185b1f1): `Normal_depth_boundary` (#531) and 54 other commits; no conflicts |
+| (this commit) | merge develop (to a84b66e9): `clean_breaklines` and `check_mesh_quality` (#538) |
 
 The branch is pushed to `origin` (the stoiver fork).
