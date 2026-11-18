@@ -826,6 +826,7 @@ and run `ninja` in `build-gpu` with nvc on PATH.
 | 12d42f57 | ponds: water under a drowned sill flows (`--pond-deep`, `PondEdges`); still and deep ponds bracket the fine run |
 | ab642fe7 | table update in C with OpenMP (`core_subgrid_table_eta`, `core_subgrid_table_conveyance`); numpy tables skip dry cells; `SUBGRID_TABLES=numpy` switch |
 | fa066cf8 | merge develop (to 8185b1f1): `Normal_depth_boundary` (#531) and 54 other commits; no conflicts |
-| (this commit) | merge develop (to a84b66e9): `clean_breaklines` and `check_mesh_quality` (#538) |
+| a877652a | merge develop (to a84b66e9): `clean_breaklines` and `check_mesh_quality` (#538) |
+| (this commit) | `dtm_lines.py`: mesh controls derived from a DTM and a channel line or inflow point (bank lines snapped to the crest, river region, compartments and sills, crests, scarp-top rim lines, drainage lines, suggested areas); `crest_lines.py` keeps a second crest that runs beside the main one |
 
 The branch is pushed to `origin` (the stoiver fork).

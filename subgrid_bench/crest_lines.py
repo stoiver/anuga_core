@@ -133,9 +133,19 @@ def crest_lines(z, dx, width=10.0, prominence=0.05, min_length=50.0, tol=3.0,
             if ml.distance(Point(bxy[-1])) < ml.distance(Point(bxy[0])):
                 bxy = bxy[::-1]
             if ml.distance(Point(bxy[0])) > 5 * dx + tol:
-                continue                                    # not attached to the main line
-            if ml.distance(Point(bxy[-1])) < max(width / 2, 4 * dx):
-                continue                                    # runs alongside the main line: the crest band's own width
+                # not attached to the main line. A second crest running beside the main one (two levees a
+                # few tens of metres apart share a group) is a line of its own if it is long enough.
+                if LineString(bxy).length >= min_length:
+                    free = np.array(LineString(bxy).simplify(tol).coords)
+                    snap_end(free, 0, 1)
+                    snap_end(free, -1, -2)
+                    branches.append(free)
+                continue
+            # runs alongside the main line, never further from it than the crest band's own width. Measured over
+            # the whole branch, not at its far end: a second crest that leaves the main one and rejoins it (two
+            # levees side by side) ends on the main line but is a line of its own.
+            if max(ml.distance(Point(q)) for q in bxy[::max(len(bxy) // 40, 1)]) < max(width / 2, 4 * dx):
+                continue
             # join: a new vertex on the main line where the branch meets it
             t = ml.project(Point(bxy[0]))
             j = np.array(ml.interpolate(t).coords[0])
