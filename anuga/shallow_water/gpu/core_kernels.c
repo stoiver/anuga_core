@@ -697,6 +697,39 @@ void core_extrapolate_edge_pass_on(struct domain *D, double predictor_dt,
 
 }
 
+// Experiment (#508): piecewise-constant edge values. With every limiter beta zero the
+// edge pass only copies the centroid values to the three edges; this does that copy
+// with no gradients, limiter or vertex values. Used by the subgrid Euler step when
+// ANUGA_SUBGRID_P0 is set.
+void core_extrapolate_edges_p0(struct domain *D) {
+    anuga_int n = D->number_of_elements;
+    double * restrict stage_cv = D->stage_centroid_values;
+    double * restrict xmom_cv = D->xmom_centroid_values;
+    double * restrict ymom_cv = D->ymom_centroid_values;
+    double * restrict bed_cv = D->bed_centroid_values;
+    double * restrict height_cv = D->height_centroid_values;
+    double * restrict stage_ev = D->stage_edge_values;
+    double * restrict xmom_ev = D->xmom_edge_values;
+    double * restrict ymom_ev = D->ymom_edge_values;
+    double * restrict bed_ev = D->bed_edge_values;
+    double * restrict height_ev = D->height_edge_values;
+    #ifdef CPU_ONLY_MODE
+    #pragma omp parallel for
+    #else
+    #pragma omp target teams distribute parallel for
+    #endif
+    for (anuga_int k = 0; k < n; k++) {
+        for (int i = 0; i < 3; i++) {
+            anuga_int ki = 3 * k + i;
+            stage_ev[ki] = stage_cv[k];
+            xmom_ev[ki] = xmom_cv[k];
+            ymom_ev[ki] = ymom_cv[k];
+            bed_ev[ki] = bed_cv[k];
+            height_ev[ki] = height_cv[k];
+        }
+    }
+}
+
 void core_extrapolate_edge_pass(struct domain *D, double predictor_dt) {
     core_extrapolate_edge_pass_on(D, predictor_dt, NULL, 0);
 }
@@ -4831,7 +4864,6 @@ void core_kinematic_viscosity_explicit(struct domain *D, double nu, double dt,
 // side's weights (a reflective wall then passes no mass).
 // ============================================================================
 #define SUBGRID_H_DRY 1.0e-6
-#ifdef CPU_ONLY_MODE
 double core_compute_fluxes_subgrid(struct domain *D, int substep_count,
                                    int timestep_fluxcalls,
                                    const double * restrict sub_z, anuga_int nsub,
@@ -4868,7 +4900,14 @@ double core_compute_fluxes_subgrid(struct domain *D, int substep_count,
     double local_timestep = 1.0e+100;
     double boundary_flux_sum_substep = 0.0;
 
+    // Mode 2: every array, the arguments included, is present on the device
+    // (gpu_subgrid_init maps the arguments); D itself is not, so nothing below
+    // may read D-> inside the loop.
+    #ifdef CPU_ONLY_MODE
     #pragma omp parallel for reduction(min:local_timestep) reduction(+:boundary_flux_sum_substep)
+    #else
+    #pragma omp target teams distribute parallel for reduction(min:local_timestep) reduction(+:boundary_flux_sum_substep)
+    #endif
     for (anuga_int k = 0; k < n; k++) {
         double ql[3], qr[3], ef[3];
         double speed_max_cell = 0.0;
@@ -4920,18 +4959,17 @@ double core_compute_fluxes_subgrid(struct domain *D, int substep_count,
             qrj[0] = qr[0];
 
             double F0 = 0.0, F1 = 0.0, F2 = 0.0, P = 0.0, B = 0.0, smax = 0.0;
-            const double * restrict zs = sub_z + ki * nsub;
-            const double * restrict ins = split ? sub_invn + ki * nsub : NULL;
+            const anuga_int kn = ki * nsub;
             for (anuga_int j = 0; j < nsub; j++) {
-                double zj = zs[j];
+                double zj = sub_z[kn + j];
                 double hc = fmax(eta_c - zj, 0.0);
                 B += hc * hc;
                 double hL = fmax(ql[0] - zj, 0.0);
                 double hR = fmax(qr[0] - zj, 0.0);
                 if (hL == 0.0 && hR == 0.0) continue;
                 double wL = 1.0, wR = 1.0;
-                if (splitL) wL = aL * cbrt(hL * hL) * ins[j];
-                if (splitR) wR = is_boundary ? wL : aR * cbrt(hR * hR) * ins[j];
+                if (splitL) wL = aL * cbrt(hL * hL) * sub_invn[kn + j];
+                if (splitR) wR = is_boundary ? wL : aR * cbrt(hR * hR) * sub_invn[kn + j];
                 qlj[1] = ql[1] * wL;
                 qlj[2] = ql[2] * wL;
                 qrj[1] = qr[1] * wR;
@@ -5020,7 +5058,11 @@ anuga_int core_subgrid_drain_limit(struct domain *D, double dt,
     anuga_geom_t * restrict areas = D->areas;
     anuga_int limited = 0;
 
+    #ifdef CPU_ONLY_MODE
     #pragma omp parallel for reduction(+:limited)
+    #else
+    #pragma omp target teams distribute parallel for reduction(+:limited)
+    #endif
     for (anuga_int k = 0; k < n; k++) {
         double out = 0.0;
         for (int i = 0; i < 3; i++) out += fmax(-slot_flux[3 * (3 * k + i)], 0.0);
@@ -5033,19 +5075,23 @@ anuga_int core_subgrid_drain_limit(struct domain *D, double dt,
         phi[k] = p;
     }
 
+    #ifdef CPU_ONLY_MODE
     #pragma omp parallel for
+    #else
+    #pragma omp target teams distribute parallel for
+    #endif
     for (anuga_int k = 0; k < n; k++) {
         double s0 = 0.0, s1 = 0.0, s2 = 0.0;
         for (int i = 0; i < 3; i++) {
             anuga_int ki = 3 * k + i;
-            const double *F = slot_flux + 3 * ki;
+            const double f0 = slot_flux[3 * ki];
             anuga_int nb = neighbours[ki];
             double w;
-            if (F[0] < 0.0) w = phi[k];                 // outflow: this cell donates
+            if (f0 < 0.0) w = phi[k];                   // outflow: this cell donates
             else w = (nb >= 0) ? phi[nb] : 1.0;         // inflow: neighbour donates
-            s0 += w * F[0];
-            s1 += w * F[1];
-            s2 += w * F[2];
+            s0 += w * f0;
+            s1 += w * slot_flux[3 * ki + 1];
+            s2 += w * slot_flux[3 * ki + 2];
         }
         double inv_area = 1.0 / areas[k];
         stage_eu[k] = s0 * inv_area;
@@ -5106,6 +5152,9 @@ void core_subgrid_table_conveyance(anuga_int n, anuga_int m, const double * rest
         const double e = eta[i];
         const double *zi = z + i * m;
         double acc = 0.0, hsum = 0.0;
+        // the power is the cost: reuse it over a run of equal depths (an ordinary
+        // cell in a mixed mesh has one bed for all its sub-triangles). Same sums.
+        double hprev = -1.0, ph = 0.0;
         anuga_int wet = 0;
         if (e > zi[0]) {                      // z is sorted along the row: below z[0] the cell is dry
             for (anuga_int k = 0; k < m; k++) {
@@ -5118,7 +5167,11 @@ void core_subgrid_table_conveyance(anuga_int n, anuga_int m, const double * rest
                     hk += (x < r ? x : r);
                 }
                 hsum += hk;
-                acc += pow(hk, p) * inv_n[i * m + k];
+                if (hk != hprev) {
+                    ph = pow(hk, p);
+                    hprev = hk;
+                }
+                acc += ph * inv_n[i * m + k];
             }
         }
         kc[i] = acc / (double) m;
@@ -5126,4 +5179,327 @@ void core_subgrid_table_conveyance(anuga_int n, anuga_int m, const double * rest
         if (hflow != NULL) hflow[i] = hsum / (double) m;
     }
 }
-#endif
+
+// K_theta / Kc from the conveyance tensor tables (SubgridTables.tensor_ratio):
+// R = K*/Kc as (xx, xy, yy) at L levels per cell, tlev (n, L) and tR (n, L, 3),
+// interpolated linearly in the level and held constant outside the table.
+// flow_form = 0: q^ . R q^ for q^ = (cos theta, sin theta);
+// flow_form = 1: (|R^-1 q^| (q^ . R^-1 q^))^-1/2.
+// One cell: lv its L levels, R its (L, 3) tensors.
+#pragma omp declare target
+static inline double core_subgrid_tensor_ratio_cell(double e, double th, const double *lv,
+                                                    const double *R, anuga_int L, int flow_form) {
+    anuga_int cnt = 0;
+    for (anuga_int l = 0; l < L; l++) cnt += (lv[l] <= e);
+    anuga_int j = cnt - 1;
+    if (j < 0) j = 0;
+    if (j > L - 2) j = L - 2;
+    const double l0 = lv[j], l1 = lv[j + 1];
+    double dl = l1 - l0;
+    if (dl < 1.0e-12) dl = 1.0e-12;
+    double w = (e - l0) / dl;
+    if (w < 0.0) w = 0.0;
+    if (w > 1.0) w = 1.0;
+    const double *R0 = R + j * 3, *R1 = R0 + 3;
+    const double a = (1.0 - w) * R0[0] + w * R1[0];
+    const double b = (1.0 - w) * R0[1] + w * R1[1];
+    const double d = (1.0 - w) * R0[2] + w * R1[2];
+    if (!(th == th)) th = 0.0;
+    const double c = cos(th), s = sin(th);
+    if (!flow_form) return a * c * c + 2 * b * c * s + d * s * s;
+    const double det = a * d - b * b;
+    const double ux = (d * c - b * s) / det, uy = (-b * c + a * s) / det;
+    return pow(hypot(ux, uy) * (c * ux + s * uy), -0.5);
+}
+
+// Pond tables (pond_storage.PondStore): a pond's volume is piecewise linear in
+// its level, with breakpoints tb[st:en], the volume tvol at each, the surface
+// area tslope just above each and tat exactly at each.
+// Last j in [st, en) with X[j] <= v; st - 1 when there is none.
+static inline anuga_int core_subgrid_last_le(const double *X, anuga_int st, anuga_int en, double v) {
+    anuga_int lo = st - 1, hi = en;
+    while (hi - lo > 1) {
+        const anuga_int mid = lo + (hi - lo) / 2;
+        if (X[mid] <= v) lo = mid; else hi = mid;
+    }
+    return lo;
+}
+static inline double core_subgrid_pond_volume(double e, anuga_int st, anuga_int en, const double *tb,
+                                              const double *tslope, const double *tvol,
+                                              double zlow, double shigh, double vmax) {
+    if (e < zlow) e = zlow;
+    if (e > shigh) e = shigh;
+    anuga_int j = core_subgrid_last_le(tb, st, en, e);
+    if (j < st) j = st;
+    const double v = tvol[j] + tslope[j] * (e - tb[j]);
+    return v < vmax ? v : vmax;
+}
+static inline double core_subgrid_pond_level(double V, anuga_int st, anuga_int en, const double *tb,
+                                             const double *tslope, const double *tvol,
+                                             double zlow, double shigh, double vmax) {
+    if (!(V > 0.0)) return zlow;
+    if (!(V < vmax * (1.0 - 1.0e-12))) return shigh;
+    const anuga_int j = core_subgrid_last_le(tvol, st, en, V);      // tvol starts at 0: j >= st
+    const double sl = tslope[j];
+    const double e = tb[j] + (sl > 0.0 ? (V - tvol[j]) / sl : 0.0);
+    return e < shigh ? e : shigh;
+}
+static inline double core_subgrid_pond_surface(double e, anuga_int st, anuga_int en, const double *tb,
+                                               const double *tslope, const double *tat) {
+    const anuga_int j = core_subgrid_last_le(tb, st, en, e);
+    if (j < st) return 0.0;
+    return tb[j] < e ? tslope[j] : tat[j];
+}
+#pragma omp end declare target
+
+void core_subgrid_table_tensor_ratio(anuga_int n, anuga_int L, const double * restrict eta,
+                                     const double * restrict theta, const double * restrict tlev,
+                                     const double * restrict tR, int flow_form,
+                                     double * restrict out) {
+    #pragma omp parallel for schedule(static)
+    for (anuga_int i = 0; i < n; i++) {
+        out[i] = core_subgrid_tensor_ratio_cell(eta[i], theta[i], tlev + i * L, tR + i * L * 3, L, flow_form);
+    }
+}
+
+// The pond exchange (pond_storage.Pond_exchange_operator._exchange, without the
+// deep option): every pond trades water with its cell's connected store over a
+// broad-crested weir at its crest, drowned by Villemonte's factor, and never
+// past equal levels or more than either store holds. A cell's ponds together
+// take no more than the cell holds. tz, tV, tS: the cells' storage tables
+// (n, m), without hollow sills. Returns the volume moved, sum of |dV|.
+double core_subgrid_pond_exchange(struct domain *D, anuga_int m,
+                                  const double * restrict tz, const double * restrict tV,
+                                  const double * restrict tS, struct subgrid_ponds *P, double dt) {
+    double * restrict stage_cv = D->stage_centroid_values;
+    double * restrict bed_cv = D->bed_centroid_values;
+    anuga_geom_t * restrict areas = D->areas;
+    const double sqrtg = sqrt(D->g);
+    const anuga_int nc = P->nc;
+    const anuga_int * restrict cells = P->cells;
+    const anuga_int * restrict cstart = P->cstart;
+    const anuga_int * restrict tstart = P->tstart;
+    const double * restrict tb = P->tb;
+    const double * restrict tslope = P->tslope;
+    const double * restrict tvol = P->tvol;
+    const double * restrict tat = P->tat;
+    const double * restrict zs = P->zs;
+    const double * restrict Vzs = P->Vzs;
+    const double * restrict vmax = P->vmax;
+    const double * restrict shigh = P->shigh;
+    const double * restrict zlow = P->zlow;
+    const double * restrict pw = P->w;
+    double * restrict PV = P->V;
+    double * restrict dV = P->dV;
+    const double cw = P->cw;
+    double moved = 0.0;
+
+    #ifdef CPU_ONLY_MODE
+    #pragma omp parallel for schedule(static) reduction(+:moved)
+    #else
+    #pragma omp target teams distribute parallel for reduction(+:moved)
+    #endif
+    for (anuga_int ci = 0; ci < nc; ci++) {
+        const anuga_int i = cells[ci];
+        const anuga_int im = i * m;
+        double h = stage_cv[i] - bed_cv[i];
+        if (h < 0.0) h = 0.0;
+        const int wetc = (h > 0.0);
+        // the cell's connected level (core_subgrid_table_eta)
+        const double target = (double) m * h;
+        anuga_int cnt = 0;
+        for (anuga_int k = 0; k < m; k++) cnt += (tV[im + k] <= target);
+        anuga_int j = cnt - 1;
+        if (j < 0) j = 0;
+        const double eta = (target + tS[im + j]) / (double) (j + 1);
+        const double A = (double) areas[i];
+        double ac = -1.0, take = 0.0;
+        int any = 0;
+        for (anuga_int g = cstart[ci]; g < cstart[ci + 1]; g++) {
+            const double V = PV[g];
+            dV[g] = 0.0;
+            // the weir only runs where a level is above the crest; a full pond under a
+            // connected level at or above its highest sill has nothing to exchange
+            if (!((wetc && eta > zs[g]) || V > Vzs[g])) continue;
+            if (V >= vmax[g] * (1.0 - 1.0e-12) && wetc && eta >= shigh[g]) continue;
+            if (!any) {
+                any = 1;
+                anuga_int nw = 0;
+                if (wetc) for (anuga_int k = 0; k < m; k++) nw += (eta - tz[im + k] > 0.0);
+                ac = (double) nw * A / (double) m;           // the connected store's free surface
+                if (ac < 1.0e-9) ac = 1.0e-9;
+            }
+            const anuga_int st = tstart[g], en = tstart[g + 1];
+            const double eta_p = core_subgrid_pond_level(V, st, en, tb, tslope, tvol, zlow[g], shigh[g], vmax[g]);
+            const double up = (wetc && eta > eta_p) ? eta : eta_p;
+            double hu = up - zs[g];
+            if (hu < 0.0) hu = 0.0;
+            double hd = 0.0;
+            if (wetc) {
+                hd = (eta < eta_p ? eta : eta_p) - zs[g];
+                if (hd < 0.0) hd = 0.0;
+            }
+            double psi = 0.0;
+            if (hu > 0.0) {
+                double x = 1.0 - pow(hd / hu, 1.5);
+                if (x < 0.0) x = 0.0;
+                psi = pow(x, 0.385);
+            }
+            const double sgn = !wetc ? -1.0 : (eta > eta_p ? 1.0 : (eta < eta_p ? -1.0 : 0.0));
+            double d = cw * pw[g] * sqrtg * sgn * pow(hu, 1.5) * psi * dt;
+            if (d > 0.0) {
+                // filling: up to the pond volume at the connected level, and no more than
+                // the connected water above the crest
+                const double ec = wetc ? eta : zs[g];
+                const double top = ec < shigh[g] ? ec : shigh[g];
+                const double base = eta_p > zs[g] ? eta_p : zs[g];
+                double fill = core_subgrid_pond_volume(top, st, en, tb, tslope, tvol, zlow[g], shigh[g], vmax[g]) - V;
+                const double f2 = ac * (ec - base);
+                if (f2 < fill) fill = f2;
+                if (fill < 0.0) fill = 0.0;
+                if (fill < d) d = fill;
+            } else {
+                // draining: the linearised equal-level transfer, pond surface at its own level
+                double ap = core_subgrid_pond_surface(eta_p, st, en, tb, tslope, tat);
+                if (ap < 1.0e-9) ap = 1.0e-9;
+                double drain = wetc ? (eta - eta_p) * ac * ap / (ac + ap) : -V;
+                if (drain > 0.0) drain = 0.0;
+                if (drain > d) d = drain;
+            }
+            if (d < -V) d = -V;
+            if (d > vmax[g] - V) d = vmax[g] - V;
+            dV[g] = d;
+            if (d > 0.0) take += d;
+        }
+        if (!any) continue;
+        double scale = 1.0;
+        if (take > 0.0) {
+            scale = h * A / take;
+            if (scale > 1.0) scale = 1.0;
+        }
+        double w = stage_cv[i];
+        for (anuga_int g = cstart[ci]; g < cstart[ci + 1]; g++) {
+            double d = dV[g];
+            if (d == 0.0) continue;
+            if (d > 0.0) d *= scale;
+            PV[g] += d;
+            w += -d / A;
+            moved += fabs(d);
+        }
+        stage_cv[i] = w;
+    }
+    return moved;
+}
+
+// ----------------------------------------------------------------------------
+// The storage operator's per-step update in one pass (#508; mode 2 runs it on
+// the device, so the subgrid step needs no host round trip). It is what
+// Subgrid_storage_operator.__call__ does with conveyance friction, the
+// conveyance split and the step cap, and without sills, ponds, connectivity,
+// directional or tensor conveyance:
+//   h       = max(stage - bed, 0)                    the cell's mean depth
+//   eta     = level holding h (core_subgrid_table_eta)
+//   bed     = eta - h,  stage = eta                  the effective bed
+//   Kc, nwet from eta (core_subgrid_table_conveyance)
+//   n_eff   = h^(5/3) / Kc, or n_base where Kc = 0 or h = 0
+//   friction = n_eff, and cell_neff = n_eff if given (the conveyance split)
+//   with tensor tables (tlev not NULL): friction from Kc times the tensor ratio
+//   along the discharge (core_subgrid_table_tensor_ratio); the split keeps Kc
+//   |q|     <= h * fr_cap * sqrt(g * (eta - lowest bed))   the speed cap (fr_cap > 0)
+//   cap     = cfl * min over wet cells of f^p r / c,  f = nwet / m,
+//             c = max(|q| / h + sqrt(g h), max_speed)
+// tz, tV, tS, tinvn are (n, m): the sorted beds, m * (mean depth) at each
+// breakpoint, the prefix sums of the beds and 1/n per sub-triangle.
+// Returns min(max_step, cap); max_step when no cell is wet.
+// ----------------------------------------------------------------------------
+double core_subgrid_storage_update(struct domain *D, anuga_int m,
+                                   const double * restrict tz, const double * restrict tV,
+                                   const double * restrict tS, const double * restrict tinvn,
+                                   const double * restrict n_base, double * restrict cell_neff,
+                                   double cfl, double cap_exponent, double cap_min_depth,
+                                   double cap_min_fraction, double max_step,
+                                   anuga_int tL, const double * restrict tlev,
+                                   const double * restrict tR, int tensor_form, double fr_cap) {
+    anuga_int n = D->number_of_elements;
+    double g = D->g;
+    double * restrict stage_cv = D->stage_centroid_values;
+    double * restrict bed_cv = D->bed_centroid_values;
+    double * restrict xmom_cv = D->xmom_centroid_values;
+    double * restrict ymom_cv = D->ymom_centroid_values;
+    double * restrict friction_cv = D->friction_centroid_values;
+    double * restrict max_speed = D->max_speed;
+    anuga_geom_t * restrict radii = D->radii;
+    const double p53 = 5.0 / 3.0;
+    const double hmin = cap_min_depth > 1.0e-6 ? cap_min_depth : 1.0e-6;
+    const int split = (cell_neff != NULL);
+    const int tensor = (tlev != NULL);
+    double limit = 1.0e+100;
+    // Speed cap: |q| / h <= fr_cap * sqrt(g * deepest depth in the cell); fr_cap <= 0 turns it off. A cell that
+    // has drained to a film can keep the momentum of the water that left; |q| / h then sets a time step of
+    // milliseconds.
+    const double frc = fr_cap;
+
+    #ifdef CPU_ONLY_MODE
+    #pragma omp parallel for reduction(min:limit)
+    #else
+    #pragma omp target teams distribute parallel for reduction(min:limit)
+    #endif
+    for (anuga_int i = 0; i < n; i++) {
+        double h = stage_cv[i] - bed_cv[i];
+        if (h < 0.0) h = 0.0;
+        const double target = (double) m * h;
+        const anuga_int im = i * m;
+        anuga_int cnt = 0;
+        for (anuga_int k = 0; k < m; k++) cnt += (tV[im + k] <= target);
+        anuga_int j = cnt - 1;
+        if (j < 0) j = 0;
+        const double e = (target + tS[im + j]) / (double) (j + 1);
+        bed_cv[i] = e - h;
+        stage_cv[i] = e;
+
+        double acc = 0.0;
+        anuga_int wet = 0;
+        if (e > tz[im]) {
+            for (anuga_int k = 0; k < m; k++) {
+                const double hk = e - tz[im + k];
+                if (hk <= 0.0) continue;
+                wet++;
+                acc += pow(hk, p53) * tinvn[im + k];
+            }
+        }
+        const double kc = acc / (double) m;
+        double ne = n_base[i];
+        if (kc > 0.0 && h > 0.0) ne = pow(h, p53) / kc;
+        if (frc > 0.0) {
+            const double dmax = e - tz[im];
+            const double qmax = (dmax > 0.0 && h > 0.0) ? h * frc * sqrt(g * dmax) : 0.0;
+            const double q2 = xmom_cv[i] * xmom_cv[i] + ymom_cv[i] * ymom_cv[i];
+            if (q2 > qmax * qmax) {
+                const double sc = (q2 > 0.0) ? qmax / sqrt(q2) : 0.0;
+                xmom_cv[i] *= sc;
+                ymom_cv[i] *= sc;
+            }
+        }
+        if (split) cell_neff[i] = ne;
+        if (tensor) {
+            // the friction (not the split) takes the tensor's conveyance along the discharge
+            const double kt = kc * core_subgrid_tensor_ratio_cell(e, atan2(ymom_cv[i], xmom_cv[i]),
+                                                                  tlev + i * tL, tR + i * tL * 3, tL, tensor_form);
+            ne = n_base[i];
+            if (kt > 0.0 && h > 0.0) ne = pow(h, p53) / kt;
+        }
+        friction_cv[i] = ne;
+
+        const double f = (double) wet / (double) m;
+        if (h > hmin && f >= cap_min_fraction) {
+            double c = sqrt(xmom_cv[i] * xmom_cv[i] + ymom_cv[i] * ymom_cv[i]) / h + sqrt(g * h);
+            if (max_speed[i] > c) c = max_speed[i];
+            const double fp = (cap_exponent == 0.0) ? 1.0 : pow(f, cap_exponent);
+            const double lim = fp * radii[i] / c;
+            if (lim < limit) limit = lim;
+        }
+    }
+    if (limit >= 1.0e+100) return max_step;
+    limit *= cfl;
+    return limit < max_step ? limit : max_step;
+}

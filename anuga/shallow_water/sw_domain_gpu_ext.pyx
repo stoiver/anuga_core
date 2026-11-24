@@ -28,7 +28,31 @@ ELSE:
     ctypedef int MPI_Comm
 
 # External C declarations (from gpu/ subdirectory)
+cdef extern from "core_kernels.h" nogil:
+    cdef struct subgrid_ponds:
+        int64_t npd, nc, ntab
+        int64_t *cells
+        int64_t *cstart
+        int64_t *tstart
+        double *tb
+        double *tslope
+        double *tvol
+        double *tat
+        double *zs
+        double *Vzs
+        double *vmax
+        double *shigh
+        double *zlow
+        double *w
+        double *V
+        double *dV
+        double cw
+
 cdef extern from "gpu_domain.h" nogil:
+    cdef struct gpu_subgrid:
+        int64_t limited
+        double cap
+
     # Forward declare the structs
     struct domain:
         int64_t number_of_elements
@@ -262,6 +286,21 @@ cdef extern from "gpu_domain.h" nogil:
         int use_sloped_mannings
         int use_active_set
         long as_samples
+        gpu_subgrid *subgrid
+
+    # Subgrid terrain (#508 prototype)
+    int gpu_subgrid_init(gpu_domain *GD, int64_t nsub, int64_t m,
+                         double *sub_z, double *sub_invn,
+                         double *tz, double *tV, double *tS, double *tinvn,
+                         double *n_base, double *cell_neff, int drain_limiter,
+                         double cfl, double cap_exponent, double cap_min_depth,
+                         double cap_min_fraction, double cap, double fr_cap)
+    double gpu_subgrid_storage_update(gpu_domain *GD, double max_step)
+    int gpu_subgrid_set_tensor(gpu_domain *GD, int64_t tL, double *tlev, double *tR, int tensor_form)
+    int gpu_subgrid_set_ponds(gpu_domain *GD, const subgrid_ponds *ponds)
+    double gpu_subgrid_pond_exchange(gpu_domain *GD, double dt)
+    void gpu_subgrid_sync_ponds(gpu_domain *GD)
+    void gpu_subgrid_finalize(gpu_domain *GD)
 
     # Function declarations - initialization and cleanup
     int gpu_domain_init(gpu_domain *GD, MPI_Comm comm, int rank, int nprocs)
@@ -2549,6 +2588,121 @@ def apply_sediment_source_gpu(GPUDomain gpu_dom, double timestep):
     GPU-safe and off the _gpu_host_writes_suppressed fallback path.
     """
     core_apply_sediment_source(&gpu_dom.GD.D, timestep)
+
+
+def init_subgrid_gpu(GPUDomain gpu_dom,
+                     double[:, ::1] sub_z not None,
+                     double[:, ::1] tz not None,
+                     double[:, ::1] tV not None,
+                     double[:, ::1] tS not None,
+                     double[:, ::1] tinvn not None,
+                     double[::1] n_base not None,
+                     double[:, ::1] sub_invn=None,
+                     double[::1] cell_neff=None,
+                     bint drain_limiter=False,
+                     double cfl=1.0, double cap_exponent=1.0,
+                     double cap_min_depth=0.0, double cap_min_fraction=0.0,
+                     double cap=1.0e100, double fr_cap=0.0):
+    """Subgrid terrain on the device (#508 prototype): map the subface beds
+    sub_z (3n, nsub), the storage tables tz, tV, tS, tinvn (n, m) and n_base
+    (n), and with sub_invn (3n, nsub) and cell_neff (n) the conveyance split.
+    The Euler step then uses the subgrid edge flux. The caller keeps every
+    array alive, and unchanged in address, until the domain is finalized.
+    """
+    cdef int64_t n = gpu_dom.GD.D.number_of_elements
+    cdef int64_t nsub = sub_z.shape[1]
+    cdef int64_t m = tz.shape[1]
+    if sub_z.shape[0] != 3 * n:
+        raise ValueError('init_subgrid_gpu: sub_z must be (3 * number_of_elements, nsub)')
+    if (tz.shape[0] != n or tV.shape[0] != n or tS.shape[0] != n or tinvn.shape[0] != n
+            or tV.shape[1] != m or tS.shape[1] != m or tinvn.shape[1] != m):
+        raise ValueError('init_subgrid_gpu: the tables must be (number_of_elements, m)')
+    if n_base.shape[0] != n:
+        raise ValueError('init_subgrid_gpu: n_base must have number_of_elements entries')
+    cdef double* si = NULL
+    cdef double* cn = NULL
+    if sub_invn is not None:
+        if cell_neff is None or cell_neff.shape[0] != n \
+                or sub_invn.shape[0] != 3 * n or sub_invn.shape[1] != nsub:
+            raise ValueError('init_subgrid_gpu: sub_invn needs a matching cell_neff')
+        si = &sub_invn[0, 0]
+        cn = &cell_neff[0]
+    if gpu_subgrid_init(&gpu_dom.GD, nsub, m, &sub_z[0, 0], si,
+                        &tz[0, 0], &tV[0, 0], &tS[0, 0], &tinvn[0, 0],
+                        &n_base[0], cn, drain_limiter, cfl, cap_exponent,
+                        cap_min_depth, cap_min_fraction, cap, fr_cap) != 0:
+        raise RuntimeError('init_subgrid_gpu failed')
+
+
+def subgrid_storage_update_gpu(GPUDomain gpu_dom, double max_step):
+    """The subgrid storage operator's per-step update on the device: level and
+    effective bed from each cell's mean depth, conveyance friction, and the
+    step cap, which is returned (max_step when no cell is wet)."""
+    return gpu_subgrid_storage_update(&gpu_dom.GD, max_step)
+
+
+def subgrid_set_tensor_gpu(GPUDomain gpu_dom,
+                           double[:, ::1] tlev not None,
+                           double[:, :, ::1] tR not None,
+                           bint flow_form=False):
+    """Map the conveyance tensor tables tlev (n, L) and tR (n, L, 3): the device
+    storage update then applies the tensor friction. After init_subgrid_gpu; the
+    caller keeps the arrays alive."""
+    cdef int64_t n = gpu_dom.GD.D.number_of_elements
+    if (tlev.shape[0] != n or tR.shape[0] != n or tR.shape[1] != tlev.shape[1]
+            or tR.shape[2] != 3 or tlev.shape[1] < 2):
+        raise ValueError('subgrid_set_tensor_gpu: tlev must be (n, L) and tR (n, L, 3)')
+    if gpu_subgrid_set_tensor(&gpu_dom.GD, tlev.shape[1], &tlev[0, 0], &tR[0, 0, 0], flow_form) != 0:
+        raise RuntimeError('subgrid_set_tensor_gpu failed')
+
+
+def subgrid_set_ponds_gpu(GPUDomain gpu_dom,
+                          int64_t[::1] cells not None, int64_t[::1] cstart not None,
+                          int64_t[::1] tstart not None,
+                          double[::1] tb not None, double[::1] tslope not None,
+                          double[::1] tvol not None, double[::1] tat not None,
+                          double[::1] zs not None, double[::1] Vzs not None,
+                          double[::1] vmax not None, double[::1] shigh not None,
+                          double[::1] zlow not None, double[::1] w not None,
+                          double[::1] V not None, double[::1] dV not None, double cw):
+    """Map the pond store (pond_storage.PondStore.kernel_arrays) on the device,
+    which owns the volumes V from then on. After init_subgrid_gpu; the caller
+    keeps the arrays alive."""
+    cdef subgrid_ponds P
+    cdef int64_t npd = V.shape[0], nc = cells.shape[0], ntab = tb.shape[0]
+    if npd == 0 or nc == 0:
+        raise ValueError('subgrid_set_ponds_gpu: no ponds')
+    if (cstart.shape[0] != nc + 1 or tstart.shape[0] != npd + 1
+            or tslope.shape[0] != ntab or tvol.shape[0] != ntab or tat.shape[0] != ntab
+            or zs.shape[0] != npd or Vzs.shape[0] != npd or vmax.shape[0] != npd
+            or shigh.shape[0] != npd or zlow.shape[0] != npd or w.shape[0] != npd
+            or dV.shape[0] != npd or cstart[nc] != npd or tstart[npd] != ntab):
+        raise ValueError('subgrid_set_ponds_gpu: array shapes do not match')
+    P.npd = npd; P.nc = nc; P.ntab = ntab
+    P.cells = &cells[0]; P.cstart = &cstart[0]; P.tstart = &tstart[0]
+    P.tb = &tb[0]; P.tslope = &tslope[0]; P.tvol = &tvol[0]; P.tat = &tat[0]
+    P.zs = &zs[0]; P.Vzs = &Vzs[0]; P.vmax = &vmax[0]; P.shigh = &shigh[0]
+    P.zlow = &zlow[0]; P.w = &w[0]; P.V = &V[0]; P.dV = &dV[0]
+    P.cw = cw
+    if gpu_subgrid_set_ponds(&gpu_dom.GD, &P) != 0:
+        raise RuntimeError('subgrid_set_ponds_gpu failed')
+
+
+def subgrid_pond_exchange_gpu(GPUDomain gpu_dom, double dt):
+    """One pond exchange on the device over the step dt; returns the volume moved."""
+    return gpu_subgrid_pond_exchange(&gpu_dom.GD, dt)
+
+
+def subgrid_sync_ponds_gpu(GPUDomain gpu_dom):
+    """Copy the pond volumes from the device into the host array."""
+    gpu_subgrid_sync_ponds(&gpu_dom.GD)
+
+
+def subgrid_limited_cell_steps_gpu(GPUDomain gpu_dom):
+    """Cell-steps the draining limiter has scaled so far (0 without subgrid)."""
+    if gpu_dom.GD.subgrid == NULL:
+        return 0
+    return gpu_dom.GD.subgrid.limited
 
 
 def apply_bedload_gpu(GPUDomain gpu_dom, double timestep):

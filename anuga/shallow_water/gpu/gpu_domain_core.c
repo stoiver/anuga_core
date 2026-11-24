@@ -489,6 +489,9 @@ void gpu_domain_finalize(struct gpu_domain *GD) {
     // Free max-quantities operator arrays
     gpu_max_quantities_finalize(GD);
 
+    // Subgrid terrain tables and scratch
+    gpu_subgrid_finalize(GD);
+
     GD->gpu_initialized = 0;
 }
 
@@ -1563,6 +1566,13 @@ void gpu_domain_sync_from_device(struct gpu_domain *GD) {
     // the Exner update of [G-4] the device owns it and the host copy would
     // otherwise stay at its initial value for ever. Centroid AND edge, because
     // the DE algorithms use discontinuous elevation and the kernel shifts both.
+    // Subgrid terrain: the storage update rewrites the effective bed and the
+    // friction on the device every step.
+    if (GD->subgrid != NULL) {
+        double *bed_cv_g = GD->D.bed_centroid_values;
+        double *fric_cv_g = GD->D.friction_centroid_values;
+        #pragma omp target update from(bed_cv_g[0:n], fric_cv_g[0:n])
+    }
     if (GD->D.n_sediment_classes > 0) {
         double *bed_cv_s = GD->D.bed_centroid_values;
         double *bed_ev_s = GD->D.bed_edge_values;

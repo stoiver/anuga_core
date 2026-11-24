@@ -22,6 +22,7 @@ void core_extrapolate_centroid_pass(struct domain *D);
 // predictor_dt != 0 fuses the ADER-2 C-K edge predictor into the tail
 // (identical arithmetic to core_ader_ck_predictor_edge, one launch fewer).
 void core_extrapolate_edge_pass(struct domain *D, double predictor_dt);
+void core_extrapolate_edges_p0(struct domain *D);
 void core_extrapolate_edge_pass_on(struct domain *D, double predictor_dt,
                                    const anuga_int *iter, anuga_int iter_n);
 
@@ -107,7 +108,6 @@ void core_forcing_and_update_on(struct domain *D, double timestep,
 // timestep_fluxcalls: total number of flux calls per timestep (for boundary flux array indexing)
 double core_compute_fluxes_central(struct domain *D, int substep_count, int timestep_fluxcalls);
 
-#ifdef CPU_ONLY_MODE
 // Subgrid edge flux (prototype, #508): sub_z holds nsub subface beds per
 // cell-edge slot (3n x nsub). Replaces fluxes + gravity, like the central kernel.
 double core_compute_fluxes_subgrid(struct domain *D, int substep_count,
@@ -130,7 +130,32 @@ void core_subgrid_table_conveyance(anuga_int n, anuga_int m, const double *eta,
                                    const double *inv_n, const double *extra,
                                    double extra_ramp, double *kc, double *nwet,
                                    double *hflow);
-#endif
+void core_subgrid_table_tensor_ratio(anuga_int n, anuga_int L, const double *eta,
+                                     const double *theta, const double *tlev,
+                                     const double *tR, int flow_form, double *out);
+// The storage operator's whole per-step update in one pass (mode 2: on the
+// device). Returns the step cap, or max_step when no cell is wet.
+double core_subgrid_storage_update(struct domain *D, anuga_int m,
+                                   const double *tz, const double *tV, const double *tS,
+                                   const double *tinvn, const double *n_base,
+                                   double *cell_neff, double cfl, double cap_exponent,
+                                   double cap_min_depth, double cap_min_fraction,
+                                   double max_step, anuga_int tL, const double *tlev,
+                                   const double *tR, int tensor_form, double fr_cap);
+// Ponds below the spill level (pond_storage.PondStore). Ponds are ordered by
+// cell: cell cells[c] owns ponds cstart[c]:cstart[c+1]; pond g owns table
+// entries tstart[g]:tstart[g+1]. The arrays belong to the caller.
+struct subgrid_ponds {
+    anuga_int npd, nc, ntab;
+    anuga_int *cells, *cstart, *tstart;
+    double *tb, *tslope, *tvol, *tat;                     // (ntab) breakpoint tables
+    double *zs, *Vzs, *vmax, *shigh, *zlow, *w;           // (npd) crest, volume at it, capacity, top, bottom, weir width
+    double *V, *dV;                                       // (npd) volume held, scratch
+    double cw;                                            // weir coefficient
+};
+double core_subgrid_pond_exchange(struct domain *D, anuga_int m, const double *tz,
+                                  const double *tV, const double *tS,
+                                  struct subgrid_ponds *P, double dt);
 
 // Edge-based flux computation (opt-in; active when the driver allocates
 // D->edge_flux_work with 6*3n doubles).  Kernel A solves each unique edge's

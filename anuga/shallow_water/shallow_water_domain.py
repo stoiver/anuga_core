@@ -7565,12 +7565,26 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
 
         self._init_gpu_boundary_info(gpu_dom)
 
+        # Subgrid prototype (#508): the storage operator maps its tables on the
+        # first step; from then on the C step uses the subgrid edge flux.
+        subgrid = getattr(self, 'subgrid_edge_z', None) is not None
+        if subgrid and not getattr(self, '_subgrid_gpu_ready', False):
+            init = getattr(self, 'subgrid_gpu_init', None)
+            if init is None:
+                raise NotImplementedError(
+                    'subgrid edge flux in compute mode unified needs an operator that sets subgrid_gpu_init')
+            init(gpu_dom)
+            self._subgrid_gpu_ready = True
+
         # Boundaries the C loop cannot evaluate on the device (e.g.
         # Transmissive_momentum_set_stage_boundary) are handled by the
         # Python-orchestrated fallback, which evaluates them on the host and
         # syncs — matching rk2/rk3/ader2. Without this, those boundaries are
         # silently ignored in DE0 and results diverge from legacy.
         if not self._gpu_all_on_gpu:
+            if subgrid:
+                raise NotImplementedError(
+                    'subgrid edge flux in compute mode unified needs boundaries the device can evaluate')
             return self._evolve_one_euler_step_gpu(yieldstep, finaltime)
 
         # Set time-dependent boundary values before calling C function
@@ -8258,6 +8272,10 @@ A sediment fraction is a tracer -- so it is transported by the machinery of
             elif isinstance(op, Sediment_transport_operator):
                 # The sediment kernel runs on the device in mode 2 and updates
                 # the tracer and bed arrays in place, so no host sync is needed.
+                continue
+            elif getattr(op, 'gpu_device_resident', False):
+                # An operator that declares its whole update a device kernel
+                # (the subgrid storage operator, #508).
                 continue
             elif (isinstance(op, Kinematic_viscosity_operator)
                   and getattr(op, 'scheme', 'implicit') == 'explicit'):

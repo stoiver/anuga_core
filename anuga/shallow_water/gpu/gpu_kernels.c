@@ -624,6 +624,8 @@ double gpu_evolve_one_euler_step(struct gpu_domain *GD, double max_timestep, int
 
     const anuga_int *as_c, *as_e; anuga_int as_nc, as_ne;
     gpu_active_lists(GD, &as_c, &as_nc, &as_e, &as_ne);
+    struct gpu_subgrid *SG = GD->subgrid;
+    if (SG != NULL) as_c = NULL;      // subgrid (#508): whole-domain passes only
 
     // Fused protect + extrapolate centroid pass, then the edge pass --
     // same launch structure as the fused RK2/ADER2 steps.
@@ -632,7 +634,10 @@ double gpu_evolve_one_euler_step(struct gpu_domain *GD, double max_timestep, int
         core_extrapolate_edge_pass_on(&GD->D, 0.0, as_c, as_nc);
     } else {
         gpu_prepare_step(GD, 0, gpu_prepare_should_zero_eu(GD));
-        gpu_extrapolate_edges(GD, 0.0);
+        static int subgrid_p0 = -1;       // experiment: copy centroids to edges (all betas zero)
+        if (subgrid_p0 < 0) subgrid_p0 = (getenv("ANUGA_SUBGRID_P0") != NULL);
+        if (SG != NULL && subgrid_p0) core_extrapolate_edges_p0(&GD->D);
+        else gpu_extrapolate_edges(GD, 0.0);
     }
 
     gpu_evaluate_reflective_boundary(GD);
@@ -646,8 +651,45 @@ double gpu_evolve_one_euler_step(struct gpu_domain *GD, double max_timestep, int
     gpu_evaluate_flather_boundary(GD);
     gpu_evaluate_normal_depth_boundary(GD);
 
-    local_timestep = as_c ? core_compute_fluxes_scatter_on(&GD->D, 0, 1, as_e, as_ne)
-                          : gpu_flux_phase(GD, 0, 1);
+    if (SG != NULL) {
+        local_timestep = core_compute_fluxes_subgrid(&GD->D, 0, 1, SG->sub_z, SG->nsub,
+                                                     SG->slot_flux, SG->cell_pres,
+                                                     SG->sub_invn, SG->cell_neff);
+    } else {
+        local_timestep = as_c ? core_compute_fluxes_scatter_on(&GD->D, 0, 1, as_e, as_ne)
+                              : gpu_flux_phase(GD, 0, 1);
+    }
+
+    // Diagnostic (#508): with ANUGA_SUBGRID_DTCELL=<file>, write for every step the cell that sets the time step.
+    if (SG != NULL) {
+        static FILE *dtf = NULL; static int dt_on = -1; static double tsum = 0.0;
+        if (dt_on < 0) { const char *f = getenv("ANUGA_SUBGRID_DTCELL"); dt_on = (f != NULL); if (dt_on) dtf = fopen(f, "w"); }
+        if (dt_on && dtf) {
+            anuga_int n = GD->D.number_of_elements;
+            double *ms = GD->D.max_speed; anuga_geom_t *rd = GD->D.radii;
+            double *st = GD->D.stage_centroid_values, *bd = GD->D.bed_centroid_values;
+            double *xm = GD->D.xmom_centroid_values, *ym = GD->D.ymom_centroid_values;
+            double best = 1.0e100; anuga_int kb = -1;
+            #ifndef CPU_ONLY_MODE
+            #pragma omp target teams distribute parallel for reduction(min:best)
+            #endif
+            for (anuga_int k = 0; k < n; k++) if (ms[k] > 1.0e-12) best = fmin(best, rd[k] / ms[k]);
+            #ifndef CPU_ONLY_MODE
+            #pragma omp target teams distribute parallel for reduction(max:kb)
+            #endif
+            for (anuga_int k = 0; k < n; k++) if (ms[k] > 1.0e-12 && rd[k] / ms[k] <= best) kb = (k > kb) ? k : kb;
+            double v[5] = {0, 0, 0, 0, 0};
+            if (kb >= 0) {
+                #ifndef CPU_ONLY_MODE
+                #pragma omp target map(tofrom:v[0:5])
+                #endif
+                { v[0] = ms[kb]; v[1] = st[kb]; v[2] = bd[kb]; v[3] = xm[kb]; v[4] = ym[kb]; }
+            }
+            fprintf(dtf, "%.3f %.6g %ld %.6g %.6f %.6f %.6g %.6g\n", tsum, best, (long)kb, v[0], v[1], v[2], v[3], v[4]);
+            tsum += GD->CFL * best < max_timestep ? GD->CFL * best : max_timestep;
+            if (((long)(tsum / 600.0)) != ((long)((tsum - 2.0) / 600.0))) fflush(dtf);
+        }
+    }
 
     static int fixed_ts_printed_euler = 0;
     if (GD->fixed_flux_timestep > 0.0) {
@@ -670,6 +712,13 @@ double gpu_evolve_one_euler_step(struct gpu_domain *GD, double max_timestep, int
         GD->recorded_flux_timestep =
             (timestep < GD->evolve_max_timestep) ? timestep : GD->evolve_max_timestep;
         if (timestep > max_timestep) timestep = max_timestep;
+    }
+
+    // Subgrid: the draining limiter rescales the explicit updates now that
+    // the step is known (mode 1 does this in update_timestep).
+    if (SG != NULL && SG->slot_flux != NULL) {
+        SG->limited += core_subgrid_drain_limit(&GD->D, timestep, SG->slot_flux,
+                                                SG->cell_pres, SG->phi);
     }
 
     // Manning + update fused (edge-based modes: also the flux gather)

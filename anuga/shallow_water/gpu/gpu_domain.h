@@ -565,6 +565,33 @@ struct gpu_domain {
 
     // FLOP counters for performance profiling (Gordon Bell)
     struct flop_counters flops;
+
+    // Subgrid terrain (#508 prototype): NULL unless gpu_subgrid_init was called.
+    struct gpu_subgrid *subgrid;
+};
+
+// Subgrid terrain on the device (#508 prototype; Euler step only). The table
+// and subface arrays belong to Python, which keeps them alive; the three
+// scratch arrays are allocated here.
+struct gpu_subgrid {
+    anuga_int nsub;            // subfaces per cell-edge slot
+    anuga_int m;               // sub-triangles per cell
+    double *sub_z;             // (3n, nsub) subface beds
+    double *sub_invn;          // (3n, nsub) 1/n per subface, or NULL
+    double *tz, *tV, *tS, *tinvn;   // (n, m) storage tables
+    double *n_base;            // (n) Manning n where a cell has no conveyance
+    double *cell_neff;         // (n) effective n for the conveyance split, or NULL
+    double *slot_flux;         // (3n, 3) scratch, or NULL without the draining limiter
+    double *cell_pres;         // (n, 2) scratch
+    double *phi;               // (n) scratch
+    double cfl, cap_exponent, cap_min_depth, cap_min_fraction;
+    double fr_cap;                // speed cap: |q|/h <= fr_cap sqrt(g (eta - lowest bed)); <= 0 off
+    double cap;                // step cap from the last storage update
+    anuga_int limited;         // cell-steps the draining limiter scaled
+    anuga_int tL;              // levels per cell in the tensor tables
+    double *tlev, *tR;         // (n, tL), (n, tL, 3) conveyance tensor tables, or NULL
+    int tensor_form;           // 0 gradient, 1 flow
+    struct subgrid_ponds *ponds;   // the pond store (core_kernels.h), or NULL
 };
 
 // ============================================================================
@@ -886,6 +913,21 @@ void gpu_culverts_apply_all(struct gpu_domain *GD, double timestep);
 // success, -1 if culvert_id is out of range. Values are non-zero only on the
 // proc that computed the discharge (the master proc).
 int gpu_culverts_get_report(struct gpu_domain *GD, int culvert_id, double *out);
+
+// Subgrid terrain (#508 prototype)
+int  gpu_subgrid_init(struct gpu_domain *GD, anuga_int nsub, anuga_int m,
+                      double *sub_z, double *sub_invn,
+                      double *tz, double *tV, double *tS, double *tinvn,
+                      double *n_base, double *cell_neff, int drain_limiter,
+                      double cfl, double cap_exponent, double cap_min_depth,
+                      double cap_min_fraction, double cap, double fr_cap);
+double gpu_subgrid_storage_update(struct gpu_domain *GD, double max_step);
+int  gpu_subgrid_set_tensor(struct gpu_domain *GD, anuga_int tL, double *tlev, double *tR, int tensor_form);
+struct subgrid_ponds;
+int  gpu_subgrid_set_ponds(struct gpu_domain *GD, const struct subgrid_ponds *ponds);
+double gpu_subgrid_pond_exchange(struct gpu_domain *GD, double dt);
+void gpu_subgrid_sync_ponds(struct gpu_domain *GD);
+void gpu_subgrid_finalize(struct gpu_domain *GD);
 
 // Record an error message on the domain (printf-style) and echo it to stderr.
 // Functions that return an error code call this first so the Cython layer can

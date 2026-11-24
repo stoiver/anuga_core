@@ -210,6 +210,26 @@ cdef extern from "sw_domain_openmp.c" nogil:
 	anuga_int core_subgrid_drain_limit(domain* D, double dt, double* slot_flux, double* cell_pres, double* phi)
 	void core_subgrid_table_eta(anuga_int n, anuga_int m, double* h, double* V, double* S, double* ssort, double* eta) nogil
 	void core_subgrid_table_conveyance(anuga_int n, anuga_int m, double* eta, double* z, double* sill, double* inv_n, double* extra, double extra_ramp, double* kc, double* nwet, double* hflow) nogil
+	cdef struct subgrid_ponds:
+		anuga_int npd, nc, ntab
+		anuga_int *cells
+		anuga_int *cstart
+		anuga_int *tstart
+		double *tb
+		double *tslope
+		double *tvol
+		double *tat
+		double *zs
+		double *Vzs
+		double *vmax
+		double *shigh
+		double *zlow
+		double *w
+		double *V
+		double *dV
+		double cw
+	double core_subgrid_pond_exchange(domain* D, anuga_int m, double* tz, double* tV, double* tS, subgrid_ponds* P, double dt)
+	void core_subgrid_table_tensor_ratio(anuga_int n, anuga_int L, double* eta, double* theta, double* tlev, double* tR, int flow_form, double* out) nogil
 	double _openmp_protect(domain* D)
 	void _openmp_extrapolate_second_order_edge_sw(domain* D)
 	void _openmp_extrapolate_centroids_only(domain* D)
@@ -1464,6 +1484,59 @@ def subgrid_table_conveyance(double[::1] eta not None,
 		hp = &hflow[0]
 	with nogil:
 		core_subgrid_table_conveyance(n, m, &eta[0], &z[0, 0], sp, &inv_n[0, 0], xp, extra_ramp, &kc[0], &nwet[0], hp)
+
+def subgrid_table_tensor_ratio(double[::1] eta not None,
+                               double[::1] theta not None,
+                               double[:, ::1] tlev not None,
+                               double[:, :, ::1] tR not None,
+                               bint flow_form,
+                               double[::1] out not None):
+	"""Subgrid conveyance tensor tables: K_theta / Kc (n) for level eta (n) and
+	discharge direction theta (n). tlev (n, L), tR (n, L, 3)."""
+	cdef anuga_int n = tlev.shape[0], L = tlev.shape[1]
+	if (eta.shape[0] != n or theta.shape[0] != n or out.shape[0] != n
+			or tR.shape[0] != n or tR.shape[1] != L or tR.shape[2] != 3 or L < 2):
+		raise ValueError('subgrid_table_tensor_ratio: array shapes do not match')
+	if n == 0:
+		return
+	with nogil:
+		core_subgrid_table_tensor_ratio(n, L, &eta[0], &theta[0], &tlev[0, 0], &tR[0, 0, 0], flow_form, &out[0])
+
+def subgrid_pond_exchange(object domain_py_object,
+                          double[:, ::1] tz not None, double[:, ::1] tV not None, double[:, ::1] tS not None,
+                          anuga_int[::1] cells not None, anuga_int[::1] cstart not None,
+                          anuga_int[::1] tstart not None,
+                          double[::1] tb not None, double[::1] tslope not None,
+                          double[::1] tvol not None, double[::1] tat not None,
+                          double[::1] zs not None, double[::1] Vzs not None,
+                          double[::1] vmax not None, double[::1] shigh not None,
+                          double[::1] zlow not None, double[::1] w not None,
+                          double[::1] V not None, double[::1] dV not None, double cw, double dt):
+	"""Subgrid pond exchange over the step dt (pond_storage.PondStore.kernel_arrays);
+	updates the stage and the pond volumes V in place and returns the volume moved."""
+	cdef domain* D = get_domain_c_struct_ptr(domain_py_object, update_domain_c_struct=False)
+	cdef subgrid_ponds P
+	cdef anuga_int npd = V.shape[0], nc = cells.shape[0], ntab = tb.shape[0], m = tz.shape[1]
+	cdef double moved
+	if npd == 0 or nc == 0:
+		return 0.0
+	if (cstart.shape[0] != nc + 1 or tstart.shape[0] != npd + 1
+			or tslope.shape[0] != ntab or tvol.shape[0] != ntab or tat.shape[0] != ntab
+			or zs.shape[0] != npd or Vzs.shape[0] != npd or vmax.shape[0] != npd
+			or shigh.shape[0] != npd or zlow.shape[0] != npd or w.shape[0] != npd
+			or dV.shape[0] != npd or cstart[nc] != npd or tstart[npd] != ntab
+			or tz.shape[0] != D.number_of_elements or tV.shape[0] != tz.shape[0] or tS.shape[0] != tz.shape[0]
+			or tV.shape[1] != m or tS.shape[1] != m):
+		raise ValueError('subgrid_pond_exchange: array shapes do not match')
+	P.npd = npd; P.nc = nc; P.ntab = ntab
+	P.cells = &cells[0]; P.cstart = &cstart[0]; P.tstart = &tstart[0]
+	P.tb = &tb[0]; P.tslope = &tslope[0]; P.tvol = &tvol[0]; P.tat = &tat[0]
+	P.zs = &zs[0]; P.Vzs = &Vzs[0]; P.vmax = &vmax[0]; P.shigh = &shigh[0]
+	P.zlow = &zlow[0]; P.w = &w[0]; P.V = &V[0]; P.dV = &dV[0]
+	P.cw = cw
+	with nogil:
+		moved = core_subgrid_pond_exchange(D, m, &tz[0, 0], &tV[0, 0], &tS[0, 0], &P, dt)
+	return moved
 
 def extrapolate_second_order_sw(object domain_py_object, update_domain_c_struct=False):
 
