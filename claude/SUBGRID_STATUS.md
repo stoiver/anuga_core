@@ -708,6 +708,33 @@ Distance to which 90% of the water has spread at 2 h (m), 1000 m² cells:
 3. If it holds up, re-run the private real-river case against its fine reference.
 4. Then the two-compartment storage, aimed at the floodplain onset.
 
+## Update, 24 November 2026
+
+- **Mode 2 (unified, GPU) path.** The subgrid flux, draining limiter, storage update, tensor friction and pond
+  exchange are C kernels (`gpu/core_kernels.c`, `gpu/gpu_subgrid.c`), run threaded on the CPU or on the device.
+  `test_mode2.py` checks mode 2 against mode 1 (levels to 2e-6 m with rain, round-off with ponds and tensor).
+- **Speed cap.** `Subgrid_storage_operator(froude_cap=5.0)` limits |q| / h to froude_cap * sqrt(g * deepest depth
+  in the cell). A steep cell that drains to a film kept the momentum of the water that left; |q| / h reached about
+  1000 m/s and the step fell to 0.01 s for as long as the film lasted. Whether it happened depended on the last
+  bit of the arithmetic. The cap leaves the valley and meander runs unchanged (same step counts).
+- **Diagnostics, off by default.** `ANUGA_SUBGRID_DTCELL=<file>` writes, for every step, the cell that sets the
+  time step. `ANUGA_SUBGRID_P0=1` copies centroid values to the edges in place of the reconstruction with zero
+  slope (mode 2 Euler step only): same results to round-off, no measurable gain per step.
+- **Public meander test** (`meander_floodplain.py`, `meander_floodplain_compare.py`): a flood wave down the
+  10 m meandering channel of the anugaSed example DEM (Perignon 2016, MIT; the DEM's source is not stated and has
+  been asked for). Standard runs converge slowly (0.5 m2 cells, LF5, as the reference); subgrid cells of
+  400 m2 give the arrival within a minute. A closed basin behind a sill narrower than a cell fills too far; the
+  pond store halves the outflow error (18% to 10%).
+- **Mesh controls from the DEM** (`meander_controls.py`, `--controls`, `--walls`): the river region between the
+  bank tops meshed finer, sills, crests and rims as breaklines, and edges on them given the highest ground
+  nearby. Outflow error 6% with 3,228 cells, close to the 2 m2 standard run. Walls bring the peak within 3% but
+  raise the level error to 0.2 m; where they hold water back has not been located.
+- **Stream fall** (`stream_fall.py`): takes the fall of a stream inside a cell out of the cell's beds.
+- **Closures on the valley** (`run_phase0.py` with `SUBGRID_TENSOR=1`, `SUBGRID_PONDS=1`, `SUBGRID_FALL=<ha>`):
+  no score moves by more than a few hundredths; on smooth terrain the base scheme is enough. The base runs now
+  take 27 s (500 m2) and 6 s (2000 m2) on 8 threads.
+- The paper is kept outside the repository.
+
 ## Where the code is
 
 ### In ANUGA (`anuga/shallow_water`), committed in 18c1c851

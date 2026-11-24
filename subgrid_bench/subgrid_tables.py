@@ -44,6 +44,12 @@ Such cells -- typically a coarse cell whose corner clips the channel, with one
 wet sub-triangle -- hold little water but have the smallest f, so they set the
 cap on almost every step. Both default to 0: every wet cell is capped.
 
+froude_cap (default 5; 0 turns it off) limits a cell's speed |q| / h to
+froude_cap * sqrt(g * deepest depth in the cell), scaling the momentum down.
+A steep cell that has drained to a film can keep the momentum of the water
+that fell through it; |q| / h then reaches hundreds of m/s and the flux CFL
+drops to milliseconds for as long as the film lasts.
+
 Hollows (optional, sill=): a sub-triangle inside a closed depression of its cell
 (no path to the cell's edges through lower ground) holds water and conveys only
 once the cell level reaches its sill s_k, the lowest level at which it connects
@@ -76,6 +82,13 @@ try:
     _C_TABLES = True
 except ImportError:
     _C_TABLES = False
+try:                                    # on its own: a build without it keeps the two above
+    if not _C_TABLES:
+        raise ImportError
+    from anuga.shallow_water.sw_domain_openmp_ext import subgrid_table_tensor_ratio as _c_tensor_ratio
+    _C_TENSOR = True
+except ImportError:
+    _C_TENSOR = False
 from anuga.operators.base_operator import Operator
 
 
@@ -427,8 +440,10 @@ class SubgridTables:
         """Conveyance tensor from a cell problem on the DTM pixels (numerical
         homogenisation; see cell_tensor). owner, pz, pn: owning cell, bed and
         Manning n of each pixel of a regular grid of shape (ny, nx), raveled
-        row-major, spacing dx. ring: solve on the cell plus this many pixels
-        around it (oversampling), averaging over the cell only.
+        row-major or 2-D, spacing dx; pn may be one number. ring: solve on the
+        cell plus this many pixels around it (oversampling), averaging over the
+        cell only. The grids are used as given, with no full-size copies (a
+        whole catchment's are GBs): each cell works on its own window.
 
         Stored as the ratio R = K* / mean(k) (symmetric, eigenvalues clipped to
         [floor, 1]; identity over a level bed) at nlev levels per cell:
@@ -437,11 +452,14 @@ class SubgridTables:
         from scipy.ndimage import binary_dilation
         ny, nx = shape
         ncell = len(self.z)
+        from scipy.ndimage import find_objects
         own2 = np.asarray(owner).reshape(ny, nx)
-        z2 = np.asarray(pz, float).reshape(ny, nx)
-        in2 = 1.0 / np.asarray(pn, float).reshape(ny, nx)
-        order = np.argsort(owner, kind='stable')
-        start = np.searchsorted(np.asarray(owner)[order], np.arange(ncell + 1))
+        z2 = np.asarray(pz).reshape(ny, nx)
+        n2 = None if np.ndim(pn) == 0 else np.asarray(pn).reshape(ny, nx)
+        lab = np.ascontiguousarray(own2 + 1)                    # 0 = outside the mesh
+        npix = np.bincount(lab.ravel(), minlength=ncell + 1)[1:]
+        box = find_objects(lab, max_label=ncell)               # each cell's bounding box
+        del lab
         above = np.array([0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0])
         nin = max(nlev - len(above), 2)
         self.tlev = np.zeros((ncell, nlev))
@@ -450,14 +468,14 @@ class SubgridTables:
         self.tfloor = floor
         todo = np.arange(ncell) if cells is None else np.arange(ncell)[cells]
         def one(c):
-            pix = order[start[c]:start[c + 1]]
-            if len(pix) < 9:
+            if npix[c] < 9:
                 return None
-            iy, ix = pix // nx, pix % nx
-            y0, y1 = max(iy.min() - ring, 0), min(iy.max() + 1 + ring, ny)
-            x0, x1 = max(ix.min() - ring, 0), min(ix.max() + 1 + ring, nx)
+            sy_, sx_ = box[c]
+            y0, y1 = max(sy_.start - ring, 0), min(sy_.stop + ring, ny)
+            x0, x1 = max(sx_.start - ring, 0), min(sx_.stop + ring, nx)
             cell = own2[y0:y1, x0:x1] == c
-            z = z2[y0:y1, x0:x1]
+            z = z2[y0:y1, x0:x1].astype(float)
+            inv = np.full(z.shape, 1.0 / pn) if n2 is None else 1.0 / n2[y0:y1, x0:x1].astype(float)
             lo, hi = z[cell].min(), z[cell].max()
             lev = np.concatenate([lo + (hi - lo) * (np.arange(1, nin + 1) / nin), hi + above])[:nlev]
             R = np.zeros((nlev, 3))
@@ -465,7 +483,7 @@ class SubgridTables:
             if hi - lo < 1e-9:
                 return lev, R
             region = binary_dilation(cell, iterations=ring) if ring else cell
-            K, kmean = cell_tensor(region, z, in2[y0:y1, x0:x1], lev, dx, avg=cell)
+            K, kmean = cell_tensor(region, z, inv, lev, dx, avg=cell)
             for l in range(nlev):
                 if kmean[l] <= 0.0:
                     R[l] = (floor, 0.0, floor)
@@ -501,6 +519,16 @@ class SubgridTables:
         to about 0.1. On the valley bench it scored worse (CSI 0.916 against
         0.947 on coarse500)."""
         eta = np.asarray(eta, dtype=float)
+        if form not in ('gradient', 'flow'):
+            raise ValueError(form)
+        if _C_TENSOR and eta.ndim == 1:
+            # compiled, threaded (core_subgrid_table_tensor_ratio); same formulas as below
+            out = np.empty(len(eta))
+            th = np.asarray(theta, dtype=float)
+            th = np.ascontiguousarray(th) if th.shape == eta.shape else np.broadcast_to(th, eta.shape).copy()
+            _c_tensor_ratio(np.ascontiguousarray(eta), th, np.ascontiguousarray(self.tlev),
+                            np.ascontiguousarray(self.tR), form == 'flow', out)
+            return out
         L = self.tlev.shape[1]
         j = np.clip((self.tlev <= eta[:, None]).sum(axis=1) - 1, 0, L - 2)
         rows = np.arange(len(eta))
@@ -667,7 +695,8 @@ class Subgrid_storage_operator(Operator):
     def __init__(self, domain, tables, limit_timestep=True, cfl=1.0,
                  cap_min_depth=0.0, cap_min_fraction=0.0, conveyance_friction=False,
                  edge_z=None, cap_exponent=1.0, drain_limiter=False, edge_invn=None,
-                 connectivity=False, directional=False, tensor=False, tensor_form='gradient', description='subgrid storage', label=None):
+                 connectivity=False, directional=False, tensor=False, tensor_form='gradient', froude_cap=5.0,
+                 description='subgrid storage', label=None):
         Operator.__init__(self, domain, description=description, label=label)
         self.tables = tables
         self.stage = domain.quantities['stage']
@@ -678,6 +707,7 @@ class Subgrid_storage_operator(Operator):
         self.cfl = cfl
         self.cap_min_depth = cap_min_depth
         self.cap_min_fraction = cap_min_fraction
+        self.froude_cap = froude_cap
         self.max_timestep = domain.evolve_max_timestep
         self.radii = domain.radii
         self.min_f_dt = np.inf        # smallest limit applied (for reporting)
@@ -728,6 +758,60 @@ class Subgrid_storage_operator(Operator):
                 raise ValueError('conveyance_friction needs tables built with manning=')
             self.friction = domain.quantities['friction']
             self.n_base = self.friction.centroid_values.copy()   # used where Kc = 0
+        # compute mode unified (mode 2): the Euler step calls this on its first
+        # step, and from then on the whole update is one device kernel
+        self._gpu_dom = None
+        self._gpu_arrays = None
+        if self.edge_flux:
+            domain.subgrid_gpu_init = self._init_gpu
+
+    @property
+    def gpu_device_resident(self):
+        """True in compute mode unified: the tables are mapped on the first step
+        and the whole update is a device kernel, so Domain.apply_fractional_steps
+        makes no host round trip for this operator. (The domain asks, and caches
+        the answer, before the first step has mapped the tables: a round trip
+        would then push the stale host level over the device's.)"""
+        return self._gpu_dom is not None or (self.edge_flux and self.domain.multiprocessor_mode == 2)
+
+    def _init_gpu(self, gpu_dom):
+        """Map the tables and the subface beds for compute mode unified. Only
+        the configuration of the production runs is on the device: edge flux,
+        conveyance friction, step cap, and optionally the conveyance split and
+        the draining limiter."""
+        T = self.tables
+        d = self.domain
+        bad = [name for name, on in (
+            ('no conveyance_friction', not self.conveyance_friction),
+            ('no limit_timestep', not self.limit_timestep),
+            ('connectivity', self.connectivity), ('directional', self.directional),
+            ('hollow sills', T.sill is not None),
+            ('ponds (tables.extra)', T.extra is not None),
+            ('enable_p1_level', hasattr(self, 'p1_beta')),
+            ('conveyance mean ' + KMEAN, KMEAN != 'parallel'),
+            ('betas not all 0 (first order only)',
+             any(getattr(d, b) != 0.0 for b in ('beta_w', 'beta_w_dry', 'beta_uh', 'beta_uh_dry', 'beta_vh', 'beta_vh_dry'))),
+            ('a dry-cell n that differs between friction and split',
+             self.conveyance_split and not np.array_equal(self.n_base, self.n_split_dry)),
+        ) if on]
+        if bad:
+            raise NotImplementedError('subgrid in compute mode unified does not support: ' + ', '.join(bad))
+        from anuga.shallow_water.sw_domain_gpu_ext import init_subgrid_gpu
+        c = lambda a: np.ascontiguousarray(a, dtype=float)
+        arr = dict(sub_z=d.subgrid_edge_z, tz=c(T.z), tV=c(T.Vb), tS=c(T.S), tinvn=c(T.inv_n), n_base=c(self.n_base))
+        if self.conveyance_split:
+            arr.update(sub_invn=d.subgrid_edge_invn, cell_neff=d.subgrid_cell_neff)
+        self._gpu_arrays = arr                 # the device maps these addresses
+        init_subgrid_gpu(gpu_dom, drain_limiter=bool(getattr(d, 'subgrid_drain_limiter', False)),
+                         cfl=self.cfl, cap_exponent=self.cap_exponent, cap_min_depth=self.cap_min_depth,
+                         cap_min_fraction=self.cap_min_fraction, fr_cap=float(self.froude_cap or 0.0), **arr)
+        if self.tensor:
+            from anuga.shallow_water.sw_domain_gpu_ext import subgrid_set_tensor_gpu
+            arr.update(tlev=c(T.tlev), tR=c(T.tR))
+            subgrid_set_tensor_gpu(gpu_dom, arr['tlev'], arr['tR'], flow_form=self.tensor_form == 'flow')
+        self._gpu_dom = gpu_dom
+        for hook in getattr(d, 'subgrid_gpu_hooks', ()):       # the pond exchange maps its store
+            hook(gpu_dom)
 
     def enable_p1_level(self, beta=None, min_sub=0.02, h_dry=1.0e-3):
         """Experimental (#508): a sloping level in each cell for the edge fluxes.
@@ -764,6 +848,8 @@ class Subgrid_storage_operator(Operator):
         self.p1_ezmin = d.subgrid_edge_z.reshape(n, 3, -1).min(axis=2)
         self.p1_height = d.quantities['height']
         self.p1_cells = 0          # cell-steps with a nonzero gradient
+        import os
+        self.p1_front = bool(os.environ.get('SUBGRID_P1_FRONT'))
         self.p1_calls = 0
         orig = d.distribute_to_vertices_and_edges
 
@@ -780,6 +866,14 @@ class Subgrid_storage_operator(Operator):
         conn = (self.p1_interior & wet[:, None] & wet[self.p1_nb]
                 & (np.minimum(w[:, None], wn) - self.p1_ezmin > self.p1_min_sub))
         dw = np.where(conn, wn - w[:, None], 0.0)
+        if getattr(self, 'p1_front', False):
+            # experimental: a dry neighbour, or one whose level is under the shared edge's lowest bed, also counts
+            # when this cell's level is over that bed; its level is taken as the edge's lowest bed (the crest)
+            ref = np.maximum(wn, self.p1_ezmin)
+            spill = (self.p1_interior & wet[:, None] & ~conn & (w[:, None] - self.p1_ezmin > self.p1_min_sub)
+                     & (wn < self.p1_ezmin + self.p1_min_sub))
+            conn = conn | spill
+            dw = np.where(spill, ref - w[:, None], dw)
         dx = self.p1_dxn * conn[:, :, None]
         m11 = (dx[:, :, 0] ** 2).sum(axis=1)
         m22 = (dx[:, :, 1] ** 2).sum(axis=1)
@@ -800,6 +894,30 @@ class Subgrid_storage_operator(Operator):
             r = np.where(dq > qmax, qmax / dq, np.where(dq < qmin, qmin / dq, 1.0))
         phi = r.min(axis=1)
         self.stage.edge_values[:] = w[:, None] + phi[:, None] * dq
+        if getattr(self, 'p1_probe', None) is not None:      # diagnostics only (reach arrival study)
+            mk = self.p1_probe['mask'] & wet
+            if mk.any():
+                e = phi[:, None] * dq                         # edge level minus the cell's
+                pool = w[:, None] - self.p1_ezmin             # depth of the flat level over each edge's lowest bed
+                lo = np.argmin(self.p1_ezmin, axis=1)         # the cell's lowest edge (its outlet)
+                ar = np.arange(len(w))
+                dryn = self.p1_interior & ~wet[self.p1_nb] & (pool > self.p1_min_sub)   # open edge to a dry cell
+                front = dryn.any(axis=1)
+                zero = np.abs(e).max(axis=1) < 1.0e-9
+                unl = np.hypot(gx, gy)
+                b = self.p1_probe['acc'].setdefault(int(self.domain.get_time() // 3600), np.zeros(12))
+                # edges between two probed cells, seen from the higher one: open if its flat level is over the edge's
+                # lowest bed; an overfall if the lower cell's level is under that bed (nothing downstream holds it back)
+                msk = self.p1_probe['mask']
+                hi = self.p1_interior & msk[:, None] & msk[self.p1_nb] & (w[:, None] > wn) & (pool > self.p1_min_sub) & wet[:, None]
+                over = hi & (wn < self.p1_ezmin)
+                c2 = self.p1_probe['acc2'].setdefault(int(self.domain.get_time() // 3600), np.zeros(6))
+                c2 += [hi.sum(), over.sum(), pool[hi & ~over].sum(), pool[over].sum(),
+                       (w[:, None] - wn)[hi & ~over].sum(), (self.p1_ezmin - wn)[over].sum()]
+                for off, sel in ((0, mk & front), (6, mk & ~front)):
+                    b[off] += sel.sum(); b[off + 1] += (sel & zero).sum(); b[off + 2] += (sel & (phi < 0.999) & ~zero).sum()
+                    b[off + 3] += -e[ar, lo][sel].sum(); b[off + 4] += np.maximum(pool[ar, lo][sel], 0).sum()
+                    b[off + 5] += (unl[sel] * np.abs(self.p1_dxe[ar, lo]).max(axis=1)[sel]).sum()
         self.p1_height.edge_values[:] = h[:, None]
         self.xmom.edge_values[:] = self.xmom.centroid_values[:, None]
         self.ymom.edge_values[:] = self.ymom.centroid_values[:, None]
@@ -822,6 +940,17 @@ class Subgrid_storage_operator(Operator):
         self._update(eta, h)
 
     def __call__(self):
+        if self.domain.multiprocessor_mode == 2:
+            if self._gpu_dom is None:
+                raise NotImplementedError('subgrid in compute mode unified needs the edge flux (edge_z) '
+                                          'and the Euler step (flow algorithm DE0)')
+            from anuga.shallow_water.sw_domain_gpu_ext import subgrid_storage_update_gpu
+            cap = subgrid_storage_update_gpu(self._gpu_dom, self.max_timestep)
+            self.domain.evolve_max_timestep = cap
+            self.min_f_dt = min(self.min_f_dt, cap) if cap < self.max_timestep else self.min_f_dt
+            return
+        if getattr(self, 'edge_probe', None) is not None:
+            self._edge_probe()
         w = self.stage.centroid_values
         d = self.elev.centroid_values
         h = np.maximum(w - d, 0.0)
@@ -840,6 +969,49 @@ class Subgrid_storage_operator(Operator):
         d[:] = eta - h
         w[:] = eta
         self._update(eta, h)
+        if getattr(self, 'edge_probe', None) is not None:
+            self.edge_probe['eta'] = eta.copy()
+
+    def _edge_probe(self):
+        """Diagnostics only (reach arrival study): discharge through the edges between probed cells in the step just
+        taken, against a weir and a Manning estimate from the levels the flux saw. Flat level only."""
+        P = self.edge_probe
+        dm = self.domain
+        sf = getattr(dm, '_subgrid_slot_flux', None)
+        if 'own' not in P:
+            n = len(self.tables.area)
+            nb = dm.neighbours.reshape(-1)
+            own = np.repeat(np.arange(n), 3)
+            ok = (nb >= 0) & P['mask'][own] & P['mask'][np.maximum(nb, 0)]
+            P['rows'] = np.flatnonzero(ok); P['own'] = own[ok]; P['nb'] = nb[ok]
+            c = dm.centroid_coordinates
+            P['dist'] = np.hypot(*(c[P['own']] - c[P['nb']]).T)
+            P['ez'] = dm.subgrid_edge_z[P['rows']]
+            P['invn'] = dm.subgrid_edge_invn[P['rows']] if getattr(dm, 'subgrid_edge_invn', None) is not None else 1.0 / 0.05
+            P['dl'] = (dm.edgelengths.reshape(-1)[P['rows']] / P['ez'].shape[1])
+            P['acc'] = {}
+        eta = P.get('eta')
+        P['eta'] = None
+        if sf is not None and eta is not None:
+            wk, wn = eta[P['own']], eta[P['nb']]
+            zmin = P['ez'][:, 0] if True else None
+            zmin = P['ez'].min(axis=1)
+            q = -sf[P['rows'], 0]                              # m3/s leaving the owner through this edge
+            hi = (wk > wn) & (wk - zmin > 0.02)                # seen from the higher cell, level over the edge
+            H = np.maximum(wk[:, None] - P['ez'], 0.0)
+            g = 9.8
+            qw = ((2.0 / 3.0) ** 1.5 * np.sqrt(g) * H ** 1.5).sum(axis=1) * P['dl']
+            S = np.maximum(wk - np.maximum(wn, zmin), 0.0) / P['dist']
+            qm = (P['invn'] * H ** (5.0 / 3.0)).sum(axis=1) * P['dl'] * np.sqrt(S)
+            over = hi & (wn < zmin)
+            dt = dm.timestep
+            b = P['acc'].setdefault(int(dm.get_time() // 3600), np.zeros(11))
+            for off, sel in ((0, over), (5, hi & ~over)):
+                b[off] += sel.sum() * dt; b[off + 1] += q[sel].sum() * dt; b[off + 2] += qw[sel].sum() * dt
+                b[off + 3] += qm[sel].sum() * dt; b[off + 4] += (wk - zmin)[sel].sum() * dt
+            b[10] += dt
+        # the level the next flux will see is set below, in __call__; picked up after it
+        P['pending'] = True
 
     def _connect(self, h):
         """Grow each wet cell's seeds and re-derive its sills where they changed."""
@@ -862,8 +1034,22 @@ class Subgrid_storage_operator(Operator):
             ss = T.minimax_from(use[rows], rows)
             T.set_sills(np.take_along_axis(ss, T.order[rows], axis=1), rows)
 
+    def _cap_speed(self, eta, h):
+        # |q| / h <= froude_cap * sqrt(g * deepest depth). A cell that has drained to a film can keep the momentum
+        # of the water that left; |q| / h then sets a time step of milliseconds.
+        qx, qy = self.xmom.centroid_values, self.ymom.centroid_values
+        qmax = h * self.froude_cap * np.sqrt(anuga.g * np.maximum(eta - self.tables.z[:, 0], 0.0))
+        q = np.hypot(qx, qy)
+        over = q > qmax
+        if over.any():
+            sc = qmax[over] / q[over]
+            qx[over] *= sc
+            qy[over] *= sc
+
     def _update(self, eta, h):
         kc = None
+        if self.froude_cap and self.froude_cap > 0:
+            self._cap_speed(eta, h)
         if self.conveyance_split:
             kc = self.tables.conveyance(eta)
             self.domain.subgrid_cell_neff[:] = self.tables.effective_manning(

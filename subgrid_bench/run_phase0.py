@@ -295,25 +295,78 @@ def main():
     h0 = inlet_rating.stage(Q_BASE) - T.channel_bed(0.0)
     domain.set_quantity('stage', np.maximum(z, T.water_surface(x, h0)), location='centroids')
     tables = None
+    pond_store = pond_op = None
+    edge_bed = T.bed
     if sub_n:
         from static_storage import Cells
         from subgrid_tables import SubgridTables
         px, py, pz = T.dtm()
         cells = Cells(domain.nodes, domain.triangles, px, py)
         # SUBGRID_HOLLOWS=1: closed depressions in a cell fill only from their sills
-        tables = SubgridTables.from_cells(cells, sub_n, px, py, pz,
-                                          manning=friction if args.variant in CONVEYANCE else None,
-                                          hollows=os.environ.get('SUBGRID_HOLLOWS', '0') == '1')
+        # SUBGRID_PONDS=1: ground below its spill level goes to a pond store (pond_storage.py);
+        # SUBGRID_FALL=<ha>: the fall of streams draining that area or more is taken out of each cell's beds
+        ponds = os.environ.get('SUBGRID_PONDS', '0') == '1'
+        fall_ha = float(os.environ.get('SUBGRID_FALL', 0))
+        ny_, nx_ = int(round(T.WIDTH / T.PIXEL)), int(round(T.LENGTH / T.PIXEL))
+        pzt = pz                                    # the bed the tables and the tensor see
+        if not (ponds or fall_ha):
+            tables = SubgridTables.from_cells(cells, sub_n, px, py, pz,
+                                              manning=friction if args.variant in CONVEYANCE else None,
+                                              hollows=os.environ.get('SUBGRID_HOLLOWS', '0') == '1')
+        else:
+            from subgrid_tables import edge_subface_beds
+            own2 = cells.owner.reshape(ny_, nx_)
+            out_cells = sorted({v for (v, _), tag in domain.boundary.items() if tag == 'right'})
+            seed = np.isin(own2, out_cells)
+            zr = None
+            if ponds:
+                from pond_storage import spill_levels
+                pzt = np.maximum(spill_levels(pz.reshape(ny_, nx_), seed).ravel(), pz)
+                print(f'ponds: {100 * np.mean(pzt > pz + 0.01):.1f}% of the pixels lie below their spill level, '
+                      f'holding {np.sum(pzt - pz) * T.PIXEL ** 2:.0f} m3; deepest {np.max(pzt - pz):.2f} m', flush=True)
+                spix_ = pzt
+
+                def edge_bed(ex, ey):               # the edges see the raised bed
+                    ex, ey = np.asarray(ex, float), np.asarray(ey, float)
+                    ix = np.clip(np.nan_to_num(ex / T.PIXEL).astype(int), 0, nx_ - 1)
+                    iy = np.clip(np.nan_to_num(ey / T.PIXEL).astype(int), 0, ny_ - 1)
+                    return np.maximum(T.bed(ex, ey), spix_[iy * nx_ + ix])
+                zr = cells.subgrid(sub_n, px, py, pz)[0]
+            zs, _, _, sx_, sy_ = cells.subgrid(sub_n, px, py, pzt, return_centroids=True)
+            used = ~np.isnan(zs[0])
+            nman = friction(sx_[:, used], sy_[:, used]) if args.variant in CONVEYANCE else None
+            if fall_ha:
+                from stream_fall import stream_fall
+                fall = np.asarray(stream_fall(pzt.reshape(ny_, nx_), own2, seed, T.PIXEL, fall_ha * 1e4, 0.25)[0], float).ravel()
+                dsub = np.nan_to_num(cells.subgrid(sub_n, px, py, fall)[0])
+                zlow = zs - dsub
+                # a levelled stream stays no lower than the cell's lowest edge bed (its lip)
+                tab0 = SubgridTables(zlow[:, used], cells.area, nman)
+                ez0 = edge_subface_beds(domain, tab0, EDGE_NSUB, edge_bed, manning=friction)[0]
+                lip = ez0.reshape(len(cells.area), -1).min(axis=1)
+                zlow = np.where(dsub > 0, np.maximum(zlow, np.minimum(lip[:, None], zs)), zlow)
+                dsub = zs - zlow
+                print(f'stream fall ({fall_ha:g} ha): {100 * np.mean(fall > 0.01):.1f}% of the pixels lowered, largest '
+                      f'{fall.max():.2f} m; after the lip limit the largest fall taken from a sub-triangle is {np.nanmax(dsub):.2f} m', flush=True)
+                zs = zlow
+                if zr is not None:
+                    zr = zr - dsub
+                pzt = pzt - fall
+            tables = SubgridTables(zs[:, used], cells.area, nman)
+            if zr is not None:
+                from pond_storage import PondStore
+                pond_store = PondStore(zr[:, used], zs[:, used], cells.area, sub_n)
+                print(f'ponds: {len(pond_store.pc)} in {len(pond_store.cells)} cells, capacity {pond_store.vmax.sum():.0f} m3', flush=True)
         if os.environ.get('SUBGRID_TENSOR', '0') == '1':
             # experimental: cell-problem conveyance tensor in the friction
             import time as _time
             _t = _time.time()
             ring = int(os.environ.get('SUBGRID_TENSOR_RING', 20))
-            tables.add_tensor(cells.owner, (int(round(T.WIDTH / T.PIXEL)), int(round(T.LENGTH / T.PIXEL))), pz,
+            tables.add_tensor(cells.owner, (int(round(T.WIDTH / T.PIXEL)), int(round(T.LENGTH / T.PIXEL))), pzt,
                               friction(px, py), dx=T.PIXEL, ring=ring,
                               floor=float(os.environ.get('SUBGRID_TENSOR_FLOOR', 0.01)), workers=8)
             print(f'tensor tables (ring {ring} px): {_time.time() - _t:.0f} s', flush=True)
-        del px, py, pz
+        del px, py, pz, pzt
         z = tables.zmin.copy()        # lowest point per cell: wet/dry and extent tests
 
     outfall_stage = T.channel_bed(T.LENGTH) - 1.0
@@ -347,9 +400,12 @@ def main():
         if edge:
             from subgrid_tables import edge_subface_beds
             if args.variant in CONVEYANCE_SPLIT:
-                ez, ein = edge_subface_beds(domain, tables, EDGE_NSUB, T.bed, manning=friction)
+                ez, ein = edge_subface_beds(domain, tables, EDGE_NSUB, edge_bed, manning=friction)
             else:
                 ez = edge_subface_beds(domain, tables, EDGE_NSUB, T.bed)
+        if pond_store is not None:
+            from pond_storage import Pond_exchange_operator
+            pond_op = Pond_exchange_operator(domain, tables, pond_store)   # before the storage operator: runs first
         sub_op = Subgrid_storage_operator(domain, tables,       # after the inlet: runs last
                                           cap_min_fraction=EDGE_CAP_MIN_FRACTION if edge else CAP_MIN_FRACTION,
                                           cfl=(EDGE_CAP_CFL_SPLIT if args.variant in CONVEYANCE_SPLIT
@@ -396,6 +452,9 @@ def main():
         s = stage_q.centroid_values
         qs = [sec.get_flow_through_cross_section() for sec in sections]
         vol_cells = domain.areas * (s - elev_q.centroid_values)   # bed is live under subgrid
+        if pond_store is not None:
+            pond_op.sync()
+            vol_cells = vol_cells + np.bincount(pond_store.pc, weights=pond_store.V, minlength=len(vol_cells))
         v_up = np.array([np.sum(vol_cells[m]) for m in upstream])
         if v_up_prev is not None:
             tt = np.linspace(t_prev, t, 61)
@@ -409,7 +468,7 @@ def main():
         q_in.append(inflow(t))
         q_sec.append(qs)
         g_stage.append(s[gauge_cells].copy())
-        volume.append(domain.get_water_volume())
+        volume.append(domain.get_water_volume() + (pond_store.V.sum() if pond_store is not None else 0.0))
         h = s - z
         if tables is not None:
             wet.append(np.sum(tables.wet_area(np.maximum(s, tables.zmin))))

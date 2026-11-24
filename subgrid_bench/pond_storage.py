@@ -36,6 +36,17 @@ from anuga.operators.base_operator import Operator
 
 from subgrid_tables import EXTRA_RAMP, edge_subface_beds, subtriangle_graph
 
+# The exchange runs in the compiled kernel when the build has it (and on the
+# device in compute mode unified). SUBGRID_TABLES=numpy forces the numpy version
+# below, which is the reference.
+try:
+    import os
+    if os.environ.get('SUBGRID_TABLES', 'c') == 'numpy':
+        raise ImportError
+    from anuga.shallow_water.sw_domain_openmp_ext import subgrid_pond_exchange as _c_pond_exchange
+except ImportError:
+    _c_pond_exchange = None
+
 
 def spill_levels(z, seed):
     """Minimax level from the seed pixels over a 2-D grid (4-connected): the
@@ -102,34 +113,92 @@ class PondStore:
         self.w = cnt * np.sqrt(4.0 * self.area[self.pc] / np.sqrt(3.0)) / n
         self.cw = cw
         self.V = np.zeros(npd)
+        self._build_tables()
         self.Vzs = self.volume(self.zs, np.arange(npd))
         # padded per-cell view, for pixel levels: crest of each of a cell's ponds
         self.G = int(np.bincount(self.pc, minlength=ncell).max()) if npd else 0
-        self.slot = np.zeros(npd, int)
-        for g in range(npd):
-            self.slot[g] = (self.pc[:g] == self.pc[g]).sum()
+        self.slot = np.arange(npd) - np.searchsorted(self.pc, self.pc)      # pc is non-decreasing
         self.crest = np.full((ncell, max(self.G, 1)), np.inf)
         self.crest[self.pc, self.slot] = self.zs
 
+    def _build_tables(self):
+        """V_p(eta) is piecewise linear, with a breakpoint at every member bed and
+        sill. Per pond, in one flat array each (pond g owns tb_start[g]:tb_start[g+1]):
+        tb the sorted breakpoints, tslope the free-surface area just above each
+        (a x the members with z <= eta < s) and tV the volume at each. volume,
+        level and surface are then a binary search, with no sweep over the members."""
+        npd = len(self.pc)
+        mr, mc = np.nonzero(self.mem)
+        nm = np.bincount(mr, minlength=npd)
+        self.tb_start = np.concatenate([[0], np.cumsum(2 * nm)])
+        self._tb_iter = int(np.ceil(np.log2(2 * nm.max() + 1))) + 1 if npd else 0
+        val = np.concatenate([self.z[mr, mc], self.s[mr, mc]])
+        row = np.concatenate([mr, mr])
+        sgn = np.concatenate([np.ones(len(mr)), -np.ones(len(mr))])
+        o = np.lexsort((val, row))
+        self.tb = val[o]
+        cs = np.cumsum(sgn[o])                                        # every pond's signs sum to zero
+        self.tslope = self.a[row[o]] * cs
+        # at a level exactly on a breakpoint: the members with z < eta < s
+        first = np.ones(len(o), bool)
+        first[1:] = (row[o][1:] != row[o][:-1]) | (self.tb[1:] != self.tb[:-1])
+        grp = np.cumsum(first) - 1
+        self.tat = self.a[row[o]] * ((cs - sgn[o])[first] - np.bincount(grp, weights=sgn[o] < 0))[grp]
+        last = self.tb_start[1:] - 1
+        self.tslope[last] = 0.0
+        dv = np.zeros(len(o), np.longdouble)
+        dv[1:] = self.tslope[:-1] * np.diff(self.tb)
+        dv[self.tb_start[:-1]] = 0.0
+        cum = np.cumsum(dv)
+        self.tV = (cum - cum[self.tb_start[:-1]][row[o]]).astype(float)
+
+    def kernel_arrays(self):
+        """The arrays core_subgrid_pond_exchange works on (see struct subgrid_ponds):
+        contiguous, and kept here so their addresses stay valid. V is self.V itself."""
+        if getattr(self, '_karr', None) is None:
+            npd = len(self.pc)
+            cells = np.unique(self.pc)
+            f = lambda a: np.ascontiguousarray(a, dtype=float)
+            i = lambda a: np.ascontiguousarray(a, dtype=np.int64)
+            self.V = f(self.V)
+            self._karr = dict(cells=i(cells), cstart=i(np.r_[np.searchsorted(self.pc, cells), npd]),   # pc is non-decreasing
+                              tstart=i(self.tb_start), tb=f(self.tb), tslope=f(self.tslope), tvol=f(self.tV), tat=f(self.tat),
+                              zs=f(self.zs), Vzs=f(self.Vzs), vmax=f(self.vmax), shigh=f(self.shigh), zlow=f(self.zlow),
+                              w=f(self.w), V=self.V, dV=np.zeros(npd), cw=float(self.cw))
+        return self._karr
+
+    def _find(self, X, v, rows):
+        """Index into the flat table X of the last entry of each pond in rows
+        that is <= v; the pond's first entry less one where there is none."""
+        lo = self.tb_start[rows] - 1
+        hi = self.tb_start[rows + 1]
+        for _ in range(self._tb_iter):
+            mid = (lo + hi) >> 1
+            ok = mid > lo
+            le = ok & (X[np.where(ok, mid, 0)] <= v)
+            lo = np.where(le, mid, lo)
+            hi = np.where(ok & ~le, mid, hi)
+        return lo
+
     def volume(self, eta, rows):
-        return self.a[rows] * np.maximum(np.minimum(eta[:, None], self.s[rows]) - self.z[rows], 0.0).sum(axis=1)
+        rows = np.asarray(rows)
+        e = np.clip(eta, self.zlow[rows], self.shigh[rows])
+        j = np.maximum(self._find(self.tb, e, rows), self.tb_start[rows])
+        return np.minimum(self.tV[j] + self.tslope[j] * (e - self.tb[j]), self.vmax[rows])
 
     def level(self, rows):
-        """Pond level for its volume (bisection; the pond's lowest bed when empty)."""
+        """Pond level for its volume (the pond's lowest bed when empty). Where the
+        volume is flat in the level, the top of the flat."""
         rows = np.asarray(rows)
         V = self.V[rows]
         out = np.where(V > 0, self.shigh[rows], self.zlow[rows])     # full or empty: no search
         part = np.nonzero((V > 0) & (V < self.vmax[rows] * (1.0 - 1e-12)))[0]
         if len(part):
             r = rows[part]
-            lo = self.zlow[r].copy()
-            hi = self.shigh[r].copy()
-            for _ in range(30):
-                mid = 0.5 * (lo + hi)
-                big = self.volume(mid, r) > V[part]
-                hi = np.where(big, mid, hi)
-                lo = np.where(big, lo, mid)
-            out[part] = 0.5 * (lo + hi)
+            j = self._find(self.tV, V[part], r)                       # tV starts at 0, so j is in the pond
+            sl = self.tslope[j]
+            out[part] = np.minimum(self.tb[j] + np.where(sl > 0, (V[part] - self.tV[j]) / np.where(sl > 0, sl, 1.0), 0.0),
+                                   self.shigh[r])
         return out
 
     def fill_depth(self, lev, ncell):
@@ -143,8 +212,12 @@ class PondStore:
         return out
 
     def surface(self, eta, rows):
-        """Free-surface area of the pond at level eta."""
-        return self.a[rows] * ((self.z[rows] < eta[:, None]) & (eta[:, None] < self.s[rows])).sum(axis=1)
+        """Free-surface area of the pond at level eta: a x the members with z < eta < s."""
+        rows = np.asarray(rows)
+        j = self._find(self.tb, eta, rows)
+        inside = j >= self.tb_start[rows]
+        j = np.maximum(j, self.tb_start[rows])
+        return np.where(inside, np.where(self.tb[j] < eta, self.tslope[j], self.tat[j]), 0.0)
 
     def cell_levels(self):
         """(ncell, G) level of each cell's ponds, NaN where empty or absent."""
@@ -236,8 +309,44 @@ class Pond_exchange_operator(Operator):
         self.stage = domain.quantities['stage']
         self.elev = domain.quantities['elevation']
         self.moved = 0.0
+        # compiled exchange: not with the deep option (which needs the pond levels on the host) or hollow sills
+        self.compiled = _c_pond_exchange is not None and not deep and tables.sill is None and len(pond.pc) > 0
+        self._gpu_dom = None
+        if self.compiled:
+            domain.subgrid_gpu_hooks = list(getattr(domain, 'subgrid_gpu_hooks', [])) + [self._init_gpu]
+
+    @property
+    def gpu_device_resident(self):
+        """True in compute mode unified: the exchange is a device kernel, mapped
+        with the storage operator's tables on the first step."""
+        return self._gpu_dom is not None or (self.compiled and self.domain.multiprocessor_mode == 2)
+
+    def _init_gpu(self, gpu_dom):
+        from anuga.shallow_water.sw_domain_gpu_ext import subgrid_set_ponds_gpu
+        subgrid_set_ponds_gpu(gpu_dom, **self.pond.kernel_arrays())
+        self._gpu_dom = gpu_dom
+
+    def sync(self):
+        """Bring the pond volumes back from the device (compute mode unified);
+        call before reading pond.V. Nothing to do otherwise."""
+        if self._gpu_dom is not None:
+            from anuga.shallow_water.sw_domain_gpu_ext import subgrid_sync_ponds_gpu
+            subgrid_sync_ponds_gpu(self._gpu_dom)
 
     def __call__(self):
+        if self.domain.multiprocessor_mode == 2:
+            if self._gpu_dom is None:
+                raise NotImplementedError('ponds in compute mode unified need the compiled exchange (no deep option, '
+                                          'no hollow sills) and a Subgrid_storage_operator with the edge flux')
+            from anuga.shallow_water.sw_domain_gpu_ext import subgrid_pond_exchange_gpu
+            self.moved += subgrid_pond_exchange_gpu(self._gpu_dom, self.get_timestep())
+            return
+        if self.compiled:
+            T = self.tables
+            if getattr(self, '_ctab', None) is None:
+                self._ctab = [np.ascontiguousarray(a, dtype=float) for a in (T.z, T.Vb, T.S)]
+            self.moved += _c_pond_exchange(self.domain, *self._ctab, dt=self.get_timestep(), **self.pond.kernel_arrays())
+            return
         self._exchange()
         if self.deep and len(self.pond.pc):
             P, T = self.pond, self.tables
@@ -257,7 +366,10 @@ class Pond_exchange_operator(Operator):
         etall = T.eta(hall)
         # the weir only runs where a level is above the crest
         hc, ec = hall[P.pc], etall[P.pc]
-        r = np.nonzero(((hc > 0) & (ec > P.zs)) | (P.V > P.Vzs))[0]
+        r = ((hc > 0) & (ec > P.zs)) | (P.V > P.Vzs)
+        # a full pond under a connected level at or above its highest sill has nothing to exchange
+        r &= ~((P.V >= P.vmax * (1.0 - 1e-12)) & (hc > 0) & (ec >= P.shigh))
+        r = np.nonzero(r)[0]
         if len(r) == 0:
             return
         c = P.pc[r]
@@ -272,7 +384,9 @@ class Pond_exchange_operator(Operator):
         dV = Q * dt
         # no overshoot: not past equal levels, not more than either store holds
         A = T.area[c]
-        ac = np.maximum(T.wet_area(np.where(hall > 0, etall, T.zmin))[c], 1e-9)
+        uc, ci = np.unique(c, return_inverse=True)
+        ew = np.where(hall > 0, etall, T.zmin)
+        ac = np.maximum(((T._active_depth_rows(ew, uc) > 0.0).sum(axis=1) * T.area[uc] / T.m)[ci], 1e-9)
         # filling: up to the pond volume at the connected level, and no more than the
         # connected water above the crest (the pond surface at the connected level is
         # zero once that level passes every sill of the group, so it cannot be used here)
@@ -298,4 +412,5 @@ class Pond_exchange_operator(Operator):
         return f'pond exchange: {self.moved:.0f} m3 moved'
 
     def timestepping_statistics(self):
+        self.sync()
         return f'ponds hold {self.pond.V.sum():.0f} m3'
