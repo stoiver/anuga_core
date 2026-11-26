@@ -25,6 +25,7 @@ volume budget, per-cell peak stage, mesh, and run statistics.
 """
 import argparse
 import os
+import sys
 import time
 
 import numpy as np
@@ -282,7 +283,20 @@ def main():
     anuga.set_gpu_offload(args.gpu)
     domain, ncross = make_domain(args.variant)
     sub_n = SUBGRID_N.get(args.variant)
-    domain.set_compute_mode('legacy' if sub_n else 'unified')
+    # Subgrid: the unified kernels (the device, on a GPU build) need the edge flux and conveyance friction; the
+    # earlier variants run only in the Python operator (legacy). Without --gpu a subgrid run stays legacy.
+    sub_unified = bool(sub_n) and args.gpu and args.variant in EDGE_FLUX and args.variant in CONVEYANCE
+    if sub_n and args.gpu and not sub_unified:
+        sys.exit(f'{args.variant}: this subgrid variant has no unified kernels; run it without --gpu')
+    domain.set_compute_mode('unified' if (not sub_n or sub_unified) else 'legacy')
+    # First order (all betas zero), as the meander and catchment runs: required by the unified subgrid kernels, and
+    # on request for a legacy subgrid run (SUBGRID_FIRST_ORDER=1). Otherwise DE0's default slopes, as the runs before
+    # November 2026.
+    first_order = sub_unified or (bool(sub_n) and os.environ.get('SUBGRID_FIRST_ORDER', '0') == '1')
+    if first_order:
+        domain.set_betas(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    print(f'==> compute mode {domain.get_compute_mode() if hasattr(domain, "get_compute_mode") else ""}, '
+          f'betas {domain.beta_w:g} {domain.beta_w_dry:g} {domain.beta_uh:g} {domain.beta_uh_dry:g} {domain.beta_vh:g} {domain.beta_vh_dry:g}', flush=True)
     # low_froude mode, optionally | LOW_FROUDE_TANGENTIAL_UPWIND (4), e.g. 5 = LF1 +
     # tangential upwind (#510). Default 0, the standard central-upwind flux.
     lf = int(os.environ.get('SUBGRID_LOW_FROUDE', 0))

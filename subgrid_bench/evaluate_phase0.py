@@ -29,6 +29,7 @@ ORDER = ['band025TU', 'band1LF4', 'band025', 'fine', 'band1', 'resolved', 'coars
          'coarse500_sub8EKL', 'coarse2000_sub8EKL', 'coarse500_sub8EKLC', 'coarse2000_sub8EKLC',
          'coarse500_sub8EKLCtu', 'coarse2000_sub8EKLCtu',
          'coarse500_sub8EKLCT', 'coarse2000_sub8EKLCT', 'coarse500_sub8EKLCTflow']      # T: cell-problem tensor friction
+ORDER += sorted(os.path.basename(p)[:-4] for p in glob.glob('results/*_gpu.npz'))      # GPU reruns (first order)
 T_SPIN = 5400.0          # arrival times ignore the spin-up transient
 PROFILE_X = np.arange(25.0, 1975.0, 50.0)
 DRY = 0.01
